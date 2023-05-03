@@ -142,43 +142,34 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     @pytorch_test_common.xfail(
         "https://github.com/pytorch/pytorch/issues/99534"
-        "Non-tensor input is not traceable in dynamo."
+        "To make it work, convert the float argument into a 0d tensor"
     )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
         dynamic_only=True,
     )
-    def test_xfail_func_with_non_tensor_args(self):
+    def test_func_with_args_and_kwargs(self):
         def func(x, b=1.0):
             y = x + b
             z = y.relu()
             return (y, z)
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+        another_x = torch.randn(2, 2, 4, dtype=torch.float32)
 
-        export_output = torch.onnx.dynamo_export(
-            func,
-            tensor_x,
-            8.0,
-            export_options=torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-            ),
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        # Test with only positional args.
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (tensor_x, 8.0), additional_test_inputs=[((another_x, 9.0),)]
         )
-        onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
-        ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
-        ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
-        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
-
-        # test on different non-tensor input - xfail
-        onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
-        ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
-        _ = onnx_test_common.run_ort(export_output, onnx_format_args)
-        for ref_output, ort_output in zip(ref_outputs, ort_outputs):
-            torch.testing.assert_close(ref_output, torch.tensor(ort_output))
+        # Test while specifying optional kwarg.
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func,
+            (tensor_x,),
+            {"b": 5.0},
+            additional_test_inputs=[((another_x,), {"b": 6.0})],
+        )
 
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
