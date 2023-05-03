@@ -31,7 +31,7 @@ def main():
             workflow=args.workflow, 
             job=args.job, 
             shard=args.shard, 
-            pytest_cache_dir=args.pytest_cache_dir,
+            cache_dir=args.cache_dir,
             bucket=args.bucket,
             temp_dir=args.temp_dir,
         )
@@ -42,7 +42,7 @@ def main():
             pr_identifier=args.pr_identifier, 
             workflow=args.workflow, 
             job=args.job, 
-            pytest_cache_dir=args.pytest_cache_dir,
+            dest_cache_dir=args.cache_dir,
             bucket=args.bucket,
             temp_dir=args.temp_dir,
         )

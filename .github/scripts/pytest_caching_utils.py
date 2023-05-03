@@ -48,7 +48,7 @@ def get_s3_key_prefix(pr_identifier, workflow, job, shard=None):
 #       uploading the cache we should first combine the resulting pytest cache after tests
 #       with the downloaded/merged cache from before the tests.
 #       However, in the short term the extra donloads are okay since they aren't that big
-def upload_pytest_cache(pr_identifier, workflow, job, shard, pytest_cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
+def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
     """
     Uploads the pytest cache to S3
     Args:
@@ -59,14 +59,14 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, pytest_cache_dir, b
     zip_file_path_base = f"{temp_dir}/zip-upload/{obj_key_prefix}" # doesn't include the extension
 
     try:
-        zip_file_path = zip_folder(pytest_cache_dir, zip_file_path_base)
+        zip_file_path = zip_folder(cache_dir, zip_file_path_base)
         obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}" # Keep the new file extension
         upload_file_to_s3(zip_file_path, bucket, obj_key)
     finally:
         print(f"Deleting {zip_file_path}")
         os.remove(zip_file_path)
 
-def download_pytest_cache(pr_identifier, workflow, job, pytest_cache_dir_new, bucket=BUCKET, temp_dir=TEMP_DIR):
+def download_pytest_cache(pr_identifier, workflow, job, dest_cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
     
@@ -78,15 +78,15 @@ def download_pytest_cache(pr_identifier, workflow, job, pytest_cache_dir_new, bu
         
         for downloaded_zip_path in downloads:
             shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[0] # the file name of the zip is the shard id
-            pytest_cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job, shard_id), PYTEST_CACHE_DIR_NAME)
+            cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job, shard_id), PYTEST_CACHE_DIR_NAME)
 
             try:
-                unzip_folder(downloaded_zip_path, pytest_cache_dir_for_shard)
-                print(f"Merging cache for job {job} shard {shard_id} into {pytest_cache_dir_new}")
-                merge_pytest_caches(pytest_cache_dir_for_shard, pytest_cache_dir_new)
+                unzip_folder(downloaded_zip_path, cache_dir_for_shard)
+                print(f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}")
+                merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
             finally:
                 # clean up the unzipped cache folder
-                shutil.rmtree(pytest_cache_dir_for_shard)
+                shutil.rmtree(cache_dir_for_shard)
     finally:
         # clean up the downloaded zip files
         shutil.rmtree(zip_download_dir)
@@ -182,11 +182,11 @@ if __name__ == '__main__':
     workflow = "test-workflow"
     job = "test-job-name"
     shard = "shard-3"
-    pytest_cache_dir = f"/Users/zainr/test-infra/{PYTEST_CACHE_DIR_NAME}"
-    upload_pytest_cache(pr_identifier, workflow, job, shard, pytest_cache_dir, BUCKET)
+    cache_dir = f"/Users/zainr/test-infra/{PYTEST_CACHE_DIR_NAME}"
+    upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, BUCKET)
 
     temp_dir = "/Users/zainr/deleteme/tmp"
     
-    pytest_cache_dir_new = f"/Users/zainr/deleteme/test_pytest_cache"
-    download_pytest_cache(pr_identifier, workflow, job, pytest_cache_dir_new, BUCKET)
+    cache_dir_new = f"/Users/zainr/deleteme/test_pytest_cache"
+    download_pytest_cache(pr_identifier, workflow, job, cache_dir_new, BUCKET)
 
