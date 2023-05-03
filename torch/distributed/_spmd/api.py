@@ -105,15 +105,15 @@ class Override(ABC):
     """
 
     @abstractmethod
-    def replacement(self, orig_submodule: torch.nn.Module, fqn: str) -> torch.nn.Module:
+    def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
         r"""
         Implement this method to return a new :class:`nn.Module` instance to
         replace the ``orig_submodule`` argument in the model. This helps if
         ``orig_submodule`` is not traceable or should not be traced.
 
         Args:
-            orig_submodule (class:`nn.Module`): original submodule instance to replace.
             fqn (str): fully quantified name of the submodule.
+            orig_submodule (class:`nn.Module`): original submodule instance to replace.
 
         Returns:
             A new :class:`nn.Module` instance to replace the original one.
