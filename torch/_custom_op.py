@@ -279,6 +279,15 @@ class CustomOp:
 
         return inner
 
+    def impl_factory(self) -> typing.Callable:
+        r"""Register an implementation for a factory function."""
+
+        def inner(f):
+            library.impl(self._lib, self._opname, "BackendSelect")(f)
+            return f
+
+        return inner
+
     def impl_abstract(self) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
 
@@ -429,11 +438,6 @@ def validate_schema(schema: FunctionSchema) -> None:
     if is_non_mutating_view:
         raise ValueError(f"custom_op does not support view functions. Got: {schema}")
 
-    # Requires us to have handling for factory functions
-    if not schema.arguments.has_tensor_arg():
-        raise ValueError(
-            f"custom_op does not support function schema with no Tensor inputs. Got: {schema}"
-        )
     # Just seems weird so banning for now
     if not schema.returns:
         raise ValueError(
@@ -729,7 +733,10 @@ def get_supported_param_types():
         (int, "SymInt", False, True),
         (float, "float", False, True),
         (bool, "bool", False, True),
+        (str, "str", False, False),
         (torch.types.Number, "Scalar", False, False),
+        (torch.dtype, "ScalarType", False, False),
+        (torch.device, "Device", False, False),
     ]
     result = []
     for line in data:
