@@ -81,7 +81,7 @@ def get_symmetric_quantization_config(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
-        qscheme=torch.per_tensor_symmetric,
+        qscheme=torch.per_tensor_affine,
         is_dynamic=False,
     )
     qscheme = (
@@ -92,7 +92,7 @@ def get_symmetric_quantization_config(
         quant_min=-127,
         quant_max=127,
         qscheme=qscheme,
-        ch_axis=1,
+        ch_axis=0,
         is_dynamic=False,
     )
     bias_quantization_spec = QuantizationSpec(dtype=torch.float)
