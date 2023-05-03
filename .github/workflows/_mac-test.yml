@@ -200,12 +200,12 @@ jobs:
 
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
 
-      - name: Upload pytest cache
-        uses: ./.github/actions/pytest-cache-upload
-        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
-        with:
-          cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
-          shard: ${{ matrix.shard }}
+      # - name: Upload pytest cache
+      #   uses: ./.github/actions/pytest-cache-upload
+      #   if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+      #   with:
+      #     cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
+      #     shard: ${{ matrix.shard }}
 
       - name: Print remaining test logs
         shell: bash

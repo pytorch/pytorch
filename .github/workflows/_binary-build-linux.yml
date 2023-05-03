@@ -210,11 +210,11 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - name: Upload pytest cache
-        uses: ./.github/actions/pytest-cache-upload
-        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
-        with:
-          cache_dir: "${GITHUB_WORKSPACE}/pytorch/.pytest_cache"
+      # - name: Upload pytest cache
+      #   uses: ./.github/actions/pytest-cache-upload
+      #   if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+      #   with:
+      #     cache_dir: "${GITHUB_WORKSPACE}/pytorch/.pytest_cache"
 
       - uses: actions/upload-artifact@v3
         with:
