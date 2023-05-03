@@ -713,12 +713,15 @@ def parse_param(name, param, error_fn):
     return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
 
 
-def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
+def derived_types(
+    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+):
     result = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
-        (typing.Tuple[base_type, ...], f"{cpp_type}[]"),
     ]
+    if list_base:
+        result.append((typing.Tuple[base_type, ...], f"{cpp_type}[]"))
     if optional_base_list:
         result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
     if optional_list_base:
@@ -728,15 +731,15 @@ def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
 
 def get_supported_param_types():
     data = [
-        # (python type, schema type, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, False),
-        (int, "SymInt", False, True),
-        (float, "float", False, True),
-        (bool, "bool", False, True),
-        (str, "str", False, False),
-        (torch.types.Number, "Scalar", False, False),
-        (torch.dtype, "ScalarType", False, False),
-        (torch.device, "Device", False, False),
+        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
+        (torch.Tensor, "Tensor", True, True, False),
+        (int, "SymInt", True, False, True),
+        (float, "float", True, False, True),
+        (bool, "bool", True, False, True),
+        (str, "str", False, False, False),
+        (torch.types.Number, "Scalar", True, False, False),
+        (torch.dtype, "ScalarType", False, False, False),
+        (torch.device, "Device", False, False, False),
     ]
     result = []
     for line in data:

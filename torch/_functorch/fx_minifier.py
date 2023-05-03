@@ -59,7 +59,8 @@ class ConcreteProp(torch.fx.Interpreter):
     def propagate(self, *args):
         with tqdm(
             desc="Saving intermediates for delta debugging",
-            total=len(self.module.graph.nodes)
+            total=len(self.module.graph.nodes),
+            disable=self.writer is None
         ) as pbar:
             self.pbar = pbar
             r = super().run(*args)
