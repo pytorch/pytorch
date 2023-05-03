@@ -11,7 +11,7 @@ on real world models for both training and inference with a single line of code.
 .. note::
     The :func:`~torch.compile` API is experimental and subject to change.
 
-The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html>`__
+The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/main/compile/get-started.html>`__
 showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we
 co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>`__
 
