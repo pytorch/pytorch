@@ -32,7 +32,8 @@ runs:
         JOB: ${{ github.job }}
         SHARD: ${{ inputs.shard }}
       run: |
-        python3 .github/scripts/pytest_upload_cache.py \
+        python3 .github/scripts/pytest_cache.py \
+          --upload \
           --cache_dir $CACHE_DIR \
           --pr_identifier $PR_IDENTIFIER \
           --workflow $WORKFLOW \
