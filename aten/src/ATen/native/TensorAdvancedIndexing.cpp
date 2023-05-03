@@ -850,8 +850,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
   auto index_contig = index.contiguous();
 
   if (source.dim() != 0) {
-    TORCH_CHECK(source.dim() == numel, "source tensor shape along dim does not match index tensor length.");
-
     auto self_sizes = self.sizes().vec();
     auto source_sizes = source.sizes().vec();
     self_sizes.erase(self_sizes.begin() + dim);
