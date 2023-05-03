@@ -627,12 +627,14 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Shape:
         - input: :math:`(B?, L)` where :math:`B?` is an optional batch dimension
-        - window: :math:`(\texttt{win\_length},)` where ``win_length <= n_fft``
+        - window: :math:`(\texttt{win\_length},)` where :math:`\texttt{win\_length} <= \texttt{n\_fft}`
         - output: :math:`(B?, N, T, C?)` where
-           * :math:`N` is the number of frequency samples, ``(n_fft // 2) + 1``
-             for onesided output, or otherwise ``n_fft``.
-           * :math:`T` is the number of frames, ``1 + L // hop_length`` for
-             centered stft, or ``1 + (L - n_fft) // hop_length`` otherwise.
+           * :math:`N` is the number of frequency samples,
+             :math:`(\texttt{n\_fft} // 2) + 1` for ``onesided=True``, or otherwise
+             :math:`\texttt{n\_fft}`.
+           * :math:`T` is the number of frames, :math:`1 + L // \texttt{hop\_length}`
+             for ``center=True``, or
+             :math:`1 + (L - \texttt{n\_fft}) // \texttt{hop\_length}` otherwise.
            * :math:`C?` is an optional length-2 dimension of real and imaginary
              components, present when ``return_complex=False``.
 
@@ -723,16 +725,18 @@ Returns:
 Shape:
     - input: :math:`(B?, N, T, C?)` where
         * :math:`B?` is an optional batch dimension
-        * :math:`N` is the number of frequency samples, ``(n_fft // 2) + 1``
-          for onesided input, or otherwise ``n_fft``.
-        * :math:`T` is the number of frames, ``1 + length // hop_length`` for
-          centered stft, or ``1 + (length - n_fft) // hop_length`` otherwise.
+        * :math:`N` is the number of frequency samples, :math:`(\texttt{n\_fft} // 2) + 1`
+          for onesided input, or otherwise :math:`\texttt{n\_fft}`.
+        * :math:`T` is the number of frames,
+          :math:`1 + \texttt{length} // \texttt{hop\_length}` for centered stft,
+          or :math:`1 + (\texttt{length} - \texttt{n\_fft}) // \texttt{hop\_length}`
+          otherwise.
         * :math:`C?` is an optional length-2 dimension of real and imaginary
           components, if using stft with ``return_complex=False``
-    - window: :math:`(\texttt{win\_length},)` where ``win_length <= n_fft``
+    - window: :math:`(\texttt{win\_length},)` where :math:`\texttt{win\_length} <= \texttt{n\_fft}`
     - output: :math:`(B?, \texttt{length}, C?)` where
-        * ``length`` is reconstructed sample length, which defaults to
-          :math:`(T - 1) * \texttt{hop\_length}` for centered stft or
+        * :math:`\texttt{length}` is reconstructed sample length, which defaults to
+          :math:`(T - 1) * \texttt{hop\_length}` for centered stft, or
           :math:`\texttt{n\_fft} + (T - 1) * \texttt{hop\_length}` otherwise.
         * :math:`C?` is an optional length-2 dimension of real and imaginary
           components, present when ``return_complex=False`` and ``onesided=False``.
