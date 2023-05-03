@@ -536,16 +536,13 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
-  if (is_dynamo_compiling && THPVariable_Check(args[i])) {
-      auto& var = THPVariable_Unpack(args[i]);
-      if (var.numel() != 1 ||
-            !at::isIntegralType(
-                var.dtype().toScalarType(), /*include_bool*/ true)) {
-          throw_intlist_exception(this, i, args[i], idx);
-        }
-      auto scalar = var.item();
-      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
+  // If in dynamo mode, allow fake tensor as int and convert to symint list
+  if (size1 > 0 && is_dynamo_compiling && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    TORCH_CHECK(var.numel() == 1);
+    auto scalar = var.item();
+    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+    return std::vector<c10::SymInt>(size1, scalar.toSymInt());
   }
 
   PyObject* arg = args[i];
@@ -938,6 +935,16 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
+
+  // If in dynamo mode, allow fake tensor and convert to symint
+  if (is_dynamo_compiling && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    TORCH_CHECK(var.numel() == 1);
+    auto scalar = var.item();
+    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+    return scalar.toSymInt();
+  }
+
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
