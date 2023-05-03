@@ -134,11 +134,17 @@ class GraphArg:
     # is_tensor lets us tell if this graph arg actually is a tensor
     # or not.
     is_tensor: bool = True
+    # Sometimes, the Tensor we pass to example is freshly allocated (smh).
+    # Then we cannot only keep a weak reference to it.  This lets you
+    # stash a strong reference too.
+    example_strong_ref: Optional[torch.Tensor] = None
 
     @property
     def example(self):
         if isinstance(self._example, TensorWeakRef):
-            return self._example()
+            r = self._example()
+            assert r is not None
+            return r
         else:
             return self._example
 
@@ -796,15 +802,7 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
-        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
-        # When we've discovered an untracked tensor, then we actually need
-        # to get Dynamo to track the tensor (which is what this function does)
-        # and put it as a graph input on the root tracer. Later on,
-        # if the input is actually used in the body of the HigherOrderOperator,
-        # then the relevant SubgraphTracer will lift it to being an input of
-        # the subgraph.
-        # See NOTE [HigherOrderOperator tracing design] for more details.
-        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+        tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
         tensor_variable = wrap_fx_proxy(
@@ -902,7 +900,7 @@ class VariableBuilder:
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
 
-            proxy = self.tx.output.root_tracer.create_graph_input(
+            proxy = self.tx.output.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
@@ -934,6 +932,7 @@ class VariableBuilder:
                     isinstance(wrapped_value, torch.Tensor),
                     fake_tensor_value,
                     is_tensor=False,
+                    example_strong_ref=wrapped_value,
                 )
             return unspec_var
 
