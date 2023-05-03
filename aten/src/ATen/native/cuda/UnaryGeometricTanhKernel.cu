@@ -16,7 +16,8 @@ CONSTEXPR_EXCEPT_WIN_CUDA char tanh_name[] = "tanh_impl";
 void tanh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR()
+    // Disabled due to accuracy issues
+#if 0 && AT_USE_JITERATOR()
     static const auto tanh_string = jiterator_stringify(
         template <typename T> T tanh_impl(T a) { return std::tanh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
