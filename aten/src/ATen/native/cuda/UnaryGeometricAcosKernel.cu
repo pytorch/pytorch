@@ -5,6 +5,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
@@ -15,7 +16,7 @@ CONSTEXPR_EXCEPT_WIN_CUDA char acos_name[] = "acos_impl";
 void acos_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR
+#if AT_USE_JITERATOR()
     static const auto acos_string = jiterator_stringify(
         template <typename T> T acos_impl(T a) { return std::acos(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
