@@ -12,13 +12,13 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char asinh_name[] = "asinh";
+CONSTEXPR_EXCEPT_WIN_CUDA char asinh_name[] = "asinh_impl";
 void asinh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto asinh_string = jiterator_stringify(
-        template <typename T> T asinh(T a) { return std::asinh(a); });
+        template <typename T> T asinh_impl(T a) { return std::asinh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "asinh_name", [&]() {
           jitted_gpu_kernel<

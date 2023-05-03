@@ -12,14 +12,14 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char atan_name[] = "atan";
+CONSTEXPR_EXCEPT_WIN_CUDA char atan_name[] = "atan_impl";
 void atan_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
   static const auto atan_string = jiterator_stringify(
     template <typename T>
-    T atan(T a) {
+    T atan_impl(T a) {
         return std::atan(a);
     }
   );

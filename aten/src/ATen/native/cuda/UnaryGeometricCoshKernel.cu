@@ -12,13 +12,13 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char cosh_name[] = "cosh";
+CONSTEXPR_EXCEPT_WIN_CUDA char cosh_name[] = "cosh_impl";
 void cosh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto cosh_string = jiterator_stringify(
-        template <typename T> T cosh(T a) { return std::cosh(a); });
+        template <typename T> T cosh_impl(T a) { return std::cosh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "cosh_name", [&]() {
           jitted_gpu_kernel<

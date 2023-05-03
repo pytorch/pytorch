@@ -12,13 +12,13 @@
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char tanh_name[] = "tanh";
+CONSTEXPR_EXCEPT_WIN_CUDA char tanh_name[] = "tanh_impl";
 void tanh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
 #if AT_USE_JITERATOR()
     static const auto tanh_string = jiterator_stringify(
-        template <typename T> T tanh(T a) { return std::tanh(a); });
+        template <typename T> T tanh_impl(T a) { return std::tanh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "tanh_name", [&]() {
           jitted_gpu_kernel<
