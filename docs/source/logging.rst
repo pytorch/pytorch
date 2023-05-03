@@ -18,6 +18,15 @@ set to maximum verbosity.
 There are two ways to configure the logging system: through the environment variable ``TORCH_LOGS``
 or the python API torch._logging.set_logs.
 
+.. automodule:: torch._logging
+.. currentmodule:: torch._logging
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_logs
+
 The environment variable ``TORCH_LOGS`` is a comma-separated list of
 ``[+-]<component>`` pairs, where ``<component>`` is a component specified below. The ``+`` prefix
 will decrease the log level of the component, displaying more log messages while the ``-`` prefix
@@ -86,12 +95,3 @@ Examples:
     ``TORCH_LOGS="+dynamo,schedule"`` will enable set the log level of TorchDynamo to ``logging.DEBUG`` and enable the ``schedule`` artifact
 
     ``TORCH_LOGS="+some.random.module,schedule"`` will set the log level of some.random.module to ``logging.DEBUG`` and enable the ``schedule`` artifact
-
-.. automodule:: torch._logging
-.. currentmodule:: torch._logging
-
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    set_logs
