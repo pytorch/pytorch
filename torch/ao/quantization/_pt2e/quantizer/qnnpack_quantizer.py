@@ -224,7 +224,7 @@ class QNNPackQuantizer(Quantizer):
         return model
 
     def _annotate_conv2d_bn(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         """
         Match the following pattern:
@@ -264,9 +264,9 @@ class QNNPackQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -281,7 +281,9 @@ class QNNPackQuantizer(Quantizer):
             "_annotated": True,
         }
 
-    def _annotate_conv2d_bn_relu(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+    def _annotate_conv2d_bn_relu(
+        self, node: Node, quantization_config: QuantizationConfig
+    ) -> None:
         """
         Match the following pattern:
 
