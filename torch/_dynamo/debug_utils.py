@@ -103,6 +103,9 @@ def minifier_dir():
     return path
 
 
+MAX_CONSTANT_NUMEL_INLINE = 4
+
+
 class NNModuleToString:
     safe_reprs = [
         torch.nn.Linear,
@@ -167,7 +170,13 @@ class NNModuleToString:
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
                 continue
-            if torch.is_floating_point(buffer):
+            # Serialize full data for small buffers
+            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                from torch._tensor_str import PRINT_OPTS
+
+                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                tensor_str = repr(buffer)
+            elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
