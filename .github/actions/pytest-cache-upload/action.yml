@@ -1,0 +1,31 @@
+name: Upload PyTest cache
+
+description: Uploads the pytest cache to S3
+
+inputs:
+  pr-identifier:
+    description: Unique identifier that only repeats when the same workflow is being run against the same PR
+    required: true
+  shard:
+    description: Shard number for the current job
+    required: false
+    default: "0"
+
+outputs:
+  pr-identifier:
+    description: "Processed identifier"
+    value: ${{ steps.get-id.pr-identifier }}
+
+runs:
+  using: composite
+  steps:
+    - name: Get the S3 key
+      id: get-id
+      shell: bash
+      env:
+        PR_IDENTIFIER: ${{ inputs.pr-identifier }}
+        WORKFLOW: ${{ github.workflow }}
+        JOB: ${{ github.job }}
+        SHARD: ${{ inputs.shard }}
+      run: |
+        python3 .github/scripts/pytest_upload_cache.py --pr_identifier $PR_IDENTIFIER
