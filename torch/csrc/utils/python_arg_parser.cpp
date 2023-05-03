@@ -735,7 +735,7 @@ static bool is_int_or_symint_list(
       return true;
     }
 
-    // NOTE: In dynamo, numpy int act as fake tensor
+    // NOTE: In dynamo, allow fake tensor to act as int
     if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
         THPVariable_Unpack(item.ptr()).sizes().empty()) {
       return true;
@@ -751,6 +751,13 @@ static bool is_int_or_symint_list(
     }
     return r;
   }
+
+  // NOTE: In dynamo, allow fake tensor to act as int
+  if (is_dynamo_compiling && THPVariable_Check(obj) &&
+        THPVariable_Unpack(obj).sizes().empty()) {
+      return true;
+  }
+
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
   return broadcast_size > 0 && THPUtils_checkLong(obj);

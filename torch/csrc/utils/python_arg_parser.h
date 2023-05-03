@@ -536,6 +536,18 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
+  if (is_dynamo_compiling && THPVariable_Check(args[i])) {
+      auto& var = THPVariable_Unpack(args[i]);
+      if (var.numel() != 1 ||
+            !at::isIntegralType(
+                var.dtype().toScalarType(), /*include_bool*/ true)) {
+          throw_intlist_exception(this, i, args[i], idx);
+        }
+      auto scalar = var.item();
+      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
+  }
+
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
