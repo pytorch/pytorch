@@ -688,6 +688,25 @@ class TestTransformers(NNTestCase):
 
             mha(query=x, key=x, value=x, key_padding_mask=pad_mask)
 
+    def test_kpm_mask_trailing_column_with_nested_tensor(self, device):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=256,
+            nhead=4,
+            dim_feedforward=512,
+            activation='gelu',
+            norm_first=False,
+            batch_first=False,
+        )
+        transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3, enable_nested_tensor=True).to(device)
+
+        x = torch.randn(10, 6, 256).to(device)
+        mask = torch.ones(6, 10)
+        mask[0, :] = 0  # here I masked 5 columns instead of just one
+        mask = mask.bool().to(device)
+        out = transformer_encoder(src=x, src_key_padding_mask=mask)
+        self.assertEqual(out.shape[1], 6)
+
+
     @onlyCUDA
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     def test_decoder_only_layer(self):
