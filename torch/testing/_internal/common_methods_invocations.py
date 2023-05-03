@@ -13034,6 +13034,12 @@ op_db: List[OpInfo] = [
             # See [Note] SDPA_flash's meta function returns incorrect Philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
                          device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA and SM80OrLater),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
+                         device_type='cuda', dtypes=(torch.float16, torch.bfloat16),
+                         active_if=PLATFORM_SUPPORTS_FUSED_SDPA and SM80OrLater),
+            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
+                         device_type='cuda', dtypes=(torch.float16, torch.bfloat16),
+                         active_if=PLATFORM_SUPPORTS_FUSED_SDPA and SM80OrLater),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
