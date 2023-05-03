@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from tools.shared.s3_upload_utils import *
+from s3_upload_utils import *
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
