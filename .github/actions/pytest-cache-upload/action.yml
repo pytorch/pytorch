@@ -28,6 +28,7 @@ runs:
         JOB: ${{ github.job }}
         SHARD: ${{ inputs.shard }}
       run: |
+        pip3 install boto3
         python3 .github/scripts/pytest_cache.py \
           --upload \
           --cache_dir $CACHE_DIR \
