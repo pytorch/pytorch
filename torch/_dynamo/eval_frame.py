@@ -521,7 +521,6 @@ def optimize(
         def toy_example(a, b):
             ...
     """
-
     check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.

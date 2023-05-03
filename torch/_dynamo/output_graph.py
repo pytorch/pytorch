@@ -800,7 +800,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         gm = fx.GraphModule(root, self.graph)
         # populate optimizers meta for train_step compiler, OK if empty
         gm.meta["optimizers"] = root._optimizers
-        # TODO was a .recompile needed here or was that a rebase conflict?
 
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")

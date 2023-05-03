@@ -477,12 +477,8 @@ class TensorVariable(VariableTracker):
                     # go back to graph-break behavior
                     unimplemented("Tensor.backward only supported with trainstep=True")
 
-                # Dynamo is tracing a train step graph.
-
-                # 1. we need to assert some things for safety, such as no double backward and no input grad_fns
-                # 2. call special version of aot before going to real backend
-                # TODO - how to check current compiler?
-
+                # In train step compilation, we ensure no input tensors (relative to the graph we trace)
+                # have .grad_fn already set, which would imply that tracing .backward escapes outside our trace.
                 def check_no_grad(tensor):
                     # TODO beter to report which local/global (name) caused the assert
                     assert tensor.grad_fn is None, (
