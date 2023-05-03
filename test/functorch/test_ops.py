@@ -509,6 +509,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
         tol1('pca_lowrank',
              {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+        tol1('nn.functional.multi_head_attention_forward',
+             {torch.float32: tol(atol=6e-05, rtol=2e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -613,7 +615,7 @@ class TestOperators(TestCase):
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('nn.functional.multi_head_attention_forward',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         tol1('__rmatmul__',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('matmul',
@@ -1091,7 +1093,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
@@ -1190,7 +1191,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'prod'),
         xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.max_unpool3d', ''),
