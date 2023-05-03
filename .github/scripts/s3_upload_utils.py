@@ -12,7 +12,7 @@ def zip_folder(folder_to_zip, dest_file_base_name):
     if dest_file_base_name.endswith(".zip"):
         dest_file_base_name = dest_file_base_name[:-4]
 
-    ensure_dir_exists(dest_file_base_name)
+    ensure_dir_exists(os.path.dirname(dest_file_base_name))
 
     print(f"Zipping {folder_to_zip} to {dest_file_base_name}")
     return shutil.make_archive(dest_file_base_name, 'zip', folder_to_zip)

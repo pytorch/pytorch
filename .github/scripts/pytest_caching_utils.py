@@ -1,11 +1,12 @@
 import os
 import shutil
+import contextlib
 
 from s3_upload_utils import *
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
-BUCKET = "pytest_cache"
+BUCKET = "pytest-cache"
 TEMP_DIR = "/tmp" # a backup location in case one isn't provided
 
 def get_sanitized_pr_identifier(pr_identifier):
@@ -55,8 +56,15 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=B
         pr_identifier: A unique, human readable identifier for the PR
         job: The name of the job that is uploading the cache
     """
+
+    if not bucket:
+        bucket = BUCKET
+    if not temp_dir:
+        temp_dir = TEMP_DIR
+
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job, shard)
     zip_file_path_base = f"{temp_dir}/zip-upload/{obj_key_prefix}" # doesn't include the extension
+    zip_file_path = ""
 
     try:
         zip_file_path = zip_folder(cache_dir, zip_file_path_base)
@@ -65,9 +73,15 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=B
     finally:
         if zip_file_path:
             print(f"Deleting {zip_file_path}")
-            os.remove(zip_file_path)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(zip_file_path)
 
 def download_pytest_cache(pr_identifier, workflow, job, dest_cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
+
+    if not bucket:
+        bucket = BUCKET
+    if not temp_dir:
+        temp_dir = TEMP_DIR
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
     

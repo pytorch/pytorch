@@ -26,6 +26,12 @@ def main():
         # TODO: First check if it's even worth uploading a new cache: 
         #    Does the cache even mark any failed tests?
 
+        # verify the cache dir exists
+        if not os.path.exists(args.cache_dir):
+            # raise an invalid input exception
+            raise ValueError(f"The given pytest cache dir `{args.cache_dir}` does not exist")            
+
+        print (os.getenv("AWS_ACCESS_KEY_ID"))
         upload_pytest_cache(
             pr_identifier=args.pr_identifier, 
             workflow=args.workflow, 
