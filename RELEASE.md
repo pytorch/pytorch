@@ -2,7 +2,6 @@
 
 <!-- toc -->
 
-- [Releasing PyTorch](#releasing-pytorch)
   - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
