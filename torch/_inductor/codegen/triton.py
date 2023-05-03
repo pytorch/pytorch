@@ -1068,7 +1068,11 @@ class TritonKernel(Kernel):
                     indirect_bounds[indirect_name[indirect_var]] = rg
 
         def gen_min_max(var, size):
-            if dynamo_config.dynamic_shapes:
+            # TODO At the moment we just give per-LoopBody bounds. This is why
+            # we may have a `var not in indirect_bounds`. We should be able
+            # to perform this analysis for a whole SchedulerNode! Same for
+            # any other analysis that uses BoundVars
+            if dynamo_config.dynamic_shapes or var not in indirect_bounds:
                 return (True, True)
             bound = indirect_bounds[var]
             return (bound.lower < 0, bound.upper > size)
