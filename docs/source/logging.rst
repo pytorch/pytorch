@@ -4,8 +4,6 @@
 torch._logging
 ==============
 
-
-
 PyTorch has a configurable logging system, where different components can be
 given different log level settings. For instance, one component's log messages
 can be completely disabled, while another component's log messages can be
@@ -38,6 +36,9 @@ Components:
 
         ``inductor``
             The log level for the TorchInductor component. Default: ``logging.WARN``
+
+        ``your.custom.module``
+            The log level for an arbitrary unregistered module. Provide the fully qualified name and the module will be enabled. Default: ``logging.WARN``
 
 Artifacts:
         ``bytecode``
@@ -83,6 +84,8 @@ Examples:
     ``TORCH_LOGS="aot_graphs"`` will enable the ``aot_graphs`` artifact
 
     ``TORCH_LOGS="+dynamo,schedule"`` will enable set the log level of TorchDynamo to ``logging.DEBUG`` and enable the ``schedule`` artifact
+
+    ``TORCH_LOGS="+some.random.module,schedule"`` will set the log level of some.random.module to ``logging.DEBUG`` and enable the ``schedule`` artifact
 
 .. automodule:: torch._logging
 .. currentmodule:: torch._logging
