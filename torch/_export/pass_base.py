@@ -23,7 +23,6 @@ from torch.utils import _pytree as pytree
 __all__ = ["ExportPassBase"]
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 Argument = Any
 Value = Any
 Fn = Callable[..., Any]
