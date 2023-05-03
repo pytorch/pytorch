@@ -6,7 +6,11 @@ import torch
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
+from torch.utils._content_store import (
+    ContentStoreReader,
+    ContentStoreWriter,
+    hash_storage,
+)
 
 
 class TestContentStore(TestCase):
@@ -49,6 +53,10 @@ class TestContentStore(TestCase):
                 StorageWeakRef(n_y2.untyped_storage()),
                 StorageWeakRef(n_y.untyped_storage()),
             )
+
+    def test_scalar(self, device):
+        # Should not raise an error
+        hash_storage(torch.tensor(2, device=device).untyped_storage())
 
 
 instantiate_device_type_tests(TestContentStore, globals())
