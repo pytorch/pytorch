@@ -4805,7 +4805,7 @@ class TestSparseAny(TestCase):
 
         is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
         if not is_sm8x:
-            pass
+            return
         for (m, n, k) in itertools.product(range(4), range(4), range(4)):
             m = (m + 1) * 32
             n = (n + 1) * 32
