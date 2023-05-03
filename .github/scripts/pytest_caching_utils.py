@@ -1,6 +1,7 @@
 import os
 import shutil
 import contextlib
+import hashlib
 
 from s3_upload_utils import *
 
@@ -9,30 +10,14 @@ PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "pytest-cache"
 TEMP_DIR = "/tmp" # a backup location in case one isn't provided
 
-def get_sanitized_pr_identifier(pr_identifier):
-    import hashlib
-    # Since the default pr identifier could include user defined text (like the branch name)
-    # we hash it to get a clean up the input and void corner cases
-    sanitized_pr_id = hashlib.md5(pr_identifier.encode()).hexdigest()
-    return sanitized_pr_id
+# create a custom string type to be used as pr identifiers to know we've gotten the right one
+class PRIdentifier(str):
+    def __init__(self, value):
+        # Since the pr identifier can be based on include user defined text (like a branch name)
+        # we hash it to get a clean input and dodge corner cases
+        self.value = hashlib.md5(value.encode()).hexdigest()
 
-def create_test_files_in_folder(folder, num_files):
-    import random
-    import string
-    import os
-
-    # make sure folder exists
-    ensure_dir_exists(folder)
-
-    for i in range(num_files):
-        file_name = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
-        file_path = os.path.join(folder, file_name)
-        with open(file_path, 'w') as f:
-            f.write("This is a test file - number {}".format(i))
-            print("done")
-        print("Created file {}".format(file_path))
-
-def get_s3_key_prefix(pr_identifier, workflow, job, shard=None):
+def get_s3_key_prefix(pr_identifier: PRIdentifier, workflow: str, job: str, shard: str = None):
     """
     The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
     For example, it won't include the file extension.
@@ -49,13 +34,16 @@ def get_s3_key_prefix(pr_identifier, workflow, job, shard=None):
 #       uploading the cache we should first combine the resulting pytest cache after tests
 #       with the downloaded/merged cache from before the tests.
 #       However, in the short term the extra donloads are okay since they aren't that big
-def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
+def upload_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, shard: str, cache_dir: str, bucket: str=BUCKET, temp_dir: str=TEMP_DIR):
     """
     Uploads the pytest cache to S3
     Args:
         pr_identifier: A unique, human readable identifier for the PR
         job: The name of the job that is uploading the cache
     """
+
+    if not isinstance(pr_identifier, PRIdentifier):
+        raise ValueError(f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}")
 
     if not bucket:
         bucket = BUCKET
@@ -76,12 +64,15 @@ def upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, bucket=B
             with contextlib.suppress(FileNotFoundError):
                 os.remove(zip_file_path)
 
-def download_pytest_cache(pr_identifier, workflow, job, dest_cache_dir, bucket=BUCKET, temp_dir=TEMP_DIR):
+def download_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, dest_cache_dir: str, bucket: str = BUCKET, temp_dir: str = TEMP_DIR):
 
     if not bucket:
         bucket = BUCKET
     if not temp_dir:
         temp_dir = TEMP_DIR
+
+    if not isinstance(pr_identifier, PRIdentifier):
+        raise ValueError(f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}")
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
     
@@ -173,26 +164,11 @@ def merged_lastfailed_content(from_lastfailed, to_lastfailed):
 
 
 if __name__ == '__main__':
-    id = "b"
-    folder = f"/Users/zainr/deleteme/{id}test-files"
-    subfolder = f"{folder}/subfolder"
-    create_test_files_in_folder(subfolder, 5)
-    create_test_files_in_folder(subfolder + "2", 5)
-    packaged_file_path = f"zipped_file/ffzsome-job-{id}test-files"
-    packed_file = zip_folder(folder, packaged_file_path)
-    print(packed_file)
-
-    # get the packed_file path relevative to the current directory
-    packed_file = os.path.relpath(packed_file, os.getcwd())
-    print(packed_file)
-
-    upload_file_to_s3(packed_file, BUCKET, packed_file)
-
     download_s3_objects_with_prefix(BUCKET, "zipped_file/ff", "downloaded_files")
 
     unzip_folder("downloaded_files/zipped_file/ffzsome-job-btest-files.zip", "/Users/zainr/deleteme/ffunzip")
 
-    pr_identifier = get_sanitized_pr_identifier("read-deal")
+    pr_identifier = PRIdentifier("read-deal")
     print(pr_identifier)
     workflow = "test-workflow"
     job = "test-job-name"

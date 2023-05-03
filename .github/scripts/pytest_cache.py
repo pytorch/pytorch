@@ -33,7 +33,7 @@ def main():
 
         print (os.getenv("AWS_ACCESS_KEY_ID"))
         upload_pytest_cache(
-            pr_identifier=args.pr_identifier, 
+            pr_identifier=PRIdentifier(args.pr_identifier),
             workflow=args.workflow, 
             job=args.job, 
             shard=args.shard, 
@@ -45,7 +45,7 @@ def main():
     if args.download:
         print(f"Downloading cache with args {args}")
         download_pytest_cache(
-            pr_identifier=args.pr_identifier, 
+            pr_identifier=PRIdentifier(args.pr_identifier),
             workflow=args.workflow, 
             job=args.job, 
             dest_cache_dir=args.cache_dir,
