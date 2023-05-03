@@ -719,11 +719,7 @@ class PyExprCSEPass:
     USE_THRESHOLD = 2
 
     # Ad-Hoc: AST nodes this pass focuses on.
-    ALLOWED_NODE_TYPES = (
-        ast.Attribute,
-        ast.Call,
-        ast.Subscript
-    )
+    ALLOWED_NODE_TYPES = (ast.Attribute, ast.Call, ast.Subscript)
 
     @dataclasses.dataclass
     class Config:
@@ -737,7 +733,9 @@ class PyExprCSEPass:
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
                 expr = _ast_unparse(node)
-                self._config.expr_count[expr] = self._config.expr_count.setdefault(expr, 0) + 1
+                self._config.expr_count[expr] = (
+                    self._config.expr_count.setdefault(expr, 0) + 1
+                )
             super().visit(node)
 
     class Replacer(ast.NodeTransformer):

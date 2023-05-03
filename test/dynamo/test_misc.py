@@ -5221,15 +5221,27 @@ def fn():
             testcase(expr="x[1].a"),
             testcase(expr="x[2].a"),
             # 'a.b.c' gets CSE-d, since it's a sub-expression used more than 'PyExprCSEPass.USE_THRESHOLD'.
-            testcase(expr="a.b.c[0].d.e", preface=["_var0 = a.b", "_var1 = _var0.c"], expected="_var1[0].d.e"),
+            testcase(
+                expr="a.b.c[0].d.e",
+                preface=["_var0 = a.b", "_var1 = _var0.c"],
+                expected="_var1[0].d.e",
+            ),
             testcase(expr="a.b.c[1].d.e", expected="_var1[1].d.e"),
             testcase(expr="a.b.c[2].d.e", expected="_var1[2].d.e"),
             # 'm.n[0]' gets CSE-d, since it is a sub-expression used more than 'PyExprCSEPass.USE_THRESHOLD'.
-            testcase(expr="f(m.n[0], '0').x.y.z", preface=["_var2 = m.n", "_var3 = _var2[0]"], expected="f(_var3, '0').x.y.z"),
+            testcase(
+                expr="f(m.n[0], '0').x.y.z",
+                preface=["_var2 = m.n", "_var3 = _var2[0]"],
+                expected="f(_var3, '0').x.y.z",
+            ),
             testcase(expr="f(m.n[0], '1').x.y.z", expected="f(_var3, '1').x.y.z"),
             testcase(expr="f(m.n[0], '2').x.y.z", expected="f(_var3, '2').x.y.z"),
             # The whole expressiong gets CSE-d, as well as all of its sub-expressions.
-            testcase(expr="self.g(a, b).k", preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"], expected="_var6"),
+            testcase(
+                expr="self.g(a, b).k",
+                preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
+                expected="_var6",
+            ),
             testcase(expr="self.g(a, b).k", expected="_var6"),
             testcase(expr="self.g(a, b).k", expected="_var6"),
         ]
@@ -5243,16 +5255,34 @@ def fn():
             expected = t.expected if t.expected is not None else t.expr
             self.assertEqual(expr, expected)
 
-
     def test_guards_cse_pass_multiple(self):
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
         testcases = [
-            testcase(expr="x[0].a < x[1].a * (3 - x[2].a)", expected="x[0].a < x[1].a * (3 - x[2].a)", expected_py38="(x[0].a < (x[1].a * (3 - x[2].a)))"),
-            testcase(expr="a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0", preface=["_var0 = a.b", "_var1 = _var0.c"], expected="_var1[0].d.e + _var1[1].d.e * _var1[2].d.e > 0", expected_py38="((_var1[0].d.e + (_var1[1].d.e * _var1[2].d.e)) > 0)"),
-            testcase(expr="f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512", preface=["_var2 = m.n", "_var3 = _var2[0]"], expected="f(_var3, '0').x.y.z * f(_var3, '1').x.y.z * f(_var3, '2').x.y.z < 512", expected_py38="(((f(_var3, '0').x.y.z * f(_var3, '1').x.y.z) * f(_var3, '2').x.y.z) < 512)"),
-            testcase(expr="self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k", preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"], expected="_var6 + (1 - _var6) <= x[0].a + _var6", expected_py38="((_var6 + (1 - _var6)) <= (x[0].a + _var6))"),
+            testcase(
+                expr="x[0].a < x[1].a * (3 - x[2].a)",
+                expected="x[0].a < x[1].a * (3 - x[2].a)",
+                expected_py38="(x[0].a < (x[1].a * (3 - x[2].a)))",
+            ),
+            testcase(
+                expr="a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
+                preface=["_var0 = a.b", "_var1 = _var0.c"],
+                expected="_var1[0].d.e + _var1[1].d.e * _var1[2].d.e > 0",
+                expected_py38="((_var1[0].d.e + (_var1[1].d.e * _var1[2].d.e)) > 0)",
+            ),
+            testcase(
+                expr="f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
+                preface=["_var2 = m.n", "_var3 = _var2[0]"],
+                expected="f(_var3, '0').x.y.z * f(_var3, '1').x.y.z * f(_var3, '2').x.y.z < 512",
+                expected_py38="(((f(_var3, '0').x.y.z * f(_var3, '1').x.y.z) * f(_var3, '2').x.y.z) < 512)",
+            ),
+            testcase(
+                expr="self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+                preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
+                expected="_var6 + (1 - _var6) <= x[0].a + _var6",
+                expected_py38="((_var6 + (1 - _var6)) <= (x[0].a + _var6))",
+            ),
         ]
 
         csepass = PyExprCSEPass()
