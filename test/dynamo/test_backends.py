@@ -212,6 +212,7 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
             lambda: torch.compile(model, backend="inductor")(example_input),
         )
 
+
 class TestDynamoModeArgParser(torch._dynamo.test_case.TestCase):
     def test_trace_numpy_int_into_symint_list_type(self):
         class MyModule(torch.nn.Linear):

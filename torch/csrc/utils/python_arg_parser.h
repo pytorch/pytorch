@@ -537,7 +537,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   }
 
   // If in dynamo mode, allow fake tensor as int and convert to symint list
-  if (size1 > 0 && is_dynamo_compiling && THPVariable_Check(args[i])) {
+  if (is_dynamo_compiling && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     TORCH_CHECK(var.numel() == 1);
     auto scalar = var.item();
