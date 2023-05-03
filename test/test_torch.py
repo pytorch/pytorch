@@ -1842,17 +1842,11 @@ else:
             x = torch.zeros(m, device=device)
             res = x.scatter_add(dim, idx, src)
 
-            # Checking if scatter_add is deterministic
-            for i in range(5):
-                res_next = x.scatter_add(dim, idx, src)
-                self.assertEqual(res, res_next, atol=0, rtol=0)
-                res = res_next
-
             expected = torch.zeros(m, device=device)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
-            self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
+            self.assertEqual(res, expected, atol=0, rtol=0)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes

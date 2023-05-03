@@ -315,22 +315,40 @@ class ValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.truediv)
 
     @staticmethod
-    def div(a, b):
-        return ValueRangeAnalysis.truediv(a, b)
-
-    @staticmethod
     def floordiv(a, b):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
+
+    @staticmethod
+    def truncdiv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
+            return ValueRanges.unknown()
+        else:
+            # Casting to integer does truncation
+            def f(a, b):
+                result = a / b
+                if result.is_finite:
+                    result = sympy.Integer(result)
+                return result
+            return ValueRanges.coordinatewise_monotone_map(a, b, f)
+
+    @staticmethod
+    def div(a, b):
+        # We don't currently use sympy.zoo consistently
+        def is_int_or_inf(val):
+            return val.is_integer or val.is_infinite
+
+        a = ValueRanges.wrap(a)
+        if is_int_or_inf(a.lower) and is_int_or_inf(a.upper):
+            return ValueRangeAnalysis.truncdiv(a, b)
+        else:
+            return ValueRangeAnalysis.truediv(a, b)
 
     @staticmethod
     def add(a, b):

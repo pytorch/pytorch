@@ -76,13 +76,23 @@ class ReferenceAnalysis:
 
     @staticmethod
     def div(a, b):
-        return a / b
+        if a.is_integer:
+            return ReferenceAnalysis.truncdiv(a, b)
+        else:
+            return ReferenceAnalysis.truediv(a, b)
 
     @staticmethod
     def floordiv(a, b):
         if b == 0:
             return sympy.nan if a == 0 else sympy.zoo
         return a // b
+
+    @staticmethod
+    def truncdiv(a, b):
+        result = a / b
+        if result.is_finite:
+            result = sympy.Integer(result)
+        return result
 
     @staticmethod
     def add(a, b):

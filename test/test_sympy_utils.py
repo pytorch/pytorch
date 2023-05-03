@@ -27,7 +27,7 @@ UNARY_OPS = [
     "floor",
     "ceil",
 ]
-BINARY_OPS = ["truediv", "div", "floordiv", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
+BINARY_OPS = ["truediv", "div", "floordiv", "truncdiv", "add", "mul", "sub", "pow", "minimum", "maximum", "mod"]
 
 UNARY_BOOL_OPS = ["not_"]
 BINARY_BOOL_OPS = ["or_", "and_"]
@@ -222,6 +222,7 @@ class TestValueRanges(TestCase):
                         r = getattr(ReferenceAnalysis, fn)(
                             sympy.Integer(a0), sympy.Integer(b0)
                         )
+                        print(r)
                         if r.is_finite:
                             self.assertIn(r, ref_r)
 
