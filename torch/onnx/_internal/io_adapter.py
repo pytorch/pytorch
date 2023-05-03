@@ -243,7 +243,7 @@ class AppendPositionalsIntoArgsStep:
         Returns:
             A tuple of the model args and kwargs, plus all extra appended inputs.
         """
-        return tuple(model_args + self.inputs), model_kwargs
+        return (*model_args, *self.inputs), model_kwargs
 
 
 class RemoveNoneInputStep:

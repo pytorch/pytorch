@@ -435,7 +435,7 @@ class FXGraphExtractor(abc.ABC):
 
             # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
             # Dynamo doesn't support non-tensor inputs.
-            self.input_adapter.append_step(io_adapter.RemoveNoRemoveNonTensorInputStepneInputStep())
+            self.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
 
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
