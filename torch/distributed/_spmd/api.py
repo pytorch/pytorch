@@ -408,14 +408,14 @@ def _compile(
 
         # FIXME(@mrshenli): type might overlap with fqns
         for typ_or_fqn, override in module_override.items():
-            for name, submodule in mod.named_modules():
+            for fqn, submodule in mod.named_modules():
                 if (
                     isinstance(typ_or_fqn, str)
-                    and typ_or_fqn == name
+                    and typ_or_fqn == fqn
                     or isinstance(typ_or_fqn, type)
                     and isinstance(submodule, typ_or_fqn)
                 ):
-                    accessor.swap_submodule(name, override.replacement(submodule, name))
+                    accessor.swap_submodule(fqn, override.replacement(fqn, submodule))
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))

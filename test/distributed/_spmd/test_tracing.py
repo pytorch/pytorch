@@ -517,7 +517,7 @@ class TraceTrainStepTest(DTensorTestBase):
                 self.outer = outer
 
             def replacement(
-                self, orig_submodule: torch.nn.Module, fqn: str
+                self, fqn: str, orig_submodule: torch.nn.Module
             ) -> torch.nn.Module:
                 return orig_submodule
 
@@ -580,7 +580,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
         class DDMOverride(Override):
             def replacement(
-                self, orig_submodule: torch.nn.Module, fqn: str
+                self, fqn: str, orig_submodule: torch.nn.Module
             ) -> torch.nn.Module:
                 return DummyDDM()
 
@@ -642,7 +642,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
         class DDMOverride(Override):
             def replacement(
-                self, orig_submodule: torch.nn.Module, fqn: str
+                self, fqn: str, orig_submodule: torch.nn.Module
             ) -> torch.nn.Module:
                 if fqn in ["ddm1", "ddm2"]:
                     return DummyDDM()
