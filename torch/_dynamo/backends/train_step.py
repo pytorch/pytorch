@@ -1,4 +1,5 @@
 import builtins
+import logging
 from contextlib import contextmanager
 from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -7,14 +8,14 @@ from unittest import mock
 import torch
 import torch.utils._pytree as pytree
 from torch import _C, _TorchCompileInductorWrapper, fx
-from torch._dynamo import register_backend
-from torch._dynamo.backends.registry import lookup_backend
 from torch._guards import detect_fake_mode, TracingContext
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 from torch.func import functionalize
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.utils import stateless
+
+log = logging.getLogger(__name__)
 
 
 def _compile_train_step(
@@ -103,7 +104,7 @@ def _rematerialize_optimizer(
         opt.state.update(orig_states)
 
 
-def train_step_compiler(backend_compile_fn):
+def _train_step_compiler(backend_compile_fn):
     """Note [Train Step Compile]
 
     Usually, torch.compile() allows graph-breaks and compiles pairs of forward (+backward) by
@@ -167,6 +168,8 @@ def train_step_compiler(backend_compile_fn):
         ), "Dynamo should populate GraphModule meta with optimizers dict"
         optimizers = mod.meta["optimizers"]
         assert len(optimizers) <= 1, "Multiple optimizers NYI"
+
+        log.debug("\n---original graph---\n%s\n\n", mod.graph)
 
         def functional_call(*lifted_args, **kwargs):
             """Call the dynamo graphmodule in a functional way safe for tracing
@@ -246,6 +249,7 @@ def train_step_compiler(backend_compile_fn):
         Step 2: Trace the full graph.
         """
         fx_g = make_fx(functional_call)(*full_fake_args)
+        log.debug("\n---functional_call graph---\n%s\n\n", fx_g.graph)
 
         """
         Step 3: Functionalize the resulting flattend graph, producing code with copy_ ops
@@ -254,23 +258,28 @@ def train_step_compiler(backend_compile_fn):
         with torch.inference_mode():
             # We need to disable grad, since we will be inplace-updating leaf nodes (optimizer acting on params)
             functional_fx_g = make_fx(functionalize(fx_g))(*full_fake_args)
+            log.debug("\n---functionalized graph---\n%s\n\n", functional_fx_g.graph)
 
         """
-        Step 4: Reverse the calling-convention change we made above with _reparametrize_module,
+        Step 4: Call the user compiler. This user compiler must be aware/capable of supporting a full train graph,
+                and should not attempt to call AOTAutograd internally.
+        """
+        with torch.inference_mode():
+            backend_fx_g = backend_compile_fn(functional_fx_g, full_fake_args)
+            log.debug("\n---backend compiled graph---\n%s\n\n", backend_fx_g.graph)
+
+        """
+        Step 5: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo.
         """
 
         def call_without_params(*runtime_args):
             with torch.inference_mode():
                 # See note above about disabling grad
-                return functional_fx_g(
+                return backend_fx_g(
                     *params_flat + named_states_flat + list(runtime_args)
                 )
 
         return call_without_params
 
     return _compile_fn
-
-
-train_step_eager = train_step_compiler(lookup_backend("eager"))
-register_backend(name="train_step_eager", compiler_fn=train_step_eager)
