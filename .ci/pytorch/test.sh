@@ -605,9 +605,12 @@ test_vulkan() {
 }
 
 test_distributed() {
-  # Smuggle a few multi-gpu tests here so that we don't have to request another large node
-  echo "Testing multi_gpu tests in test_torchinductor"
-  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
+
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    # Smuggle a few multi-gpu tests here so that we don't have to request another large node
+    echo "Testing multi_gpu tests in test_torchinductor"
+    pytest test/inductor/test_torchinductor.py -k test_multi_gpu
+  fi
 
   echo "Testing distributed python tests"
   time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
