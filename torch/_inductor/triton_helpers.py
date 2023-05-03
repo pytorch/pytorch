@@ -43,6 +43,10 @@ if TRITON_HAS_REDUCE:
     def min2(a, dim):
         return tl.reduce(a, dim, minimum)
 
+    @triton.jit
+    def max2(a, dim):
+        return tl.reduce(a, dim, maximum)
+
 else:
 
     @triton.jit
@@ -53,15 +57,6 @@ else:
             nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
             min_values = tl.where(has_nan, nan, min_values)
         return min_values
-
-
-if TRITON_HAS_REDUCE:
-
-    @triton.jit
-    def max2(a, dim):
-        return tl.reduce(a, dim, maximum)
-
-else:
 
     @triton.jit
     def max2(a, dim):
