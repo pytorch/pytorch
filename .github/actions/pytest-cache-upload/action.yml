@@ -4,23 +4,17 @@ description: Uploads the pytest cache to S3
 
 inputs:
   cache_dir:
-    description: Path to the pytest cache directory. This folder will be zipped and uploaded to S3.
+    description: Path to the pytest cache directory, relative to $GITHUB_WORKSPACE. This folder will be zipped and uploaded to S3.
     required: true
   shard:
     description: Shard number for the current job
     required: false
     default: "0"
 
-outputs:
-  pr-identifier:
-    description: "Processed identifier"
-    value: ${{ steps.get-id.pr-identifier }}
-
 runs:
   using: composite
   steps:
-    - name: Get the S3 key
-      id: get-id
+    - name: Upload the cache
       shell: bash
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}

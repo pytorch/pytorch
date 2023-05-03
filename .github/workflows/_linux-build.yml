@@ -84,9 +84,8 @@ jobs:
         # Temp for testing
       - name: Upload pytest cache
         uses: ./.github/actions/pytest-cache-upload
-        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          cache_dir: ${{ env.GITHUB_WORKSPACE }}/.pytest_cache
+          cache_dir: .pytest_cache
           # shard: ${{ matrix.shard }}
 
       - name: Calculate docker image
