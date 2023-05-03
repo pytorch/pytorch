@@ -24,7 +24,7 @@ torch.utils.checkpoint
     that if CUDA devices are among the devices detected, it will be prioritized;
     otherwise, the first device encountered will be selected.) If there are no
     CPU-tensors, the default device type state (default value is `cuda`, and it
-    could be set to other device by ``DefaultDevice``) will be saved and restored.
+    could be set to other device by ``DefaultDeviceType``) will be saved and restored.
     However, the logic has no way to anticipate if the user will move
     Tensors to a new device within the ``run_fn`` itself.  Therefore, if you move
     Tensors to a new device ("new" meaning not belonging to the set of

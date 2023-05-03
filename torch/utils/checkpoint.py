@@ -11,7 +11,7 @@ __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
     "set_device_states", "noop_context_fn", "set_checkpoint_early_stop",
-    "DefaultDevice"
+    "DefaultDeviceType"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -40,13 +40,13 @@ def _get_device_module(device='cuda'):
     device_module = getattr(torch, device)
     return device_module
 
-class DefaultDevice(object):
+class DefaultDeviceType(object):
     r"""
-    A class that manages the default device type for checkpointing. 
-    If no non-CPU tensors are present, the default device type will be used.
-    The default value is 'cuda'. The device type is used in the checkpointing 
-    process when determining which device states to save and restore
-    for recomputation.
+    A class that manages the default device type for checkpointing.
+    If no non-CPU tensors are present, the default device type will
+    be used. The default value is 'cuda'. The device type is used in
+    the checkpointing process when determining which device states
+    to save and restore for recomputation.
     """
     _default_device_type = "cuda"
 
@@ -58,7 +58,7 @@ class DefaultDevice(object):
         Args:
             device (str): The device type to be set as default. Default is 'cuda'.
         """
-        DefaultDevice._default_device_type = device
+        DefaultDeviceType._default_device_type = device
 
     @staticmethod
     def get_device_type() -> str:
@@ -68,7 +68,7 @@ class DefaultDevice(object):
         Returns:
             str: The current default device type.
         """
-        return DefaultDevice._default_device_type
+        return DefaultDeviceType._default_device_type
 
 def _infer_device_type(*args):
     device_types = list({arg.device.type for arg in args
@@ -80,7 +80,7 @@ def _infer_device_type(*args):
                       "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
                       "detected, it will be prioritized; otherwise, the first device encountered will be selected.)")
     if len(device_types) == 0:
-        return DefaultDevice.get_device_type()
+        return DefaultDeviceType.get_device_type()
     elif "cuda" in device_types:
         return "cuda"
     else:
