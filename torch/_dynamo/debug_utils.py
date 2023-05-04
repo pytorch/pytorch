@@ -103,6 +103,9 @@ def minifier_dir():
     return path
 
 
+MAX_CONSTANT_NUMEL_INLINE = 4
+
+
 class NNModuleToString:
     safe_reprs = [
         torch.nn.Linear,
@@ -167,7 +170,13 @@ class NNModuleToString:
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
                 continue
-            if torch.is_floating_point(buffer):
+            # Serialize full data for small buffers
+            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                from torch._tensor_str import PRINT_OPTS
+
+                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                tensor_str = repr(buffer)
+            elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
@@ -180,9 +189,10 @@ class NNModuleToString:
         for param_name, param in gm._parameters.items():
             if param is None:
                 continue
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            maybe_device = ""
             if param.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+                maybe_device = ', device="cuda"'
+            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -221,134 +231,21 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_config_string():
+def generate_config_string(*, stable_output=False):
     import torch._functorch.config
     import torch._inductor.config
 
-    return textwrap.dedent(
-        f"""\
+    if stable_output:
+        return "# config omitted due to stable_output=True"
+
+    return f"""\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
-torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
-torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
-        """
-    )
-
-
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
-
-
-def generate_compiler_repro_string(gm, args):
-    model_str = textwrap.dedent(
-        f"""
-import torch
-from torch import tensor, device
-import torch.fx as fx
-from torch._dynamo.testing import rand_strided
-from math import inf
-from torch.fx.experimental.proxy_tensor import make_fx
-
-{generate_config_string()}
-
-{TEST_REPLACEABLE_COMMENT}
-{extra_imports}
-
-        """
-    )
-    model_str += f"# torch version: {torch.version.__version__}\n"
-    if hasattr(torch.version, "cuda"):
-        model_str += f"# torch cuda version: {torch.version.cuda}\n"
-    if hasattr(torch.version, "git_version"):
-        model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-    model_str += _cuda_system_info_comment()
-
-    model_str += NNModuleToString.convert(gm)
-
-    model_str += "args = []\n"
-
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
-
-    for arg in args:
-        if isinstance(arg, int):
-            model_str += f"args.append({arg})\n"
-        elif isinstance(arg, torch.SymInt):
-            model_str += f"args.append({arg.node.hint})  # {arg}\n"
-        elif isinstance(arg, torch.Tensor):
-            model_str += (
-                "args.append(rand_strided"
-                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
-                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
-            )
-        else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
-
-    # TODO: fake may be better for performance here
-    tracing_mode = "real"
-    if config.dynamic_shapes:
-        tracing_mode = "symbolic"
-    model_str += f"mod = make_fx(Repro(), tracing_mode={repr(tracing_mode)})(*args)\n"
-    return model_str
-
-
-INDUCTOR_IMPORT = """
-from torch._inductor.compile_fx import compile_fx_inner
-from torch._dynamo.debug_utils import same_two_models
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+{torch._functorch.config.codegen_config()}
 """
-
-
-COMPILER_REPRO_OPTIONS = {
-    "inductor": (INDUCTOR_IMPORT, "compile_fx_inner", "inductor_fails"),
-    "inductor_accuracy": (
-        INDUCTOR_IMPORT,
-        "compile_fx_inner",
-        "inductor_accuracy_fails",
-    ),
-}
-
-
-def inductor_fails(fx_g, args, check_str=None):
-    has_cuda = False
-    for arg in args:
-        if arg.is_cuda:
-            has_cuda = True
-            break
-
-    def sync():
-        if has_cuda:
-            # Ensures that segfaults are surfaced
-            torch.cuda.synchronize()
-
-    from torch._inductor.compile_fx import compile_fx_inner
-
-    try:
-        result = fx_g(*args)
-        assert isinstance(result, (tuple, list))
-        assert not any([isinstance(x, (tuple, list)) for x in result])
-    except Exception:
-        return False
-
-    sync()
-
-    try:
-        compile_mod = compile_fx_inner(fx_g, args)
-        compile_mod(args)
-        sync()
-    except Exception as e:
-        if check_str is not None and check_str not in repr(e):
-            return False
-        print(repr(e))
-        return True
-    return False
-
-
-def inductor_accuracy_fails(fx_g, args, check_str=None):
-    from torch._inductor.compile_fx import compile_fx_inner
-
-    return backend_aot_accuracy_fails(fx_g, args, compile_fx_inner)
 
 
 def get_minifier_repro_path():
@@ -374,6 +271,19 @@ class AccuracyError(Exception):
     pass
 
 
+def clone_inputs_retaining_gradness(example_inputs):
+    """
+    This clone inputs is different from utils clone_input. In case of minifier,
+    all the tensors are leaf tensors while creating a new graph. So, we set the
+    requires_grad field w/o checking the leafness of the tensor.
+    """
+    cloned_inputs = clone_inputs(example_inputs)
+    for idx in range(len(example_inputs)):
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+    return cloned_inputs
+
+
 def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
@@ -383,13 +293,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    new_args = clone_inputs(args)
-    # Set the requires_grad field explicitly because clone_inputs only sets
-    # requires_grad for leaf tensors.
-    for narg, arg in zip(new_args, args):
-        if isinstance(arg, torch.Tensor):
-            narg.requires_grad_(arg.requires_grad)
-    args = new_args
+    args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -415,9 +319,22 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(
+    gm,
+    opt_gm,
+    example_inputs,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     """
     Check two models have same accuracy.
+
+    require_fp64: if True, raise an error if we unable to calculate the fp64 reference
+    ignore_non_fp: if True, do not compare outputs which are not floating point.  This
+        is mostly useful for the minifier (which wants to avoid quantizing floating point
+        error into integer/boolean error)
     """
     from .eval_frame import OptimizedModule
     from .testing import (
@@ -436,19 +353,22 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
-    try:
-        fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs(example_inputs)
-        )
-        fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
-    except Exception:
-        log.warning("Could not generate fp64 outputs")
-        fp64_ref = None
+    fp64_ref = None
+    if config.same_two_models_use_fp64:
+        try:
+            fp64_model, fp64_examples = cast_to_fp64(
+                copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+            )
+            fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
+        except Exception:
+            if require_fp64:
+                raise RuntimeError("Could not generate fp64 outputs")
+            log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
     except Exception as e:
-        # This means that the the minified graph is bad/exposes a different problem.
+        # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
             (
@@ -459,7 +379,14 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
+    passing = same(
+        ref,
+        res,
+        fp64_ref,
+        tol=config.repro_tolerance,
+        equal_nan=True,
+        ignore_non_fp=ignore_non_fp,
+    )
     return passing
 
 
@@ -499,9 +426,27 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
+def backend_accuracy_fails(
+    gm,
+    example_inputs,
+    compiler_fn,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     try:
-        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+        compiled_gm = compiler_fn(
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+        )
+        return not same_two_models(
+            gm,
+            compiled_gm,
+            example_inputs,
+            only_fwd,
+            require_fp64=require_fp64,
+            ignore_non_fp=ignore_non_fp,
+        )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
@@ -513,10 +458,3 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
             )
         )
         return False
-
-    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
-
-
-# NB: This lives here because inductor_accuracy_fails relies on it; this
-# is only used by after_aot
-backend_aot_accuracy_fails = functools.partial(backend_accuracy_fails, only_fwd=True)

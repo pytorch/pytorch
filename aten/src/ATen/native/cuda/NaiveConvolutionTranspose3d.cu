@@ -332,7 +332,7 @@ void slow_conv_transpose3d_out_cuda_template(
           // Unpack columns back into input:
           at::native::col2vol<scalar_t, accscalar_t>(
               at::cuda::getCurrentCUDAStream(),
-              columns.data_ptr<scalar_t>(),
+              columns.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_depth,
               output_height,
@@ -352,7 +352,7 @@ void slow_conv_transpose3d_out_cuda_template(
               dilation_depth,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B
