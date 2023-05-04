@@ -369,19 +369,14 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
-        self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-
-        def setup_guard():
-            assert istype(val.training, bool)
-            self.code.append(f"{ref}.training == {val.training}")
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
-        else:
-            unimplemented(f"Guard setup for uninitialized class {type(val)}")
+        # The module guard checks for modifications to the Module's type, __dict__,
+        # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
+        # This subsumes the check for Module.training.
+        g = torch._C._dynamo.guards.nn_module_guard(val)
+        name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
+        self._produce_guard_code(guard, [f"{name}()"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -816,6 +811,7 @@ class CheckFunctionManager:
         self.valid = True
         self._weakrefs: List["ReferenceType[object]"] = []
         self._seen_ids: Set[int] = set()
+        self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
 
         # Note: right overrides left
@@ -864,6 +860,7 @@ class CheckFunctionManager:
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
                 and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
+                and guard.create_fn is not GuardBuilder.NN_MODULE  # Force-enable NN_MODULE checks for now
             ):
                 continue
             guard.create(local_builder, global_builder)
@@ -975,6 +972,7 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
+        closure_vars.update(self._extra_closure_vars)
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1016,6 +1014,14 @@ class CheckFunctionManager:
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+    def add_extra_closure_var(self, name_hint, obj):
+        idx = 0
+        while f"{name_hint}_{idx}" in self._extra_closure_vars:
+            idx += 1
+        name = f"{name_hint}_{idx}"
+        self._extra_closure_vars[name] = obj
+        return name
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:

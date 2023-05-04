@@ -463,10 +463,125 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
+typedef struct {
+  PyDictObject *dict;  // borrowed reference
+  uint64_t dict_version_tag;
+} AttrTag;
+
+static const char* module_guard_attrs[] = {
+  "_parameters",
+  "_buffers",
+  "_modules",
+  "_forward_hooks",
+  "_forward_pre_hooks",
+};
+
+typedef struct {
+  PyObject_HEAD
+  PyObject *wr;
+  unsigned int version_tag;
+  uint64_t dict_version_tag;
+  AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
+} NNModuleGuard;
+
+static void NNModuleGuard_dealloc(NNModuleGuard* self) {
+  Py_CLEAR(self->wr);
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyTypeObject NNModuleGuardType = {
+    // NOLINTNEXTLINE
+    PyVarObject_HEAD_INIT(NULL, 0)};
+
+static PyObject* NNModuleGuard_call(PyObject *callable, PyObject *args, PyObject *kwargs) {
+  NNModuleGuard *guard = (NNModuleGuard *)callable;
+
+  PyObject* mod = PyWeakref_GetObject(guard->wr);
+  if (mod == NULL) {
+    Py_RETURN_FALSE;
+  }
+
+  if (Py_TYPE(mod)->tp_version_tag != guard->version_tag) {
+    Py_RETURN_FALSE;
+  }
+
+  // NOTE: we must check the dict version tag before we check the attributes,
+  // because the attributes may be dead references if the dict has been updated.
+  PyObject* dict = PyObject_GenericGetDict(mod, NULL);
+  if (((PyDictObject*)dict)->ma_version_tag != guard->dict_version_tag) {
+    Py_DECREF(dict);
+    Py_RETURN_FALSE;
+  }
+  Py_DECREF(dict);
+
+  for (auto& attr_tag : guard->attr_tags) {
+    if (attr_tag.dict->ma_version_tag != attr_tag.dict_version_tag) {
+      Py_RETURN_FALSE;
+    }
+  }
+  Py_RETURN_TRUE;
+}
+
+static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
+  NNModuleGuard *guard = (NNModuleGuard *)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
+  if (guard == NULL) {
+    return NULL;
+  }
+
+  guard->wr = PyWeakref_NewRef(obj, NULL);
+  if (guard->wr == NULL) {
+    Py_DECREF(guard);
+    return NULL;
+  }
+
+  PyObject *dict = PyObject_GenericGetDict(obj, NULL);
+  if (dict == NULL) {
+    Py_DECREF(guard);
+    return NULL;
+  }
+  guard->dict_version_tag = ((PyDictObject*)dict)->ma_version_tag;
+
+  Py_ssize_t idx = 0;
+  for (const char* attr : module_guard_attrs) {
+    auto& tag = guard->attr_tags[idx];
+    PyObject *attr_obj = PyDict_GetItemString(dict, attr);
+    if (attr_obj == NULL) {
+      Py_DECREF(dict);
+      Py_DECREF(guard);
+      return NULL;
+    }
+
+    tag.dict = (PyDictObject*)attr_obj;
+    tag.dict_version_tag = tag.dict->ma_version_tag;
+    idx++;
+  }
+  Py_DECREF(dict);
+
+  if (Py_TYPE(obj)->tp_version_tag == 0) {
+    // The tp_version_tag may be lazily set on attribute access. If we don't
+    // have a valid tag, perform a property lookup to force the tag to be set.
+    PyObject *tmp = PyObject_GetAttrString(obj, "__dict__");
+    if (tmp == NULL) {
+      Py_DECREF(guard);
+      return NULL;
+    }
+    Py_DECREF(tmp);
+  }
+
+  guard->version_tag = Py_TYPE(obj)->tp_version_tag;
+  if (guard->version_tag == 0) {
+    Py_DECREF(guard);
+    PyErr_SetString(PyExc_ValueError, "object has no version tag");
+    return NULL;
+  }
+  return (PyObject *)guard;
+}
+
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, NULL},
     {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
+    {"nn_module_guard", nn_module_guard, METH_O, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -490,8 +605,17 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_init = (initproc)TensorGuards_init;
   TensorGuardsType.tp_new = TensorGuards_new;
 
+  NNModuleGuardType.tp_name = "torch._C._dynamo.guards.NNModuleGuard";
+  NNModuleGuardType.tp_basicsize = sizeof(NNModuleGuard);
+  NNModuleGuardType.tp_call = NNModuleGuard_call;
+  NNModuleGuardType.tp_dealloc = (destructor)NNModuleGuard_dealloc;
+  NNModuleGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
+
   PyObject* m;
   if (PyType_Ready(&TensorGuardsType) < 0)
+    return NULL;
+
+  if (PyType_Ready(&NNModuleGuardType) < 0)
     return NULL;
 
   m = PyModule_Create(&_module);
@@ -501,6 +625,12 @@ PyObject* torch_c_dynamo_guards_init() {
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
+    Py_DECREF(m);
+    return NULL;
+  }
+
+  if (PyModule_AddObject(m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
+    Py_DECREF(&NNModuleGuardType);
     Py_DECREF(m);
     return NULL;
   }
