@@ -1,9 +1,19 @@
 import itertools
+
+import unittest
 import weakref
 from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import detect_fake_mode
+from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
+from torch.fx.experimental.proxy_tensor import make_fx
+from . import config
+from .decomposition import select_decomp_table
+import torch.fx.traceback as fx_traceback
+
+aten = torch.ops.aten
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -92,28 +102,59 @@ def constant_fold(gm, num_inputs):
     gm.recompile()
 
 
+@torch.utils._python_dispatch._disable_current_modes()
+def fuse_conv_bn(gm):
+    _fuse_conv_bn_(gm)
+
+
+def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
+    if not any(
+        node.target is aten._native_batch_norm_legit_no_training.default
+        for node in gm.graph.nodes
+    ):
+        return gm
+
+    fake_mode = detect_fake_mode(example_inputs)
+
+    # constant params will be real tensors, not fake
+    # TODO: fake_mode should should enable py dispatcher if its symbolic ?
+    # TODO: is there a better way of decomposing just some nodes ? graph pattern matcher ?
+    with unittest.mock.patch.object(
+        fake_mode, "allow_non_fake_inputs", True
+    ), fake_mode:
+        args = [e for i, e in enumerate(example_inputs) if i in preserved_arg_indices]
+        with fx_traceback.preserve_node_meta():
+            gm = make_fx(gm, select_decomp_table())(*args)
+
+    return gm
+
+
 def optimize_for_inference(
-    original_gm: torch.fx.GraphModule,
-    fake_gm: torch.fx.GraphModule,
+    symbolic_traced_gm: torch.fx.GraphModule,
+    gm: torch.fx.GraphModule,
     example_inputs_,
     fw_metadata,
 ):
     params = {
-        **dict(original_gm.named_parameters(remove_duplicate=False)),
-        **dict(original_gm.named_buffers(remove_duplicate=False)),
+        **dict(symbolic_traced_gm.named_parameters(remove_duplicate=False)),
+        **dict(symbolic_traced_gm.named_buffers(remove_duplicate=False)),
     }
     params_flat, _ = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
 
-    fake_gm, preserved_arg_indices = replace_params_with_constants(
-        fake_gm, params_flat, example_inputs_, fw_metadata
+    gm, preserved_arg_indices = replace_params_with_constants(
+        gm, params_flat, example_inputs_, fw_metadata
     )
 
-    constant_fold(fake_gm, len(preserved_arg_indices))
+    constant_fold(gm, len(preserved_arg_indices))
+    fuse_conv_bn(gm)
+    # now, decomp batch norm if we were unable to fuse it
+    gm = decompose_unfused_batchnorms(gm, example_inputs_, preserved_arg_indices)
 
     # invalidate nn Modules
-    invalidate_eager_modules()
-    return fake_gm, preserved_arg_indices
+    if config.optimize_for_inference_discard_parameters:
+        invalidate_eager_modules()
+    return gm, preserved_arg_indices
 
 
 class ErasedTensor(torch.Tensor):

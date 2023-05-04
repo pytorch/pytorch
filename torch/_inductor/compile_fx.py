@@ -679,6 +679,10 @@ def compile_fx(
 
     graph_id = next(_graph_counter)
 
+    decompositions = (
+        decompositions if decompositions is not None else select_decomp_table()
+    )
+
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
         if is_inference:
@@ -699,12 +703,18 @@ def compile_fx(
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
 
     # TODO - expand grad required checks
-    if config.optimize_for_inference:
+    if config.optimize_for_inference and not torch.is_grad_enabled():
         from torch._inductor.freezing import optimize_for_inference
+
+        decompositions = dict(decompositions)
+        del decompositions[torch.ops.aten._native_batch_norm_legit_no_training.default]
 
         def inference_compiler(model: torch.fx.GraphModule, example_inputs):
             # partition_fn won't be called
             joint_graph_passes(model)
+
+            # from functorch.compile import draw_graph
+            # draw_graph(model, "inference_compiler")
 
             opt_model, preserved_arg_indices = optimize_for_inference(
                 model_,
@@ -768,8 +778,6 @@ def compile_fx(
             )
 
     with overrides.patch_functions():
-        if decompositions is None:
-            decompositions = select_decomp_table()
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch

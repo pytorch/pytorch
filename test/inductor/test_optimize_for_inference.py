@@ -1,38 +1,31 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
-import gc
 import importlib
+import os
 import sys
 import unittest
-import os
-import warnings
 
 import torch
 
 import torch._dynamo
-import torch.nn as nn
 from torch._inductor import config
-from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch.testing import FileCheck
 from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from inductor.test_torchinductor import copy_tests, check_model, check_model_cuda
-
-
-
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_LINUX,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
+
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -94,8 +87,40 @@ class OptimizeForInferenceTemplate(TestCase):
             )
         )
 
-    def test_mutation(self):
+    def test_unfolded_bn(self):
+        x = torch.rand([3, 32, 15, 15]).to(self.device)
 
+        mod = torch.nn.BatchNorm2d(32, eps=0.001).eval().to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x) + 10
+
+        with torch.no_grad():
+            out_eager = mod(x)
+            out_compiled, code = run_and_get_code(foo, mod, x)
+
+            self.assertEqual(out_eager, out_compiled)
+            breakpoint()
+
+    def test_folded_conv_bn(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).cuda().eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
+
+        with torch.no_grad():
+            out_optimized_for_infernece = foo(mod, x)
+
+        with unittest.patch(config, "optimize_for_inference", False):
+            out_compiled = foo(mod, x)
+
+        # TODO - torch.compile gives different answers than eager
+        self.assertEqual(out_optimized_for_infernece, out_compiled)
+
+    def test_mutation(self):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -121,7 +146,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_eager, out_comp)
             self.assertEqual(out_eager2, out_comp2)
-
 
     def test_autocast(self):
         if self.device == "cpu":
@@ -153,11 +177,12 @@ class OptimizeForInferenceTemplate(TestCase):
         with torch.no_grad():
             foo(mod, x)
 
-        with self.assertRaisesRegex(RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+        ):
             mod(x)
 
     def test_rng_op(self):
-
         @torch.compile()
         def foo():
             return torch.rand([4, 4], device=self.device) + 1
@@ -183,7 +208,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         common = check_model_cuda
         device = "cuda"
         autocast = torch.cuda.amp.autocast
-
 
     copy_tests(OptimizeForInferenceTemplate, CudaTests, "cuda")
 

@@ -182,6 +182,8 @@ disable_cpp_codegen = is_fbcode()
 
 optimize_for_inference = True
 
+optimize_for_inference_discard_parameters = False
+
 
 # config specific to codegen/cpp.pp
 class cpp:

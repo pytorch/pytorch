@@ -19,19 +19,21 @@ rand_ops = [aten.dropout, aten._fused_dropout, aten._standard_gamma,
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph, skip_filter = None):
+
+    skip_filter = skip_filter if skip_filter else lambda n: False
     new_graph = fx.Graph()
     env = {}  # map from node in the old graph to node in the new graph
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
     for n in fx_g.nodes:
-        # The placeholder, output, and get_attr nodes are copied to the new grpah without change
+        # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
-        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
+        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops or skip_filter(n):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
-            # substitute args and kwargs memebrs to their mapping in env if exists
+            # substitute args and kwargs members to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
             def substitute(arg_list):
                 arg_list, spec = tree_flatten(arg_list)
