@@ -174,7 +174,7 @@ class SocketImpl {
     return hnd_;
   }
 
-  ol waitForInput(std::chrono::milliseconds timeout);
+  bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
   bool setSocketFlag(int level, int optname, bool value) noexcept;
@@ -408,9 +408,7 @@ bool SocketImpl::waitForInput(std::chrono::milliseconds timeout) {
   return pollFd(&pfd, 1, static_cast<int>(timeout.count())) > 0;
 }
 
-
-
-mespace {
+namespace {
 
 struct addrinfo_delete {
   void operator()(::addrinfo* addr) const noexcept {
@@ -943,9 +941,6 @@ bool Socket::waitForInput(std::chrono::milliseconds timeout) {
 
 } // namespace detail
 
-
-
-cketError::~SocketError() = default;
+SocketError::~SocketError() = default;
 
 } // namespace c10d
-  
