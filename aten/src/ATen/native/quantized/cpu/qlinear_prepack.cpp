@@ -218,7 +218,7 @@ inline ideep::tensor pack_weight(
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wei.get_dims(), dnnl::memory::data_type::s8,
                                                              dnnl::memory::data_type::u8);
   ideep::tensor exp_wgt(w_desc);
-  exp_wgt.feed_from(wgt);
+  exp_wgt.feed_from(wei);
   return exp_wgt;
 }
 

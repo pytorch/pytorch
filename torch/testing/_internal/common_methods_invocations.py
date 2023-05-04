@@ -133,6 +133,10 @@ from torch.testing._internal.opinfo.definitions.special import (
 from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
+from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_sparse_reduction_sum,
+    sample_inputs_sparse_reduction_sum
+)
 
 if TEST_SCIPY:
     from scipy import stats
@@ -1127,6 +1131,20 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
         # is tested in test_conj_view (which tests operations with only conjugated input tensor
         # -- not conjugated arg tensors)
         yield SampleInput(make_arg((S, )), make_arg_conj((S, )))
+
+def error_inputs_dot_vdot(op_info, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    yield ErrorInput(SampleInput(make_input(1), args=(make_input(3, dtype=torch.float16),)),
+                     error_regex='dot : expected both vectors to have same dtype')
+    yield ErrorInput(SampleInput(make_input(1, 1), args=(make_input(3),)),
+                     error_regex='1D tensors expected')
+    yield ErrorInput(SampleInput(make_input(9), args=(make_input(3),)),
+                     error_regex='inconsistent tensor size')
+    if device != "cpu":
+        ErrorInput(SampleInput(make_input(3), args=(make_input(3, device="cpu"),)),
+                   error_regex='Expected all tensors to be on the same device')
+
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -3169,46 +3187,6 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
     # error inputs for output_size lesser than 0
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1, 1)), output_size=(-1, 0, 2)),
                      error_regex="Trying to create tensor with negative dimension")
-
-
-def sample_inputs_reduction_sparse(op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs):
-    layout_name = str(layout).split('.', 1)[-1].rsplit('_coo', 1)[0]
-    op_supports_layout = getattr(op_info, 'supports_' + layout_name)
-    if not op_supports_layout:
-        return
-
-    for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        if sample_input.input.ndim == 0:
-            # scalar sparse tensors are not supported
-            continue
-
-        yield SampleInput(
-            sample_input.input.detach().to_sparse(layout=layout,
-                                                  blocksize=blocksize).requires_grad_(requires_grad),
-            args=sample_input.args,
-            kwargs=sample_input.kwargs)
-
-        if layout is torch.sparse_coo and (dtype.is_floating_point or dtype.is_complex):
-            # uncoalesced samples
-            inp = sample_input.input.detach().to_sparse(layout=layout)
-            inp = torch.sparse_coo_tensor(inp.indices().repeat(1, 2),
-                                          inp.values().repeat(2),
-                                          inp.shape,
-                                          dtype=inp.dtype,
-                                          device=inp.device)
-            assert not inp.is_coalesced()
-            yield SampleInput(inp.requires_grad_(requires_grad),
-                              args=sample_input.args,
-                              kwargs=sample_input.kwargs)
-
-        if sample_input.input.ndim > 2:
-            # hybrid samples
-            yield SampleInput(
-                sample_input.input.detach().to_sparse(layout=layout,
-                                                      blocksize=blocksize,
-                                                      dense_dim=sample_input.input.ndim - 2).requires_grad_(requires_grad),
-                args=sample_input.args,
-                kwargs=sample_input.kwargs)
 
 
 class _TestParamsMaxPoolBase:
@@ -8167,6 +8145,7 @@ class foreach_inputs_sample_func:
         num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
         if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
@@ -8227,6 +8206,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2)):
             for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 and ord not in (-1, -2) else (False,):
@@ -8274,6 +8254,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
+        _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
         # zero_size tensor
         if dtype == torch.float32 and (not num_input_tensors_specified) and ("cuda" in device):
@@ -9437,6 +9418,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_dot_vdot,
+           error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -9451,6 +9433,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_dot_vdot,
+           error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -17681,16 +17664,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_sparse=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
-        sample_inputs_sparse_coo_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_coo),
-        sample_inputs_sparse_csr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csr),
-        sample_inputs_sparse_csc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_csc),
-        sample_inputs_sparse_bsr_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsr),
-        sample_inputs_sparse_bsc_func=partial(sample_inputs_reduction_sparse, layout=torch.sparse_bsc),
+        error_inputs_sparse_func=error_inputs_sparse_reduction_sum,
+        sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_coo),
+        sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_csr),
+        sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_csc),
+        sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsr),
+        sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_bsc),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
