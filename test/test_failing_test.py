@@ -20,11 +20,11 @@ class TestSortAndSelect(TestCase):
     def test_failing_inputs(self, device):
         self.assertEqual(4, 5, "this shold fail ofc")
 
-    
+
     def test_more_failing_inputs(self, device):
         self.assertEqual(6, 5, "this shold fail too")
 
-    
+
     def test_success_comp(self, device):
         self.assertEqual(5, 5, "this shold fail...scratch that, it should pass")
 

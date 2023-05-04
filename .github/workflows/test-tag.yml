@@ -36,7 +36,7 @@ jobs:
       - name: "print THE_REST"
         run: |
           echo ${THE_REST}
-          
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 

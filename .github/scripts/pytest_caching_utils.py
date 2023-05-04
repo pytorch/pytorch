@@ -23,7 +23,7 @@ def get_s3_key_prefix(pr_identifier: PRIdentifier, workflow: str, job: str, shar
     For example, it won't include the file extension.
     """
     prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{pr_identifier}/{sanitize_for_s3(workflow)}/{sanitize_for_s3(job)}"
-    
+
     if shard:
         prefix += f"/{shard}"
 
@@ -75,13 +75,13 @@ def download_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, 
         raise ValueError(f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}")
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
-    
+
     zip_download_dir = f"{temp_dir}/cache-zip-downloads/{obj_key_prefix}"
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
     try:
         # downloads the cache zips for all shards
         downloads = download_s3_objects_with_prefix(bucket, obj_key_prefix, zip_download_dir)
-        
+
         for downloaded_zip_path in downloads:
             shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[0] # the file name of the zip is the shard id
             cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job, shard_id), PYTEST_CACHE_DIR_NAME)
@@ -134,7 +134,7 @@ def merge_lastfailed_files(source_pytest_cache, dest_pytest_cache):
     if not os.path.exists(dest_lastfailed_file):
         copy_file(source_lastfailed_file, dest_lastfailed_file)
         return
-    
+
     # Both files exist, so we need to merge them
     from_lastfailed = load_json_file(source_lastfailed_file)
     to_lastfailed = load_json_file(dest_lastfailed_file)
@@ -145,11 +145,11 @@ def merge_lastfailed_files(source_pytest_cache, dest_pytest_cache):
 
 def merged_lastfailed_content(from_lastfailed, to_lastfailed):
     """
-    The lastfailed files are dictionaries where the key is the test identifier. 
+    The lastfailed files are dictionaries where the key is the test identifier.
     Each entry's value appears to always be `true`, but let's not count on that.
     An empty dictionary is represented with a single value with an empty string as the key.
     """
-    
+
     # If an entry in from_lastfailed doesn't exist in to_lastfailed, add it and it's value
     for key in from_lastfailed:
         if key not in to_lastfailed:
@@ -159,7 +159,7 @@ def merged_lastfailed_content(from_lastfailed, to_lastfailed):
         # Remove the empty entry if it exists since we have actual entries now
         if "" in to_lastfailed:
             del to_lastfailed[""]
-    
+
     return to_lastfailed
 
 
@@ -177,7 +177,6 @@ if __name__ == '__main__':
     upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, BUCKET)
 
     temp_dir = "/Users/zainr/deleteme/tmp"
-    
+
     cache_dir_new = f"/Users/zainr/deleteme/test_pytest_cache"
     download_pytest_cache(pr_identifier, workflow, job, cache_dir_new, BUCKET)
-

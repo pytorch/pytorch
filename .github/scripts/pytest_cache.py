@@ -4,7 +4,7 @@ from pytest_caching_utils import *
 
 def main():
     parser = argparse.ArgumentParser(description="Upload this job's the pytest cache to S3")
-    
+
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--upload', action='store_true', help='Upload the pytest cache to S3')
     mode.add_argument('--download', action='store_true', help='Download the pytest cache from S3, merging it with any local cache')
@@ -23,31 +23,31 @@ def main():
     if args.upload:
         print(f"Uploading cache with args {args}")
 
-        # TODO: First check if it's even worth uploading a new cache: 
+        # TODO: First check if it's even worth uploading a new cache:
         #    Does the cache even mark any failed tests?
 
         # verify the cache dir exists
         if not os.path.exists(args.cache_dir):
             # raise an invalid input exception
-            raise ValueError(f"The given pytest cache dir `{args.cache_dir}` does not exist")            
+            raise ValueError(f"The given pytest cache dir `{args.cache_dir}` does not exist")
 
         print (os.getenv("AWS_ACCESS_KEY_ID"))
         upload_pytest_cache(
             pr_identifier=PRIdentifier(args.pr_identifier),
-            workflow=args.workflow, 
-            job=args.job, 
-            shard=args.shard, 
+            workflow=args.workflow,
+            job=args.job,
+            shard=args.shard,
             cache_dir=args.cache_dir,
             bucket=args.bucket,
             temp_dir=args.temp_dir,
         )
-    
+
     if args.download:
         print(f"Downloading cache with args {args}")
         download_pytest_cache(
             pr_identifier=PRIdentifier(args.pr_identifier),
-            workflow=args.workflow, 
-            job=args.job, 
+            workflow=args.workflow,
+            job=args.job,
             dest_cache_dir=args.cache_dir,
             bucket=args.bucket,
             temp_dir=args.temp_dir,

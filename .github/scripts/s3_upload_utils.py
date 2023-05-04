@@ -76,7 +76,7 @@ def download_s3_objects_with_prefix(bucket, prefix, download_folder):
         download_path = os.path.join(download_folder, obj.key)
         ensure_dir_exists(os.path.dirname(download_path))
         print(f"Downloading s3://{bucket.name}/{obj.key} to {download_path}...", end="")
-        
+
         s3.Object(bucket.name, obj.key).download_file(download_path)
         downloads.append(download_path)
         print("done")
