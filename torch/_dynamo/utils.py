@@ -269,7 +269,7 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
 def setup_compile_debug():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
         torch._logging.set_logs(
