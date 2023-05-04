@@ -32,8 +32,10 @@ The environment variable ``TORCH_LOGS`` is a comma-separated list of
 will decrease the log level of the component, displaying more log messages while the ``-`` prefix
 will increase the log level of the component and display fewer log messages. The default setting
 is the behavior when a component is not specified in ``TORCH_LOGS``. In addition to components, there are
-also artifacts. Artifacts are specific pieces of debug information that are either displayed or not displayed,
-so prefixing an artifact with ``+`` or ``-`` will be a no-op.  The following options are configurable through the ``TORCH_LOGS`` environment
+also artifacts. Artifacts are specific pieces of debug information associated with a component that are either displayed or not displayed,
+so prefixing an artifact with ``+`` or ``-`` will be a no-op. Since they are associated with a component, enabling that component will typically also enable that artifact,
+unless that artifact was specified to be `off_by_default`. This option is specified in _registrations.py for artifacts that are so spammy they should only be displayed when explicitly enabled.
+The following components and artifacts are configurable through the ``TORCH_LOGS`` environment
 variable (see torch._logging.set_logs for the python API):
 
 Components:
