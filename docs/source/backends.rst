@@ -9,6 +9,7 @@ torch.backends
 
 These backends include:
 
+- ``torch.backends.cpu``
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
 - ``torch.backends.mps``
@@ -18,6 +19,11 @@ These backends include:
 - ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
 
+torch.backends.cpu
+^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cpu
+
+.. autofunction::  torch.backends.cpu.get_cpu_capability
 
 torch.backends.cuda
 ^^^^^^^^^^^^^^^^^^^
