@@ -413,6 +413,14 @@ class DTensorSpec:
         return len(self.tensor_meta.shape)
 
     @property
+    def num_shards(self) -> int:
+        num_shards = 1
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                num_shards *= self.mesh.size(i)
+        return num_shards
+
+    @property
     def dim_map(self) -> List[int]:
         """
         dim_map is a property we derive from `placements` of
