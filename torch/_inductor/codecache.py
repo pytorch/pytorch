@@ -28,7 +28,6 @@ import torch
 from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
-from torch.utils import cpp_extension
 
 if config.is_fbcode():
     from torch._inductor.fb.logging import global_cache_log
@@ -358,6 +357,9 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -495,6 +497,8 @@ def use_custom_generated_macros():
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    from torch.utils import cpp_extension
+
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch

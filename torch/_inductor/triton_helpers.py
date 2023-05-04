@@ -3,13 +3,6 @@ import triton.language as tl
 
 
 @triton.jit
-def is_floating(x):
-    # Addition to promote scalars to tensor
-    x += tl.zeros((1,), tl.int1)
-    return x.dtype.is_floating()
-
-
-@triton.jit
 def _prod_accumulate(a, b):
     return a * b
 
@@ -85,3 +78,9 @@ def min_with_index(value, index, dim):
 @triton.jit
 def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
+
+
+@triton.jit
+def device_assert_then(cond, msg, r):
+    tl.device_assert(cond, msg)
+    return r
