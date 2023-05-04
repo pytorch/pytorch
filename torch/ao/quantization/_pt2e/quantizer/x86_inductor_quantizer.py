@@ -1,5 +1,6 @@
 import torch
 import copy
+import functools
 from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
@@ -7,22 +8,37 @@ from .quantizer import (
     QuantizationSpec,
     Quantizer,
 )
+from torch.ao.quantization._pt2e.quantizer.utils import (
+    get_act_obs_or_fq_ctr,
+    get_bias_obs_or_fq_ctr,
+    get_weight_obs_or_fq_ctr,
+)
 from .qnnpack_quantizer import (
-    _TORCH_DTYPE_TO_QDTYPE,
     _is_annotated,
 )
-from typing import List, Dict, Optional
+from typing import Callable, List, Dict, Optional
 from torch.fx import Node
-from torch.ao.quantization.observer import (
-    HistogramObserver,
-    PerChannelMinMaxObserver,
-    PlaceholderObserver,
-)
 
 __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
 ]
+
+_QUANT_CONFIG_TO_ANNOTATOR = {}
+
+
+def register_annotator(quantization_configs: List[QuantizationConfig]):
+    def decorator(fn: Callable):
+        for quantization_config in quantization_configs:
+            if quantization_config in _QUANT_CONFIG_TO_ANNOTATOR:
+                raise KeyError(
+                    f"Annotator for quantization config {quantization_config} is already registered"
+                )
+            _QUANT_CONFIG_TO_ANNOTATOR[quantization_config] = functools.partial(
+                fn, config=quantization_config
+            )
+
+    return decorator
 
 def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     supported_operators: Dict[str, List[OperatorPatternType]] = {
@@ -32,53 +48,6 @@ def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     }
     return copy.deepcopy(supported_operators)
 
-def _get_act_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.activation is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.activation
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    assert quantization_spec.qscheme in [torch.per_tensor_affine]
-    if not quantization_spec.is_dynamic:
-        return HistogramObserver.with_args(
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-            reduce_range=False,
-        )
-    else:
-        # TODO: extend this helper function to support dynamic quantization
-        raise Exception("Unsupported quantization_spec for activation: {}".format(quantization_spec))
-
-def _get_weight_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.weight is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.weight
-    qdtype = _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype]
-    if quantization_spec.qscheme == torch.per_channel_symmetric:
-        return PerChannelMinMaxObserver.with_args(
-            qscheme=quantization_spec.qscheme,
-            dtype=qdtype,
-            quant_min=quantization_spec.quant_min,
-            quant_max=quantization_spec.quant_max,
-        )
-    else:
-        raise Exception("Unsupported quantization_spec for weight: {}".format(quantization_spec))
-
-def _get_bias_obs_or_fq_ctr(quantization_config: Optional[QuantizationConfig]):
-    if quantization_config is None:
-        return None
-    assert quantization_config is not None
-    if quantization_config.bias is None:
-        return None
-    quantization_spec: QuantizationSpec = quantization_config.bias
-    assert quantization_spec.dtype == torch.float, "Only float dtype for bias is supported for bias right now"
-    return PlaceholderObserver.with_args(dtype=quantization_spec.dtype)
 
 def get_default_x86_inductor_quantization_config():
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
@@ -121,7 +90,7 @@ class X86InductorQuantizer(Quantizer):
 
     def __init__(self):
         super().__init__()
-        self.global_config: Optional[QuantizationConfig] = None
+        self.global_config: QuantizationConfig = None  # type: ignore[assignment]
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -139,7 +108,7 @@ class X86InductorQuantizer(Quantizer):
                 return ops
         return []
 
-    def set_global(self, quantization_config: Optional[QuantizationConfig]):
+    def set_global(self, quantization_config: QuantizationConfig):
         self.global_config = quantization_config
         return self
 
@@ -147,19 +116,32 @@ class X86InductorQuantizer(Quantizer):
         """ just handling global spec for now
         """
         global_config = self.global_config
-        ops = self.get_supported_operator_for_quantization_config(global_config)
+        _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
+
+        return model
+
+    @register_annotator(
+        [
+            get_default_x86_inductor_quantization_config(),
+        ]
+    )
+    def annotate_symmetric_config(
+        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    ) -> torch.fx.GraphModule:
         # annotate the nodes from last to first since the matching is in the reversed order
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
         for node in reversed(model.graph.nodes):
-            self._annotate_conv2d_binary_unary(node, global_config)
-            self._annotate_conv2d_binary(node, global_config)
-            self._annotate_conv2d_unary(node, global_config)
-            self._annotate_conv2d(node, global_config)
+            # one improvement is to register node annotators for each
+            # supported op type.
+            self._annotate_conv2d_binary_unary(node, config)
+            self._annotate_conv2d_binary(node, config)
+            self._annotate_conv2d_unary(node, config)
+            self._annotate_conv2d(node, config)
         return model
 
-    def _annotate_conv2d_binary_unary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+    def _annotate_conv2d_binary_unary(self, node: Node, quantization_config: QuantizationConfig) -> None:
         # Conv2d + add + unary op
         supported_unary_node = [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]
         if node.op != "call_function" or node.target not in supported_unary_node:
@@ -195,9 +177,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -207,16 +189,16 @@ class X86InductorQuantizer(Quantizer):
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
             "args_act_index": [extra_input_node_idx],
         }
         unary_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
-    def _annotate_conv2d_binary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+    def _annotate_conv2d_binary(self, node: Node, quantization_config: QuantizationConfig) -> None:
         # Conv2d + add
         supported_binary_node = [torch.ops.aten.add_.Tensor, torch.ops.aten.add.Tensor]
         if node.op != "call_function" or node.target not in supported_binary_node:
@@ -248,9 +230,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -260,13 +242,13 @@ class X86InductorQuantizer(Quantizer):
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
             "args_act_index": [extra_input_node_idx],
         }
 
-    def _annotate_conv2d_unary(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+    def _annotate_conv2d_unary(self, node: Node, quantization_config: QuantizationConfig) -> None:
         supported_unary_node = [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]
         if node.op != "call_function" or node.target not in supported_unary_node:
             return
@@ -279,9 +261,9 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
@@ -289,11 +271,11 @@ class X86InductorQuantizer(Quantizer):
             "_annotated": True,
         }
         unary_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 
-    def _annotate_conv2d(self, node: Node, quantization_config: Optional[QuantizationConfig]) -> None:
+    def _annotate_conv2d(self, node: Node, quantization_config: QuantizationConfig) -> None:
         conv_node = node
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             return
@@ -301,10 +283,10 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([conv_node]):
             return
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": _get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": _get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
+            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
             "weight_index": 1,
             # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
