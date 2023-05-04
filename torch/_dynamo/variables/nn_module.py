@@ -674,7 +674,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
-        name = "__call__"
+        name = "_call_impl"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
