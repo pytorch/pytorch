@@ -228,19 +228,14 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
-    return textwrap.dedent(
-        f"""\
+    return f"""\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
-torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
-torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
-        """
-    )
-
-
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+{torch._functorch.config.codegen_config()}
+"""
 
 
 def get_minifier_repro_path():
@@ -266,6 +261,19 @@ class AccuracyError(Exception):
     pass
 
 
+def clone_inputs_retaining_gradness(example_inputs):
+    """
+    This clone inputs is different from utils clone_input. In case of minifier,
+    all the tensors are leaf tensors while creating a new graph. So, we set the
+    requires_grad field w/o checking the leafness of the tensor.
+    """
+    cloned_inputs = clone_inputs(example_inputs)
+    for idx in range(len(example_inputs)):
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+    return cloned_inputs
+
+
 def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
@@ -275,13 +283,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    new_args = clone_inputs(args)
-    # Set the requires_grad field explicitly because clone_inputs only sets
-    # requires_grad for leaf tensors.
-    for narg, arg in zip(new_args, args):
-        if isinstance(arg, torch.Tensor):
-            narg.requires_grad_(arg.requires_grad)
-    args = new_args
+    args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -307,7 +309,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
     """
     Check two models have same accuracy.
     """
@@ -330,10 +332,12 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     try:
         fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs(example_inputs)
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
         )
         fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
     except Exception:
+        if require_fp64:
+            raise RuntimeError("Could not generate fp64 outputs")
         log.warning("Could not generate fp64 outputs")
         fp64_ref = None
 
@@ -391,9 +395,16 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
+def backend_accuracy_fails(
+    gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False
+):
     try:
-        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+        compiled_gm = compiler_fn(
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+        )
+        return not same_two_models(
+            gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64
+        )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
@@ -405,5 +416,3 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
             )
         )
         return False
-
-    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
