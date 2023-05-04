@@ -2158,29 +2158,19 @@ class BufferList(IRNode):
         return ()
 
     def list_arg_count(self):
-        _, (list_reads, list_writes) = self.extract_read_writes()
+        _, (list_reads, list_writes) = self._list_read_writes()
         return len(list_reads) + len(list_writes)
 
     @cache_on_self
-    def normalized_read_writes(self):
-        return self.extract_read_writes()[0]
-
-    @cache_on_self
-    def extract_read_writes(self):
-        list_load_extractor = dependencies.RecordListLoadStores()
-
-        with V.set_ops_handler(list_load_extractor):
+    def _list_read_writes(self):
+        def fn():
             self.get_store_function()(self.make_loader()())
 
-        return (
-            dependencies.ReadWrites(
-                list_load_extractor._reads, list_load_extractor._writes, set()
-            ),
-            (list_load_extractor._list_reads, list_load_extractor._list_writes),
-        )
+        return dependencies.extract_list_read_writes(fn)
 
     def get_read_writes(self):
-        return self.normalized_read_writes()
+        read_writes, _ = self._list_read_writes()
+        return read_writes
 
 
 class ListElemBuffer(Buffer):

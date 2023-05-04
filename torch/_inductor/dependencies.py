@@ -354,5 +354,17 @@ def extract_read_writes(
     )
 
 
+def extract_list_read_writes(fn: Callable):
+    list_load_extractor = RecordListLoadStores()
+
+    with V.set_ops_handler(list_load_extractor):
+        fn()
+
+    return (
+        ReadWrites(list_load_extractor._reads, list_load_extractor._writes, set()),
+        (list_load_extractor._list_reads, list_load_extractor._list_writes),
+    )
+
+
 def canonicalization_prefix():
     return "c"
