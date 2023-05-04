@@ -1546,6 +1546,23 @@ def forward(self, tangents_1):
         x = torch.randn(3, 3, requires_grad=True).clone()
         self.verify_aot_autograd(f, [x, x])
 
+    # See https://github.com/pytorch/pytorch/issues/100224
+    def test_dupe_arg_returned_as_output(self):
+        def f(a, b, a_):
+            a[0].add_(1)
+            return a_
+        f_compiled = aot_function(f, nop)
+        a = torch.ones(2)
+        b = torch.ones(2)
+        out_ref = f(a, b, a)
+
+        a2 = torch.ones(2)
+        b2 = torch.ones(2)
+        out_test = f_compiled(a2, b2, a2)
+
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(a, a2)
+
     @patch('torch._functorch.aot_autograd.AOT_COUNTER', new_callable=itertools.count)
     @patch("torch._functorch.config.debug_assert", True)
     def test_invalid_dupe_left_bias(self, counter):
