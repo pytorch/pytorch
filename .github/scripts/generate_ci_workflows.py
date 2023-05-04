@@ -244,7 +244,7 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         ),
         branches="main",
         ciflow_config=CIFlowConfig(
-            unstable=True,
+            isolated_workflow=True,
         ),
     ),
     BinaryBuildWorkflow(
@@ -259,7 +259,7 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
         ),
         branches="main",
         ciflow_config=CIFlowConfig(
-            unstable=True,
+            isolated_workflow=True,
         ),
     ),
 ]
