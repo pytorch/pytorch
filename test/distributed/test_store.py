@@ -579,6 +579,19 @@ class TestPythonStore(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
             store.multi_set(["foo", "bar"], [b"v", b"v"])
 
+    def test_has_extended_api_passthrough(self):
+        class TestStore(dist.Store):
+            pass
+        test_store = TestStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api)
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.append("foo", "bar")
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_get(["foo", "bar"])
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_set(["foo", "bar"], [b"v", b"v"])
+
     def test_has_extended_api_roundtrip(self):
         store = DummyStore()
         prefix = dist.PrefixStore("p", store)
