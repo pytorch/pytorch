@@ -195,7 +195,7 @@ auto handle_torch_function_setter(
 }
 
 // Combines self and args into one tuple.
-auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
+static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   if (args == nullptr) {
     return py::make_tuple(py::handle(self));
   } else if (self == nullptr) {
@@ -601,7 +601,7 @@ bool is_tensor_and_append_overloaded(
   return false;
 }
 
-bool is_scalar_list(PyObject* obj) {
+static bool is_scalar_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -646,7 +646,7 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
-bool is_float_or_complex_list(PyObject* obj) {
+static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;

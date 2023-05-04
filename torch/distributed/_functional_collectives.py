@@ -1,7 +1,7 @@
 import warnings
 
 import weakref
-from typing import Any, cast, List, Tuple, Union
+from typing import cast, List, Tuple, Union
 
 import sys
 import torch
@@ -14,6 +14,17 @@ from torch.utils._pytree import tree_map_only
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
+
+"""
+The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
+https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
+
+The new check is a bit more hackish, but that's all we have for now.
+
+"""
+def _is_running_under_torch_deploy():
+    return torch._meta_registrations is object
+
 
 """
 New traceable, functional collectives.
@@ -102,6 +113,22 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
         _wait_and_clear_tensor(data_ptr, version_and_work[0])
     return tensor
 
+class WaitHolder:
+    """
+    WaitHolder is an indirection to the tensor that needs to be waited on.
+
+    It decomples the tensor an AsyncCollectiveTensor wraps from
+    the tensor it needs to use with wait_tensor.
+    """
+
+    def __init__(self, lookup_tensor):
+        self.lookup_tensor = lookup_tensor
+
+    def wait_tensor(self):
+        if self.lookup_tensor is not None:
+            wait_tensor(self.lookup_tensor)
+            self.lookup_tensor = None
+
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
     A Tensor wrapper subclass that is used to trigger a call to wait
@@ -115,13 +142,14 @@ class AsyncCollectiveTensor(torch.Tensor):
         return res
     """
     elem: torch.Tensor
+    _holder: WaitHolder
 
-    __slots__ = ['elem']
+    __slots__ = ['elem', '_holder']
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, elem: torch.Tensor):
+    def __new__(cls, elem: torch.Tensor, holder: WaitHolder):
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, elem.size(),
@@ -130,15 +158,23 @@ class AsyncCollectiveTensor(torch.Tensor):
             device=elem.device, requires_grad=False
         )
         r.elem = elem
+        r._holder = holder
         return r
 
     def __repr__(self):
         return f"AsyncCollectiveTensor({self.elem})"
 
+    def trigger_wait(self):
+        self._holder.wait_tensor()
+        return self
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        def unwrap(e: Any):
-            return wait_tensor(e.elem)
+        def unwrap(e: AsyncCollectiveTensor):
+            # TODO do we need to insert a wait_tensor op for all tensors or just the first one?
+            # Given only first usage of any of the output tensors needs to wait, for now we emit only one wait
+            e._holder.wait_tensor()
+            return e.elem
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
@@ -166,6 +202,17 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
     _register_tensor_work(inplace_tensor, work)
 
     return inplace_tensor
+
+def _all_reduce_coalesced(self, reduceOp, tag, ranks, group_size):
+    op = _str_to_reduce_op(reduceOp)
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    inplace_tensor_list = [t.clone(memory_format=torch.contiguous_format) for t in self]
+    work = dist.all_reduce_coalesced(inplace_tensor_list, op=op, group=group, async_op=True)
+    _register_tensor_work(inplace_tensor_list[0], work)
+
+    return inplace_tensor_list
 
 def _all_gather_into_tensor(shard, tag, ranks, group_size):
     # TODO add dim support?
@@ -263,7 +310,7 @@ def _are_we_tracing() -> bool:
 def _maybe_wrap_tensor(self):
     if _are_we_tracing():
         return wait_tensor(self)
-    res = AsyncCollectiveTensor(self)
+    res = AsyncCollectiveTensor(self, WaitHolder(self))
     _register_wrapper_tensor(res, self)
     return res
 
@@ -364,8 +411,40 @@ def reduce_scatter_tensor(
     res = _maybe_wrap_tensor(tensor)
     return res
 
-c10_lib = torch.library.Library("c10d_functional", "DEF")
-c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
+
+def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = "") -> List[torch.Tensor]:
+    """
+    Reduces a list of tensors across all machines in such a way that all get
+    the final result.
+
+    The all tensors in the input list are left unmodified.
+
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor_list = torch.ops.c10d_functional.all_reduce_coalesced(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+
+    if _are_we_tracing():
+        return list(map(wait_tensor, tensor_list))
+
+    res = []
+    lookup_tensor = tensor_list[0]
+    wh = WaitHolder(lookup_tensor)
+    for tensor in tensor_list:
+        act = AsyncCollectiveTensor(tensor, wh)
+        res.append(cast(torch.Tensor, act))
+
+    # FIXME we should register all tensors and ref count when to emit the wait
+    _register_wrapper_tensor(res[0], lookup_tensor)
+    return res
 
 # We now register meta kernels to deal with tracing
 def _all_reduce_meta(self, *args):
@@ -384,10 +463,13 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
     out_size[0] //= group_size
     return input.new_empty(out_size)
 
+def _all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
+    return [torch.empty_like(t) for t in self]
 
 def _register_ops():
     ops_defs = [
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+        "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "wait_tensor(Tensor self) -> Tensor",
         "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -403,8 +485,12 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-
-if sys.executable != 'torch_deploy':
+if not _is_running_under_torch_deploy():
+    # Library MUST be defined at module scope or it doesn't work
+    # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
+    #   guarded against running inside it
+    c10_lib = torch.library.Library("c10d_functional", "DEF")
+    c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")

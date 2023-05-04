@@ -15,9 +15,16 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 class TestSDPAPatternRewriter(TestCase):
     @config.patch(fallback_random=True, lowmem_dropout=False)
-    def _check_common(self, dot_prod_attention, args1=None, contains=True):
-        tensor_shape = (4, 2, 16, 32)
+    def _check_common(
+        self,
+        dot_prod_attention,
+        args1=None,
+        contains=True,
+        atol=1e-5,
+        has_fuse_pattern=True,
+    ):
         if args1 is None:
+            tensor_shape = (4, 2, 16, 32)
             args1 = [
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
@@ -26,8 +33,9 @@ class TestSDPAPatternRewriter(TestCase):
         args2 = [*map(torch.clone, args1)]
 
         for training in [False, True]:
-            for x in itertools.chain(args1[:3], args2[:3]):
-                x.requires_grad = training
+            for x in itertools.chain(args1[:], args2[:]):
+                if isinstance(x, torch.Tensor):
+                    x.requires_grad = training
 
             torch.manual_seed(1234)
             result1 = dot_prod_attention(*args1)
@@ -37,21 +45,21 @@ class TestSDPAPatternRewriter(TestCase):
             result2, (source_code,) = run_and_get_code(
                 torch.compile(dot_prod_attention, fullgraph=True), *args2
             )
-            self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
+            if has_fuse_pattern:
+                self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
             if contains:
                 # many of the patterns get re-expanded in dispatcher
                 self.assertIn(
                     "aten._scaled_dot_product_efficient_attention", source_code
                 )
-            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
                 result1.sum().backward()
                 result2.sum().backward()
-
-                self.assertEqual(args1[0].grad, args2[0].grad)
-                self.assertEqual(args1[1].grad, args2[1].grad)
-                self.assertEqual(args1[2].grad, args2[2].grad)
+                for arg1, arg2 in zip(args1, args2):
+                    if isinstance(arg1, torch.Tensor):
+                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
     def test_sdpa_rewriter_1(self):
         def dot_prod_attention(
@@ -164,6 +172,35 @@ class TestSDPAPatternRewriter(TestCase):
             return attn_weight @ value
 
         self._check_common(sfdp_pattern_6, contains=False)
+
+    def test_pattern_fails_with_tensor_factor(self):
+        # https://github.com/pytorch/pytorch/issues/99124
+        class Model(torch.nn.Module):
+            def __init__(self, is_inv_factor):
+                super(Model, self).__init__()
+                self.is_inv_factor = is_inv_factor
+
+            def forward(self, query, key, value, scale_factor) -> torch.Tensor:
+                y = torch.matmul(query, key.transpose(-2, -1))
+                if self.is_inv_factor:
+                    y = y.div(scale_factor)
+                else:
+                    y = y.mul(scale_factor)
+                return y.softmax(dim=-1).matmul(value)
+
+        tensor_shape = (2, 4, 4, 4)
+        for is_inv_factor in [True, False]:
+            args = [
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn((4, 1, 1), device="cuda"),
+            ]
+            model = Model(is_inv_factor).eval()
+            # The training path has an accuracy gap compared with eager mode.
+            self._check_common(
+                model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+            )
 
 
 if __name__ == "__main__":

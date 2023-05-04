@@ -753,7 +753,7 @@ Backend/Hardware Support
 Today, PyTorch supports the following backends for running quantized operators efficiently:
 
 * x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations), via `x86` optimized by `fbgemm <https://github.com/pytorch/FBGEMM>`_ and `onednn <https://github.com/oneapi-src/oneDNN>`_ (see the details at `RFC <https://github.com/pytorch/pytorch/issues/83888>`_)
-* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native/quantized/cpu/qnnpack>`_
+* ARM CPUs (typically found in mobile/embedded devices), via `qnnpack <https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native/quantized/cpu/qnnpack>`_
 * (early prototype) support for NVidia GPU via `TensorRT <https://developer.nvidia.com/tensorrt>`_ through `fx2trt` (to be open sourced)
 
 
@@ -1176,4 +1176,4 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.quantization.backend_config
 .. py:module:: torch.ao.pruning
 .. py:module:: torch.ao.pruning.scheduler
-.. py:module:: torch.ao.pruning.pruner
+.. py:module:: torch.ao.pruning.sparsifier
