@@ -3635,7 +3635,7 @@ def _process_group_name(ranks, use_hashed_name):
     global _world
     if use_hashed_name:
         pg_name = hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
-        while pg_name in _world.pg_names:
+        while pg_name in _world.pg_names.values():
             pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
     else:
         pg_name = str(_world.group_count)

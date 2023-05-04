@@ -3417,14 +3417,14 @@ class TestSparseCompressedTritonKernels(TestCase):
                 bsr_dense_mm(lhs.to("cuda:0"), rhs.to("cuda:1"))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
             bsr_dense_mm(lhs, rhs.to(torch.float))
-        with self.assertRaisesRegex(ValueError, "and one of \(half, bfloat16, float32\)"):
+        with self.assertRaisesRegex(ValueError, r"and one of \(half, bfloat16, float32\)"):
             bsr_dense_mm(lhs.to(torch.double), rhs.to(torch.double))
         with self.assertRaisesRegex(ValueError, "all inputs are expected to be at least 2D"):
             bsr_dense_mm(lhs, torch.rand(1, dtype=dtype, device=device))
         with self.assertRaisesRegex(ValueError, "sizes are not compatible for matrix multiplication"):
             bsr_dense_mm(lhs, torch.rand(1, 1, dtype=dtype, device=device))
         with self.assertRaisesRegex(ValueError,
-                                    "dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
+                                    r"dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
             bsr_dense_mm(lhs, torch.rand(32, 15, dtype=dtype, device=device))
         # Blocksizes check
         for blocksize in (15, 30):
