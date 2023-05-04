@@ -29,7 +29,7 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
 
   // Fill sortedOrigIndices with sequential indices
   const auto count_iter = thrust::counting_iterator<int64_t>(0);
-  auto orig_data = device_ptr(orig_indices.data_ptr<int64_t>());
+  auto orig_data = device_ptr(orig_indices.mutable_data_ptr<int64_t>());
   thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -37,7 +37,7 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
   // directly
   // Sort; a stable sort is not required
   // NB - not passing comparator causes thrust to use radix sort, and it hurts perf A LOT, at least for medium (few K) sized indices
-  auto sorted_data = device_ptr(sorted_indices.data_ptr<int64_t>());
+  auto sorted_data = device_ptr(sorted_indices.mutable_data_ptr<int64_t>());
   thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, LTOp<int64_t>());
 }
 
@@ -45,7 +45,6 @@ void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_
 
 template<typename index_t>
 void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
-  using device_ptr = thrust::device_ptr<index_t>;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
@@ -55,8 +54,8 @@ void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count) {
   // Compute an increasing sequence per unique item in sortedIndices:
   // sorted: 2 5 5 5 7 7 8 9 9
   //  count: 1 1 2 3 1 2 1 1 2
-  auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
-  auto count_data = device_ptr(count.data_ptr<index_t>());
+  auto sorted_data = thrust::device_ptr<const index_t>(sorted_indices.const_data_ptr<index_t>());
+  auto count_data = thrust::device_ptr<index_t>(count.mutable_data_ptr<index_t>());
   thrust::inclusive_scan_by_key(
     policy,
     sorted_data,
@@ -92,16 +91,16 @@ int64_t embedding_backward_cuda_kernel_unique_by_key(const Tensor &sorted_indice
   at::cuda::ThrustAllocator allocator;
   auto policy = thrust::cuda::par(allocator).on(stream);
   const ptrdiff_t numel = sorted_indices.numel();
-  auto sorted_indices_dev = thrust::device_ptr<index_t>(sorted_indices.data_ptr<index_t>());
+  auto sorted_indices_dev = thrust::device_ptr<const index_t>(sorted_indices.const_data_ptr<index_t>());
   auto dummy = at::empty_like(sorted_indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto dummy_dev = thrust::device_ptr<index_t>(dummy.data_ptr<index_t>());
+  auto dummy_dev = thrust::device_ptr<index_t>(dummy.mutable_data_ptr<index_t>());
   auto ends = thrust::unique_by_key_copy(
           policy,
           sorted_indices_dev,
           sorted_indices_dev + numel,
           thrust::make_counting_iterator(0),
           dummy_dev,
-          thrust::device_ptr<index_t>(segment_offsets.data_ptr<index_t>()));
+          thrust::device_ptr<index_t>(segment_offsets.mutable_data_ptr<index_t>()));
   return thrust::get<0>(ends) - dummy_dev;
 }
 
