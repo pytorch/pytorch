@@ -12,6 +12,7 @@ from torch.utils._content_store import (
     ContentStoreReader,
     ContentStoreWriter,
     hash_storage,
+    skipIfRocm,
 )
 
 
@@ -60,6 +61,7 @@ class TestContentStore(TestCase):
         # Should not raise an error
         hash_storage(torch.tensor(2, device=device).untyped_storage())
 
+    @skipIfRocm
     def test_load_tensor(self, device):
         with tempfile.TemporaryDirectory() as loc:
             writer = ContentStoreWriter(loc)
