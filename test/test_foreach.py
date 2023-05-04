@@ -981,7 +981,7 @@ class TestForeach(TestCase):
                     check_batched_grad=False,
                 )
 
-    @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1))
+    @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
     def test_tensros_grouping(self):
 
         from collections import defaultdict
@@ -1020,24 +1020,36 @@ class TestForeach(TestCase):
                 ) for i in range(num_tensors)
             ])
 
-        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists)
-        grouped, _ = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists)
-        self.assertEqual(ref_grouped, grouped)
+        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
+        grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
+        for (device, dtype) in ref_grouped:
+            ref_values = ref_grouped[(device, dtype)]
+            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            self.assertEqual(ref_values, values)
 
-        ref_grouped, ref_indices = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
-        grouped, indices = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
-        self.assertEqual(ref_grouped, grouped)
-        self.assertEqual(ref_indices, indices)
+        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
+        grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
+        for (device, dtype) in ref_grouped:
+            ref_values = ref_grouped[(device, dtype)]
+            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            self.assertEqual(ref_values[:-1], values)
+            self.assertEqual(ref_values[-1], indices)
 
         nested_tensorlists.append([None] * num_tensors)
-        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists)
-        grouped, _ = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists)
-        self.assertEqual(ref_grouped, grouped)
+        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
+        grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
+        for (device, dtype) in ref_grouped:
+            ref_values = ref_grouped[(device, dtype)]
+            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            self.assertEqual(ref_values, values)
 
-        ref_grouped, ref_indices = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
-        grouped, indices = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
-        self.assertEqual(ref_grouped, grouped)
-        self.assertEqual(ref_indices, indices)
+        ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
+        grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
+        for (device, dtype) in ref_grouped:
+            ref_values = ref_grouped[(device, dtype)]
+            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            self.assertEqual(ref_values[:-1], values)
+            self.assertEqual(ref_values[-1], indices)
 
 
 instantiate_device_type_tests(TestForeach, globals())

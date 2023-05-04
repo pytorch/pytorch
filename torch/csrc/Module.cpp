@@ -1722,6 +1722,11 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
+  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
+  using _FlatMap = std::unordered_map<
+      _DeviceDtypeKey,
+      at::native::TensorsAndIndicesT,
+      at::native::ParamsHash<_DeviceDtypeKey>>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
       [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
@@ -1732,7 +1737,13 @@ Call this whenever a new thread is created in order to propagate values from
         auto cpp_grouped_tensors_with_indices =
             at::native::group_tensors_by_first_tensors_device_and_dtype(
                 nested_tensorlist, with_indices);
-        return cpp_grouped_tensors_with_indices;
+        _FlatMap map;
+        for (const auto& iter : cpp_grouped_tensors_with_indices) {
+          const auto thp_dtype = torch::getTHPDtype(iter.first.second);
+          const std::string scalar_type = thp_dtype->name;
+          map.insert({{iter.first.first, scalar_type}, iter.second});
+        }
+        return map;
       });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
