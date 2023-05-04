@@ -63,7 +63,7 @@ class MemoryDep(typing.NamedTuple):
 
     def is_scalar(self) -> bool:
         if isinstance(self.index, sympy.Symbol):
-            return self.index not in self.var_names
+            return self.index not in self.var_names and not self.is_indirect()
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
@@ -99,6 +99,13 @@ class MemoryDep(typing.NamedTuple):
         """Check if self can read from other in a single fused kernel"""
         if not isinstance(other, MemoryDep) or other.is_indirect():
             return False
+        if (
+            len(other.size) - 1 == len(self.size)
+            and other.size[: len(self.size)] == self.size
+        ):
+            # reduction has last (reduced) dim in its sizes, and some
+            # downstream dependencies get confused by it
+            return other.name == self.name and other.index == self.index
         return self == other
 
 
@@ -210,6 +217,9 @@ class ReadWrites:
             op_counts=self.op_counts,
         )
 
+    def reads_and_writes(self):
+        return itertools.chain(self.reads, self.writes)
+
     def generalize_for_scheduling(self):
         return ReadWrites(
             {dep.generalize_for_scheduling() for dep in self.reads},
@@ -217,7 +227,14 @@ class ReadWrites:
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
+            op_counts=self.op_counts,
         )
+
+    def has_indirect(self):
+        for dep in self.reads_and_writes():
+            if isinstance(dep, StarDep) or dep.is_indirect():
+                return True
+        return False
 
 
 class _RecordLoadStoreInner(V.MockHandler):
@@ -266,12 +283,14 @@ class _RecordLoadStoreInner(V.MockHandler):
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
-        free_symbols = index.free_symbols
-        while new_vars and new_vars[-1] not in free_symbols:
-            # Reduction has last (reduced) dim in its sizes, but
-            # downstream users won't.  Normalize this away.
-            new_vars.pop()
-            new_sizes.pop()
+        if False:
+            # TODO(jansel): this is causing errors
+            free_symbols = index.free_symbols
+            while new_vars and new_vars[-1] not in free_symbols:
+                # Reduction has last (reduced) dim in its sizes, but
+                # downstream users won't.  Normalize this away.
+                new_vars.pop()
+                new_sizes.pop()
         return index, tuple(new_vars), tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
