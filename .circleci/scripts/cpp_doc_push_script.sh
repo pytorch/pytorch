@@ -1,4 +1,3 @@
-#!/bin/bash
 # =================== The following code **should** be executed inside Docker container ===================
 
 # Install dependencies
@@ -35,6 +34,11 @@ echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
+is_main_doc=false
+if [ "$version" == "main" ]; then
+  is_main_doc=true
+fi
+
 echo "install_path: $install_path  version: $version"
 
 # ======================== Building PyTorch C++ API Docs ========================
@@ -49,6 +53,7 @@ set -ex
 
 # Generate ATen files
 pushd "${pt_checkout}"
+pip install -r requirements.txt
 time python -m torchgen.gen \
   -s aten/src/ATen \
   -d build/aten/src/ATen
@@ -63,6 +68,7 @@ time python tools/setup_helpers/generate_code.py \
 
 # Build the docs
 pushd docs/cpp
+pip install -r requirements.txt
 time make VERBOSE=1 html -j
 
 popd
@@ -73,7 +79,7 @@ pushd cppdocs
 # Purge everything with some exceptions
 mkdir /tmp/cppdocs-sync
 mv _config.yml README.md /tmp/cppdocs-sync/
-rm -rf ./*
+rm -rf *
 
 # Copy over all the newly generated HTML
 cp -r "${pt_checkout}"/docs/cpp/build/html/* .
