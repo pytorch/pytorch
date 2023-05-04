@@ -1,4 +1,5 @@
 import sympy
+from sympy.logic.boolalg import Boolean as SympyBoolean
 
 
 # The normal Python interpretation of the operators
@@ -76,10 +77,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def div(a, b):
-        if a.is_integer:
-            return ReferenceAnalysis.truncdiv(a, b)
-        else:
-            return ReferenceAnalysis.truediv(a, b)
+        return ReferenceAnalysis.truediv(a, b)
 
     @staticmethod
     def floordiv(a, b):
@@ -125,11 +123,29 @@ class ReferenceAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return sympy.Min(a, b)
+        # Poorman's version of upcasting in Sympy
+        # This won't do for sympy.Expr as the casting does nothing for those
+        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
+            result_type = sympy.Float
+        elif a.is_Integer or b.is_Integer:
+            result_type = sympy.Integer
+        else:
+            result_type = SympyBoolean
+        return sympy.Min(result_type(a), result_type(b))
 
     @staticmethod
     def maximum(a, b):
-        return sympy.Max(a, b)
+        # Poorman's version of upcasting in Sympy
+        # This won't do for sympy.Expr as the casting does nothing for those
+        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
+            result_type = sympy.Float
+        elif a.is_Integer or b.is_Integer:
+            result_type = sympy.Integer
+        else:
+            assert a.is_Boolean
+            assert b.is_Boolean
+            result_type = SympyBoolean
+        return sympy.Max(result_type(a), result_type(b))
 
     @staticmethod
     def floor(x):

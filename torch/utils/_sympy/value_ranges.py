@@ -333,6 +333,8 @@ class ValueRangeAnalysis:
             # Casting to integer does truncation
             def f(a, b):
                 result = a / b
+                # This won't work for sympy.Expr, so it'll need a workaround when
+                # dealing with dynamic shapes
                 if result.is_finite:
                     result = sympy.Integer(result)
                 return result
@@ -340,15 +342,7 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def div(a, b):
-        # We don't currently use sympy.zoo consistently
-        def is_int_or_inf(val):
-            return val.is_integer or val.is_infinite
-
-        a = ValueRanges.wrap(a)
-        if is_int_or_inf(a.lower) and is_int_or_inf(a.upper):
-            return ValueRangeAnalysis.truncdiv(a, b)
-        else:
-            return ValueRangeAnalysis.truediv(a, b)
+        return ValueRangeAnalysis.truediv(a, b)
 
     @staticmethod
     def add(a, b):
@@ -424,11 +418,33 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, min)
+        return ValueRangeAnalysis.min_or_max(a, b, sympy.Min)
 
     @staticmethod
     def maximum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, max)
+        return ValueRangeAnalysis.min_or_max(a, b, sympy.Max)
+
+    @staticmethod
+    def min_or_max(a, b, fn):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+
+        # Performs upcasting first
+        def fn_(x, y):
+            # Poorman's version of upcasting in Sympy
+            # This won't do for sympy.Expr as the casting does nothing for those
+            # Inf is not a float...
+            if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
+                result_type = sympy.Float
+            elif x.is_Integer or y.is_Integer:
+                result_type = sympy.Integer
+            else:
+                assert x.is_Boolean
+                assert y.is_Boolean
+                result_type = SympyBoolean
+            return fn(result_type(x), result_type(y))
+
+        return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
 
     @staticmethod
     def where(a, b, c):

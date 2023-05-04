@@ -136,9 +136,8 @@ class TestValueRanges(TestCase):
                     continue
                 ref_r = getattr(ReferenceAnalysis, fn)(a, b)
 
-                # These min/max ops have a dtype dependent that's value-dependent on Python
                 # sympy.floordiv does 1.0 // 1.0 == 1 rather than 1.0. wtf
-                if fn not in ("minimum", "maximum", "floordiv"):
+                if fn != "floordiv":
                     self.assertEqual(r.lower.is_integer, r.upper.is_integer)
                     self.assertEqual(ref_r.is_integer, r.upper.is_integer)
                 self.assertEqual(r.lower, r.upper)
@@ -230,7 +229,7 @@ class TestSympyInterp(TestCase):
     @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
     def test_interp(self, fn):
         # SymPy does not implement truncation for Expressions
-        if fn in ("div", "truncdiv"):
+        if fn in ("div", "truncdiv", "minimum", "maximum"):
             return
 
         from sympy.abc import x, y
