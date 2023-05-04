@@ -63,7 +63,7 @@ class DataParallel(ParallelMode):
         *,
         input_batch_dim: int = 0,
         custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None,
-        _preserve_node_type: bool = False
+        _preserve_node_type: bool = False,
     ):
         """
         DataParallel Mode that partition the model and graph to data parallel style
@@ -74,7 +74,7 @@ class DataParallel(ParallelMode):
         Args:
             parallel_style (str): parallel style to use. Currently supports
                 "replicate", "fully_shard", and "default".
-        
+
         Keyword args:
             input_batch_dim (int): the batch dimension of the input tensor.
                  default: 0
