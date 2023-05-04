@@ -1722,6 +1722,9 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
+  // FIXME(crcrpar): Better have `at::ScalarType` get mapped to `torch.dtype`
+  // Currently I see the second item of the key is displayed as
+  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
   using _DeviceDtypeKey = std::pair<at::Device, std::string>;
   using _FlatMap = std::unordered_map<
       _DeviceDtypeKey,
@@ -1732,13 +1735,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
              nested_tensorlist,
          const bool with_indices) {
-        // TODO(crcrpar): Need to map at::ScalarType to THPDtype so that repr
-        // works
-        auto cpp_grouped_tensors_with_indices =
-            at::native::group_tensors_by_first_tensors_device_and_dtype(
-                nested_tensorlist, with_indices);
         _FlatMap map;
-        for (const auto& iter : cpp_grouped_tensors_with_indices) {
+        for (const auto& iter :
+             at::native::group_tensors_by_first_tensors_device_and_dtype(
+                 nested_tensorlist, with_indices)) {
           const auto thp_dtype = torch::getTHPDtype(iter.first.second);
           const std::string scalar_type = thp_dtype->name;
           map.insert({{iter.first.first, scalar_type}, iter.second});

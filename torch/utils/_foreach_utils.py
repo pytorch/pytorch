@@ -33,7 +33,11 @@ def _group_tensors_by_device_and_dtype(
     with_indices: bool = False,
 ) -> Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Optional[Tensor]]], List[int]]]:
 
-    return torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
+    return {
+        (device, getattr(torch, str_dtype)): value
+        for (device, str_dtype), value in
+        torch._C._group_tensors_by_device_and_dtype(tensorlistlist, with_indices).items()
+    }
 
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:

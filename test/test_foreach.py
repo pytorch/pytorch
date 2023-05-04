@@ -1024,14 +1024,14 @@ class TestForeach(TestCase):
         grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
         for (device, dtype) in ref_grouped:
             ref_values = ref_grouped[(device, dtype)]
-            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            values, indices = grouped[(device, dtype)]
             self.assertEqual(ref_values, values)
 
         ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
         grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
         for (device, dtype) in ref_grouped:
             ref_values = ref_grouped[(device, dtype)]
-            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            values, indices = grouped[(device, dtype)]
             self.assertEqual(ref_values[:-1], values)
             self.assertEqual(ref_values[-1], indices)
 
@@ -1040,14 +1040,14 @@ class TestForeach(TestCase):
         grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
         for (device, dtype) in ref_grouped:
             ref_values = ref_grouped[(device, dtype)]
-            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            values, indices = grouped[(device, dtype)]
             self.assertEqual(ref_values, values)
 
         ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
         grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
         for (device, dtype) in ref_grouped:
             ref_values = ref_grouped[(device, dtype)]
-            values, indices = grouped[(device, str(dtype).split('.')[-1])]
+            values, indices = grouped[(device, dtype)]
             self.assertEqual(ref_values[:-1], values)
             self.assertEqual(ref_values[-1], indices)
 
