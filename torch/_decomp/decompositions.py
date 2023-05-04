@@ -2158,8 +2158,8 @@ def _upsample_2d_get_memory_format(input):
             if input.is_contiguous(memory_format=torch.channels_last)
             else torch.contiguous_format
         )
-    if memory_format != input_memory_format:
-        memory_format = input_memory_format
+        if memory_format != input_memory_format:
+            memory_format = input_memory_format
 
     return memory_format
 
