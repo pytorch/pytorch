@@ -848,7 +848,6 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
 
-            breakpoint()
             tx.output.guards.update(output.guards)
             tx.output.create_node(
                 "output",
@@ -856,7 +855,6 @@ def speculate_subgraph(
                 (tracer.create_arg((output.as_proxy(),))),
                 {},
             )
-            breakpoint()
             graph = tx.output.graph
             lifted_freevars = tracer.lifted_freevars
 
