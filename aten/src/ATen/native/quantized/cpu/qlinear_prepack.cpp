@@ -291,14 +291,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   // Prepack weight
   auto input_shape = torch::List<int64_t>();
   auto weight_copy = weight.clone();
-  ///////////////////////
-  // ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
-  // wgt.transpose_(0, 1); // ONEDNN requires transposed weight
-  // auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), dnnl::memory::data_type::s8,
-  //                                                            dnnl::memory::data_type::u8);
-  // ideep::tensor exp_wgt(w_desc);
-  // exp_wgt.feed_from(wgt);
-  ///////////////////////
   auto exp_wgt = pack_weight(weight_copy, input_shape);
   ideep::tensor * packed_weight_p = new ideep::tensor(std::move(exp_wgt));
   packed_weight_p->set_scale(wgt_scales);
@@ -308,18 +300,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
   if (bias.has_value()) {
     auto& b = bias.value();
-    ///////////////////////
-    // auto bias_size = b.sizes().vec();
-    // bias_size.insert(bias_size.begin(), 1);
-    // TORCH_CHECK(
-    //     bias_size[1] == weight_ptr->get_dim(1),
-    //     "bias should have N elements: ",
-    //     std::to_string(weight_ptr->get_dim(1)),
-    //     ", but got ", bias_size[1]);
-    // auto bias_desc = ideep::tensor::desc(bias_size, dnnl::memory::data_type::f32);
-    // ideep::tensor packed_bias;
-    // packed_bias.init(bias_desc, b.data_ptr());
-    ///////////////////////
     auto packed_bias = pack_bias(b, weight_ptr->get_dim(1));
     onednn_bias = c10::optional<ideep::tensor>(packed_bias);
   }
