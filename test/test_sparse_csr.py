@@ -3331,7 +3331,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.float, torch.half, *[torch.bfloat16] if SM80OrLater else [])
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
