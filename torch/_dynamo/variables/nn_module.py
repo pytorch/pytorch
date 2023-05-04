@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from typing import Dict, List
 
 import torch.nn
-from torch._guards import TracingContext
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
@@ -348,8 +347,6 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
         module = tx.output.get_submodule(key)
-        tc = TracingContext.get()
-        assert tc, "Expected valid tracing context"
 
         def generic_call_method_helper(name):
             # Helper function to put a `call_method` node in FX graph,
@@ -612,7 +609,6 @@ class NNModuleVariable(VariableTracker):
                 isinstance(x, variables.TensorVariable)
                 for x in itertools.chain(args, kwargs.values())
             )
-            or name == "zero_grad"
         ):
             return generic_call_method_helper(name)
         else:

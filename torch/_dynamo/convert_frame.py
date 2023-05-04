@@ -219,7 +219,6 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints=None,
-    trainstep: bool = False,
     fake_mode=None,
 ):
     """Fully convert a frame into an FX graph"""
@@ -348,7 +347,6 @@ def convert_frame_assert(
             hooks,
             frame,
             frame_state=frame_state,
-            trainstep=trainstep,
             fake_mode=fake_mode,
         )
 
@@ -369,7 +367,6 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
-    trainstep=False,
     fake_mode=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
@@ -392,7 +389,6 @@ def _compile(
             export_constraints,
             mutated_closure_cell_contents,
             frame_state=frame_state,
-            trainstep=trainstep,
             fake_mode=fake_mode,
         )
         with tracing(tracer.output.tracing_context):
