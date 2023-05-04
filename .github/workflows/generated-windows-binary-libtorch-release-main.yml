@@ -9,7 +9,7 @@ on:
     branches:
       - main
     tags:
-      - 'ciflow/unstable/*'
+      - 'ciflow/trunk/*'
   workflow_dispatch:
 
 env:

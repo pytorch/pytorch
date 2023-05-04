@@ -16,7 +16,6 @@ Arch = Literal["windows", "linux", "macos"]
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
-LABEL_CIFLOW_UNSTABLE = "ciflow/unstable"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
@@ -31,14 +30,11 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
     isolated_workflow: bool = False
-    unstable: bool = False
 
     def __post_init__(self) -> None:
         if not self.isolated_workflow:
             if LABEL_CIFLOW_PERIODIC not in self.labels:
-                self.labels.add(
-                    LABEL_CIFLOW_TRUNK if not self.unstable else LABEL_CIFLOW_UNSTABLE
-                )
+                self.labels.add(LABEL_CIFLOW_TRUNK)
 
 
 class Config(TypedDict):
@@ -243,9 +239,6 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             libtorch_variants=["shared-with-deps"],
         ),
         branches="main",
-        ciflow_config=CIFlowConfig(
-            unstable=True,
-        ),
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -258,9 +251,6 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             libtorch_variants=["shared-with-deps"],
         ),
         branches="main",
-        ciflow_config=CIFlowConfig(
-            unstable=True,
-        ),
     ),
 ]
 
