@@ -79,7 +79,8 @@ def upload_pytest_cache(
         if zip_file_path:
             print(f"Deleting {zip_file_path}")
             with contextlib.suppress(FileNotFoundError):
-                os.remove(zip_file_path)
+                pass
+                # os.remove(zip_file_path) # suppress deletes while testing
 
 
 def download_pytest_cache(
@@ -128,11 +129,12 @@ def download_pytest_cache(
                 merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
             finally:
                 # clean up the unzipped cache folder
-                shutil.rmtree(cache_dir_for_shard)
+                pass
+                # shutil.rmtree(cache_dir_for_shard) suppress deletes while testing
     finally:
         # clean up the downloaded zip files
-        shutil.rmtree(zip_download_dir)
-
+        # shutil.rmtree(zip_download_dir)  suppress deletes while testing
+        pass
 
 def copy_file(source_file, dest_file):
     ensure_dir_exists(os.path.dirname(dest_file))
