@@ -193,7 +193,7 @@ class ExportGraphModuleMixin:
                 node.meta["original_aten"] = op_to_str(original_aten)
 
             if (source_fn := node.meta.get("source_fn", None)) is not None:
-                node.meta["source_fn"] = op_to_str(source_fn)
+                node.meta["source_fn"] = (source_fn[0], op_to_str(source_fn[1]))
 
             # Check if other metadata are pickleable
             unpickleable_keys = []
