@@ -82,3 +82,4 @@ please check out the references below.
    technical-overview
    nn-module
    transformations
+   quantization
