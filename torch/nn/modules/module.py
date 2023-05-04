@@ -1734,9 +1734,6 @@ class Module:
             prefix (str): the prefix for parameters and buffers used in this
                 module
         """
-        for hook in self._state_dict_pre_hooks.values():
-            hook(self, prefix, keep_vars)
-
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
@@ -1828,6 +1825,8 @@ class Module:
         if hasattr(destination, "_metadata"):
             destination._metadata[prefix[:-1]] = local_metadata
 
+        for hook in self._state_dict_pre_hooks.values():
+            hook(self, prefix, keep_vars)
         self._save_to_state_dict(destination, prefix, keep_vars)
         for name, module in self._modules.items():
             if module is not None:
