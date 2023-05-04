@@ -2,6 +2,7 @@
 import copy
 import functools
 from io import StringIO
+from typing import List
 import random
 import unittest
 from unittest.mock import patch
@@ -668,6 +669,48 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_fsdp_staticmethod(self):
+        """
+        Tests that Dynamo compiles staticmethods for FSDP-managed modules
+        correctly both when the staticmethod is invoked from the class and from
+        the object itself.
+        """
+        class ModuleWithStaticMethod(nn.Module):
+            def __init__(self, use_self: bool):
+                super().__init__()
+                self._use_self = use_self
+                torch.manual_seed(42)  # force `_param` to be deterministic
+                self._param = nn.Parameter(torch.randn((3,), device="cuda"))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                if self._use_self:
+                    z = self._add(x, self._param)
+                else:
+                    z = ModuleWithStaticMethod._add(x, self._param)
+                z *= 2
+                return z
+
+            @staticmethod
+            def _add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        model = ModuleWithStaticMethod(False)
+        x = torch.randn((2, 3), device="cuda")
+        ref_out = model(x)
+        test_outs: List[torch.Tensor] = []
+
+        for use_self in (False, True):
+            model = ModuleWithStaticMethod(use_self)
+            fsdp_model = FSDP(model, use_orig_params=True)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+            test_outs.append(fsdp_model(x))
+            # Check for no recompiles, which could happen if incorrectly
+            # passing args to the staticmethod (e.g. doubly passing `self`)
+            self.assertEqual(cnt.frame_count, 1)
+        for test_out in test_outs:
+            self.assertEqual(test_out, ref_out)
 
 
 if __name__ == "__main__":

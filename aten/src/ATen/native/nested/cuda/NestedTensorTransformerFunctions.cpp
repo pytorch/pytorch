@@ -122,7 +122,7 @@ Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
   int64_t* nt_sizes_ptr = ef_sizes.data_ptr<int64_t>();
   int64_t ef_sizes_size_0 = ef_sizes.sizes()[0];
   Tensor offsets = at::empty({1 + ef_sizes_size_0}, at::kLong);
-  int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t* offsets_ptr = offsets.mutable_data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   int64_t ef_sizes_size_1 = ef_sizes.sizes()[1];
   for (const auto i : c10::irange(ef_sizes_size_0)) {
@@ -686,8 +686,8 @@ std::tuple<
     Tensor,
     int64_t,
     int64_t,
-    int64_t,
-    int64_t,
+    Tensor,
+    Tensor,
     Tensor>
 _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& query,
@@ -710,8 +710,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       max_seqlen_batch_kv,
       output_shape) = sdpa_nested_preprocessing(query, key, value);
 
-  Tensor attention, log_sumexp, debug_attn_mask;
-  int64_t philox_seed{0}, philox_offset{0};
+  Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
   std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_buffer_reshaped,
