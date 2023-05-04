@@ -1585,7 +1585,7 @@ class TestTorchTidyProfiler(TestCase):
         self.assertIsInstance(
             node.extra_fields,
             torch._C._profiler._ExtraFields_TorchOp)
-        tensor_info = node.extra_fields.inputs[index]
+        tensor_info = node.extra_fields.input_shapes[index]
         self.assertIsInstance(tensor_info, _TensorMetadata)
         self.assertIsNotNone(tensor_info.impl_ptr)
         self.assertIsNotNone(tensor_info.storage_data_ptr)
@@ -1913,7 +1913,7 @@ class TestTorchTidyProfiler(TestCase):
             # Use linear op to identify weight ground truth.
             linear_op_node = find_node_with_name(nodes, "aten::linear")
             self.assertIsNotNone(linear_op_node)
-            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.inputs
+            x_metadata, weight_metadata, _ = linear_op_node.extra_fields.input_shapes
             self.assertEqual(x_id, x_metadata.id)
 
             # Module
@@ -2026,7 +2026,7 @@ class TestTorchTidyProfiler(TestCase):
 
         roots = p.profiler.kineto_results.experimental_event_tree()
         tensor_impls = tuple(
-            e.extra_fields.inputs[0].impl_ptr
+            e.extra_fields.input_shapes[0].impl_ptr
             for e in _utils.traverse_dfs(roots)
             if e.name == "aten::fill_"
         )
@@ -2046,7 +2046,7 @@ class TestTorchTidyProfiler(TestCase):
         for e in _utils.traverse_dfs(roots):
             fields = e.extra_fields
             if isinstance(fields, torch._C._profiler._ExtraFields_TorchOp):
-                id_set |= {t.allocation_id for t in fields.inputs if isinstance(t, _TensorMetadata)}
+                id_set |= {t.allocation_id for t in fields.input_shapes if isinstance(t, _TensorMetadata)}
 
             elif isinstance(fields, torch._C._profiler._ExtraFields_Allocation):
                 id_set.add(fields.allocation_id)
@@ -2093,7 +2093,7 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._profiler._ExtraFields_TorchOp)
 
         def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
+            return [getattr(i, name, default) for i in node.extra_fields.input_shapes]
 
         self.assertEqual(getattr_inputs("sizes", []), [[4, 4], [4, 1], []])
         self.assertEqual(getattr_inputs("strides", []), [[12, 3], [1, 1], []])
@@ -2125,7 +2125,7 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._profiler._ExtraFields_TorchOp)
 
         def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
+            return [getattr(i, name, default) for i in node.extra_fields.input_shapes]
 
         self.assertEqual(getattr_inputs("sizes", []), [[2, 3], [2, 3], []])
         self.assertEqual(getattr_inputs("strides", []), [[], [], []])
@@ -2148,7 +2148,7 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._profiler._ExtraFields_TorchOp)
 
         def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
+            return [getattr(i, name, default) for i in node.extra_fields.input_shapes]
 
         self.assertEqual(getattr_inputs("sizes", []), [[4, 3], [4, 3], []])
         self.assertEqual(getattr_inputs("strides", []), [[], [], []])
@@ -2167,12 +2167,12 @@ class TestTorchTidyProfiler(TestCase):
         self.assertIsNotNone(node)
 
         def getattr_inputs(name, default):
-            return [getattr(i, name, default) for i in node.extra_fields.inputs]
+            return [getattr(i, name, default) for i in node.extra_fields.input_shapes]
 
         # The second argument to the add gets promotoed to a zerodim Tensor
         self.assertEqual(getattr_inputs("dtype", None), [torch.float32, torch.float64, None])
         self.assertEqual(getattr_inputs("sizes", []), [[5, 5], [], []])
-        self.assertEqual(node.extra_fields.inputs[2], alpha)
+        self.assertEqual(node.extra_fields.input_shapes[2], alpha)
 
     def test_tensor_lists(self):
         x = torch.ones((1,))
@@ -2182,7 +2182,7 @@ class TestTorchTidyProfiler(TestCase):
 
         nodes = p.profiler.kineto_results.experimental_event_tree()
         node = find_node_with_name(nodes, "aten::stack")
-        inputs = node.extra_fields.inputs
+        inputs = node.extra_fields.input_shapes
         self.assertEqual(len(inputs), 2)
         self.assertIsInstance(inputs[0], list)
         self.assertEqual(len(inputs[0]), 2)

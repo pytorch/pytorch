@@ -592,12 +592,12 @@ def source_code_location(event: Optional[_ProfilerEvent]):
 
 def input_shapes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.inputs)
+    return tuple(tuple(getattr(i, "sizes", ())) for i in event.extra_fields.input_shapes)
 
 
 def input_dtypes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-    return tuple(getattr(i, "dtype", None) for i in event.extra_fields.inputs)
+    return tuple(getattr(i, "dtype", None) for i in event.extra_fields.input_shapes)
 
 
 def report_all_anti_patterns(prof,

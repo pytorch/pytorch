@@ -156,10 +156,10 @@ def _extract_parameters_and_gradients(
         and children
         and children[0].typed[0] == _EventType.TorchOp
         and children[0].name in ("aten::detach", "aten::add_")
-        and children[0].typed[1].inputs
-        and isinstance(children[0].typed[1].inputs[0], _TensorMetadata)
+        and children[0].typed[1].input_shapes
+        and isinstance(children[0].typed[1].input_shapes[0], _TensorMetadata)
     ):
-        yield None, TensorKey.from_tensor(children[0].typed[1].inputs[0])
+        yield None, TensorKey.from_tensor(children[0].typed[1].input_shapes[0])
 
     # We directly instrument `torch.nn.Module` and `torch.optim.Optimizer`
     # NOTE: The values captured by the python tracer are cached; they can be
@@ -229,7 +229,7 @@ class SchemaMatcher:
             for i, arg in enumerate(schema.arguments):
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
-        return tuple(mutable or (None for _ in t.inputs))
+        return tuple(mutable or (None for _ in t.input_shapes))
 
     @classmethod
     def match_schemas(cls, t: _ExtraFields_TorchOp) -> Tuple[FunctionSchema, ...]:
@@ -242,7 +242,7 @@ class SchemaMatcher:
             #
             # Scalar and uncaptured inputs.
             else i
-            for i in t.inputs
+            for i in t.input_shapes
         )
 
         def matches(schema) -> bool:
@@ -377,7 +377,7 @@ class SizeMap:
 
     @staticmethod
     def _flat_tensor_inputs(op: _ExtraFields_TorchOp) -> Iterator[_TensorMetadata]:
-        for i in op.inputs:
+        for i in op.input_shapes:
             if isinstance(i, _TensorMetadata):
                 yield i
             elif isinstance(i, list):
@@ -422,7 +422,7 @@ class DataFlowNode:
         mutable_by_key: Dict[Optional[TensorKey], Set[Optional[bool]]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
-                op.inputs, SchemaMatcher.inputs_are_mutable(op)
+                op.input_shapes, SchemaMatcher.inputs_are_mutable(op)
             ):
                 # Tensor
                 if isinstance(op_input, _TensorMetadata):
