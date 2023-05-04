@@ -81,13 +81,13 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-        # Temp for testing
-      - name: Upload pytest cache
-        uses: ./.github/actions/pytest-cache-upload
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache_dir: .pytest_cache
-          # shard: ${{ matrix.shard }}
+      #   # Temp for testing
+      # - name: Upload pytest cache
+      #   uses: ./.github/actions/pytest-cache-upload
+      #   with:
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     cache_dir: .pytest_cache
+      #     # shard: ${{ matrix.shard }}
 
       - name: Calculate docker image
         id: calculate-docker-image
