@@ -125,6 +125,21 @@ class TestAutocastCPU(TestCase):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
 
+    def test_autocast_rnn(self):
+        x = torch.randn(1, 2, 1)
+        hx = torch.randn(2, 2, 1)
+        cx = torch.randn(2, 2, 1)
+
+        m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
+
+        # Raise ValueError when autocast is not enabled
+        with self.assertRaisesRegex(ValueError, "input must have the type"):
+            m(x, (hx, cx))
+
+        # Should be able to run the below case with autocast
+        with torch.cpu.amp.autocast():
+            m(x, (hx, cx))
+
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod
