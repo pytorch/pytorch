@@ -385,6 +385,7 @@ if dist.is_available():
             "UCX_TLS": "tcp",
             "UCC_TLS": "nccl,ucp",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -465,9 +466,9 @@ def run_test(
     env=None,
 ) -> int:
     maybe_set_hip_visible_devies()
-
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
+    stepcurrent_key = test_file
     if isinstance(test_file, ShardedTest):
         # C++ tests work with pytest sharding
         unittest_args.extend(
@@ -477,6 +478,7 @@ def run_test(
             ]
         )
         test_file = test_module.name
+        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -493,7 +495,9 @@ def run_test(
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
-        unittest_args.extend(get_pytest_args(options, is_cpp_test=is_cpp_test))
+        unittest_args.extend(
+            get_pytest_args(options, stepcurrent_key, is_cpp_test=is_cpp_test)
+        )
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
     # TODO: These features are not available for C++ test yet
@@ -542,13 +546,14 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
+    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    timeout = (
+        THRESHOLD * 3
+        if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        else None
     )
-    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -559,7 +564,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=2 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
@@ -573,7 +578,6 @@ def run_test(
 
     print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
-
     return ret_code
 
 
@@ -893,7 +897,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def get_pytest_args(options, is_cpp_test=False):
+def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     if RERUN_DISABLED_TESTS:
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -904,7 +908,9 @@ def get_pytest_args(options, is_cpp_test=False):
     else:
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
-        rerun_options = ["-x", "--reruns=2", "--sw"]
+        rerun_options = ["-x", "--reruns=2"]
+        if IS_CI:
+            rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
