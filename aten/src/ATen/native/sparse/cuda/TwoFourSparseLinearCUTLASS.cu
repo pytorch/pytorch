@@ -2,21 +2,26 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
+#ifndef USE_ROCM
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_sparse.h>
+#endif
 
 #include <type_traits>
 #include <tuple>
 
+#ifndef USE_ROCM
 #define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
                 "Got CUTLASS error: ", cutlassGetStatusString(status));   \
   }
+#endif
 
 namespace at {
 namespace native {
 
+#ifndef USE_ROCM
 // This kernel is for creating 2:4 sparse matrix metadata for given
 // "mask" matrix corresponding to the original dense matrix.  The
 // "mask" matrix contains true values where dense matrix elements are
@@ -352,6 +357,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 
     return std::make_tuple(tensor_d, meta_reordered);
 }
+#endif
 
 // Perform GEMM operation between matrix with 2:4 sparsity pattern,
 // and dense matrix, using corresponding CUTLASS sparse GEMM kernel.
@@ -381,6 +387,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 std::tuple<Tensor, Tensor> _two_four_sparse_linear(
       const Tensor& tensor_a, const Tensor& tensor_b,
       const Tensor& mask_or_meta) {
+#ifndef CUDA_ROCM
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
 
@@ -573,6 +580,10 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
                 }
             }));
     return result;
+#else
+    AT_ERROR("torch._two_four_sparse_linear: ROCm doesn't support CUTLASS");
+    return std::make_tuple(Tensor{}, Tensor{});
+#endif
 }
 
 } // namespace native
