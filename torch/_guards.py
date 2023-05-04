@@ -394,6 +394,19 @@ class TracingContext:
     will return None.
     """
 
+    class TrainStepContext:
+        """
+        Tracks state across dynamo tracing and train-step compiler,
+        mostly to enforce safety invariants.
+        """
+
+        def __init__(self):
+            # only support one backward call
+            self.backward_called = False
+            # ensure all stepped optimizers also get zero_grad'd
+            self.optimizers_zeroed_grad = set()
+            self.optimizers_stepped = set()
+
     @staticmethod
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
@@ -404,6 +417,7 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
+        self.trainstep: Optional[TracingContext.TrainStepContext] = None
 
     @staticmethod
     def extract_stack():
@@ -449,6 +463,31 @@ class TracingContext:
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+
+    @staticmethod
+    def trace_train_step():
+        """
+        Mark that we're tracing a train step (no going back).
+        """
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "trace_train_step() must be called within an ongoing trace."
+        tc.trainstep = TracingContext.TrainStepContext()
+
+    @staticmethod
+    def train_step_context(assert_if_missing=False):
+        """
+        Get the train step context if active, or None. Optionally, assert.
+        """
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "train_step_context() must be called within an ongoing trace."
+        if assert_if_missing:
+            assert tc.trainstep, "Expected an active train_step context but found none"
+
+        return tc.trainstep
 
 
 """
