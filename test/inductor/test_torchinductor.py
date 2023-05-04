@@ -90,6 +90,7 @@ class TestCase(TorchTestCase):
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
+                    "generate_intermediate_hooks": True,
                 }
             )
         )
@@ -1814,6 +1815,17 @@ class CommonTemplate:
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
+    def test_aliased_buffer_reuse(self):
+        def fn(x, y):
+            x = 2 * x
+            y = 2 * y
+            c = torch.cat([x, y], dim=-1)
+            d = 1 + c
+            m = torch.mm(d, d)
+            return m[:, :2] + x
+
+        self.common(fn, (torch.randn(4, 2), torch.randn(4, 2)), check_lowp=False)
+
     def test_view_detach(self):
         def fn(a):
             return a[0].detach()
@@ -2667,6 +2679,30 @@ class CommonTemplate:
 
         if self.device != "cpu":
             self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    def test_view_as_complex(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, view_2):
+                clone = torch.ops.aten.clone.default(
+                    view_2, memory_format=torch.contiguous_format
+                )
+                view_2 = None
+                view_as_complex = torch.ops.aten.view_as_complex.default(clone)
+                clone = None
+                return (view_as_complex,)
+
+        inp = torch.empty_strided((128, 64, 12, 32, 2), (1, 98304, 8192, 256, 128)).to(
+            self.device
+        )
+        mod = Repro()
+
+        o1 = mod(inp)
+        o2 = torch.compile(mod)(inp)
+
+        self.assertEqual(o1, o2)
 
     def test_cauchy(self):
         def fn(x, y):
@@ -4540,6 +4576,13 @@ class CommonTemplate:
 
     @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
+        def fn2(a):
+            return torch.nn.functional.dropout(a, 1.0, True) + a
+
+        self.common(fn2, [torch.randn(55)])
+
+    @config.patch({"lowmem_dropout": True})
+    def test_dropout_trivial_1_lowmem(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 

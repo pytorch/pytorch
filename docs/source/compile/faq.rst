@@ -35,7 +35,7 @@ backwards ops, due to how AOTAutograd compiled functions interact with
 dispatcher hooks.
 
 The basic strategy for optimizing DDP with Dynamo is outlined in
-`distributed.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/distributed.py>`__
+`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/distributed.py>`__
 where the main idea will be to graph break on `DDP bucket
 boundaries <https://pytorch.org/docs/stable/notes/ddp.html#internal-design>`__.
 
