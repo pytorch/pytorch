@@ -798,16 +798,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 def is_fn_safe_to_run(tx, f, sub_args):
     # Snapshot state
     graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
-
-    pre_side_effects = tx.output.side_effects.clone()
     # Will raise if not sound
     output, graph, lifted_freevars = speculate_subgraph(
         tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True
     )
     # If we got here, we are probably sound, but we do not support freevars yet, so lets call cases where we found them
     # unsafe.
-    post_side_effects = tx.output.side_effects
-    if lifted_freevars or post_side_effects.diff(pre_side_effects):
+    if lifted_freevars:
         return False
     return True
 
@@ -1275,6 +1272,8 @@ class TorchHigherOrderOperator(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
+            pre_side_effects = tx.output.side_effects.clone()
+
             always_restore = self.value.__name__ == "trampoline_autograd_bwd"
             fn = TorchVariable(self.value)
             checkpoint = tx.copy_graphstate()
@@ -1296,6 +1295,10 @@ class TorchHigherOrderOperator(VariableTracker):
             )
             if body_lifted_freevars:
                 unimplemented("NYI - freevars in autograd function.")
+
+            post_side_effects = tx.output.side_effects
+            if post_side_effects.diff(pre_side_effects):
+                unimplemented("NYI - side effects in autograd function.")
 
             if always_restore:
                 # Nothing left to do here
