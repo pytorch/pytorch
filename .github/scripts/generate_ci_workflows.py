@@ -149,7 +149,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX, arches=["11.8"], python_versions=["3.8"]
         ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -157,7 +157,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX, arches=["11.7"], python_versions=["3.8"]
         ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -169,7 +169,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -181,7 +181,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
 ]
 
@@ -272,7 +272,7 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -284,7 +284,7 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
 ]
 
