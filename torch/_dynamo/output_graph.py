@@ -243,7 +243,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
-        self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
@@ -288,6 +287,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def guards(self) -> Set[Guard]:
         return self.tracing_context.guards_context.dynamo_guards
 
+    @property
+    def nn_modules(self) -> Dict[str, torch.nn.Module]:
+        return self.tracing_context.module_context.nn_modules
+
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -300,14 +303,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
-        assert self.nn_modules is not None
         assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
+        module_state = self.tracing_context.module_context.copy_graphstate()
         state = OutputGraphState(
             dict(self.input_source_to_var),
             list(self.tracked_fakes),
             guards_graph_state,
-            dict(self.nn_modules),
+            module_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
@@ -322,13 +325,15 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.input_source_to_var,
             self.tracked_fakes,
             guards_state,
-            self.nn_modules,
+            module_state,
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
             self.tensor_weakref_to_sizes_strides,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
+        self.tracing_context.module_context.restore_graphstate(module_state)
+
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
@@ -523,7 +528,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     target
                 )
 
-        assert self.nn_modules is not None
         for k, v in self.nn_modules.items():
             if v is target:
                 # it already exists
@@ -615,7 +619,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
-        assert self.nn_modules is not None
         root = FakeRootModule(self.nn_modules)
 
         # Add all the local vars to the "stack" so restore at the end
@@ -910,10 +913,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # some of the tensor objects to be held alive for longer than necessary.
 
         self.root_tx = None
-
-        # Note: generated fx graph will hold a reference to the nn_module,
-        # So depending on the backend they may not be released
-        self.nn_modules = None
+        self.nn_modules.clear()
         self.param_name_to_source = None
 
         for node in self.graph.nodes:
