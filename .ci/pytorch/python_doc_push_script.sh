@@ -88,7 +88,6 @@ pushd "$pt_checkout"
 pushd docs
 
 # Build the docs
-pip -q install -r requirements.txt
 if [ "$is_main_doc" = true ]; then
   build_docs html
   [ $? -eq 0 ] || exit $?

@@ -17,7 +17,6 @@ echo "version: $version"
 
 # Build functorch docs
 pushd $pt_checkout/functorch/docs
-pip -q install -r requirements.txt
 make html
 popd
 
