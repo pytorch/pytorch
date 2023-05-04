@@ -87,6 +87,46 @@ class Module6(torch.nn.Module):
         return self.fn(foo)
 
 
+class LinearFunction(torch.autograd.Function):
+    # Note that forward, setup_context, and backward are @staticmethods
+    @staticmethod
+    def forward(input, weight, bias):
+        output = input.mm(weight.t())
+        if bias is not None:
+            output += bias.unsqueeze(0).expand_as(output)
+        return output
+
+    @staticmethod
+    # inputs is a Tuple of all of the inputs passed to forward.
+    # output is the output of the forward().
+    def setup_context(ctx, inputs, output):
+        input, weight, bias = inputs
+        ctx.save_for_backward(input, weight, bias)
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, weight, bias = ctx.saved_tensors
+        grad_input = grad_weight = grad_bias = None
+        if ctx.needs_input_grad[0]:
+            grad_input = grad_output.mm(weight)
+        if ctx.needs_input_grad[1]:
+            grad_weight = grad_output.t().mm(input)
+        if bias is not None and ctx.needs_input_grad[2]:
+            grad_bias = grad_output.sum(0)
+
+        return grad_input, grad_weight, grad_bias
+
+
+class ModuleLinear(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fn = LinearFunction.apply
+
+    def forward(self, input, weight, bias=None):
+        return LinearFunction.apply(input, weight, bias)
+
+
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
     def test_autograd_function_equivalence(self):
@@ -113,3 +153,10 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     res = opt_model(x)
                     self.assertTrue(torch.allclose(ref, res))
                 self.assertEqual(cnts.frame_count, 1 if grad else 2)
+
+    def test_linear_setup_context(self):
+        model = ModuleLinear()
+        opt_model = torch._dynamo.optimize("eager")(model)
+        input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
+        opt_model(input, weight)

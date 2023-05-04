@@ -238,6 +238,16 @@ class AutogradFunctionVariable(VariableTracker):
         args = [ctx, *args]
 
         if requires_grad and torch.is_grad_enabled():
+            # Note - this is the same check used in autograd/function.py, except inverted.
+            # If we want to support functorch transforms here, we will need to enable this.
+            if (
+                self.fn_cls.setup_context
+                != torch.autograd.function._SingleLevelFunction.setup_context
+            ):
+                unimplemented(
+                    "NYI - requires_grad on autograd.Function with custom context"
+                )
+
             from .torch import is_fn_safe_to_run, TorchHigherOrderOperator
 
             def trampoline_autograd_apply(*args, **kwargs):

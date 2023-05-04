@@ -1277,6 +1277,7 @@ class TorchHigherOrderOperator(VariableTracker):
             always_restore = self.value.__name__ == "trampoline_autograd_bwd"
             fn = TorchVariable(self.value)
             checkpoint = tx.copy_graphstate()
+            pre_guards_len = len(tx.output.guards)
             graph_checkpoint = tx.output.graph
             (
                 body_r,
@@ -1293,6 +1294,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 # Backwards should never, ever be stored!
                 always_restore=always_restore,
             )
+            post_guards_len = len(tx.output.guards)
             if body_lifted_freevars:
                 unimplemented("NYI - freevars in autograd function.")
 
@@ -1301,6 +1303,8 @@ class TorchHigherOrderOperator(VariableTracker):
                 unimplemented("NYI - side effects in autograd function.")
 
             if always_restore:
+                if post_guards_len - pre_guards_len > 0:
+                    unimplemented("NYI - New guards discovered in a restoring state")
                 # Nothing left to do here
                 return None
 
