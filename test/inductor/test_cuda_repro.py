@@ -628,6 +628,7 @@ class CudaReproTests(TestCase):
         gm = make_fx(forward)(emb)
         opt = torch._inductor.compile_fx.compile_fx_inner(gm, [emb])
         opt([emb])
+        torch.cuda.synchronize()
 
     def test_deterministic_algorithms(self):
         N = 10000
