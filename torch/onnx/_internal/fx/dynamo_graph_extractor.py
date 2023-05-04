@@ -188,12 +188,9 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Translate callable to FX graph.
         #
-        # TODO(wechi): There are several symbolic tracing mechanisms to convert
-        # nn.Module to FX graph. We should choose the right one after they are
-        # matured.
         fx_mode = "symbolic" if options.dynamic_shapes else "fake"
         graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *args, aten_graph=True, tracing_mode=fx_mode, **kwargs
+            wrapped_model, *args, tracing_mode=fx_mode, **kwargs
         )
         del graph_guard  # Unused
         torch._dynamo.reset()

@@ -16,7 +16,6 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer, simplify
 
-import torch._dynamo.config as dynamo_config
 import torch._logging
 
 import torch.fx
@@ -725,31 +724,15 @@ class Reduction(Loops):
         elif reduction_type == "argmin":
 
             def combine_fn(a, b):
-                a_value, a_index = a
-                b_value, b_index = b
-                mask = ops.lt(b_value, a_value)
-                a_isnan = ops.ne(a_value, a_value)
-                b_isnan = ops.ne(b_value, b_value)
-                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
-
-                return (
-                    ops.where(mask, b_value, a_value),
-                    ops.where(mask, b_index, a_index),
+                return ops.minimum(a[0], b[0]), ops.where(
+                    ops.lt(b[0], a[0]), b[1], a[1]
                 )
 
         elif reduction_type == "argmax":
 
             def combine_fn(a, b):
-                a_value, a_index = a
-                b_value, b_index = b
-                mask = ops.gt(b_value, a_value)
-                a_isnan = ops.ne(a_value, a_value)
-                b_isnan = ops.ne(b_value, b_value)
-                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
-
-                return (
-                    ops.where(mask, b_value, a_value),
-                    ops.where(mask, b_index, a_index),
+                return ops.maximum(a[0], b[0]), ops.where(
+                    ops.gt(b[0], a[0]), b[1], a[1]
                 )
 
         else:
@@ -872,19 +855,18 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        sr_qualified = split_reduction
-        if sr_qualified and dynamo_config.dynamic_shapes:
+        if split_reduction:
             # TODO(voz): dedup with sizevar util introduced in other PR
             def _is_static(x):
                 return isinstance(x, (int, sympy.Integer))
 
-            sr_qualified = (
+            split_reduction = (
                 all(_is_static(r) for r in ranges)
                 and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
-        if sr_qualified:
+        if split_reduction:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -914,11 +896,6 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
-        elif split_reduction and dynamo_config.dynamic_shapes:
-            torch._logging.warning_once(
-                log,
-                "Could not do split reduction due to dynamic shapes; performance may be worse",
-            )
 
         return TensorBox.create(
             Reduction(
