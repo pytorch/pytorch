@@ -46,7 +46,7 @@ runs:
         AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
       run: |
-        set +x
+        set -x
 
         echo "all the commands sent to the below script:"
         echo "cache_dir: $GITHUB_WORKSPACE/$CACHE_DIR"
