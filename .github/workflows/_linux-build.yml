@@ -85,6 +85,7 @@ jobs:
       - name: Upload pytest cache
         uses: ./.github/actions/pytest-cache-upload
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           # shard: ${{ matrix.shard }}
 

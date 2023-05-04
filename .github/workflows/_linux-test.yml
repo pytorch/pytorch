@@ -110,6 +110,7 @@ jobs:
       # - name: Download pytest cache
       #   uses: ./.github/actions/pytest-cache-download
       #   with:
+          # github-token: ${{ secrets.GITHUB_TOKEN }}
       #     cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
 
       - name: Set Test step time
@@ -224,6 +225,7 @@ jobs:
         # continue-on-error: true
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
 

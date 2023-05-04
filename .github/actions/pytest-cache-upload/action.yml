@@ -10,10 +10,26 @@ inputs:
     description: Shard number for the current job
     required: false
     default: "0"
+  github-token:
+    description: GITHUB_TOKEN
+    required: true
 
 runs:
   using: composite
   steps:
+    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+      name: Setup dependencies
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 5
+        retry_wait_seconds: 30
+        command: |
+          set -eux
+          python3 -m pip install boto3==1.19.12
+
     - name: Upload the cache
       shell: bash
       env:
@@ -22,7 +38,6 @@ runs:
         JOB: ${{ github.job }}
         SHARD: ${{ inputs.shard }}
       run: |
-        pip3 install boto3
         set +x
 
         echo "all the commands sent to the below script:""
