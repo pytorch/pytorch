@@ -3872,7 +3872,7 @@ class StorageBox(MutableBox):
         if (
             isinstance(self.data, (Pointwise, Reduction))
             and self.num_reads() > 1
-            and self.is_non_scalar_tensor_num_reads_larger_than_one()
+            and self.is_Pointwise_non_scalar_tensor_num_reads_larger_than_one()
         ):
             self.realize()
 
@@ -3928,7 +3928,7 @@ class StorageBox(MutableBox):
         return len(read_writes.reads)
 
     @cache_on_self
-    def is_non_scalar_tensor_num_reads_larger_than_one(self):
+    def is_Pointwise_non_scalar_tensor_num_reads_larger_than_one(self):
         # Skip the check for non Pointwise instances
         return (
             (sum(read.index != 0 for read in self.data.get_reads()) > 1)
