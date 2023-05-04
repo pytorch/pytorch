@@ -1,4 +1,4 @@
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -56,7 +56,7 @@ class _ReplicateState:
             )
         self.module = module
         replicate.state(module)._params_collected = False
-        module.register_forward_pre_hook(self.forward_pre_hook)
+        module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
         # TODO(@yhcharles): fix type error
         module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
         self.kwargs = kwargs
@@ -89,10 +89,11 @@ class _ReplicateState:
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
 
     def forward_pre_hook(
-        self, module: nn.Module, input: Tuple[torch.Tensor, ...]
-    ) -> None:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         self.init_helper()
-        self._ddp._pre_forward()
+        args, kwargs = self._ddp._pre_forward(*args, **kwargs)
+        return args, kwargs
 
     def forward_post_hook(
         self,
