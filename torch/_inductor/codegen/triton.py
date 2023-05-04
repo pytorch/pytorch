@@ -14,6 +14,7 @@ import torch
 
 import torch._logging
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
@@ -189,7 +190,21 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return ops.maximum("0", x)
+        bug = config.triton.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            # NB: this only triggers runtime error as long as input
+            # is not all zero
+            return f'triton_helpers.device_assert_then({x} == 0, "injected assert fail", {x})'
+        elif bug == "accuracy":
+            return f"{x} + 1"
+        elif bug is None:
+            return ops.maximum("0", x)
+        else:
+            raise AssertionError(
+                f"unrecognized config triton.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def minimum(a, b):
@@ -318,6 +333,14 @@ class TritonOverrides(OpOverrides):
     def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
+
+    # TODO: work out how to use randint4x
+    @staticmethod
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
 
     @staticmethod
     def rsqrt(x):
@@ -637,20 +660,6 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-class ProdHelper:
-    name = "_prod_accumulate"
-
-    @staticmethod
-    def codegen(buffer):
-        buffer.splice(
-            f"""
-            @triton.jit
-            def {ProdHelper.name}(a, b):
-                return a * b
-            """
-        )
-
-
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
@@ -673,7 +682,6 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
-        self.helper_functions = set()
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -705,10 +713,9 @@ class TritonKernel(Kernel):
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
-        if dynamo_config.dynamic_shapes:
-            if not isinstance(last_numel, (int, sympy.Integer)):
-                # Not static
-                return False
+        if not isinstance(last_numel, (int, sympy.Integer)):
+            # Not static
+            return False
         hint = V.graph.sizevars.size_hint(last_numel)
         if hint > threshold:
             return False
@@ -1190,13 +1197,8 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            if reduction_type == "prod":
-                self.helper_functions.add(ProdHelper)
-                return (
-                    f"tl.reduce({value}, {dim}, {ProdHelper.name})[{', '.join(sizes)}]"
-                )
-            else:
-                return f"tl.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+            module = "triton_helpers" if reduction_type in ("prod",) else "tl"
+            return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         dim = len(self.range_trees) - 1
         result_var = self.cse.newvar()
@@ -1230,6 +1232,8 @@ class TritonKernel(Kernel):
                 updated = f"{accumulator} + {value}"
             elif reduction_type == "prod":
                 updated = f"{accumulator} * {value}"
+            elif reduction_type == "xor_sum":
+                updated = f"{accumulator} ^ {value}"
             else:
                 raise NotImplementedError(f"reduction_type {reduction_type}")
 
@@ -1431,6 +1435,7 @@ class TritonKernel(Kernel):
                     from torch._inductor.ir import TileHint
                     from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
+                    from torch._inductor import triton_helpers
                 """
             )
             if config.benchmark_kernel:
@@ -1442,9 +1447,6 @@ class TritonKernel(Kernel):
                         from torch._inductor.triton_heuristics import grid
                     """
                 )
-
-        for helper in sorted(self.helper_functions, key=lambda kls: kls.__name__):
-            helper.codegen(code)
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1552,24 +1554,16 @@ class TritonKernel(Kernel):
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                postfix = (
-                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
-                )
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    code.writeline(
-                        f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
-                    )
+                    code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if dynamo_config.dynamic_shapes:
-                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                        val = int(simplified_tree_numel)
-                    else:
-                        continue
-                else:
+                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     val = int(simplified_tree_numel)
+                else:
+                    continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
@@ -1894,6 +1888,27 @@ class TritonScheduling:
         kernel_name = self.define_kernel(src_code, node_schedule)
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
+            # Not every node in the schedule will actually be live on output;
+            # we can't check dead buffers.
+            live_outs = kernel.args.live_output_buffers()
+            for node in node_schedule:
+                if not isinstance(node, scheduler.BaseSchedulerNode):
+                    continue
+                name = node.get_name()
+                if name not in live_outs:
+                    continue
+                origin_node = node.node.get_origin_node()
+                if origin_node is not None:
+                    counters["inductor"]["intermediate_hooks"] += 1
+                    V.graph.wrapper_code.writeline(
+                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
+                    )
+
         self.scheduler.free_buffers()
 
     def define_kernel(self, src_code, node_schedule):
@@ -1923,7 +1938,7 @@ class TritonScheduling:
             wrapper.kernel_to_hash[kernel_name] = basename
 
             compile_wrapper = IndentedBuffer()
-            compile_wrapper.writeline("async_compile.triton('''")
+            compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 
