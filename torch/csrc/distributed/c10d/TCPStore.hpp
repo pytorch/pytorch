@@ -88,7 +88,7 @@ class TORCH_API TCPStore : public Store {
 
   void multiSet(
     const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values);
+    const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
 
