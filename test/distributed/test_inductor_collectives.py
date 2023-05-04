@@ -218,6 +218,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @requires_nccl()
+@torch._inductor.config.patch(inplace_buffers=True)
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
     """
     Prefer single-proc test runner for basic tests as it is easier to work with.
