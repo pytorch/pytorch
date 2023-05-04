@@ -26,6 +26,7 @@ import torch
 import torch._ops
 
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.diagnostics import infra
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
@@ -38,6 +39,12 @@ _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
 through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
 should reference ``ExportOptions.opset_version``."""
+
+_PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
+"""The URL to the PyTorch GitHub issues page."""
+
+_DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
+"""The default path to write the SARIF log to if the export fails."""
 
 
 class ExportOptions:
@@ -98,6 +105,10 @@ class ResolvedExportOptions(ExportOptions):
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
+    diagnostic_context: infra.DiagnosticContext
+    """The diagnostics context for the export. Responsible for recording diagnostics,
+    logging diagnostics, and generating the SARIF log."""
+
     @_beartype.beartype
     def __init__(
         self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
@@ -111,6 +122,7 @@ class ResolvedExportOptions(ExportOptions):
             self.logger = options.logger
             self.fx_tracer = options.fx_tracer
             self.decomposition_table = options.decomposition_table
+            self.diagnostic_context = options.diagnostic_context
         else:
             T = TypeVar("T")
 
@@ -136,6 +148,15 @@ class ResolvedExportOptions(ExportOptions):
             self.op_level_debug = resolve(options.op_level_debug, False)
             self.logger = resolve(
                 options.logger, lambda: logging.getLogger().getChild("torch.onnx")
+            )
+
+            # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
+            # Options:
+            #   - Add a shim and make it noop if onnxscript is not available.
+            #   - Try local import and raise.
+            # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
+            self.diagnostic_context = infra.DiagnosticContext(
+                "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
             )
 
             for key in dir(options):
@@ -308,6 +329,7 @@ class ExportOutput:
     _model_proto: Final[onnx.ModelProto]
     _input_adapter: Final[InputAdapter]
     _output_adapter: Final[OutputAdapter]
+    _diagnostic_context: Final[infra.DiagnosticContext]
 
     @_beartype.beartype
     def __init__(
@@ -315,16 +337,24 @@ class ExportOutput:
         model_proto: onnx.ModelProto,
         input_adapter: InputAdapter,
         output_adapter: OutputAdapter,
+        diagnostic_context: infra.DiagnosticContext,
     ):
         self._model_proto = model_proto
         self._input_adapter = input_adapter
         self._output_adapter = output_adapter
+        self._diagnostic_context = diagnostic_context
 
     @property
     def model_proto(self) -> onnx.ModelProto:
         """The exported ONNX model as an ``onnx.ModelProto``."""
 
         return self._model_proto
+
+    @property
+    def diagnostic_context(self) -> infra.DiagnosticContext:
+        """The diagnostic context associated with the export."""
+
+        return self._diagnostic_context
 
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
@@ -474,8 +504,11 @@ class FXGraphExtractor(abc.ABC):
         import torch.onnx._internal.fx.fx_exporter as fx_exporter
         import torch.onnx._internal.fx.passes as passes
 
+        diagnostic_context = options.diagnostic_context
+
         # Apply decomposition table to the input graph.
         module = passes.Decompose(
+            diagnostic_context,
             fx_module,
             options.decomposition_table,
             enable_dynamic_axes=options.dynamic_shapes,
@@ -484,17 +517,21 @@ class FXGraphExtractor(abc.ABC):
         # ONNX does not support views and mutations.
         # Functionalize to get a semantically equivalent graph without mutations.
         module = passes.Functionalize(
-            module, enable_dynamic_axes=options.dynamic_shapes
+            diagnostic_context, module, enable_dynamic_axes=options.dynamic_shapes
         ).run(*fx_module_args)
         # Input mutations are detected and distilled after `Functionalize` pass.
         # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
+        module = passes.RemoveInputMutation(diagnostic_context, module).run(
+            *fx_module_args
+        )
 
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:
         # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
         if options.op_level_debug:
-            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
+            module = passes.ShapeInferenceWithFakeTensor(
+                diagnostic_context, module
+            ).run(*fx_module_args)
 
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -502,10 +539,15 @@ class FXGraphExtractor(abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
-            onnxscript_graph = passes.export_fx_to_onnxscript(module, options)
+            onnxscript_graph = passes.export_fx_to_onnxscript(
+                diagnostic_context, module, options
+            )
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input adapter.
             self.adapt_input(fx_exporter.RemoveNoneInputStep, fx_module_args, {})
+            # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+            # Dynamo doesn't support non-tensor inputs.
+            self.adapt_input(fx_exporter.RemoveNonTensorInputStep, fx_module_args, {})
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
             self.output_adapter.append_step(fx_exporter.FlattenOutputStep())
@@ -513,7 +555,10 @@ class FXGraphExtractor(abc.ABC):
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(options.opset_version)
         return torch.onnx.ExportOutput(
-            onnx_model, self.input_adapter, self.output_adapter
+            onnx_model,
+            self.input_adapter,
+            self.output_adapter,
+            options.diagnostic_context,
         )
 
     def adapt_input(
@@ -713,12 +758,23 @@ def dynamo_export(
 
     _assert_dependencies(resolved_export_options)
 
-    return Exporter(
-        options=resolved_export_options,
-        model=model,
-        model_args=model_args,
-        model_kwargs=model_kwargs,
-    ).export()
+    try:
+        return Exporter(
+            options=resolved_export_options,
+            model=model,
+            model_args=model_args,
+            model_kwargs=model_kwargs,
+        ).export()
+    except Exception as e:
+        sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
+        resolved_export_options.diagnostic_context.dump(sarif_report_path)
+        # TODO(bowbao): A summary as well as suggestion for posting the .sarif log in
+        # the issue to be added.
+        message = (
+            f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
+            f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
+        )
+        raise RuntimeError(message) from e
 
 
 __all__ = [

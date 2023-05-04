@@ -1,4 +1,8 @@
 # Owner(s): ["module: dynamo"]
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_export_persist_assert)
+"""
 import functools
 import inspect
 import math
@@ -2582,6 +2586,31 @@ def forward(self, x):
             "Dynamic control flow is not supported at the moment",
         ):
             gm, _ = torch._dynamo.export(f, torch.randn(5, 6), aten_graph=True)
+
+    @config.patch(assume_static_by_default=False)
+    def test_export_persist_assert(self):
+        def f(x):
+            assert x.shape[0] > 4, "Shape must be more than 4"
+            return x.cos() + x.sin()
+
+        gm, guard = torch._dynamo.export(
+            f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        def has_aten_op(gm, op):
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
+
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
+            gm(torch.randn(3, 4, 5))
 
     def test_access_class_method_from_user_class(self):
         class A:

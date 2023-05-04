@@ -1231,14 +1231,14 @@ def make_rand(fn_name):
     def rand_or_randn(
         *size,
         dtype=None,
-        layout=0,
+        layout=None,
         device=None,
         pin_memory=False,
         memory_format=None,
     ):
         warn_triton_random()
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1537,7 +1537,6 @@ make_fallback(aten.multi_margin_loss_backward)
 make_fallback(aten._pdist_backward)
 make_fallback(aten.reflection_pad1d_backward)
 make_fallback(aten.replication_pad1d_backward)
-make_fallback(aten.smooth_l1_loss_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.softshrink_backward, warn=False)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
@@ -1828,13 +1827,13 @@ def tensor_constructor(fill_value):
         names=None,
         dtype=None,
         device=None,
-        layout=0,
+        layout=None,
         pin_memory=False,
         memory_format=None,
     ):
         assert names is None
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1872,10 +1871,10 @@ def create_tensor_like(creation_fn):
     """
 
     def _constant_like(
-        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+        x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1906,7 +1905,7 @@ def new_constant(fill_value):
     ):
         assert isinstance(size, (list, type))
         assert not pin_memory
-        assert not layout or layout == torch.strided
+        assert layout in (None, torch.strided)
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -1933,7 +1932,7 @@ def empty_strided(
     assert isinstance(size, (list, type))
     assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
-    assert not layout or layout == torch.strided
+    assert layout in (None, torch.strided)
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
@@ -3015,10 +3014,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3028,11 +3027,15 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
+                        ops.int_minimum(
+                            ph, ops.sub(phend, ops.constant(1, torch.int32))
+                        ),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
+                        ops.int_minimum(
+                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                        ),
                         indices_size[-1],
                     ),
                 ]
@@ -3419,18 +3422,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.minimum(
+        hend = ops.int_minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.minimum(
+        wend = ops.int_minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3447,10 +3450,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3468,13 +3471,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
@@ -3521,20 +3524,8 @@ def _validate_reduction_axis(x, axis):
 
 def make_reduction(reduction_type: str, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        if reduction_type == "min" and axis is not None:
-            return (
-                reduce_amin(x, axis, keepdims, dtype=dtype),
-                reduce_argmin(x, axis, keepdims),
-            )
-        if reduction_type == "max" and axis is not None:
-            return (
-                reduce_amax(x, axis, keepdims, dtype=dtype),
-                reduce_argmax(x, axis, keepdims),
-            )
         if dtype is not None:
             x = to_dtype(x, dtype)
-        if reduction_type == "any":
-            x = to_dtype(x, torch.bool)
         size = x.get_size()
         axis = set(_validate_reduction_axis(x, axis))
 
@@ -3579,9 +3570,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             inner_fn=loader,
             ranges=new_size,
             reduction_ranges=reduced_sizes,
-            reduction_type={"amax": "max", "amin": "min"}.get(
-                reduction_type, reduction_type
-            ),
+            reduction_type=reduction_type,
         )
         if isinstance(
             result.data.data, Reduction
@@ -3867,12 +3856,37 @@ def prod(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
+@register_lowering(aten.any)
+def reduce_any(x, dim=None, keepdim=False):
+    x = to_dtype(x, torch.bool)
+    return make_reduction("any")(x, axis=dim, keepdims=keepdim)
+
+
+@register_lowering(aten.max)
+def reduce_max(x, dim=None, keepdim=False):
+    if dim is not None:
+        return (
+            reduce_amax(x, axis=dim, keepdims=keepdim),
+            reduce_argmax(x, axis=dim, keepdims=keepdim),
+        )
+
+    return reduce_amax(x, axis=None, keepdims=keepdim)
+
+
+@register_lowering(aten.min)
+def reduce_min(x, dim=None, keepdim=False):
+    if dim is not None:
+        return (
+            reduce_amin(x, axis=dim, keepdims=keepdim),
+            reduce_argmin(x, axis=dim, keepdims=keepdim),
+        )
+
+    return reduce_amin(x, axis=None, keepdims=keepdim)
+
+
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
-register_lowering(aten.max)(make_reduction("max"))
-register_lowering(aten.min)(make_reduction("min"))
-reduce_amax = register_lowering(aten.amax)(make_reduction("amax"))
-reduce_amin = register_lowering(aten.amin)(make_reduction("amin"))
-register_lowering(aten.any)(make_reduction("any", override_return_dtype=torch.bool))
+reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
+reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
 reduce_argmax = register_lowering(aten.argmax)(
     make_reduction("argmax", override_return_dtype=torch.int64)
 )
