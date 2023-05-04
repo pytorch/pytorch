@@ -13,6 +13,8 @@ typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> twoOutp
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>> threeOutputs;
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>, Tensor, optional<int64_t>> fourOutputs;
 
+namespace {
+
 // Note [Batching rules for matmul-like operators]
 // at::matmul doesn't "de-expand" arguments to get better performance (maybe
 // it should). In the batching rules for matmul-like operators (dot, mv, mm),
@@ -478,12 +480,13 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-std::tuple<Tensor, c10::optional<int64_t>>
+static std::tuple<Tensor, c10::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, c10::optional<int64_t> input_bdim, const optional<Tensor>& atol,
     const c10::optional<int64_t> atol_bdim, const optional<Tensor>& rtol,
     const c10::optional<int64_t> rtol_bdim, bool hermitian) {
   return atol_rtol_tensor_batch_rule(ATEN_FN2(linalg_pinv, atol_rtol_tensor), input, input_bdim, atol, atol_bdim, rtol, rtol_bdim, hermitian, "linalg.pinv");
+}
 }
 
 #define LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, num_out) SINGLE_ARG(\
