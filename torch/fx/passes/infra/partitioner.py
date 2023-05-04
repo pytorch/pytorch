@@ -39,7 +39,6 @@ class CapabilityBasedPartitioner:
                  allows_single_node_partition: bool = False,
                  non_compute_ops: Optional[Sequence[str]] = None,
                  allowed_single_node_partition_ops: Optional[Sequence[str]] = None,
-                 aggressive_merge: Optional[bool] = False,
                  ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
@@ -50,7 +49,6 @@ class CapabilityBasedPartitioner:
             if allowed_single_node_partition_ops is not None
             else []
         )
-        self.aggressive_merge = aggressive_merge
 
     def __is_node_supported(self, node: Node) -> bool:
         return (
@@ -154,9 +152,9 @@ class CapabilityBasedPartitioner:
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
-            for user_node in node.users:
-                if user_node in assignment:
-                    merge_candidates[assignment[user_node]] = None
+            # merge all possible partitions
+            for node in assignment:
+                merge_candidates[assignment[node]] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -166,18 +164,6 @@ class CapabilityBasedPartitioner:
                     # it doesn't create cyclic dependency in the graph, otherwise,
                     # this is a no-op
                     maybe_merge_partition(self_id, other_id)
-
-        # merge the candidates aggressively
-        if self.aggressive_merge:
-            merge_candidates_list = list(set(assignment.values()))
-            while True:
-                size = len(merge_candidates_list)
-                self_id = merge_candidates_list[0]
-                for other_id in merge_candidates_list[1:]:
-                    maybe_merge_partition(self_id, other_id)
-                new_size = len(merge_candidates_list)
-                if new_size == size:
-                    break
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")

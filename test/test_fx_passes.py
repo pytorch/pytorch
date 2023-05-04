@@ -228,10 +228,11 @@ class TestPartitionFunctions:
         return a7 - 1.0
 
     @staticmethod
-    def forward17(a, b, c, d):
+    def forward17(a, b, c, d, e, f):
         a0 = a + b
         a1 = c + d
-        return (a0, a1)
+        a2 = e + f
+        return a0, a1, a2
 
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
@@ -265,7 +266,7 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward11, [['add_1'], ['add']], False),
 
         # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
-        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]], False),
+        (TestPartitionFunctions.forward12, [["add_2", "add_3", "add_4"], ["add", "add_1"]], False),
 
         # 5 getitem special case
         (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]], False),
@@ -306,18 +307,16 @@ class TestFXGraphPasses(JitTestCase):
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
 
-    @parametrize("fn, expected_partition, aggressive_merge", [
-        (TestPartitionFunctions.forward17, [['add_1'], ['add']], False),
-        (TestPartitionFunctions.forward17, [['add', 'add_1']], True),
+    @parametrize("fn, expected_partition", [
+        (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),
     ])
-    def test_partitioner_aggressive_merge(self, fn, expected_partition, aggressive_merge):
+    def test_partitioner_independent_output(self, fn, expected_partition):
         traced = symbolic_trace(fn)
 
         supported_ops = MockOperatorSupport()
         partitioner = CapabilityBasedPartitioner(traced,
                                                  supported_ops,
-                                                 allows_single_node_partition=True,
-                                                 aggressive_merge=aggressive_merge)
+                                                 allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
         assert len(partitions_name) == len(expected_partition)
@@ -326,10 +325,10 @@ class TestFXGraphPasses(JitTestCase):
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
-        a, b, c, d = torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4)
+        a, b, c, d, e, f = torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4), torch.rand(4)
 
-        expected = fn(a, b, c, d)
-        result = fused_graph(a, b, c, d)
+        expected = fn(a, b, c, d, e, f)
+        result = fused_graph(a, b, c, d, e, f)
         torch.testing.assert_close(expected, result)
 
     @parametrize("partition", [
