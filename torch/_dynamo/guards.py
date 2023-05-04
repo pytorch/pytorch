@@ -821,7 +821,7 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
 
-        if config.report_guard_failures:
+        if config.report_guard_failures or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
             # lookup where there are multiple entries in the same cache line,
             # this can lead to very high performance overhead. So, we have
