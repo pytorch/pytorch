@@ -1,5 +1,4 @@
 import sympy
-from sympy.logic.boolalg import Boolean as SympyBoolean
 
 
 # The normal Python interpretation of the operators
@@ -127,10 +126,10 @@ class ReferenceAnalysis:
         # This won't do for sympy.Expr as the casting does nothing for those
         if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
             result_type = sympy.Float
-        elif a.is_Integer or b.is_Integer:
-            result_type = sympy.Integer
         else:
-            result_type = SympyBoolean
+            assert a.is_Integer
+            assert b.is_Integer
+            result_type = sympy.Integer
         return sympy.Min(result_type(a), result_type(b))
 
     @staticmethod
@@ -139,12 +138,10 @@ class ReferenceAnalysis:
         # This won't do for sympy.Expr as the casting does nothing for those
         if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
             result_type = sympy.Float
-        elif a.is_Integer or b.is_Integer:
-            result_type = sympy.Integer
         else:
-            assert a.is_Boolean
-            assert b.is_Boolean
-            result_type = SympyBoolean
+            assert a.is_Integer
+            assert b.is_Integer
+            result_type = sympy.Integer
         return sympy.Max(result_type(a), result_type(b))
 
     @staticmethod

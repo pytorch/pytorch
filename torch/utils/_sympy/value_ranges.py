@@ -436,12 +436,10 @@ class ValueRangeAnalysis:
             # Inf is not a float...
             if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
                 result_type = sympy.Float
-            elif x.is_Integer or y.is_Integer:
-                result_type = sympy.Integer
             else:
-                assert x.is_Boolean
-                assert y.is_Boolean
-                result_type = SympyBoolean
+                assert x.is_Integer
+                assert y.is_Integer
+                result_type = sympy.Integer
             return fn(result_type(x), result_type(y))
 
         return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
