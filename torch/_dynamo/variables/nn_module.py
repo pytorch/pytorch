@@ -318,7 +318,7 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 else:
-                    fn = mod._call_impl
+                    fn = mod.__call__
                 fn_source = AttrSource(self.source, "__call__")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
@@ -690,7 +690,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
-        name = "_call_impl"
+        name = "__call__"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
