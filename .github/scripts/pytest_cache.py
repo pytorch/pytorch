@@ -49,7 +49,19 @@ def main():
         # TODO: First check if it's even worth uploading a new cache:
         #    Does the cache even mark any failed tests?
 
-        print(os.getenv("AWS_ACCESS_KEY_ID"))
+        id = os.getenv("AWS_ACCESS_KEY_ID")
+        # get the first three chars if it's not none
+        if id:
+            id = id[:3]
+            print(f"Access key id prefix: {id}xxxxxxxxxx")
+        else:
+            print("No access key id found")
+
+        if os.getenv("AWS_SECRET_ACCESS_KEY"):
+            print("Secret access key found")
+        else:
+            print("No secret access key found")
+
         upload_pytest_cache(
             pr_identifier=PRIdentifier(args.pr_identifier),
             workflow=args.workflow,

@@ -42,6 +42,9 @@ jobs:
       build-environment: linux-focal-py3.8-gcc7
       docker-image: ${{ needs.linux-focal-py3_8-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-gcc7-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-docs:
     name: linux-docs
@@ -99,6 +102,9 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
@@ -120,6 +126,9 @@ jobs:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-bionic-py3_8-clang9-build:
     name: linux-bionic-py3.8-clang9
@@ -146,6 +155,9 @@ jobs:
       build-environment: linux-bionic-py3.8-clang9
       docker-image: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_8-clang9-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-bionic-py3_11-clang9-build:
     name: linux-bionic-py3.11-clang9
@@ -172,6 +184,9 @@ jobs:
       build-environment: linux-bionic-py3.11-clang9
       docker-image: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-bionic-cuda11_8-py3_10-gcc7-build:
     name: linux-bionic-cuda11.8-py3.10-gcc7
@@ -200,6 +215,9 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-focal-py3-clang7-mobile-build:
     name: linux-focal-py3-clang7-mobile-build
@@ -255,6 +273,9 @@ jobs:
       build-environment: linux-bionic-py3_8-clang8-xla
       docker-image: ${{ needs.linux-bionic-py3_8-clang8-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_8-clang8-xla-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
 
   linux-bionic-cpu-py3_10-gcc7-bazel-test:
     name: linux-bionic-cpu-py3.10-gcc7-bazel-test
@@ -354,3 +375,6 @@ jobs:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.test-matrix }}
+    secrets:
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}

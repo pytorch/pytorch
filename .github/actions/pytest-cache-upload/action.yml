@@ -13,6 +13,12 @@ inputs:
   github-token:
     description: GITHUB_TOKEN
     required: true
+  aws-access-key-id:
+    description: AWS access key id
+    required: true
+  aws-secret-access-key:
+    description: AWS secret access key
+    required: true
 
 runs:
   using: composite
@@ -37,6 +43,8 @@ runs:
         WORKFLOW: ${{ github.workflow }}
         JOB: ${{ github.job }}
         SHARD: ${{ inputs.shard }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
       run: |
         set +x
 
