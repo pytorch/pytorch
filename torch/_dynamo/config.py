@@ -167,6 +167,12 @@ repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
 # has diverged so that we should treat it as an accuracy failure
 repro_tolerance = 1e-3
 
+# If True, when testing if two models are the same, we will test them against
+# a third fp64 reference and only report a problem if the RMSE relative to the
+# fp64 is greater.  However, this will use more memory; you may disable this
+# if memory usage is too high.
+same_two_models_use_fp64 = True
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
