@@ -175,7 +175,9 @@ class MetaConverter:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
-            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+            source = ConstantSource(
+                f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
+            )
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
@@ -290,8 +292,16 @@ class MetaConverter:
 
                     from torch._dynamo.source import AttrSource
 
+                    if shape_env:
+                        base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
+                    else:
+                        base_dynamic_dims = None
                     base = self.meta_tensor(
-                        t._base, shape_env, callback, source=AttrSource(source, "_base")
+                        t._base,
+                        shape_env,
+                        callback,
+                        source=AttrSource(source, "_base"),
+                        dynamic_dims=base_dynamic_dims,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -492,10 +502,6 @@ class MetaConverter:
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
-                    # these are supported in meta conversion but the fallbacks
-                    # don't work
-                    t.is_neg(),
-                    t.is_conj(),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
@@ -528,9 +534,10 @@ class MetaConverter:
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
                     )
-                # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
+                    # NB: Cannot directly use Parameter constructor
+                    # because that would force a detach, not desirable
+                    r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause
