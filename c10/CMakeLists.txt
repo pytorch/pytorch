@@ -62,7 +62,7 @@ if(C10_USE_IWYU)
         "-Xiwyu"
         "--transitive_includes_only"
         "-Xiwyu"
-        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/c10.imp"
+        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
         )
     set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
   endif()
