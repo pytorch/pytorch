@@ -172,7 +172,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: bool = True,
+    use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     **kwargs
 ):
@@ -271,6 +271,15 @@ def checkpoint(
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    if use_reentrant is None:
+        warnings.warn(
+            "torch.utils.checkpoint: please pass in use_reentrant=True or "
+            "use_reentrant=False explicitly. The default value of use_reentrant "
+            "will be updated to be False in the future. To maintain current "
+            "behavior, pass use_reentrant=True. It is recommended that you use "
+            "use_reentrant=False. Refer to docs for more details on the "
+            "differences between the two variants.")
+        use_reentrant = True
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs and use_reentrant:
