@@ -3,7 +3,7 @@ import operator
 from typing import Any, Callable, Tuple
 
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import _replace_pattern
 import torch.nn.functional as F
 
@@ -62,6 +62,33 @@ def _fused_qat_conv2d_bn_pattern(
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
     return x
 
+def _fused_qat_conv2d_bn_pattern_no_conv_bias(
+    x: torch.Tensor,
+    conv_weight: torch.Tensor,
+    # Not used, only for matching convenience
+    conv_bias: torch.Tensor,
+    bn_weight: torch.Tensor,
+    bn_bias: torch.Tensor,
+    bn_running_mean: torch.Tensor,
+    bn_running_var: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Same as `_fused_qat_conv2d_bn_pattern`, but handles the case with no conv bias.
+    """
+    # TODO: allow setting eps
+    bn_eps = 1e-5
+    running_std = torch.sqrt(bn_running_var + bn_eps)
+    scale_factor = bn_weight / running_std
+    weight_shape = [1] * len(conv_weight.shape)
+    weight_shape[0] = -1
+    bias_shape = [1] * len(conv_weight.shape)
+    bias_shape[1] = -1
+    scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
+    x = F.conv2d(x, scaled_weight, None)
+    x = x / scale_factor.reshape(bias_shape)
+    x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+    return x
+
 def _get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
@@ -81,6 +108,23 @@ def _get_aten_graph_module(
     aten_pattern.recompile()
     return aten_pattern
 
+def _has_conv_bias_filter(match: "InternalMatch", original_graph: Graph, pattern_graph: Graph):
+    """
+    Match filter for the subgraph rewriter that returns True if the conv node in
+    the original graph has bias.
+    """
+    for _, n in match.nodes_map.items():
+        if n.target == torch.ops.aten.convolution.default:
+            return n.args[2] is not None
+    raise ValueError("Could not find conv node in matched conv + bn pattern")
+
+def _no_conv_bias_filter(match: "InternalMatch", original_graph: Graph, pattern_graph: Graph):
+    """
+    Match filter for the subgraph rewriter that returns True if the conv node in
+    the original graph does NOT have bias.
+    """
+    return not _has_conv_bias_filter(match, original_graph, pattern_graph)
+
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     """
     Given a graph of decomposed aten ops, replace the (conv + bn) pattern with
@@ -94,11 +138,43 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     m.recompile()
     example_inputs = _conv2d_bn_pattern_example_inputs
     match_pattern = _get_aten_graph_module(_conv2d_bn_pattern, example_inputs)
-    replacement_pattern = _get_aten_graph_module(_fused_qat_conv2d_bn_pattern, example_inputs)
+
+    # Step (1): Replace patterns with conv bias
+    #
+    # Here we do replacement separately for cases with and without conv bias, since
+    # the replacement patterns for these two cases are substantially different.
     # TODO: use the public replace_pattern API once it also returns replacement nodes
-    match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern, ignore_literals=True)
+
+    replacement_pattern_with_conv_bias = _get_aten_graph_module(
+        _fused_qat_conv2d_bn_pattern,
+        example_inputs,
+    )
+    mr_with_conv_bias = _replace_pattern(
+        m,
+        match_pattern,
+        replacement_pattern_with_conv_bias,
+        match_filters=[_has_conv_bias_filter],
+        ignore_literals=True,
+    )
     m.recompile()
 
+    # Step (2): Replace patterns without conv bias
+
+    replacement_pattern_no_conv_bias = _get_aten_graph_module(
+        _fused_qat_conv2d_bn_pattern_no_conv_bias,
+        example_inputs,
+    )
+    mr_no_conv_bias = _replace_pattern(
+        m,
+        match_pattern,
+        replacement_pattern_no_conv_bias,
+        match_filters=[_no_conv_bias_filter],
+        ignore_literals=True,
+    )
+    m.recompile()
+
+    # Step (3): Post processing
+    #
     # Due to limited functionality in the subgraph rewriter, here we manually
     # update the replacement graph as follows:
     #
@@ -112,7 +188,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     # subgraph rewriter as possible, so we don't have to manually copy anything over.
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
-    for mr in match_and_replacement:
+    for mr in mr_with_conv_bias + mr_no_conv_bias:
         # Find replacement conv and bn nodes by climbing upwards from anchor node
         assert len(mr.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
@@ -131,6 +207,9 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
         # Copy over metadata for all three nodes in [conv - bn - getitem]
         # Also copy over constant args for conv
         for match_pattern_node, original_node in mr.nodes_map.items():
+            # bias can be None
+            if original_node is None:
+                continue
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
