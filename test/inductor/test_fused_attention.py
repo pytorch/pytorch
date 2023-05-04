@@ -14,6 +14,14 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestSDPAPatternRewriter(TestCase):
+    def _clone_inputs(self, inputs):
+        def clone(x):
+            if not isinstance(x, torch.Tensor):
+                return x
+            return x.clone()
+
+        return tuple(clone(x) for x in inputs)
+
     @config.patch(fallback_random=True, lowmem_dropout=False)
     def _check_common(
         self,
@@ -30,11 +38,11 @@ class TestSDPAPatternRewriter(TestCase):
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
             ]
-        args2 = [*map(torch.clone, args1)]
+        args2 = self._clone_inputs(args1)
 
         for training in [False, True]:
             for x in itertools.chain(args1[:], args2[:]):
-                if isinstance(x, torch.Tensor):
+                if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
 
             torch.manual_seed(1234)
@@ -58,7 +66,7 @@ class TestSDPAPatternRewriter(TestCase):
                 result1.sum().backward()
                 result2.sum().backward()
                 for arg1, arg2 in zip(args1, args2):
-                    if isinstance(arg1, torch.Tensor):
+                    if isinstance(arg1, torch.Tensor) and arg1.is_floating_point():
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
     def test_sdpa_rewriter_1(self):
@@ -204,6 +212,7 @@ class TestSDPAPatternRewriter(TestCase):
 
     def test_pattern_fails_with_unsupported_mask(self):
         # https://github.com/pytorch/pytorch/issues/100315
+        # and https://github.com/pytorch/pytorch/issues/100318.
         class Model(torch.nn.Module):
             def __init__(
                 self,
@@ -219,14 +228,18 @@ class TestSDPAPatternRewriter(TestCase):
                 return attn_weight @ value
 
         tensor_shape = (2, 4, 4, 4)
-        for is_scalar_mask in [True, False]:
+
+        upsupported_masks = [
+            torch.randn((2, 4, 4, 4), device="cuda").to(dtype=mask_dtype)
+            for mask_dtype in [torch.bool, torch.int]
+        ]
+        upsupported_masks.append(2.0)
+        for atte_mask in upsupported_masks:
             args = [
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
-                2.0
-                if is_scalar_mask
-                else torch.randn((2, 4, 4, 4), device="cuda").int(),
+                atte_mask,
             ]
             model = Model().eval()
             # The training path has an accuracy gap compared with eager mode.

@@ -165,7 +165,7 @@ def _sfdp_params_check(match):
         attn_mask = attn_mask_node.meta["val"]
         if (
             not isinstance(attn_mask, torch.Tensor)
-            or (attn_mask.dtype != query.dtype and attn_mask.dtype != torch.bool)
+            or attn_mask.dtype != query.dtype
             or query.device != attn_mask.device
         ):
             return False
