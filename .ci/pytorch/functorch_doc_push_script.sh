@@ -23,7 +23,7 @@ popd
 git clone https://github.com/pytorch/functorch -b gh-pages --depth 1 functorch_ghpages
 pushd functorch_ghpages
 
-if [ $version == "main" ]; then
+if [ "$version" == "main" ]; then
   version=nightly
 fi
 

@@ -1,3 +1,4 @@
+#!/bin/bash
 # =================== The following code **should** be executed inside Docker container ===================
 
 # Install dependencies
@@ -32,11 +33,6 @@ install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
 echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
-fi
-
-is_main_doc=false
-if [ "$version" == "main" ]; then
-  is_main_doc=true
 fi
 
 echo "install_path: $install_path  version: $version"
@@ -77,7 +73,7 @@ pushd cppdocs
 # Purge everything with some exceptions
 mkdir /tmp/cppdocs-sync
 mv _config.yml README.md /tmp/cppdocs-sync/
-rm -rf *
+rm -rf ./*
 
 # Copy over all the newly generated HTML
 cp -r "${pt_checkout}"/docs/cpp/build/html/* .
