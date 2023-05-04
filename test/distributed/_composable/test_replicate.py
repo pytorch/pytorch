@@ -214,6 +214,7 @@ class ReplicateTest(MultiProcessTestCase):
         )
         self._compare_module(model, replicate_model)
 
+    @skip_if_lt_x_gpu(2)
     def test_replicate_device_id(self):
         dist.init_process_group(
             backend="gloo",

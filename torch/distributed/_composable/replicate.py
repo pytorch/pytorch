@@ -1,5 +1,5 @@
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import weakref
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -28,7 +28,9 @@ def replicate(
     torch._C._log_api_usage_once("torch.distributed.replicate")
     if "device_id" in kwargs:
         if not isinstance(kwargs["device_id"], (int, torch.device)):
-            raise RuntimeError(f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}")
+            raise RuntimeError(
+                f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}"
+            )
     _ReplicateState(ignored_modules=ignored_modules).mark_module(module, **kwargs)
     return module
 
