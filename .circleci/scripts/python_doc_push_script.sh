@@ -1,4 +1,3 @@
-#!/bin/bash
 # =================== The following code **should** be executed inside Docker container ===================
 
 # Install dependencies
@@ -56,7 +55,7 @@ echo "install_path: $install_path  version: $version"
 build_docs () {
   set +e
   set -o pipefail
-  make "$1" 2>&1 | tee /tmp/docs_build.txt
+  make $1 2>&1 | tee /tmp/docs_build.txt
   code=$?
   if [ $code -ne 0 ]; then
     set +x
@@ -73,12 +72,12 @@ build_docs () {
 }
 
 
-git clone https://github.com/pytorch/pytorch.github.io -b "$branch" --depth 1
+git clone https://github.com/pytorch/pytorch.github.io -b $branch --depth 1
 pushd pytorch.github.io
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
-if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
+if [ -n $ANACONDA_PYTHON_VERSION ]; then
   export PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:$PATH
 fi
 
@@ -89,10 +88,10 @@ pushd "$pt_checkout"
 pushd docs
 
 # Build the docs
+pip -q install -r requirements.txt
 if [ "$is_main_doc" = true ]; then
-  if ! build_docs html; then
-    exit $?
-  fi
+  build_docs html
+  [ $? -eq 0 ] || exit $?
   make coverage
   # Now we have the coverage report, we need to make sure it is empty.
   # Count the number of lines in the file and turn that number into a variable
@@ -103,7 +102,7 @@ if [ "$is_main_doc" = true ]; then
   # Also: see docs/source/conf.py for "coverage_ignore*" items, which should
   # be documented then removed from there.
   lines=$(wc -l build/coverage/python.txt 2>/dev/null |cut -f1 -d' ')
-  undocumented=$((lines - 2))
+  undocumented=$(($lines - 2))
   if [ $undocumented -lt 0 ]; then
     echo coverage output not found
     exit 1
@@ -115,9 +114,8 @@ if [ "$is_main_doc" = true ]; then
   fi
 else
   # skip coverage, format for stable or tags
-  if ! build_docs html-stable; then
-    exit $?
-  fi
+  build_docs html-stable
+  [ $? -eq 0 ] || exit $?
 fi
 
 # Move them into the docs repo
