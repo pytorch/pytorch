@@ -1739,8 +1739,8 @@ Call this whenever a new thread is created in order to propagate values from
         for (const auto& iter :
              at::native::group_tensors_by_first_tensors_device_and_dtype(
                  nested_tensorlist, with_indices)) {
-          const auto thp_dtype = torch::getTHPDtype(iter.first.second);
-          const std::string scalar_type = thp_dtype->name;
+          const auto scalar_type =
+              torch::utils::getDtypeNames(iter.first.second).first;
           map.insert({{iter.first.first, scalar_type}, iter.second});
         }
         return map;
