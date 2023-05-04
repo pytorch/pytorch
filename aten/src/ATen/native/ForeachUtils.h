@@ -245,7 +245,10 @@ FlatMap group_tensors_by_first_tensors_device_and_dtype(const nested_optional_te
   for (const auto& tensor_index : c10::irange(num_tensors)) {
     const auto key = [&]() -> DeviceDtypeKey {
         const auto t = nested_tensorlist[0][tensor_index];
-        TORCH_CHECK(t.has_value());
+        TORCH_CHECK(
+          t.has_value(),
+          "Tensors of the first list of nested Tensor lists are supposed to be defined but ",
+          tensor_index, "th Tensor is not.");
         return {t->device(), t->scalar_type()};
     }();
     if (!grouped_tensors_with_indices.count(key)) {
