@@ -1,5 +1,3 @@
-import contextlib
-import os
 import shutil
 
 from s3_upload_utils import *
@@ -60,7 +58,7 @@ def create_test_files_in_folder(pytest_cache_dir):
 
 
 if __name__ == "__main__":
-    folder = f"/Users/zainr/deleteme/test-files"
+    folder = "/Users/zainr/deleteme/test-files"
     subfolder = f"{folder}/fake_pytest_cache"
     create_test_files_in_folder(subfolder)
     create_test_files_in_folder(subfolder + "2")

@@ -136,6 +136,7 @@ def download_pytest_cache(
         # shutil.rmtree(zip_download_dir)  suppress deletes while testing
         pass
 
+
 def copy_file(source_file, dest_file):
     ensure_dir_exists(os.path.dirname(dest_file))
     shutil.copyfile(source_file, dest_file)
@@ -225,5 +226,5 @@ if __name__ == "__main__":
 
     temp_dir = "/Users/zainr/deleteme/tmp"
 
-    cache_dir_new = f"/Users/zainr/deleteme/test_pytest_cache"
+    cache_dir_new = "/Users/zainr/deleteme/test_pytest_cache"
     download_pytest_cache(pr_identifier, workflow, job, cache_dir_new, BUCKET)
