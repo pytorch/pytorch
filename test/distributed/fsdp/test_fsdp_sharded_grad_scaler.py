@@ -178,7 +178,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         if use_orig_params == "enable_use_orig_params":
             use_orig = True
             model_cls = NonUniformReqGradNWM
-            sharded_grad_scaler_kwargs = {"init_scale": 2.0**13}
+            sharded_grad_scaler_kwargs = {"init_scale": 2.0**11}
         else:
             use_orig = False
             model_cls = NestedWrappedModule  # type: ignore[assignment]
