@@ -21,7 +21,7 @@ from torch.autograd.grad_mode import no_grad
 def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
                                        with_indices: Optional[bool] = False) -> \
         Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]]:
-    assert all([not x or len(x) == len(tensorlistlist[0]) for x in tensorlistlist]), (
+    assert all(not x or len(x) == len(tensorlistlist[0]) for x in tensorlistlist), (
            "all specified tensorlists must match in length")
     per_device_and_dtype_tensors: Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]] = defaultdict(
         lambda: [[] for _ in range(len(tensorlistlist) + (1 if with_indices else 0))])
@@ -39,4 +39,4 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
     if device.type not in ['cpu', 'cuda'] or torch.jit.is_scripting():
         return False
-    return all([t is None or type(t) == torch.Tensor for t in tensors])
+    return all(t is None or type(t) == torch.Tensor for t in tensors)
