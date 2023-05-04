@@ -72,25 +72,28 @@ struct TagToIOType {
   InputOutputEncoder::IOType io_type;
 };
 
-constexpr int tagCount = ((int) InputOutputEncoder::Tag::TERMINATOR) + 1;
+constexpr int tagCount = ((int)InputOutputEncoder::Tag::TERMINATOR) + 1;
 constexpr std::array<TagToIOType, tagCount> tag_map = {{
-  {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
-  {InputOutputEncoder::Tag::UndefinedTensor, InputOutputEncoder::IOType::Shapes},
-  {InputOutputEncoder::Tag::TensorListBegin, InputOutputEncoder::IOType::Shapes},
-  {InputOutputEncoder::Tag::ScalarList, InputOutputEncoder::IOType::ConcreteArgs},
-  {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
-  {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
-  {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
+    {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::UndefinedTensor,
+     InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::TensorListBegin,
+     InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::ScalarList,
+     InputOutputEncoder::IOType::ConcreteArgs},
+    {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
 }};
 
 constexpr bool allTagsMapped(int idx = 0) {
   return tag_map[idx].tag == InputOutputEncoder::Tag::TERMINATOR ||
-    ((idx == (int) tag_map[idx].tag) && allTagsMapped(idx + 1));
+      ((idx == (int)tag_map[idx].tag) && allTagsMapped(idx + 1));
 }
 static_assert(allTagsMapped(), "tag_map is out of order");
 
 constexpr InputOutputEncoder::IOType tagToIOType(InputOutputEncoder::Tag tag) {
-  return tag_map[(int) tag].io_type;
+  return tag_map[(int)tag].io_type;
 }
 } // namespace
 
@@ -138,7 +141,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
   }
 }
 
-bool InputOutputEncoder::isSupportedScalarList(const c10::IValue& list_candidate) {
+bool InputOutputEncoder::isSupportedScalarList(
+    const c10::IValue& list_candidate) {
   if (!list_candidate.isList()) {
     return false;
   }
@@ -206,7 +210,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
             arg.emplace_back(decode_tensor());
           }
-          push_value(*tag_it, std::move(arg));
+          push_value(Tag::TensorListBegin, std::move(arg));
         } break;
 
         case Tag::ScalarList:

@@ -458,11 +458,7 @@ class InputOutputEncoder final {
     TERMINATOR
   };
 
-  enum class IOType {
-    Shapes,
-    ConcreteArgs,
-    None
-  };
+  enum class IOType { Shapes, ConcreteArgs, None };
 
  private:
   void push(const at::Tensor& t);
