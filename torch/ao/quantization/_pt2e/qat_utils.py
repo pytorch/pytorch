@@ -108,7 +108,11 @@ def _get_aten_graph_module(
     aten_pattern.recompile()
     return aten_pattern
 
-def _has_conv_bias_filter(match: "InternalMatch", original_graph: Graph, pattern_graph: Graph):
+def _has_conv_bias_filter(
+    match: "InternalMatch",  # type: ignore[name-defined]
+    original_graph: Graph,
+    pattern_graph: Graph,
+) -> bool:
     """
     Match filter for the subgraph rewriter that returns True if the conv node in
     the original graph has bias.
@@ -118,7 +122,11 @@ def _has_conv_bias_filter(match: "InternalMatch", original_graph: Graph, pattern
             return n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
-def _no_conv_bias_filter(match: "InternalMatch", original_graph: Graph, pattern_graph: Graph):
+def _no_conv_bias_filter(
+    match: "InternalMatch",  # type: ignore[name-defined]
+    original_graph: Graph,
+    pattern_graph: Graph,
+) -> bool:
     """
     Match filter for the subgraph rewriter that returns True if the conv node in
     the original graph does NOT have bias.
