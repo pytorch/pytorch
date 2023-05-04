@@ -7,11 +7,16 @@ import types
 from typing import Dict, List
 
 import torch._C
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    HAS_NUMPY_TORCH_INTEROP,
+    identity,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
@@ -108,6 +113,12 @@ class SuperVariable(VariableTracker):
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
+    """
+
+
+class DelayGraphBreakVariable(UnknownVariable):
+    """
+    Used to insert a dummy variable in the stack to do the graph break at CALL_FUNCTION.
     """
 
 
@@ -498,6 +509,19 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif (
+            self.value is functools.wraps
+            and not kwargs
+            and len(args) == 1
+            and args[0].source
+        ):
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    return fn.clone(wraps_source=args[0].source)
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps, **options)
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -546,7 +570,30 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+            unimplemented(f"numpy.{self.value}()")
+        import torch_np
+
+        from .builder import wrap_fx_proxy_cls
+        from .tensor import NumpyNdarrayVariable
+
+        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        # lookup method name in torch_np
+        if hasattr(torch_np, self.value.__name__):
+            func = getattr(torch_np, self.value.__name__)
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    func,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                example_value=None,
+                **options,
+            )
+        else:
+            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,
@@ -576,3 +623,7 @@ class NullVariable(VariableTracker):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
         return [create_instruction("PUSH_NULL")]
+
+
+class DeletedVariable(VariableTracker):
+    """Marker used to implement delattr()"""

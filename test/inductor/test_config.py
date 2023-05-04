@@ -14,7 +14,6 @@ def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
 
-@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -189,6 +188,40 @@ class TestInductorConfig(TestCase):
         self.assertRaises(
             torch._dynamo.exc.InvalidBackend,
             lambda: torch.compile(dummy_fn, backend="does_not_exist")(torch.randn(10)),
+        )
+
+    def test_non_inductor_backend(self):
+        def assert_options(expected_mode=None, expected_options=None):
+            def backend(gm, _, *, mode=None, options=None):
+                nonlocal call_count
+                self.assertEqual(mode, expected_mode)
+                self.assertEqual(options, expected_options)
+                call_count += 1
+                return gm
+
+            return backend
+
+        inp = torch.randn(8)
+
+        def fn(x):
+            return x + 1
+
+        for mode, options in [
+            (None, None),
+            ("fast-mode", None),
+            (None, {"foo": "bar"}),
+        ]:
+            call_count = 0
+            torch.compile(
+                fn, backend=assert_options(mode, options), mode=mode, options=options
+            )(inp)
+            torch._dynamo.reset()
+            self.assertEqual(call_count, 1)
+
+        # TypeError: eager() got an unexpected keyword argument 'mode'
+        self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed,
+            lambda: torch.compile(fn, backend="eager", mode="nope")(inp),
         )
 
 
