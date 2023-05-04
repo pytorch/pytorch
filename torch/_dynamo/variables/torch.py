@@ -854,7 +854,14 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             )
 
-        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+        # NOTE: [speculate_subgraph vs old_speculate_subgraph]
+        # We're in the middle of rewriting how Dynamo capture for HigherOrderOperators
+        # works. If you are writing a new HigherOrderOperator, please prefer using
+        # `speculate_subgraph`.
+        # The main reason why we cannot get rid of `old_speculate_subgraph` yet is
+        # that `speculate_subgraph` does not yet support calling nn.Modules or
+        # accessing attributes of nn.Modules.
+        def old_speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
                 # closure vars other than 'self' are not in scope of generated code, so error early
                 # TODO(avik): we should eventually support this.
@@ -891,13 +898,13 @@ class TorchHigherOrderOperator(VariableTracker):
             # One argument to graph per sub_args
             for a in sub_args:
                 if isinstance(a, TensorVariable):
-                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    tx.output.current_tracer.create_graph_input(a.as_proxy().node.name)
                     args.append(a)
                 else:
                     # call_function() needs a TensorVariable, therefore we construct
                     # one with inner graph proxy.
                     assert isinstance(a, torch.Tensor)
-                    proxy = tx.output.create_graph_input("arg")
+                    proxy = tx.output.current_tracer.create_graph_input("arg")
                     args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
@@ -915,7 +922,10 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             tx.output.guards.update(output.guards)
             tx.output.create_node(
-                "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                "output",
+                "output",
+                (tx.output.current_tracer.create_arg((output.as_proxy(),))),
+                {},
             )
 
             tx.output.side_effects.prune_dead_object_new(tx)
@@ -936,6 +946,55 @@ class TorchHigherOrderOperator(VariableTracker):
                 nn_modules,
                 comparable_state,
             )
+
+        # See NOTE [HigherOrderOperator tracing design] for details of the design
+        # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
+        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+            try:
+                with tx.output.new_subtracer() as tracer:
+                    args = []
+                    # One argument to graph per sub_args
+                    for a in sub_args:
+                        assert not isinstance(
+                            a, torch.Tensor
+                        ), "Tensors should already be tracked?"
+                        if not isinstance(a, TensorVariable):
+                            unimplemented(
+                                "HigherOrderOperator with body that accepts non-Tensors as input"
+                            )
+                        tracer.create_graph_input(a.as_proxy().node.name)
+                        args.append(a)
+
+                    output = f.call_function(tx, args, {})
+                    # Register output to graph
+                    # Modeled off of compile_and_call_fx_graph
+                    # TODO: support non single Tensor output
+                    if not isinstance(output, TensorVariable):
+                        unimplemented(
+                            "HigherOrderOperator with body with non single Tensor output"
+                        )
+
+                    tx.output.guards.update(output.guards)
+                    tx.output.create_node(
+                        "output",
+                        "output",
+                        (tracer.create_arg((output.as_proxy(),))),
+                        {},
+                    )
+
+                    graph = tx.output.graph
+                    lifted_freevars = tracer.lifted_freevars
+
+                    return (
+                        output,
+                        graph,
+                        lifted_freevars,
+                    )
+
+            except torch._dynamo.exc.Unsupported as ex:
+                tx.output.graph = graph_checkpoint
+                tx.restore_graphstate(checkpoint)
+                raise
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -1009,7 +1068,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 try:
                     # NB: 0 is predicate
                     ix = 1 if branch else 2
-                    return speculate_subgraph(
+                    return old_speculate_subgraph(
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
                 except ArgsMismatchError as e:
@@ -1096,7 +1155,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 body_guards,
                 body_nn_modules_context,
                 body_cmp,
-            ) = speculate_subgraph(
+            ) = old_speculate_subgraph(
                 args[0],
                 [
                     get_fake_value(args[1].as_proxy().node, tx)[0],
@@ -1152,6 +1211,34 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
             p_args = (lowered_node,) + p_args
+        elif self.value.__name__ == "wrap":
+            # See NOTE [HigherOrderOperator tracing design] for more details
+            checkpoint = tx.copy_graphstate()
+            graph_checkpoint = tx.output.graph
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                args[0],
+                [
+                    *args[1:],
+                ],
+                graph_checkpoint,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+            body_node = make_attr(body_name)
+            p_args = (
+                body_node,
+                *(arg.as_proxy() for arg in args[1:]),
+                *(arg for arg in body_lifted_freevars),
+            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
