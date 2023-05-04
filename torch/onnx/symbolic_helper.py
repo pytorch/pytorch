@@ -1263,7 +1263,7 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
 
 
 @_beartype.beartype
-def _repeat_interleave_single_value_helper(
+def _repeat_interleave_single_value_repeat_helper(
     g: jit_utils.GraphContext, self, repeats, dim
 ):
     from torch.onnx.symbolic_opset9 import flatten, unsqueeze
@@ -1278,7 +1278,7 @@ def _repeat_interleave_single_value_helper(
     if _get_tensor_rank(repeats) == 0:
         repeats = g.op("Reshape", repeats, g.op("Constant", value_t=torch.tensor([1])))
 
-    # Create a new dim of size 1, then resize it to be 'repeats' long, and finally collapse it.
+    # Create a new dim of size 1, then expand it to be 'repeats' long, and finally collapse it.
     unsqueezed = unsqueeze(g, self, dim + 1)
 
     # repeats_per_dim is 1 for all dims except for the new unsqueezed dim, where it has value 'repeats'.

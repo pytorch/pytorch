@@ -4294,7 +4294,7 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        return symbolic_helper._repeat_interleave_single_value_helper(
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
             g, self, repeats, dim
         )
 
