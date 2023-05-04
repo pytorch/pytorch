@@ -128,34 +128,6 @@ void SymInt::operator+=(const SymInt& sci) {
   *this = *this + sci;
 }
 
-bool SymInt::operator<(int64_t sci) const {
-  return *this < c10::SymInt(sci);
-}
-
-bool SymInt::operator<=(int64_t sci) const {
-  return *this <= c10::SymInt(sci);
-}
-
-bool SymInt::operator>(int64_t sci) const {
-  return *this > c10::SymInt(sci);
-}
-
-bool SymInt::operator>=(int64_t sci) const {
-  return *this >= c10::SymInt(sci);
-}
-
-bool SymInt::operator==(int64_t sci) const {
-  return *this == c10::SymInt(sci);
-}
-
-bool SymInt::operator!=(int64_t sci) const {
-  return *this != c10::SymInt(sci);
-}
-
-SymInt SymInt::operator*(int64_t sci) const {
-  return *this * c10::SymInt(sci);
-}
-
 std::ostream& operator<<(std::ostream& os, const SymInt& s) {
   if (s.is_heap_allocated()) {
     os << s.toSymNodeImplUnowned()->str();
@@ -164,5 +136,110 @@ std::ostream& operator<<(std::ostream& os, const SymInt& s) {
   }
   return os;
 }
+
+// This template lets us not do a refcount bump when we do an
+// identity conversion
+template <typename T>
+struct Convert {};
+
+template <>
+struct Convert<SymInt> {
+  const SymInt& operator()(const SymInt& a) {
+    return a;
+  }
+};
+
+template <>
+struct Convert<SymFloat> {
+  SymFloat operator()(const SymInt& a) {
+    return a;
+  }
+};
+
+#define DEFINE_SYMINT_OP_INTONLY(scalar_t, RetTy) \
+  RetTy operator%(const SymInt& a, scalar_t b) {  \
+    return Convert<RetTy>()(a) % RetTy(b);        \
+  };                                              \
+  RetTy operator%(scalar_t a, const SymInt& b) {  \
+    return RetTy(a) % Convert<RetTy>()(b);        \
+  };
+
+#define DEFINE_SYMINT_OP(scalar_t, RetTy)        \
+  RetTy operator+(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) + RetTy(b);       \
+  };                                             \
+  RetTy operator-(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) - RetTy(b);       \
+  };                                             \
+  RetTy operator*(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) * RetTy(b);       \
+  };                                             \
+  RetTy operator/(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) / RetTy(b);       \
+  };                                             \
+  RetTy operator+(scalar_t a, const SymInt& b) { \
+    return RetTy(a) + Convert<RetTy>()(b);       \
+  };                                             \
+  RetTy operator-(scalar_t a, const SymInt& b) { \
+    return RetTy(a) - Convert<RetTy>()(b);       \
+  };                                             \
+  RetTy operator*(scalar_t a, const SymInt& b) { \
+    return RetTy(a) * Convert<RetTy>()(b);       \
+  };                                             \
+  RetTy operator/(scalar_t a, const SymInt& b) { \
+    return RetTy(a) / Convert<RetTy>()(b);       \
+  };                                             \
+  bool operator==(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) == RetTy(b);      \
+  };                                             \
+  bool operator!=(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) != RetTy(b);      \
+  };                                             \
+  bool operator<(const SymInt& a, scalar_t b) {  \
+    return Convert<RetTy>()(a) < RetTy(b);       \
+  };                                             \
+  bool operator<=(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) <= RetTy(b);      \
+  };                                             \
+  bool operator>(const SymInt& a, scalar_t b) {  \
+    return Convert<RetTy>()(a) > RetTy(b);       \
+  };                                             \
+  bool operator>=(const SymInt& a, scalar_t b) { \
+    return Convert<RetTy>()(a) >= RetTy(b);      \
+  };                                             \
+  bool operator==(scalar_t a, const SymInt& b) { \
+    return RetTy(a) == Convert<RetTy>()(b);      \
+  };                                             \
+  bool operator!=(scalar_t a, const SymInt& b) { \
+    return RetTy(a) != Convert<RetTy>()(b);      \
+  };                                             \
+  bool operator<(scalar_t a, const SymInt& b) {  \
+    return RetTy(a) < Convert<RetTy>()(b);       \
+  };                                             \
+  bool operator<=(scalar_t a, const SymInt& b) { \
+    return RetTy(a) <= Convert<RetTy>()(b);      \
+  };                                             \
+  bool operator>(scalar_t a, const SymInt& b) {  \
+    return RetTy(a) > Convert<RetTy>()(b);       \
+  };                                             \
+  bool operator>=(scalar_t a, const SymInt& b) { \
+    return RetTy(a) >= Convert<RetTy>()(b);      \
+  };
+
+DEFINE_SYMINT_OP_INTONLY(int64_t, SymInt)
+DEFINE_SYMINT_OP_INTONLY(int32_t, SymInt)
+DEFINE_SYMINT_OP_INTONLY(uint64_t, SymInt)
+DEFINE_SYMINT_OP_INTONLY(uint32_t, SymInt)
+DEFINE_SYMINT_OP(int64_t, SymInt)
+DEFINE_SYMINT_OP(int32_t, SymInt) // make sure constants work
+DEFINE_SYMINT_OP(uint64_t, SymInt)
+DEFINE_SYMINT_OP(uint32_t, SymInt)
+DEFINE_SYMINT_OP(double, SymFloat)
+DEFINE_SYMINT_OP(float, SymFloat) // just for completeness
+
+#if defined(__APPLE__)
+DEFINE_SYMINT_OP_INTONLY(size_t, SymInt) // needed for osx
+DEFINE_SYMINT_OP(size_t, SymInt) // needed for osx
+#endif
 
 } // namespace c10
