@@ -339,14 +339,19 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             functools.partial(AutogradFunctionContextVariable, inference=True),
             {},
         )
-        out.proxy = tx.output.create_proxy(
-            "call_function", SaveSimulatingAutogradFunctionContext, tuple(), {}
-        )
-        out.proxy.node.meta["example_value"] = out.value
+
+        def lazy_proxy_fn():
+            proxy = tx.output.create_proxy(
+                "call_function", SaveSimulatingAutogradFunctionContext, tuple(), {}
+            )
+            proxy.node.meta["example_value"] = out.value
+            return proxy
+
+        out.lazy_proxy_fn = lazy_proxy_fn
         return out
 
     def as_proxy(self):
-        return self.proxy
+        return self.lazy_proxy_fn()
 
     def call_method(
         self,

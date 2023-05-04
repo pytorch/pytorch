@@ -119,12 +119,26 @@ class LinearFunction(torch.autograd.Function):
 
 
 class ModuleLinear(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fn = LinearFunction.apply
-
     def forward(self, input, weight, bias=None):
         return LinearFunction.apply(input, weight, bias)
+
+
+class MaterializingGradFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        ctx.set_materialize_grads(False)
+        return x.clone(), x.clone()
+
+    @staticmethod
+    def backward(ctx, grad_out1, grad_out2):
+        if grad_out2 is None:
+            print("grad_out2 is None!")
+        return grad_out1, grad_out2
+
+
+class MaterializingGradModule(torch.nn.Module):
+    def forward(self, x):
+        return MaterializingGradFunction.apply(x)
 
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
@@ -160,3 +174,9 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
         opt_model(input, weight)
+
+    def test_materialize_grad(self):
+        model = MaterializingGradModule()
+        opt_model = torch._dynamo.optimize("eager")(model)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        opt_model(x)

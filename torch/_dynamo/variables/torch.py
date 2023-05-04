@@ -848,6 +848,7 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
 
+            breakpoint()
             tx.output.guards.update(output.guards)
             tx.output.create_node(
                 "output",
@@ -855,7 +856,7 @@ def speculate_subgraph(
                 (tracer.create_arg((output.as_proxy(),))),
                 {},
             )
-
+            breakpoint()
             graph = tx.output.graph
             lifted_freevars = tracer.lifted_freevars
 
@@ -1273,7 +1274,6 @@ class TorchHigherOrderOperator(VariableTracker):
             "trampoline_autograd_apply",
         ):
             pre_side_effects = tx.output.side_effects.clone()
-
             always_restore = self.value.__name__ == "trampoline_autograd_bwd"
             fn = TorchVariable(self.value)
             checkpoint = tx.copy_graphstate()
@@ -1296,14 +1296,17 @@ class TorchHigherOrderOperator(VariableTracker):
             )
             post_guards_len = len(tx.output.guards)
             if body_lifted_freevars:
+                breakpoint()
                 unimplemented("NYI - freevars in autograd function.")
 
             post_side_effects = tx.output.side_effects
             if post_side_effects.diff(pre_side_effects):
+                breakpoint()
                 unimplemented("NYI - side effects in autograd function.")
 
             if always_restore:
                 if post_guards_len - pre_guards_len > 0:
+                    breakpoint()
                     unimplemented("NYI - New guards discovered in a restoring state")
                 # Nothing left to do here
                 return None
@@ -1315,6 +1318,7 @@ class TorchHigherOrderOperator(VariableTracker):
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
         else:
+            breakpoint()
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
