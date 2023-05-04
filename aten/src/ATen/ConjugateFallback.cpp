@@ -9,7 +9,7 @@ struct ConjFallback : MathOpFallback {
   }
 };
 
-void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+static void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   ConjFallback object;
   object.fallback_impl(op, dispatch_keys, stack);
 }

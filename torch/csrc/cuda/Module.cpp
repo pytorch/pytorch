@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
@@ -912,6 +913,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
             alloc_trace_max_entries,
             alloc_trace_record_context);
       });
+
+  m.def("_cuda_isHistoryEnabled", []() {
+    return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
 }
 
 // We choose to ignore certain blocks that are currently allocated
@@ -1089,6 +1094,22 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
+  m.def("_set_cached_tensors_enabled", [](bool enabled) {
+    at::caching::set_cached_tensors_enabled(enabled);
+  });
+
+  m.def("_add_cached_tensor", [](const at::Tensor& t) {
+    at::caching::add_cached_tensor(t);
+  });
+
+  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
+    at::caching::remove_cached_tensor(t);
+  });
+
+  m.def("_is_cached_tensor", [](const at::Tensor& t) {
+    return at::caching::is_cached_tensor(t);
+  });
+
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
@@ -1130,6 +1151,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
   });
+
+  m.def(
+      "_cuda_checkPoolLiveAllocations",
+      [](int device,
+         at::cuda::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
 
   m.def(
       "_cuda_setCheckpointPoolState",
