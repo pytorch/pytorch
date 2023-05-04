@@ -1439,8 +1439,6 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1579,9 +1577,6 @@ inplace_symbolic_tensor_failures = {
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
-    # Views
-    xfail('t', ''),
-    xfail('transpose', ''),
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
