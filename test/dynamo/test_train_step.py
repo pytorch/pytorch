@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+
 import unittest
 from copy import deepcopy
 
@@ -37,16 +38,6 @@ def init_weights(m):
 
 
 class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
-    """
-    The Basic Idea
-    1) dynamo stashes optimizer on graphmodule in special key
-    2) optimizer.step() just sticks a call in graph without trying to arg-proxy anything
-    3) inside train_step_compiler, we reparameterize the optimizer
-
-    WIP/Issues
-    - handle more than one optimizer (e.g. for different submodules)
-    """
-
     def test_no_optimizer(self):
         def train_step(model, inputs):
             out = model(*inputs)
