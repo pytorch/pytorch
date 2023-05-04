@@ -16,7 +16,7 @@ and graphs for one benchmark suite with the default setting. For example, the de
 training performance trend in the past 7 days for ``TorchBench``. Droplists on the top of that page can be
 selected to view tables and graphs with different options. In addition to the pass rate, there are 3 key
 performance metrics reported there: ``Geometric mean speedup``, ``Mean compilation time``, and
-``Peak memory footprint compression ratio``. 
+``Peak memory footprint compression ratio``.
 Both ``Geometric mean speedup`` and ``Peak memory footprint compression ratio`` are compared against
 the PyTorch eager performance, and the larger the better. Each individual performance number on those tables can be clicked,
 which will bring you to a view with detailed numbers for all the tests in that specific benchmark suite.
@@ -28,7 +28,7 @@ All the dashboard tests are defined in this
 `function <https://github.com/pytorch/pytorch/blob/3e18d3958be3dfcc36d3ef3c481f064f98ebeaf6/.ci/pytorch/test.sh#L305>`__.
 The exact test configurations are subject to change, but at the moment, we measure both inference and training
 performance with AMP precision on the three benchmark suites. We also measure different settings of TorchInductor,
-including ``default``, ``with_cudagraphs (default + cudagraphs)``, and ``dynamic (default + dynamic_shapes)``. 
+including ``default``, ``with_cudagraphs (default + cudagraphs)``, and ``dynamic (default + dynamic_shapes)``.
 
 Can I check if my PR affects TorchInductor's performance on the dashboard before merging?
 -----------------------------------------------------------------------------------------
@@ -49,4 +49,4 @@ is a good place to look for logs from some of the recent runs.
 In those logs, you can search for lines like
 ``python benchmarks/dynamo/huggingface.py --performance --cold-start-latency --inference --amp --backend inductor --disable-cudagraphs --device cuda``
 and run them locally if you have a GPU working with PyTorch 2.0.
-``python benchmarks/dynamo/huggingface.py -h`` will give you a detailed explanation on options of the benchmarking script. 
+``python benchmarks/dynamo/huggingface.py -h`` will give you a detailed explanation on options of the benchmarking script.
