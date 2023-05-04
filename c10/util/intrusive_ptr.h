@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
