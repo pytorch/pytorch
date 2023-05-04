@@ -14,9 +14,9 @@ matplotlib==3.5.3
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 3.5.3
 
-tensorboard==2.10.0
+tensorboard==2.13.0
 #Description: This is used to generate PyTorch docs
-#Pinned versions: 2.10.0
+#Pinned versions: 2.13.0
 
 breathe==4.15.0
 #Description: This is used to generate PyTorch C++ docs
