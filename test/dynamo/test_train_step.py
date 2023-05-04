@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+
 import unittest
 from copy import deepcopy
 
@@ -7,7 +8,12 @@ import torch
 import torch._dynamo
 import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
-from torch._dynamo.backends.train_step import _compile_train_step
+from torch._dynamo.backends.train_step import (
+    _compile_train_step,
+    _train_step_compiler,
+    _train_step_eager,
+    _train_step_inductor,
+)
 from torch._dynamo.testing import same
 
 
@@ -32,16 +38,6 @@ def init_weights(m):
 
 
 class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
-    """
-    The Basic Idea
-    1) dynamo stashes optimizer on graphmodule in special key
-    2) optimizer.step() just sticks a call in graph without trying to arg-proxy anything
-    3) inside train_step_compiler, we reparameterize the optimizer
-
-    WIP/Issues
-    - handle more than one optimizer (e.g. for different submodules)
-    """
-
     def test_no_optimizer(self):
         def train_step(model, inputs):
             out = model(*inputs)
@@ -55,7 +51,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
 
         correct_loss = train_step(model, inputs)
 
-        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
+        opt_train_step = _compile_train_step(train_step, backend=_train_step_eager)
         opt_loss = opt_train_step(model, inputs)
 
         self.assertTrue(same(correct_loss, opt_loss))
@@ -92,7 +88,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             name: param.clone().detach() for name, param in model.named_parameters()
         }
 
-        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
+        opt_train_step = _compile_train_step(train_step, backend=_train_step_eager)
         opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
         opt_params = {
             name: param.clone().detach() for name, param in opt_model.named_parameters()
@@ -137,7 +133,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_optimizer = deepcopy(optimizer)
         inputs = [torch.randn((128, 10)).cuda()]
 
-        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
+        opt_train_step = _compile_train_step(train_step, backend=_train_step_eager)
         for step in range(10):
             correct_loss = train_step(model, optimizer, inputs)
             opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
@@ -175,7 +171,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         opt_model.apply(init_weights)
         opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
         inputs = [torch.randn((128, 10))]
-        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
+        opt_train_step = _compile_train_step(train_step, backend=_train_step_eager)
 
         loss = []
         for step in range(10):
@@ -208,7 +204,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
         inputs = [
             pre_input_layer(pre_inputs),
         ]
-        opt_train_step = _compile_train_step(train_step, backend="train_step_eager")
+        opt_train_step = _compile_train_step(train_step, backend=_train_step_eager)
 
         with self.assertRaisesRegex(AssertionError, r"an input tensor has a grad_fn"):
             opt_train_step(opt_model, opt_optimizer, inputs)
@@ -225,7 +221,7 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             torch.randn((128, 10)),
         ]
         opt_train_step = _compile_train_step(
-            train_step_multi_backward, backend="train_step_eager"
+            train_step_multi_backward, backend=_train_step_eager
         )
         with self.assertRaisesRegex(AssertionError, r"multiple \.backward\(\) calls"):
             opt_train_step(opt_model, opt_optimizer, inputs)
@@ -236,13 +232,72 @@ class TestCompileTrainStep(torch._dynamo.test_case.TestCase):
             loss.backward(loss)
 
         opt_train_step = _compile_train_step(
-            train_step_backward_args, backend="train_step_eager"
+            train_step_backward_args, backend=_train_step_eager
         )
 
         with self.assertRaisesRegex(
             AssertionError, r"\.backward\(\) call with non-empty args"
         ):
             opt_train_step(opt_model, opt_optimizer, inputs)
+
+    def test_custom_backend(self):
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
+        inputs = [torch.randn((128, 10))]
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        train_step_cnt = _train_step_compiler(cnt)
+        opt_train_step = _compile_train_step(train_step, backend=train_step_cnt)
+
+        loss = []
+        for step in range(10):
+            opt_loss = opt_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(opt_loss)
+            if step > 0:
+                # in practice, this model loss goes 684, 458, 264, 125, ... so this check should not be too noisy
+                self.assertTrue(loss[-2] > loss[-1])
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 57)
+
+    def test_inductor_backend(self):
+        def train_step(model, optimizer, inputs):
+            out = model(*inputs)
+            loss = out.sum()
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            return loss
+
+        opt_model = Seq()
+        opt_model.apply(init_weights)
+        opt_optimizer = torch.optim.SGD(opt_model.parameters(), lr=0.01, momentum=0.9)
+        inputs = [torch.randn((128, 10))]
+
+        torch._dynamo.reset()
+        ind_train_step = _compile_train_step(train_step, backend=_train_step_inductor)
+
+        loss = []
+        for step in range(10):
+            ind_loss = ind_train_step(opt_model, opt_optimizer, inputs)
+            loss.append(ind_loss)
+            if step > 0:
+                self.assertTrue(loss[-2] > loss[-1])
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            RuntimeError, r"_compile_train_step does not support inductor"
+        ):
+            ind_train_step = _compile_train_step(train_step, backend="inductor")
 
 
 if __name__ == "__main__":

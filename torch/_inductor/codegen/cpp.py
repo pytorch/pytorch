@@ -206,7 +206,7 @@ class CppPrinter(ExprPrinter):
         mod = self.paren(self.doprint(mod))
         if div != "1":
             x = f"({x} / {div})"
-        return f"{x} % {mod}"
+        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
@@ -518,7 +518,19 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def sigmoid(x):
@@ -813,7 +825,19 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"{x} * ({x}>0)"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x} * ({x}>0)"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def minimum(a, b):

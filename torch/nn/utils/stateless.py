@@ -124,11 +124,6 @@ def _reparametrize_module(
 
     orig_parameters_and_buffers: Dict[str, Tensor] = {}
     try:
-        # Problem: untied dict contains 2 names for every tensor, which correctly alias to the same faketensor.
-        # but swap returns 'orig' values only for one set of those names.  for the other set of names, it returns
-        # the new faketensors as "original" values.  WTF?
-        # setting 'tie_weights' has no effect, since the caller is already providing a 'tied' dict as input.
-        # only option seems to be having the caller 'remove_duplicates' on faketensor creation?
         orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
             untied_parameters_and_buffers, allow_missing=True
         )

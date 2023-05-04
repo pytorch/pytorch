@@ -3226,7 +3226,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
     {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
-    {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors, bool round_with_scale_factor=False) -> (Tensor)", "upsample_nearest2d"},
+    {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", "upsample_nearest2d"},
     {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
     {"aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> Tensor", "unary"},
     {"aten::dequantize(Tensor self) -> Tensor", "unary"},
