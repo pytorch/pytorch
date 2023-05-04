@@ -271,7 +271,6 @@ class ForeachKernel(Kernel):
             code.splice(self.compute)
             code.splice(self.stores)
 
-        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
