@@ -380,20 +380,21 @@ def summarize_graph_break(filename):
     miss some graph breaks because of de-duping. We can further refine this
     function as need arises.
     """
-    log_file = f"{filename.removesuffix('.csv')}_graph_breaks.csv"
+    log_file = f"{filename.rstrip('.csv')}_graph_breaks.csv"
     if os.path.exists(log_file):
         df = pd.read_csv(log_file)
         df = df.sort_values("reason").drop_duplicates(subset="reason")
 
         # Specialize for multi tensor sgd as reason is not identical
-        multi_tensor_sgd_row = df.loc[
-            df["reason"].str.contains("_multi_tensor_sgd")
-        ].iloc[0]
-        df = df[~df["reason"].str.contains("_multi_tensor_sgd")]  # Drop all sgd rows
-        df = pd.concat(
-            [df, pd.DataFrame([multi_tensor_sgd_row])], axis=0
-        )  # Add back a single row
-        df.to_csv(f"{log_file.removesuffix('.csv')}_deduped.csv", index=False)
+        multi_tensor_sgd_row = df.loc[df["reason"].str.contains("_multi_tensor_sgd")]
+        if len(multi_tensor_sgd_row):
+            df = df[
+                ~df["reason"].str.contains("_multi_tensor_sgd")
+            ]  # Drop all sgd rows
+            df = pd.concat(
+                [df, pd.DataFrame([multi_tensor_sgd_row.iloc[0]])], axis=0
+            )  # Add back a single row
+        df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
 
 
 def print_summary(filename):
@@ -1632,7 +1633,7 @@ class BenchmarkRunner:
             )
 
         if explain or self.args.log_graph_breaks or self.args.print_graph_breaks:
-            filename = f"{output_filename.removesuffix('.csv')}_graph_breaks.csv"
+            filename = f"{output_filename.rstrip('.csv')}_graph_breaks.csv"
 
             def add_double_quotes(x):
                 # Delimiter because reason could have comma
