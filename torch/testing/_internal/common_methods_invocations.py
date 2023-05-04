@@ -18413,6 +18413,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
         )
     ),
+    PythonRefInfo(
+        "_refs.equal",
+        torch_opinfo_name="equal",
+        supports_nvfuser=False,
+        skips=(
+            # RuntimeError: Cannot cast FakeTensor to number
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
