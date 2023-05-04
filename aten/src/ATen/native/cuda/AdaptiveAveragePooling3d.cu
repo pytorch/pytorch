@@ -15,7 +15,7 @@
 #include <ATen/ops/adaptive_avg_pool3d_backward_native.h>
 #include <ATen/ops/adaptive_avg_pool3d_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 #include <ATen/native/AdaptivePooling.h>
@@ -537,7 +537,7 @@ Tensor adaptive_avg_pool3d_backward_cuda(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("adaptive_avg_pool3d_backward_cuda");
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gradInput = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }
