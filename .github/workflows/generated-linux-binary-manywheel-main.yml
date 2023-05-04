@@ -7,7 +7,7 @@ name: linux-binary-manywheel
 on:
   push:
     branches:
-      - master
+      - main
     tags:
       - 'ciflow/trunk/*'
   workflow_dispatch:
