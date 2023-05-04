@@ -373,7 +373,6 @@ class NNModuleVariable(VariableTracker):
                 ),
                 **options,
             )
-
         if name in ["_call_impl", "_wrapped_call_impl"]:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
@@ -693,7 +692,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
-        else:   
+        else:
             source = None
 
         return variables.UserFunctionVariable(
@@ -714,12 +713,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             fn = getattr(self.value_type, name)
             if self.source:
                 source = AttrSource(AttrSource(self.source, "__class__"), name)
-            else:   
+            else:
                 source = None
 
             return variables.UserFunctionVariable(
-            fn, source=source, **options
-        ).call_function(tx, [self] + list(args), kwargs)
+                fn, source=source, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:

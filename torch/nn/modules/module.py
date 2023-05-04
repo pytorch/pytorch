@@ -1496,7 +1496,7 @@ class Module:
         return result
 
     def _wrapped_call_impl(self, *args, **kwargs):
-        if getattr(self, "_compiled_call_impl", False):
+        if self._compiled_call_impl is not None:
             return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
         else:
             return self._call_impl(*args, **kwargs)
