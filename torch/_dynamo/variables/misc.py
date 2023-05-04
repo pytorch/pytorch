@@ -257,6 +257,16 @@ class AutogradFunctionVariable(VariableTracker):
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
             )
+
+            # On varying strides of grads
+            #
+            # A varying stride in speculated_fwd_result can produce potentially unsound code.
+            # To quote rzou, It does matter if the autograd.Function branches on the strides of the Tensor and is
+            # actually unsafe in one of the branches. The actual case where this matters is if a Tensor is a Tensor
+            # subclass -- it would be more likely that in the Tensor subclass case there will be unsafe behavior.
+            # We think this is unlikely to happen today. If we find this happening, and we think that capturing
+            # autograd function is leading to issues, we can extend this to rewrite bwd to coerce the guards to
+            # be the expected strides.
             bwd_args = [ctx, speculated_fwd_result]
             # ctx.value.saved_tensors = ctx.value.to_save
             if not is_fn_safe_to_run(
