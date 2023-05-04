@@ -237,10 +237,13 @@ def convert_frame_assert(
         if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
-            )
+            if config.report_guard_failures:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+            else:
+                message = f"Recompiling function {code.co_name} in {code.co_filename}"
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message)
