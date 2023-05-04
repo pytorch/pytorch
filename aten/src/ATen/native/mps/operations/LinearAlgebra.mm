@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
+
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -527,6 +529,8 @@ Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                                                      order:left ? bRows : bCols
                                                                     numberOfRightHandSides:left ? bCols : bRows
                                                                                      alpha:1.0f] autorelease];
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_});
 
       MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
@@ -560,7 +564,7 @@ Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                   rightHandSideMatrix:rightHandSideMatrix
                        solutionMatrix:solutionMatrix];
       }
-      mpsStream->commit(true);
+      getMPSProfiler().endProfileKernel(filter);
     }
   });
   return out;
