@@ -1345,7 +1345,9 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             adjusted_flat_args = [seed, offset, *flat_args]
             flat_args.clear()  # Don't hold extra reference
-        compiled_fw = compiler(fw_module, adjusted_flat_args)
+
+        torch._guards.TracingContext.get().fw_metadata = fw_metadata
+        compiled_fw = compiler(fw_module, flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
     # However, create_runtime_wrapper does not expect the rng offsets in the
@@ -3349,6 +3351,7 @@ def aot_module_simplified(
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
+    forward.params_flat = params_flat
 
     return forward
 
