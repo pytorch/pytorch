@@ -146,6 +146,32 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
 # TODO(jansel): make these pattern work with lowmem_dropout=True
 
 
+def _sfdp_params_check(match):
+    assert all(k in match.kwargs for k in ("query", "key", "value"))
+    query = match.kwargs["query"].meta["val"]
+    key = match.kwargs["key"].meta["val"]
+    value = match.kwargs["value"].meta["val"]
+    if not (query.dtype == key.dtype == value.dtype) or not (
+        query.device == key.device == value.device
+    ):
+        return False
+    add_mask_node = filter_nodes(match.nodes, aten.add.Tensor)
+    # Has attn_mask add.
+    if len(add_mask_node) > 0:
+        attn_mask_node = add_mask_node[0].args[1]
+        # attn_mask_node may be a float/int number.
+        if not hasattr(attn_mask_node, "meta"):
+            return False
+        attn_mask = attn_mask_node.meta["val"]
+        if (
+            not isinstance(attn_mask, torch.Tensor)
+            or (attn_mask.dtype != query.dtype and attn_mask.dtype != torch.bool)
+            or query.device != attn_mask.device
+        ):
+            return False
+    return True
+
+
 def _sfdp_scale_factor_check(scale_factor_op):
     def fn(match):
         scale_factor_node = filter_nodes(match.nodes, scale_factor_op)[0]
@@ -154,13 +180,9 @@ def _sfdp_scale_factor_check(scale_factor_op):
         # make sure the scale_factor a float/int. SymInt?
         if not isinstance(scale_factor, (float, int)):
             return False
-        return True
+        return _sfdp_params_check(match)
 
     return fn
-
-
-def _return_true(match):
-    return True
 
 
 @functools.lru_cache(None)
@@ -212,8 +234,20 @@ def _sfdp_init():
             d,
             _sfdp_scale_factor_check(aten.mul.Tensor),
         ),
-        (_sfdp_pattern_5, _sfdp_replacement_5, [g(), g(), g(), b()], {}, _return_true),
-        (_sfdp_pattern_6, _sfdp_replacement_6, [g(), g(), g(), b()], d, _return_true),
+        (
+            _sfdp_pattern_5,
+            _sfdp_replacement_5,
+            [g(), g(), g(), b()],
+            {},
+            _sfdp_params_check,
+        ),
+        (
+            _sfdp_pattern_6,
+            _sfdp_replacement_6,
+            [g(), g(), g(), b()],
+            d,
+            _sfdp_params_check,
+        ),
     ]:
         args = [*args, *workaround.values()]
         register_replacement(

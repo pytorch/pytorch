@@ -202,6 +202,38 @@ class TestSDPAPatternRewriter(TestCase):
                 model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
             )
 
+    def test_pattern_fails_with_unsupported_mask(self):
+        # https://github.com/pytorch/pytorch/issues/100315
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super(Model, self).__init__()
+
+            def forward(self, query, key, value, attn_mask) -> torch.Tensor:
+                attn_weight = torch.softmax(
+                    query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))
+                    + attn_mask,
+                    dim=-1,
+                )
+                return attn_weight @ value
+
+        tensor_shape = (2, 4, 4, 4)
+        for is_scalar_mask in [True, False]:
+            args = [
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                2.0
+                if is_scalar_mask
+                else torch.randn((2, 4, 4, 4), device="cuda").int(),
+            ]
+            model = Model().eval()
+            # The training path has an accuracy gap compared with eager mode.
+            self._check_common(
+                model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+            )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
