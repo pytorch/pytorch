@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
@@ -60,6 +61,90 @@ def inner(x):
 inner(torch.randn(2))
 """
         self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
+
+    @requires_cuda()
+    def test_rmse_improves_over_atol(self):
+        # From https://twitter.com/itsclivetime/status/1651135821045719041?s=20
+        run_code = """
+@torch.compile()
+def inner(x):
+    return x - torch.tensor(655, dtype=torch.half, device='cuda') * 100
+
+inner(torch.tensor(655 * 100, dtype=torch.half, device='cuda'))
+"""
+
+        # If we disable RMSE against fp64, this triggers accuracy error,
+        # as the increased precision from torch.compile changes the result
+        # of 655 * 100
+        with dynamo_config.patch("same_two_models_use_fp64", False):
+            self._run_full_test(
+                run_code,
+                "aot",
+                "AccuracyError",
+                isolate=False,
+                # NB: need this to avoid refusing to minify when fp64 doesn't work
+                # (which it doesn't, due to the config patch above)
+                minifier_args=["--strict-accuracy"],
+            )
+
+        # But using fp64, we see that the intended semantics is the increased
+        # 655 * 100 precision, and so we report no problem
+        self._run_full_test(run_code, "aot", None, isolate=False)
+
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    @inductor_config.patch("cpp.inject_log1p_bug_TESTING_ONLY", "accuracy")
+    def test_accuracy_vs_strict_accuracy(self):
+        run_code = """
+@torch.compile()
+def inner(x):
+    y = torch.log1p(x)
+    b = y > 0
+    # Need to ensure suffix removal hits a boolean output
+    b = torch.logical_not(b)
+    b = torch.logical_not(b)
+    x = torch.relu(x)
+    return torch.where(b, x, x)
+
+inner(torch.randn(20))
+"""
+
+        # Strict accuracy gets hung up on the boolean mask difference, which
+        # will localize the error to sigmoid, even though it doesn't actually
+        # matter to the end result
+        res = self._run_full_test(
+            run_code,
+            "aot",
+            "AccuracyError",
+            isolate=False,
+            minifier_args=["--strict-accuracy"],
+        )
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, arg0_1):
+        log1p = torch.ops.aten.log1p.default(arg0_1);  arg0_1 = None
+        return (log1p,)""",
+        )
+
+        # FP accuracy will refuse to promote the logical_not on the outputs,
+        # and so you'll get to the relu (unless the minifier somehow tries
+        # removing entire suffix except the log1p first!)
+        res = self._run_full_test(run_code, "aot", "AccuracyError", isolate=False)
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, arg0_1):
+        relu = torch.ops.aten.relu.default(arg0_1);  arg0_1 = None
+        return (relu,)""",
+        )
 
 
 if __name__ == "__main__":
