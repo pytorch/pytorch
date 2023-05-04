@@ -689,7 +689,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if mod.cls_to_become is not None:
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
-
         name = "_call_impl"
         fn = getattr(self.value_type, name)
         if self.source:
@@ -711,6 +710,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
+        if name in ["_call_impl", "_wrapped_call_impl"]:
+            fn = getattr(self.value_type, name)
+            if self.source:
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+            else:   
+                source = None
+
+            return variables.UserFunctionVariable(
+            fn, source=source, **options
+        ).call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
