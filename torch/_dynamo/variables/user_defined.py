@@ -346,6 +346,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif callable(self.value):
+            self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -401,6 +404,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__func__, self, source=source, **options
             )
         elif isinstance(subobj, types.FunctionType):
+            # Check `__dict__` to bypass the function descriptor protocol to
+            # accurately check for static method
+            is_staticmethod = name in type(self.value).__dict__ and isinstance(
+                type(self.value).__dict__[name], staticmethod
+            )
+            if is_staticmethod:
+                # Use `UserFunctionVariable` to avoid doubly passing in `self`
+                # as an argument, which happens if using `UserMethodVariable`
+                return variables.UserFunctionVariable(
+                    subobj, name, source=source, **options
+                )
             return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (

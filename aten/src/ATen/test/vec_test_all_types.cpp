@@ -19,6 +19,8 @@ namespace {
     template <typename T>
     class SignManipulation : public ::testing::Test {};
     template <typename T>
+    class SignManipulationHalfPrecision : public ::testing::Test {};
+    template <typename T>
     class Rounding : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocal : public ::testing::Test {};
@@ -78,6 +80,7 @@ namespace {
     TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Interleave, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(SignManipulation, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulationHalfPrecision, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
@@ -164,6 +167,70 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+    }
+    TYPED_TEST(SignManipulationHalfPrecision, Absolute) {
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      using RT = float; // reference
+      constexpr auto N = vec::size();
+      CACHE_ALIGN RT x_fp[N];
+      CACHE_ALIGN VT x_hp[N];
+      auto seed = TestSeed();
+      ValueGen<RT> generator(RT(-1), RT(1), seed);
+      for (const auto i : c10::irange(N)) {
+        x_fp[i] = generator.get();
+        x_hp[i] = VT(x_fp[i]);
+      }
+      float atol = 0.01f;
+      float rtol = 0.01f;
+      auto cmp = [=](RT ref, VT val) {
+        return std::abs(ref - val) <= atol + rtol * std::abs(val);
+      };
+
+      auto x_fp_vec = vfloat::loadu(x_fp);
+      x_fp_vec.abs().store(x_fp);
+      x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+      x_fp_vec.abs().store(x_fp + vfloat::size());
+
+      auto x_hp_vec = vec::loadu(x_hp);
+      x_hp_vec.abs().store(x_hp);
+
+      for (int64_t len = 1; len <= N; len++) {
+        ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nabsolute, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+      }
+    }
+    TYPED_TEST(SignManipulationHalfPrecision, Negate) {
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      using RT = float; // reference
+      constexpr auto N = vec::size();
+      CACHE_ALIGN RT x_fp[N];
+      CACHE_ALIGN VT x_hp[N];
+      auto seed = TestSeed();
+      ValueGen<RT> generator(RT(-1), RT(1), seed);
+      for (const auto i : c10::irange(N)) {
+        x_fp[i] = generator.get();
+        x_hp[i] = VT(x_fp[i]);
+      }
+      float atol = 0.01f;
+      float rtol = 0.01f;
+      auto cmp = [=](RT ref, VT val) {
+        return std::abs(ref - RT(val)) <= atol + rtol * std::abs(val);
+      };
+
+      auto x_fp_vec = vfloat::loadu(x_fp);
+      x_fp_vec.neg().store(x_fp);
+      x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+      x_fp_vec.neg().store(x_fp + vfloat::size());
+
+      auto x_hp_vec = vec::loadu(x_hp);
+      x_hp_vec.neg().store(x_hp);
+
+      for (int64_t len = 1; len <= N; len++) {
+        ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+            << "\nnegate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+      }
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
