@@ -25,8 +25,15 @@ from torch.ao.quantization._quantize_pt2e import (
 )
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 
-from torch.ao.quantization.qconfig import default_per_channel_symmetric_qnnpack_qconfig
-from torch.ao.quantization.quantize_fx import convert_to_reference_fx, prepare_fx
+from torch.ao.quantization.qconfig import (
+    default_per_channel_symmetric_qnnpack_qat_qconfig,
+    default_per_channel_symmetric_qnnpack_qconfig,
+)
+from torch.ao.quantization.quantize_fx import (
+    convert_to_reference_fx,
+    prepare_fx,
+    prepare_qat_fx,
+)
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -315,6 +322,43 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
         self.assertTrue("tensor_constant" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
+
+    def test_prepare_qat_conv_bn_numerics(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
+        m = M()
+        m_fx = copy.deepcopy(m)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # PT2 export
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        result = m(*example_inputs)
+
+        # FX
+        qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qat_qconfig)
+        backend_config = get_qnnpack_backend_config()
+        m_fx = prepare_qat_fx(m_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
+        result_fx = m_fx(*example_inputs)
+
+        # Verify that numerics match
+        self.assertEqual(result, result_fx)
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):

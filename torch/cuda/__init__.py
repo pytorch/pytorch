@@ -183,7 +183,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
         # NVIDIA GPU compute architectures are backward compatible within major version
-        supported = any([sm // 10 == cap_major for sm in supported_sm])
+        supported = any(sm // 10 == cap_major for sm in supported_sm)
         if not supported:
             device_name = get_device_name(idx)
             capability = cap_major * 10 + cap_minor
