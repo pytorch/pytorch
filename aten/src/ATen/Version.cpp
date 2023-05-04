@@ -90,40 +90,41 @@ std::string get_openmp_version() {
   return ss.str();
 }
 
-std::string get_cpu_capability() {
-  // It is possible that we override the cpu_capability with
-  // environment variable
-  auto capability = native::get_cpu_capability();
-  switch (capability) {
-#if defined(HAVE_VSX_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
-    case native::CPUCapability::VSX:
-      return "VSX";
-#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
-    case native::CPUCapability::ZVECTOR:
-      return "Z VECTOR";
-#else
-    case native::CPUCapability::DEFAULT:
-      return "NO AVX";
-    case native::CPUCapability::AVX2:
-      return "AVX2";
-    case native::CPUCapability::AVX512:
-      return "AVX512";
-#endif
-    default:
-      break;
-  }
-  return "";
-}
-
 static std::string used_cpu_capability() {
   // It is possible that we override the cpu_capability with
   // environment variable
   std::ostringstream ss;
-  ss << "CPU capability usage: " << get_cpu_capability();
+  ss << "CPU capability usage: ";
+  auto capability = native::get_cpu_capability();
+  switch (capability) {
+#if defined(HAVE_VSX_CPU_DEFINITION)
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::VSX:
+      ss << "VSX";
+      break;
+#elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::ZVECTOR:
+      ss << "Z VECTOR";
+      break;
+#else
+    case native::CPUCapability::DEFAULT:
+      ss << "NO AVX";
+      break;
+    case native::CPUCapability::AVX2:
+      ss << "AVX2";
+      break;
+    case native::CPUCapability::AVX512:
+      ss << "AVX512";
+      break;
+#endif
+    default:
+      break;
+  }
   return ss.str();
 }
 
