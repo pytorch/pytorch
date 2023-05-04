@@ -3,11 +3,20 @@ import hashlib
 import os
 import shutil
 
-from s3_upload_utils import *
+from file_io_utils import (
+    ensure_dir_exists,
+    sanitize_for_s3,
+    zip_folder,
+    unzip_folder,
+    download_s3_objects_with_prefix,
+    upload_file_to_s3,
+    load_json_file,
+    write_json_file,
+)
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
-BUCKET = "pytest-cache"
+BUCKET = "gha-artifacts"
 TEMP_DIR = "/tmp"  # a backup location in case one isn't provided
 
 
@@ -111,31 +120,35 @@ def download_pytest_cache(
             bucket, obj_key_prefix, zip_download_dir
         )
 
-        for downloaded_zip_path in downloads:
-            shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[
-                0
-            ]  # the file name of the zip is the shard id
+        for downloaded_zip in downloads:
+            # the file name of the zip is the shard id
+            shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
             cache_dir_for_shard = os.path.join(
                 f"{temp_dir}/unzipped-caches",
                 get_s3_key_prefix(pr_identifier, workflow, job, shard_id),
                 PYTEST_CACHE_DIR_NAME,
             )
 
-            try:
-                unzip_folder(downloaded_zip_path, cache_dir_for_shard)
-                print(
-                    f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}"
-                )
-                merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
-            finally:
-                # clean up the unzipped cache folder
-                pass
-                # shutil.rmtree(cache_dir_for_shard) suppress deletes while testing
+            unzip_folder(downloaded_zip, cache_dir_for_shard)
+            print(
+                f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}"
+            )
+            merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
     finally:
         # clean up the downloaded zip files
         # shutil.rmtree(zip_download_dir)  suppress deletes while testing
         pass
 
+def unzip_cache_folder(zip_file_path, dest_dir):
+    # the file name of the zip is the shard id
+    shard_id = os.path.splitext(os.path.basename(zip_file_path))[0]
+    cache_dir_for_shard = os.path.join(
+        dest_dir,
+        get_s3_key_prefix(pr_identifier, workflow, job, shard_id),
+        PYTEST_CACHE_DIR_NAME,
+    )
+
+    unzip_folder(downloaded_zip, cache_dir_for_shard)
 
 def copy_file(source_file, dest_file):
     ensure_dir_exists(os.path.dirname(dest_file))
@@ -206,25 +219,3 @@ def merged_lastfailed_content(from_lastfailed, to_lastfailed):
             del to_lastfailed[""]
 
     return to_lastfailed
-
-
-if __name__ == "__main__":
-    download_s3_objects_with_prefix(BUCKET, "zipped_file/ff", "downloaded_files")
-
-    unzip_folder(
-        "downloaded_files/zipped_file/ffzsome-job-btest-files.zip",
-        "/Users/zainr/deleteme/ffunzip",
-    )
-
-    pr_identifier = PRIdentifier("read-deal")
-    print(pr_identifier)
-    workflow = "test-workflow"
-    job = "test-job-name"
-    shard = "shard-3"
-    cache_dir = f"/Users/zainr/test-infra/{PYTEST_CACHE_DIR_NAME}"
-    upload_pytest_cache(pr_identifier, workflow, job, shard, cache_dir, BUCKET)
-
-    temp_dir = "/Users/zainr/deleteme/tmp"
-
-    cache_dir_new = "/Users/zainr/deleteme/test_pytest_cache"
-    download_pytest_cache(pr_identifier, workflow, job, cache_dir_new, BUCKET)
