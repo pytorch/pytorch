@@ -31,10 +31,9 @@ runs:
 
 
         python3 .github/scripts/pytest_cache.py \
-          --upload \
+          --download \
           --cache_dir $GITHUB_WORKSPACE/$CACHE_DIR \
           --pr_identifier $GITHUB_REF \
           --workflow $WORKFLOW \
           --job $JOB \
-          --shard $SHARD \
           --temp_dir $RUNNER_TEMP \
