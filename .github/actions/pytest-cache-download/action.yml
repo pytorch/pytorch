@@ -36,7 +36,7 @@ runs:
       run: |
         set +x
 
-        echo "all the commands sent to the below script:""
+        echo "all the commands sent to the below script:"
         echo "cache_dir: $GITHUB_WORKSPACE/$CACHE_DIR"
         echo "pr_identifier: $GITHUB_REF"
         echo "workflow: $WORKFLOW"
