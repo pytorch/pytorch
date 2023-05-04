@@ -37,13 +37,17 @@ class ListTracker:
             self.index_vars.append(tree.construct(layout.size))
 
     def codegen_tile_ptrs(self, code: IndentedBuffer, list_index: int):
-        index_vars = reversed(self.index_vars[list_index])
-        nodes = [V.kernel.range_tree_nodes[v] for v in index_vars]
+        index_expr = self.index_expr(list_index)
+
+        nodes = [
+            V.kernel.range_tree_nodes[v]
+            for v in sorted(index_expr.free_symbols, key=lambda s: s.name)
+        ]
         for node in nodes:
             node.codegen_into(code)
 
         code.splice(
-            f"{self.var}_tile_ptrs = {self.arg_names[list_index]} + ({self.index_expr(list_index)})"
+            f"{self.var}_tile_ptrs = {self.arg_names[list_index]} + ({index_expr})"
         )
 
     def index_expr(self, list_index: int):
