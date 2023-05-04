@@ -2309,7 +2309,6 @@ def forward(self, x):
                 preserved = True
         self.assertTrue(preserved)
 
-    @pytest.mark.xfail(reason="Saving example_fake_inputs breaks the serialization")
     @config.patch(
         dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
