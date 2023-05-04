@@ -211,6 +211,27 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_transpose2d_has_output_size_input(self):
+        # https://github.com/pytorch/pytorch/issues/100344.
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose(x, output_size=(10, 10))
+
+        mod = M().eval()
+        v = torch.randn(1, 3, 10, 10, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
