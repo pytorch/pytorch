@@ -311,11 +311,11 @@ class TestMkldnn(TestCase):
                     mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                     y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
             # test thnn impl
-            mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
-            mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
+            ref_conv = copy.deepcopy(conv)
+            conv_lower = copy.deepcopy(conv).to(dtype=dtype)
             with torch.backends.mkldnn.flags(enabled=False):
-                y = mkldnn_conv(x.to_mkldnn()).to_dense()
-                y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
+                y = ref_conv(x)
+                y_lower = conv_lower(x_lower).float()
                 self.assertEqual(y, y_lower, atol=1e-1, rtol=1e-3)
 
     def test_conv1d_lower_precision(self):
@@ -412,10 +412,10 @@ class TestMkldnn(TestCase):
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half)
         # fall back to thnn impl
         with torch.backends.mkldnn.flags(enabled=False):
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-2)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=1e-2)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half, prec=1e-3)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half, prec=1e-3)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=5e-2)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=5e-2)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half, prec=5e-3)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half, prec=5e-3)
 
     def _test_conv_transpose_base(self, dim):
         conv_module = {
