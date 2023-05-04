@@ -152,6 +152,9 @@ class ReadWrites:
             self.var_ranges,
         )
 
+    def reads_and_writes(self):
+        return itertools.chain(self.reads, self.writes)
+
 
 class _RecordLoadStoreInner(V.MockHandler):
     def __init__(self, var_ranges: VarRanges, normalize: bool):
