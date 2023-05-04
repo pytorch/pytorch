@@ -72,6 +72,7 @@ force_contiguous_inputs = os.environ.get("TORCHINDUCTOR_FORCE_CONTIGUOUS_INPUTS"
 fallback_batchnorm = os.environ.get("TORCHINDUCTOR_FALLBACK_BATCH_NROM", "1") == "1"
 
 force_mix_layout = os.environ.get("TORCHINDUCTOR_FORCE_MIX_LAYOUT", "0") == "1"
+verify_uniform_layouts = os.environ.get("TORCHINDUCTOR_VERIFY_UNIFORM_LAYOUTS", "0") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have

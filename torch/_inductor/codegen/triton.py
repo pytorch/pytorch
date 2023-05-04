@@ -1891,8 +1891,13 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
-
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+
+        def verify_uniform_layouts():
+            breakpoint()
+   
+        if config.verify_uniform_layouts:
+            verify_uniform_layouts()
 
         if config.generate_intermediate_hooks:
             for node in node_schedule:
