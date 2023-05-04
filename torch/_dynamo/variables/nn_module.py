@@ -374,7 +374,7 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
 
-        if name == "_call_impl":
+        if name in ["_call_impl", "_wrapped_call_impl"]:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
@@ -694,7 +694,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
-        else:
+        else:   
             source = None
 
         return variables.UserFunctionVariable(
