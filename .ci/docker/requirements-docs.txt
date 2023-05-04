@@ -18,7 +18,7 @@ tensorboard==2.10.0
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 2.10.0
 
-breathe==4.25.0
+breathe==4.15.0
 #Description: This is used to generate PyTorch C++ docs
 #Pinned versions: 4.25.0
 
@@ -38,7 +38,7 @@ IPython==8.12.0
 #Description: This is used to generate PyTorch functorch docs
 #Pinned versions: 8.12.0
 
-myst-nb==0.13.2
+myst-nb==0.17.2
 #Description: This is used to generate PyTorch functorch docs
 #Pinned versions: 0.13.2
 
