@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import logging
 import typing
-from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -31,44 +31,6 @@ class MemoryDep(typing.NamedTuple):
     def broadcast_extend_sizes(self, extra_sizes: List[sympy.Expr]) -> "MemoryDep":
         size = (*self.size, *[x for x in extra_sizes if x != 1])
         return MemoryDep(self.name, self.index, size)
-
-    def maybe_swap_sizes(self) -> "MemoryDep":
-        # swap only in simple cases where index is trivial and
-        # there are just 2 sizes
-        if (
-            len(self.size) == 2
-            and len(self.index.args) == 0
-            and cast(sympy.Symbol, self.index).name == canonicalization_prefix() + "0"
-        ):
-            c = canonicalization_prefix()
-            size = (self.size[1], self.size[0])
-            s0 = sympy_symbol(c + "0")
-            s1 = sympy_symbol(c + "1")
-            index = sympy_subs(self.index, {s0: s1})
-            return MemoryDep(self.name, index, size)
-        else:
-            return self
-
-    def strip_last_size(self) -> "MemoryDep":
-        nsizes = len(self.size)
-        if not (nsizes >= 1 and len(self.index.args) <= nsizes - 1):
-            return self
-        # make sure last dim index is not used
-        prefix = canonicalization_prefix()
-        len_prefix = len(prefix)
-        prefixes = [
-            fs.name[:len_prefix]
-            for fs in cast(Set[sympy.Symbol], self.index.free_symbols)
-        ]
-        assert (
-            len(prefixes) == 0 or prefix in prefixes
-        ), "index expression should contain canonicalized symbols"
-        last_index = f"{prefix}{len(self.size)-1}"
-        if last_index not in self.index.free_symbols:
-            size = self.size[:-1]
-            return MemoryDep(self.name, self.index, size)
-        else:
-            return self
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -203,15 +165,26 @@ class _RecordLoadStoreInner(V.MockHandler):
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:
-        sizes = list(self._var_ranges.values())
-        sizes = [V.graph.sizevars.simplify(x) for x in sizes]
         if not self._normalize:
-            return index, tuple([x for x in sizes if x != 1])
+            sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
+            var_names = tuple(
+                k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
+            )
+            sizes = tuple(v for v in sizes if v != 1)
+            return index, sizes
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
-        index_vars = list(self._var_ranges.keys())
+        free_symbols = index.free_symbols
+        var_ranges = {
+            k: V.graph.sizevars.simplify(v)
+            for k, v in self._var_ranges.items()
+            # TODO(jansel): explore this further normalization
+            # if k in free_symbols
+        }
+        index_vars = [*var_ranges.keys()]
+        sizes = [*var_ranges.values()]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -220,10 +193,18 @@ class _RecordLoadStoreInner(V.MockHandler):
 
         # assign new variables each dimension to deal with numbering mismatches
         # d0, d1, d2 could become d0, d2 -- which won't match d0, d1
-        _, add_var = var_builder(canonicalization_prefix())
+        new_vars, add_var = var_builder(canonicalization_prefix())
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
-
         index = sympy_subs(sympy.expand(index), replacement)
+
+        new_vars = [*new_vars.keys()]
+        new_sizes = [*new_sizes]
+        free_symbols = index.free_symbols
+        while new_vars and new_vars[-1] not in free_symbols:
+            # Reduction has last (reduced) dim in its sizes, but
+            # downstream users won't.  Normalize this away.
+            new_vars.pop()
+            new_sizes.pop()
         return index, tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
