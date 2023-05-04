@@ -1071,6 +1071,10 @@ def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # Custom fallback lowering
+    if node.target is aten.view_as_complex.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1231,14 +1235,14 @@ def make_rand(fn_name):
     def rand_or_randn(
         *size,
         dtype=None,
-        layout=0,
+        layout=None,
         device=None,
         pin_memory=False,
         memory_format=None,
     ):
         warn_triton_random()
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1411,6 +1415,8 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_bilinear2d_backward, require_dense)
+
+make_fallback(aten.view_as_complex.default, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
@@ -1827,13 +1833,13 @@ def tensor_constructor(fill_value):
         names=None,
         dtype=None,
         device=None,
-        layout=0,
+        layout=None,
         pin_memory=False,
         memory_format=None,
     ):
         assert names is None
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1871,10 +1877,10 @@ def create_tensor_like(creation_fn):
     """
 
     def _constant_like(
-        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+        x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1905,7 +1911,7 @@ def new_constant(fill_value):
     ):
         assert isinstance(size, (list, type))
         assert not pin_memory
-        assert not layout or layout == torch.strided
+        assert layout in (None, torch.strided)
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -1932,7 +1938,7 @@ def empty_strided(
     assert isinstance(size, (list, type))
     assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
-    assert not layout or layout == torch.strided
+    assert layout in (None, torch.strided)
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
@@ -3014,10 +3020,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3027,11 +3033,15 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
+                        ops.int_minimum(
+                            ph, ops.sub(phend, ops.constant(1, torch.int32))
+                        ),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
+                        ops.int_minimum(
+                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
+                        ),
                         indices_size[-1],
                     ),
                 ]
@@ -3418,18 +3428,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.minimum(
+        hend = ops.int_minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.minimum(
+        wend = ops.int_minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3446,10 +3456,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3467,13 +3477,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.minimum(
+                                ops.int_minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
