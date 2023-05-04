@@ -151,6 +151,7 @@ class TritonTemplateKernel(TritonKernel):
                 "import triton",
                 "from torch._inductor.triton_heuristics import template",
                 "from torch._inductor.utils import instance_descriptor",
+                "from torch._inductor import triton_helpers",
                 "",
                 self.jit_line(),
                 f"def {self.kernel_name}({', '.join(arg_defs)}):",
@@ -739,7 +740,7 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
-            choices[0].name,
+            name,
             repr([self.key_of(x) for x in input_nodes]),
             autotune,
         )
@@ -786,7 +787,7 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
@@ -895,7 +896,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-autotune_select_algorithm = AlgorithmSelectorCache()
+_ALGORITHM_SELECTOR_CACHE = None
+
+
+def autotune_select_algorithm(*args, **kwargs):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
 def realize_inputs(*args):

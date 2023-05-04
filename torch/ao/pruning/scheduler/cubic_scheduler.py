@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import warnings
-from .base_scheduler import BaseScheduler
 
+from .base_scheduler import BaseScheduler
 
 __all__ = ["CubicSL"]
 
@@ -24,7 +24,7 @@ class CubicSL(BaseScheduler):
     happens. By default,
 
     Args:
-        sparsifier (BasePruner): Wrapped pruner.
+        sparsifier (BaseSparsifier): Wrapped sparsifier.
         init_sl (int, list): Initial level of sparsity
         init_t (int, list): Initial step, when pruning starts
         delta_t (int, list): Pruning frequency

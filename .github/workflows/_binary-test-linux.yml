@@ -128,7 +128,7 @@ jobs:
           github-secret: ${{ secrets.github-token }}
         # Setup the environment
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

@@ -584,3 +584,13 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         inputs[1].setType(inputs[1].type().with_sizes([8,]))
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         self.assertEqual(next(foo.graph.outputs()).type().sizes(), [8,])
+
+    def test_squeeze_dims(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.ops.aten.squeeze(x, dim=0)
+
+        input = next(foo.graph.inputs())
+        input.setType(input.type().with_sizes([1, 5, 8]))
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        self.assertEqual(next(foo.graph.outputs()).type().symbolic_sizes(), [5, 8])
