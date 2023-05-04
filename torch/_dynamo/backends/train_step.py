@@ -1,4 +1,5 @@
 import builtins
+import itertools
 import logging
 from typing import Callable, Dict, List, Optional, Union
 
@@ -110,10 +111,7 @@ def _train_step_compiler(backend_compile_fn):
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
-        params = {
-            **dict(mod.named_parameters()),
-            **dict(mod.named_buffers()),
-        }
+        params = dict(itertools.chain(mod.named_parameters(), mod.named_buffers()))
         params_flat, params_spec = pytree.tree_flatten(params)
         params_len = len(params_flat)
         fake_params_flat = fakeify_inputs(params_flat)
@@ -132,7 +130,7 @@ def _train_step_compiler(backend_compile_fn):
                 out = mod(*_user_args, **kwargs)
 
             if not isinstance(out, (tuple, list)):
-                raise RuntimeError(
+                raise TypeError(
                     "Graph output must be a tuple() to avoid pytree processing of the ouputs."
                 )
             return out
