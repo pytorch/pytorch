@@ -3383,6 +3383,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    @slowTest
     def test_batch_norm_impl_index_correctness(self):
         with torch.backends.cudnn.flags(enabled=True):
             batch = [2, 7, 16]

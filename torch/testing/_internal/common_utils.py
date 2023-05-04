@@ -1388,9 +1388,12 @@ def slowTest(fn):
     return wrapper
 
 
-def slowAwareTest(fn):
-    fn.__dict__['slow_test'] = True
-    return fn
+def slowTestIf(condition=True):
+    def dec(fn):
+        if condition:
+            return slowTest(fn)
+        return fn
+    return dec
 
 
 def skipCUDAMemoryLeakCheckIf(condition):
