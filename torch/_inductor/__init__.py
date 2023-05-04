@@ -50,7 +50,7 @@ def aot_compile(
         example_inputs,
         config_patches=options,
     )()
-    lib_path = result[0] if isinstance(result, tuple) else result
+    lib_path = result[0] if isinstance(result, (list, tuple)) else result
     return lib_path
 
 
