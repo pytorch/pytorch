@@ -1569,8 +1569,12 @@ make_fallback(aten.exponential.default, warn=False)
 
 @register_lowering(aten.copy)
 def copy(self, src, non_blocking=False):
-    assert self.get_dtype() == src.get_dtype()
-    assert self.get_device() == src.get_device()
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() == src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
     # TODO: respect storage offset?
     if self.get_size() != src.get_size():
         out = expand(src, self.get_size())
