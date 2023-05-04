@@ -547,7 +547,7 @@ class TestProfilerTree(TestCase):
                   <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                   test_profiler_tree.py(...): forward
                     nn.Module: ReLU_0
-                    <built-in function getattr>
+                      <built-in function getattr>
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                         torch/nn/modules/activation.py(...): forward
