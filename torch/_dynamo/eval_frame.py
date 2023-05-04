@@ -24,6 +24,7 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
+from torch._dynamo.backends.is_train_step import _is_train_step_compiler
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -531,17 +532,17 @@ def optimize(
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
 
-    backend = get_compiler_fn(backend)
+    if _is_train_step_compiler(backend):
+        assert nopython, "nopython should be set whenever using train_step compile"
+    else:
+        # TODO(whc) the debug wrapper screws up `_is_train_step_compiler` logic, and hasn't been tested anyway.
+        backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     if nopython:
-        return optimize_assert(
-            backend,
-            dynamic=dynamic,
-            hooks=hooks,
-        )
+        return optimize_assert(backend, dynamic=dynamic, hooks=hooks)
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
         hooks,
@@ -1056,14 +1057,17 @@ def optimize_assert(
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
-    backend = get_compiler_fn(backend)
+    if not _is_train_step_compiler(backend):
+        backend = get_compiler_fn(backend)
 
     # Find if backend has any extra context manager
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend, export=export, export_constraints=export_constraints
+            backend,
+            export=export,
+            export_constraints=export_constraints,
         ),
         hooks,
         backend_ctx_ctor,

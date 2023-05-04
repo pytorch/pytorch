@@ -32,6 +32,7 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
+from .backends.is_train_step import _is_train_step_compiler
 from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
 from .bytecode_transformation import (
     cleaned_instructions,
@@ -1946,6 +1947,9 @@ class InstructionTranslator(InstructionTranslatorBase):
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
         with tracing(self.output.tracing_context):
+            if _is_train_step_compiler(compiler_fn):
+                TracingContext.trace_train_step()
+
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_contents = mutated_closure_cell_contents

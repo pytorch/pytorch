@@ -125,6 +125,7 @@ logger = logging.getLogger(__name__)
 global _c10d_error_logger
 _c10d_error_logger = _get_or_create_logger()
 
+
 def exception_handler(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -4115,3 +4116,34 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     if tag.startswith("user:"):
         tag = tag[5:]
     return tag
+
+
+# This ops are not friently to TorchDynamo. So, we decide to disallow these ops
+# in FX graph, allowing them to run them on eager, with torch.compile.
+dynamo_unsupported_distributed_c10d_ops = [
+    all_reduce_multigpu,
+    recv,
+    all_gather_object,
+    all_gather_coalesced,
+    all_to_all_single,
+    all_reduce,
+    gather_object,
+    all_to_all,
+    all_reduce_coalesced,
+    gather,
+    broadcast_object_list,
+    barrier,
+    reduce_multigpu,
+    scatter,
+    scatter_object_list,
+    reduce,
+    reduce_scatter_multigpu,
+    all_gather,
+    broadcast_multigpu,
+    all_gather_multigpu,
+    reduce_scatter,
+    all_gather_into_tensor,
+    broadcast,
+    reduce_scatter_tensor,
+    send,
+]

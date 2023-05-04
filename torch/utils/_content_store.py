@@ -120,7 +120,6 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         if pad > 0:
             x = F.pad(x, (0, pad), "constant", 0)
         x = x.view(torch.int32)
-        torch._dynamo.mark_dynamic(x, 0)
         # We run the 32-bit hash five times with differing parameters to
         # reduce chance of collision
         ITER = 5

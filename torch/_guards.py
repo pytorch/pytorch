@@ -8,7 +8,19 @@ import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    TypeVar,
+)
+
+import torch
 
 log = logging.getLogger(__name__)
 
@@ -297,6 +309,41 @@ class GuardsCheckpointState:
         return self.diff(other) is None
 
 
+class ModuleContextCheckpointState:
+    nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def __init__(self, nn_modules):
+        self.nn_modules = nn_modules
+
+    """
+    Produces a delta against another ModuleContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    module key names.
+    """
+
+    def diff(self, other):
+        r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
+    def __init__(self):
+        self.nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def copy_graphstate(self):
+        return ModuleContextCheckpointState(dict(self.nn_modules))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, ModuleContextCheckpointState)
+        self.nn_modules = state.nn_modules
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -347,15 +394,30 @@ class TracingContext:
     will return None.
     """
 
+    class TrainStepContext:
+        """
+        Tracks state across dynamo tracing and train-step compiler,
+        mostly to enforce safety invariants.
+        """
+
+        def __init__(self):
+            # only support one backward call
+            self.backward_called = False
+            # ensure all stepped optimizers also get zero_grad'd
+            self.optimizers_zeroed_grad = set()
+            self.optimizers_stepped = set()
+
     @staticmethod
     def get() -> Optional["TracingContext"]:
         return _CURRENT_TRACING_CONTEXT
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.module_context = ModuleContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
+        self.trainstep: Optional[TracingContext.TrainStepContext] = None
 
     @staticmethod
     def extract_stack():
@@ -401,6 +463,31 @@ class TracingContext:
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
         tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+
+    @staticmethod
+    def trace_train_step():
+        """
+        Mark that we're tracing a train step (no going back).
+        """
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "trace_train_step() must be called within an ongoing trace."
+        tc.trainstep = TracingContext.TrainStepContext()
+
+    @staticmethod
+    def train_step_context(assert_if_missing=False):
+        """
+        Get the train step context if active, or None. Optionally, assert.
+        """
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "train_step_context() must be called within an ongoing trace."
+        if assert_if_missing:
+            assert tc.trainstep, "Expected an active train_step context but found none"
+
+        return tc.trainstep
 
 
 """
