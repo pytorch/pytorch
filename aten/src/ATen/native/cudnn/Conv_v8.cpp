@@ -359,7 +359,7 @@ bool plan_errata_exception(const cudnnHandle_t handle, const std::string & execu
   if (!has_json) {
     return false;
   } else {
-    return cudnn_frontend::check_errata_with_opgraph(errata_json_handle, executionPlanTag, handle, opGraph, [](){return true;});
+    return cudnn_frontend::check_errata(errata_json_handle, executionPlanTag, handle, opGraph, [](){return true;});
   }
 }
 
@@ -463,7 +463,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
 }
 
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
-auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, cudnn_frontend::OperationGraph& opGraph, const Tensor& x, const bool deterministic, const bool allow_tf32) {
+auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, cudnn_frontend::OperationGraph& opGraph, const Tensor& x, const bool deterministic, const bool allow_tf32, const bool fallback) {
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, heuristic_mode, !fallback, fallback);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
@@ -471,7 +471,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
   return configs;
 }
 
-auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, const Tensor& x, const bool deterministic, const bool allow_tf32) {
+auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, const Tensor& x, const bool deterministic, const bool allow_tf32, const bool fallback) {
   auto heuristic_mode = at::native::cudnnv8_use_heur_mode_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, x, deterministic, allow_tf32, heuristic_mode, !fallback, fallback);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
