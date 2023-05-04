@@ -359,88 +359,43 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   auto input_ = input;
   auto hx_prev = hx_;
   auto cx_prev = cx_tmp;
+  Tensor hx, cx;
+
   std::vector<std::tuple<Tensor, Tensor, Tensor, Tensor>> layer_gates(rnn.seq_length);
-  std::vector<std::tuple<Tensor, Tensor>> layer_states(rnn.seq_length);
-  for (int seq = 0; seq < rnn.seq_length; seq++) {
-    auto hx = hx_prev;
-    auto cx = cx_prev;
-    auto gate = at::linear(input_[seq], weight0, bias_ih).add_(at::linear(hx, weight1, bias_hh));
+  std::vector<std::tuple<Tensor, Tensor>> layer_states(rnn.seq_length + 1);
+  layer_states[0] = std::make_tuple(hx_, cx_tmp);
+  for (int seq = 1; seq < rnn.seq_length + 1; seq++) {
+    hx = hx_prev;
+    cx = cx_prev;
+    int x_index = reverse ? rnn.seq_length - seq : seq - 1;
+    auto gate = at::linear(input_[x_index], weight0, bias_ih).add_(at::linear(hx, weight1, bias_hh));
     auto chunked_gates = gate.unsafe_chunk(4, 1);
     auto i = chunked_gates[0].sigmoid_();
     auto f = chunked_gates[1].sigmoid_();
     auto g = chunked_gates[2].tanh_();
     auto o = chunked_gates[3].sigmoid_();
-    layer_gates[seq] = std::make_tuple(i, f, g, o);
-    auto cy = (f * cx).add_(i * g);
+    layer_gates[x_index] = std::make_tuple(i, f, g, o);
+    auto cy = (f * cx).add(i * g);
     auto hy = o * cy.tanh();
     layer_states[seq] = std::make_tuple(hy, cy);
     hx_prev = hy;
     cx_prev = cy;
   }
-  
 
-  // const auto gates0 = at::linear(input_[0], weight0, bias_ih).add_(at::linear(hx0, weight1, bias_hh));
-  // auto chunked_gates0 = gates0.unsafe_chunk(4, 1);
-  // auto i0 = chunked_gates0[0].sigmoid_();
-  // auto f0 = chunked_gates0[1].sigmoid_();
-  // auto g0 = chunked_gates0[2].tanh_();
-  // auto o0 = chunked_gates0[3].sigmoid_();
-  // auto cx1 = (f0 * cx_tmp).add_(i0 * g0);
-  // auto hx1 = o0 * cx1.tanh();
-
-  // const auto gates1 = at::linear(input_[1], weight0, bias_ih).add_(at::linear(hx1, weight1, bias_hh));
-  // auto chunked_gates1 = gates1.unsafe_chunk(4, 1);
-  // auto i1 = chunked_gates1[0].sigmoid_();
-  // auto f1 = chunked_gates1[1].sigmoid_();
-  // auto g1 = chunked_gates1[2].tanh_();
-  // auto o1 = chunked_gates1[3].sigmoid_();
-  // auto cx2 = (f1 * cx1).add_(i1 * g1);
-  // auto hx2 = o1 * cx2.tanh();
-
-  // const auto gates2 = at::linear(input_[2], weight0, bias_ih).add_(at::linear(hx2, weight1, bias_hh));
-  // auto chunked_gates2 = gates2.unsafe_chunk(4, 1);
-  // auto i2 = chunked_gates2[0].sigmoid_();
-  // auto f2 = chunked_gates2[1].sigmoid_();
-  // auto g2 = chunked_gates2[2].tanh_();
-  // auto o2 = chunked_gates2[3].sigmoid_();
-  // auto cx3 = (f2 * cx2).add_(i2 * g2);
-  // auto hx3 = o2 * cx3.tanh();
-
-  // auto cy0 = f0 * cx_tmp + i0 * g0;
-  // auto cy1 = f1 * cy0 + i1 * g1;
-  // auto cy2 = f2 * cy1 + i2 * g2;
-  // auto hy0 = hx1;
-  // auto hy1 = hx2;
-  // auto hy2 = hx3;
   Tensor dx, dWx, dWh, db, db_, dprev_h, dprev_c, dWh_, dWx_;
   Tensor new_grad_hy, d1, dgp, dip, dfp, dop, do_, dg, df, di, da;
   std::vector<at::Tensor> layer_dx(rnn.seq_length);
-  // for (int seq = rnn.seq_length - 1; seq >= 0; seq--) {
-  // input_ = input_[seq];
-  // hx = hx[seq];
-  // cy = cy[seq];
-  // auto gates = at::linear(input_, weight0, bias_ih).add_(at::linear(hx, weight1, bias_hh));
-  // auto chunked_gates = gates.unsafe_chunk(4, 1);
-  // auto i = chunked_gates[0].sigmoid_();
-  // auto f = chunked_gates[1].sigmoid_();
-  // auto g = chunked_gates[2].tanh_();
-  // auto o = chunked_gates[3].sigmoid_();
   for (int seq = rnn.seq_length - 1; seq >=0; seq--) {
-    auto i = std::get<0>(layer_gates[seq]);
-    auto f = std::get<1>(layer_gates[seq]);
-    auto g = std::get<2>(layer_gates[seq]);
-    auto o = std::get<3>(layer_gates[seq]);
-    auto hy = std::get<0>(layer_states[seq]);
-    auto cy = std::get<1>(layer_states[seq]);
-    Tensor hx, cx;
-    if (seq != 0) {
-      hx = std::get<0>(layer_states[seq - 1]);
-      cx = std::get<1>(layer_states[seq - 1]);
-    } else {
-      hx = hx_;
-      cx = cx_tmp;
-    }
-    new_grad_hy = grad_output[seq].add(grad_hy);
+    int x_index = reverse ? rnn.seq_length - seq - 1 : seq;
+    auto i = std::get<0>(layer_gates[x_index]);
+    auto f = std::get<1>(layer_gates[x_index]);
+    auto g = std::get<2>(layer_gates[x_index]);
+    auto o = std::get<3>(layer_gates[x_index]);
+    auto hy = std::get<0>(layer_states[seq + 1]);
+    auto cy = std::get<1>(layer_states[seq + 1]);
+    auto hx = std::get<0>(layer_states[seq]);
+    auto cx = std::get<1>(layer_states[seq]);
+    new_grad_hy = grad_output[x_index].add(grad_hy);
     d1 = grad_cy.add(new_grad_hy * o * (1 - cy.tanh() * cy.tanh()));
     dgp = d1 * i;
     dip = d1 * g;
@@ -456,7 +411,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     dx = at::matmul(da, weight0);
     dx = at::unsqueeze(dx, 0);
     dprev_h = at::matmul(da, weight1);
-    dWx_ = at::matmul(da.transpose(0, 1), input_[seq]);
+    dWx_ = at::matmul(da.transpose(0, 1), input_[x_index]);
     dWh_ = at::matmul(da.transpose(0, 1), hx);
     if (seq == rnn.seq_length - 1) {
       db = db_;
@@ -467,61 +422,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       dWx += dWx_;
       dWh += dWh_;
     }
-    layer_dx[seq] = dx;
+    layer_dx[x_index] = dx;
     grad_hy = dprev_h;
     grad_cy = dprev_c;
-
-    // new_grad_hy = grad_output[1].add(dprev_h);
-    // d1 = dprev_c.add(new_grad_hy * o1 * (1 - cy1.tanh() * cy1.tanh()));
-    // dgp = d1 * i1;
-    // dip = d1 * g1;
-    // dprev_c = d1 * f1;
-    // dfp = d1 * cy0;
-    // dop = new_grad_hy * cy1.tanh();
-    // do_ = dop * o1 * (1 - o1);
-    // dg = dgp * (1 - g1 * g1);
-    // df = dfp * f1 * (1 - f1);
-    // di = dip * i1 * (1 - i1);
-    // da = at::cat({di, df, dg, do_}, 1);
-    // db_ = at::sum(da, 0);
-    // db += db_;
-    // dx = at::matmul(da, weight0);
-    // dx = at::unsqueeze(dx, 0);
-    // dprev_h = at::matmul(da, weight1);
-    // dWx_ = at::matmul(da.transpose(0, 1), input_[1]);
-    // dWx += dWx_;
-    // dWh_ = at::matmul(da.transpose(0, 1), hy0);
-    // dWh += dWh_;
-    // layer_dx[1] = dx;
-
-    // new_grad_hy = grad_output[0].add(dprev_h);
-    // d1 = dprev_c.add(new_grad_hy * o0 * (1 - cy0.tanh() * cy0.tanh()));
-    // dgp = d1 * i0;
-    // dip = d1 * g0;
-    // dprev_c = d1 * f0;
-    // dfp = d1 * cx_tmp;
-    // dop = new_grad_hy * cy0.tanh();
-    // do_ = dop * o0 * (1 - o0);
-    // dg = dgp * (1 - g0 * g0);
-    // df = dfp * f0 * (1 - f0);
-    // di = dip * i0 * (1 - i0);
-    // da = at::cat({di, df, dg, do_}, 1);
-    // db_ = at::sum(da, 0);
-    // db += db_;
-    // dx = at::matmul(da, weight0);
-    // dx = at::unsqueeze(dx, 0);
-    // dprev_h = at::matmul(da, weight1);
-    // dWx_ = at::matmul(da.transpose(0, 1), input_[0]);
-    // dWx += dWx_;
-    // dWh_ = at::matmul(da.transpose(0, 1), hx);
-    // dWh += dWh_;
-    // layer_dx[0] = dx;
   }
 
   auto cat_layer_dx = at::cat(layer_dx, 0);
-  // }
   return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
-
 
   // const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
   // const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
