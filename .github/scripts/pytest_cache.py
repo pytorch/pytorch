@@ -44,9 +44,8 @@ def main():
 
         # verify the cache dir exists
         if not os.path.exists(args.cache_dir):
-            print(
-                f"The given pytest cache dir `{args.cache_dir}` does not exist. Skipping upload"
-            )
+            print(f"The pytest cache dir `{args.cache_dir}` does not exist. Skipping upload")
+            return
 
         # TODO: First check if it's even worth uploading a new cache:
         #    Does the cache even mark any failed tests?
