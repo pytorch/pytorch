@@ -29,8 +29,8 @@ def register_debug_prims():
     @custom_op("debugprims::load_tensor")
     def load_tensor(
         name: str,
-        sizes: Tuple[int, ...],
-        strides: Tuple[int, ...],
+        size: Tuple[int, ...],
+        stride: Tuple[int, ...],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -38,11 +38,11 @@ def register_debug_prims():
         ...
 
     @load_tensor.impl_factory()
-    def load_tensor_factory(name, sizes, strides, dtype, device):
+    def load_tensor_factory(name, size, stride, dtype, device):
         if LOAD_TENSOR_READER is None:
             from torch._dynamo.testing import rand_strided
 
-            return rand_strided(sizes, strides, dtype, device)
+            return rand_strided(size, stride, dtype, device)
         else:
             from torch._dynamo.utils import clone_input
 
