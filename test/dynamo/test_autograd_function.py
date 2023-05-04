@@ -1,11 +1,12 @@
 # Owner(s): ["module: dynamo"]
-from unittest.mock import patch
+
+import math
 
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import math
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
@@ -85,6 +86,7 @@ class Module6(torch.nn.Module):
     def forward(self, foo):
         return self.fn(foo)
 
+
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
     def test_autograd_function_equivalence(self):
@@ -93,7 +95,10 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                 model = globals()[f"Module{i}"]()
                 opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
                 self.assertTrue(
-                    torch.allclose(opt_model(torch.ones(2, 3, requires_grad=grad)), torch.tensor([2.0], requires_grad=grad))
+                    torch.allclose(
+                        opt_model(torch.ones(2, 3, requires_grad=grad)),
+                        torch.tensor([2.0], requires_grad=grad),
+                    )
                 )
 
     def test_autograd_function_has_graph_break(self):
@@ -108,4 +113,3 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     res = opt_model(x)
                     self.assertTrue(torch.allclose(ref, res))
                 self.assertEqual(cnts.frame_count, 1 if grad else 2)
-            

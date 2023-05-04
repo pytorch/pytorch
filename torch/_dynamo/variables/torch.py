@@ -798,13 +798,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 def is_fn_safe_to_run(tx, f, sub_args):
     # Snapshot state
     graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
+
+    pre_side_effects = tx.output.side_effects.clone()
     # Will raise if not sound
     output, graph, lifted_freevars = speculate_subgraph(
         tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True
     )
     # If we got here, we are probably sound, but we do not support freevars yet, so lets call cases where we found them
     # unsafe.
-    if lifted_freevars:
+    post_side_effects = tx.output.side_effects
+    if lifted_freevars or post_side_effects.diff(pre_side_effects):
         return False
     return True
 
@@ -858,10 +861,6 @@ def speculate_subgraph(
 
             graph = tx.output.graph
             lifted_freevars = tracer.lifted_freevars
-
-            if always_restore:
-                tx.output.graph = graph_checkpoint
-                tx.restore_graphstate(checkpoint)
 
             return (
                 output,
@@ -967,7 +966,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         f"at {code.co_filename}:{code.co_firstlineno} because "
                         f"it closes over variables {closure_vars}. Please rewrite "
                         f"'{code.co_name}' to take {closure_vars} as additional args.",
-                        ref_case_id=26,
+                        case_name="cond_closed_over_variable",
                     )
 
             # Setup the subgraph we're going to capture into

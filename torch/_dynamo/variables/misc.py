@@ -265,7 +265,6 @@ class AutogradFunctionVariable(VariableTracker):
                 unimplemented("Unsafe bwd in autograd.function")
 
             # If fwd and backward are sound, we want apply in the graph.
-            # We do not want forward, because doing so messes with the versioning of tensors for grad in bwd.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
             return TorchHigherOrderOperator(trampoline_autograd_apply).call_function(
