@@ -184,7 +184,7 @@ except ImportError:
 #     - @deviceCountAtLeast(<minimum number of devices to run test with>)
 #         Passes a list of strings representing all available devices of
 #         the test class's device type as the test template's "device" argument.
-#         If there are a fewer devices than the value passed to the decorator
+#         If there are fewer devices than the value passed to the decorator
 #         the test is skipped.
 #     - @dtypes(<list of tuples of dtypes>)
 #         In addition to accepting multiple dtypes, the @dtypes decorator
@@ -426,7 +426,7 @@ class DeviceTypeTestBase(TestCase):
             yield (test, '', {}, lambda _: [])
 
         # Parametrization decorators set the parametrize_fn attribute on the test.
-        parametrize_fn = test.parametrize_fn if hasattr(test, 'parametrize_fn') else default_parametrize_fn
+        parametrize_fn = getattr(test, "parametrize_fn", default_parametrize_fn)
 
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
@@ -1280,10 +1280,26 @@ def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
             version = _get_torch_cuda_version()
-            if version == (0, 0):  # cpu
+            if version == (0, 0):  # cpu or rocm
                 return fn(self, *args, **kwargs)
             if version in (versions or []):
                 reason = "test skipped for CUDA version {0}".format(version)
+                raise unittest.SkipTest(reason)
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+    return dec_fn
+
+# Skips a test for CUDA versions less than specified, given in the form of [major, minor].
+def skipCUDAIfVersionLessThan(versions : Tuple[int, int] = None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            version = _get_torch_cuda_version()
+            if version == (0, 0):  # cpu or rocm
+                return fn(self, *args, **kwargs)
+            if version < versions:
+                reason = "test skipped for CUDA versions < {0}".format(version)
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 
