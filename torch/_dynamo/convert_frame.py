@@ -243,7 +243,10 @@ def convert_frame_assert(
                     f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
                 )
             else:
-                message = f"Recompiling function {code.co_name} in {code.co_filename}"
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message)
