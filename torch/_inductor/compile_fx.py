@@ -561,14 +561,16 @@ def compile_fx_aot(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
-    config_new = deepcopy(config_patches) if config_patches is not None else dict()
-    config_new.update({"cpp_wrapper": True})
-    breakpoint()
+    config_patches = (
+        {"cpp_wrapper": True}
+        if config_patches is None
+        else {**config_patches, "cpp_wrapper": True}
+    )
     return compile_fx(
         model_,
         example_inputs_,
         inner_compile=functools.partial(inner_compile, aot_mode=True),
-        config_patches=config_new,
+        config_patches=config_patches,
     )
 
 
