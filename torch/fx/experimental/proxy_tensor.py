@@ -253,7 +253,9 @@ def inside_mode(proxy_mode):
 
 def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     def can_handle_tensor(x):
-        return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        # TODO: Why do we have to special case detach here?
+        return (type(x) in HANDLED_TYPES and func is not torch.ops.aten.detach.default) \
+            or has_proxy_slot(x, proxy_mode.tracer)
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this

@@ -904,6 +904,9 @@ class FakeTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
         if isinstance(elem, torch._subclasses.FakeTensor):
+            # TODO: This is a hack to make sure that we don't double-wrap
+            #       An alternative is to prevent FakeTensor from being called within
+            #       dispatch when the input is already fake
             self = elem
         else:
             self = torch.Tensor._make_subclass(
@@ -1067,7 +1070,7 @@ class FakeTensor(torch.Tensor):
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
-# memory should not significantly incraese.
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
@@ -1367,7 +1370,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
 
                 x = converter(self, x)
-
+            else:
+                assert x.fake_mode is self, "Mixing fake modes NYI"
             flat_arg_fake_tensors.append(x)
             return x
 
