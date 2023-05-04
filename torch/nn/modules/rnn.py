@@ -209,7 +209,7 @@ class RNNBase(Module):
             init.uniform_(weight, -stdv, stdv)
 
     def check_input(self, input: Tensor, batch_sizes: Optional[Tensor]) -> None:
-        if input.dtype != self._flat_weights[0].dtype and not torch.is_autocast_enabled():
+        if input.dtype != self._flat_weights[0].dtype and (not torch.is_autocast_enabled() and not torch.is_autocast_cpu_enabled()):
             raise ValueError('input must have the type {}, got type {}'.format(
                 self._flat_weights[0].dtype, input.dtype))
         expected_input_dim = 2 if batch_sizes is not None else 3
