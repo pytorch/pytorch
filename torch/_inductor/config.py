@@ -31,7 +31,7 @@ loop_ordering_search_limit = 120
 split_var_ranges = True
 
 # generate inplace computations
-inplace_buffers = False  # https://github.com/openai/triton/issues/1615
+inplace_buffers = True
 
 # allow reusing buffers for more efficient memory use
 allow_buffer_reuse = True
