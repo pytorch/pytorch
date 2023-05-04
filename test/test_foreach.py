@@ -982,7 +982,7 @@ class TestForeach(TestCase):
                 )
 
     @unittest.skipIf(not (torch.cuda.is_available() and torch.cuda.device_count() > 1), "requires multiple GPUs")
-    def test_tensros_grouping(self):
+    def test_tensors_grouping(self):
 
         from collections import defaultdict
         import random

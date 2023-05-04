@@ -32,7 +32,6 @@ def _group_tensors_by_device_and_dtype(
     tensorlistlist: List[List[Optional[Tensor]]],
     with_indices: bool = False,
 ) -> Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Optional[Tensor]]], List[int]]]:
-
     return {
         (device, getattr(torch, str_dtype)): value
         for (device, str_dtype), value in

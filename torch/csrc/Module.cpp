@@ -1722,7 +1722,7 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
-  // FIXME(crcrpar): Better have `at::ScalarType` get mapped to `torch.dtype`
+  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
   // Currently I see the second item of the key is displayed as
   // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
   using _DeviceDtypeKey = std::pair<at::Device, std::string>;
