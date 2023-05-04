@@ -70,7 +70,10 @@ def grid_partitioner(full_grid, max_grid, tensors, tensors_dim_map):
     for grid_point in itertools.product(*generate_grid_points()):
         grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, max_grid)]
         slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
-        yield grid, list(generate_sliced_tensors(slices))
+        # grid_points are iterated in a "contiguous" order, i.e.
+        # left dimensions traversed slower than left dimensions.
+        # This order is reversed for CUDA grids.
+        yield grid[::-1], list(generate_sliced_tensors(slices))
 
 if _has_triton():
     import triton
@@ -337,9 +340,7 @@ if _has_triton():
             (-3, None),
         )
 
-        for grid_reversed, sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensors, tensors_dim_map):
-            # Grid is reversed to iteratate over nnz, then over columns.
-            grid = grid_reversed[::-1]
+        for grid, sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensors, tensors_dim_map):
             _bsr_strided_sparse_rowspace_kernel[grid](
                 *blocksize,
                 *sliced_tensors[:4],
@@ -369,9 +370,7 @@ if _has_triton():
             (0, -3, -4)
         )
 
-        for grid_reversed, sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensors, tensors_dim_map):
-            # Grid is reversed to iteratate over rows, then columns, then batches.
-            grid = grid_reversed[::-1]
+        for grid, sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensors, tensors_dim_map):
             _bsr_strided_dense_rowspace_kernel[grid](
                 *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
