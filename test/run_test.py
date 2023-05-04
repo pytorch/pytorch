@@ -1445,7 +1445,9 @@ def main():
     ]
 
     # Disable most tests for now
-    selected_tests_parallel = [x for x in selected_tests_parallel if x.name == "test_failing_test"]
+    selected_tests_parallel = [
+        x for x in selected_tests_parallel if x.name == "test_failing_test"
+    ]
     selected_tests_serial = []
 
     print_to_stderr(

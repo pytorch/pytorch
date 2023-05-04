@@ -1,14 +1,15 @@
-import os
-import shutil
 import contextlib
 import hashlib
+import os
+import shutil
 
 from s3_upload_utils import *
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "pytest-cache"
-TEMP_DIR = "/tmp" # a backup location in case one isn't provided
+TEMP_DIR = "/tmp"  # a backup location in case one isn't provided
+
 
 # create a custom string type to be used as pr identifiers to know we've gotten the right one
 class PRIdentifier(str):
@@ -17,7 +18,10 @@ class PRIdentifier(str):
         # we hash it to get a clean input and dodge corner cases
         self.value = hashlib.md5(value.encode()).hexdigest()
 
-def get_s3_key_prefix(pr_identifier: PRIdentifier, workflow: str, job: str, shard: str = None):
+
+def get_s3_key_prefix(
+    pr_identifier: PRIdentifier, workflow: str, job: str, shard: str = None
+):
     """
     The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
     For example, it won't include the file extension.
@@ -29,12 +33,21 @@ def get_s3_key_prefix(pr_identifier: PRIdentifier, workflow: str, job: str, shar
 
     return prefix
 
+
 # TODO: After uploading the cache, delete the old S3 uploads so that we don't keep downloading unnecessary files.
 #       Since we want the cache to contain a union of all jobs that failed in this PR, before
 #       uploading the cache we should first combine the resulting pytest cache after tests
 #       with the downloaded/merged cache from before the tests.
 #       However, in the short term the extra donloads are okay since they aren't that big
-def upload_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, shard: str, cache_dir: str, bucket: str=BUCKET, temp_dir: str=TEMP_DIR):
+def upload_pytest_cache(
+    pr_identifier: PRIdentifier,
+    workflow: str,
+    job: str,
+    shard: str,
+    cache_dir: str,
+    bucket: str = BUCKET,
+    temp_dir: str = TEMP_DIR,
+):
     """
     Uploads the pytest cache to S3
     Args:
@@ -43,7 +56,9 @@ def upload_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, sh
     """
 
     if not isinstance(pr_identifier, PRIdentifier):
-        raise ValueError(f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}")
+        raise ValueError(
+            f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}"
+        )
 
     if not bucket:
         bucket = BUCKET
@@ -51,12 +66,14 @@ def upload_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, sh
         temp_dir = TEMP_DIR
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job, shard)
-    zip_file_path_base = f"{temp_dir}/zip-upload/{obj_key_prefix}" # doesn't include the extension
+    zip_file_path_base = (
+        f"{temp_dir}/zip-upload/{obj_key_prefix}"  # doesn't include the extension
+    )
     zip_file_path = ""
 
     try:
         zip_file_path = zip_folder(cache_dir, zip_file_path_base)
-        obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}" # Keep the new file extension
+        obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}"  # Keep the new file extension
         upload_file_to_s3(zip_file_path, bucket, obj_key)
     finally:
         if zip_file_path:
@@ -64,15 +81,24 @@ def upload_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, sh
             with contextlib.suppress(FileNotFoundError):
                 os.remove(zip_file_path)
 
-def download_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, dest_cache_dir: str, bucket: str = BUCKET, temp_dir: str = TEMP_DIR):
 
+def download_pytest_cache(
+    pr_identifier: PRIdentifier,
+    workflow: str,
+    job: str,
+    dest_cache_dir: str,
+    bucket: str = BUCKET,
+    temp_dir: str = TEMP_DIR,
+):
     if not bucket:
         bucket = BUCKET
     if not temp_dir:
         temp_dir = TEMP_DIR
 
     if not isinstance(pr_identifier, PRIdentifier):
-        raise ValueError(f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}")
+        raise ValueError(
+            f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}"
+        )
 
     obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
 
@@ -80,15 +106,25 @@ def download_pytest_cache(pr_identifier: PRIdentifier, workflow: str, job: str, 
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
     try:
         # downloads the cache zips for all shards
-        downloads = download_s3_objects_with_prefix(bucket, obj_key_prefix, zip_download_dir)
+        downloads = download_s3_objects_with_prefix(
+            bucket, obj_key_prefix, zip_download_dir
+        )
 
         for downloaded_zip_path in downloads:
-            shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[0] # the file name of the zip is the shard id
-            cache_dir_for_shard = os.path.join(f"{temp_dir}/unzipped-caches", get_s3_key_prefix(pr_identifier, workflow, job, shard_id), PYTEST_CACHE_DIR_NAME)
+            shard_id = os.path.splitext(os.path.basename(downloaded_zip_path))[
+                0
+            ]  # the file name of the zip is the shard id
+            cache_dir_for_shard = os.path.join(
+                f"{temp_dir}/unzipped-caches",
+                get_s3_key_prefix(pr_identifier, workflow, job, shard_id),
+                PYTEST_CACHE_DIR_NAME,
+            )
 
             try:
                 unzip_folder(downloaded_zip_path, cache_dir_for_shard)
-                print(f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}")
+                print(
+                    f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}"
+                )
                 merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
             finally:
                 # clean up the unzipped cache folder
@@ -112,16 +148,21 @@ def merge_pytest_caches(pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merg
         relative_path = os.path.relpath(root, pytest_cache_dir_to_merge_from)
 
         for file in files:
-            if relative_path == "v/cache" and file == 'lastfailed':
-                continue # We'll merge this later
+            if relative_path == "v/cache" and file == "lastfailed":
+                continue  # We'll merge this later
 
             # Since these files are static, only copy them if they don't already exist in the new cache
-            to_file_path = os.path.join(pytest_cache_dir_to_merge_into, relative_path, file)
+            to_file_path = os.path.join(
+                pytest_cache_dir_to_merge_into, relative_path, file
+            )
             if not os.path.exists(to_file_path):
                 from_file_path = os.path.join(root, file)
                 copy_file(from_file_path, to_file_path)
 
-    merge_lastfailed_files(pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into)
+    merge_lastfailed_files(
+        pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
+    )
+
 
 def merge_lastfailed_files(source_pytest_cache, dest_pytest_cache):
     # Simple cases where one of the files doesn't exist
@@ -143,6 +184,7 @@ def merge_lastfailed_files(source_pytest_cache, dest_pytest_cache):
     # Save the results
     write_json_file(dest_lastfailed_file, merged_content)
 
+
 def merged_lastfailed_content(from_lastfailed, to_lastfailed):
     """
     The lastfailed files are dictionaries where the key is the test identifier.
@@ -163,10 +205,13 @@ def merged_lastfailed_content(from_lastfailed, to_lastfailed):
     return to_lastfailed
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     download_s3_objects_with_prefix(BUCKET, "zipped_file/ff", "downloaded_files")
 
-    unzip_folder("downloaded_files/zipped_file/ffzsome-job-btest-files.zip", "/Users/zainr/deleteme/ffunzip")
+    unzip_folder(
+        "downloaded_files/zipped_file/ffzsome-job-btest-files.zip",
+        "/Users/zainr/deleteme/ffunzip",
+    )
 
     pr_identifier = PRIdentifier("read-deal")
     print(pr_identifier)

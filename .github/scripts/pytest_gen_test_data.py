@@ -1,18 +1,18 @@
+import contextlib
 import os
 import shutil
-import contextlib
 
 from s3_upload_utils import *
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "pytest_cache"
-TEMP_DIR = "/tmp" # a backup location in case one isn't provided
+TEMP_DIR = "/tmp"  # a backup location in case one isn't provided
 
 
 def create_test_files_in_folder(pytest_cache_dir):
-    import random
     import os
+    import random
 
     # delete anything currently in pytest_cache_dir
     if os.path.exists(pytest_cache_dir):
@@ -28,7 +28,7 @@ def create_test_files_in_folder(pytest_cache_dir):
     # random integer from 100 to 300
     data_id = random.randint(100, 300)
 
-    for test_num in range(10): # number of tests to fail
+    for test_num in range(10):  # number of tests to fail
         test_name = f"test_id_{data_id}__failes_num_{test_num}"
         failed_tests[test_name] = True
 
@@ -54,16 +54,16 @@ def create_test_files_in_folder(pytest_cache_dir):
             continue
 
         file_path = os.path.join(pytest_cache_dir, file_name)
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             f.write(f"This is a test file from generateion {data_id}")
         print("Created file {}".format(file_path))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     folder = f"/Users/zainr/deleteme/test-files"
     subfolder = f"{folder}/fake_pytest_cache"
     create_test_files_in_folder(subfolder)
     create_test_files_in_folder(subfolder + "2")
-
 
     # download_s3_objects_with_prefix(BUCKET, "zipped_file/ff", "downloaded_files")
 

@@ -1,8 +1,9 @@
-import boto3
-import os
 import json
+import os
 import re
 import shutil
+import boto3
+
 
 def zip_folder(folder_to_zip, dest_file_base_name):
     """
@@ -15,7 +16,7 @@ def zip_folder(folder_to_zip, dest_file_base_name):
     ensure_dir_exists(os.path.dirname(dest_file_base_name))
 
     print(f"Zipping {folder_to_zip} to {dest_file_base_name}")
-    return shutil.make_archive(dest_file_base_name, 'zip', folder_to_zip)
+    return shutil.make_archive(dest_file_base_name, "zip", folder_to_zip)
 
 
 def unzip_folder(zip_file_path, unzip_to_folder):
@@ -23,7 +24,7 @@ def unzip_folder(zip_file_path, unzip_to_folder):
     Returns the path to the unzipped folder
     """
     print(f"Unzipping {zip_file_path} to {unzip_to_folder}")
-    shutil.unpack_archive(zip_file_path, unzip_to_folder, 'zip')
+    shutil.unpack_archive(zip_file_path, unzip_to_folder, "zip")
 
 
 def ensure_dir_exists(dir):
@@ -35,7 +36,7 @@ def load_json_file(file_path):
     """
     Returns the deserialized json object
     """
-    with open(file_path, 'r') as f:
+    with open(file_path, "r") as f:
         return json.load(f)
 
 
@@ -43,7 +44,7 @@ def write_json_file(file_path, content):
     dir = os.path.dirname(file_path)
     ensure_dir_exists(dir)
 
-    with open(file_path, 'w') as f:
+    with open(file_path, "w") as f:
         json.dump(content, f, indent=2)
 
 
@@ -66,8 +67,9 @@ def upload_file_to_s3(file_name, bucket, key):
 
     print("done")
 
+
 def download_s3_objects_with_prefix(bucket, prefix, download_folder):
-    s3 = boto3.resource('s3')
+    s3 = boto3.resource("s3")
     bucket = s3.Bucket(bucket)
 
     downloads = []
