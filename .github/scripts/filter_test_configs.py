@@ -250,10 +250,7 @@ def remove_disabled_jobs(
             )
             return filtered_test_matrix
 
-        if (
-            disabled_job_cfg == TEST_JOB_NAME
-            or disabled_job_cfg == BUILD_AND_TEST_JOB_NAME
-        ):
+        if disabled_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
             print(
                 f"Issue {disabled_url} created by {author} has disabled all the test jobs for {workflow} / {job_name}"
             )
@@ -263,7 +260,7 @@ def remove_disabled_jobs(
         if m:
             disabled_job = m.group("job")
             # Make sure that the job name is a valid test job name first before checking the config
-            if disabled_job == TEST_JOB_NAME or disabled_job == BUILD_AND_TEST_JOB_NAME:
+            if disabled_job in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
                 disabled_cfg = m.group("cfg")
                 # Remove the disabled config from the test matrix
                 filtered_test_matrix["include"] = [

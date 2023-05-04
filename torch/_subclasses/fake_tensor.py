@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
+import torch._custom_op
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -1290,6 +1291,16 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
+
+        # Users can register FakeTensor rules for custom operators
+        # Call them if they exist.
+        if func.name() in torch._custom_op.global_registry:
+            custom_op = torch._custom_op.global_registry[func.name()]
+            if custom_op is not None and custom_op._abstract_impl is not None:
+                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                    result = custom_op._abstract_impl.func(*args, **kwargs)
+                    return result
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
