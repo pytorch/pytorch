@@ -60,13 +60,6 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-        # Top 60
-        # CPU: empty is returning all 0's and there is a mismatch with MPS
-        # allocation (MacOS 13). According to
-        # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
-        'empty': [torch.float16, torch.float32],
-
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -119,7 +112,6 @@ def mps_ops_grad_modifier(ops):
         'signal.windows.hann': [torch.float32],
         'signal.windows.kaiser': [torch.float32],
         'signal.windows.nuttall': [torch.float32],
-        'empty_permuted': [torch.float16, torch.float32],
         'eye': [torch.float16, torch.float32],
 
         # trunc_tensor not working properly for float16
@@ -282,7 +274,7 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'nn.functional.triplet_margin_loss': [torch.uint8],
         'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
+        'nn.functional.pairwise_distance': [torch.uint8],
         'outer': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
@@ -315,12 +307,6 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # fill tensors with uninitialized data, causing mismatch with CPU
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
-        'dist': [torch.float16],  # cpu result off, showing inf values
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -576,9 +562,7 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'view_as_complex': None,
-        'segment_reduce': None,
         'segment_reduce_': None,
-        '_segment_reduce_lengths': None,
         '_upsample_bilinear2d_aa': None,
         'geometric' : None,
         'geometric_': None,
@@ -681,12 +665,6 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
 
-        # these fill tensors with uninitialized data, causing mismatch with CPU
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # 'empty': [torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
         # zero to negative integer powers are undefined
@@ -717,12 +695,33 @@ def mps_ops_modifier(ops):
         'byte': [torch.float16, torch.float32],
     }
 
+    EMPTY_OPS_SKIPLIST = {
+        # Fill tensors with uninitialized data, causing mismatch with CPU.
+        # They occasionally match, thus skipping them.
+        # See https://github.com/pytorch/pytorch/issues/100175
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
 
     for op in ops:
         key = op.name + op.variant_test_name
+        if key in EMPTY_OPS_SKIPLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip("Skipping empty ops."),
+                         dtypes=EMPTY_OPS_SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -754,10 +753,6 @@ def mps_ops_error_inputs_modifier(ops):
         'bernoulli',
         'clamp_max',
         'clamp_min',
-        'index_add',
-        'trace',
-        'nn.functional.max_pool2d',
-        'nn.functional.gelu',
         'masked_scatter',
 
         # unsupported float64 dtype
@@ -779,6 +774,10 @@ def mps_ops_error_inputs_modifier(ops):
         # MPS does not support tensor dimensions > 16
         'amax',
         'amin',
+        'aminmax',
+
+        # memory overlapping checks
+        'index_select',
 
         # unimplemented
         'logcumsumexp',
@@ -1495,6 +1494,22 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
+    def test_linear_bias(self):
+        def helper(bias_shape):
+            device = "cpu"
+            x = torch.randn(2, 2, 2, 64, device=device)
+            linear = torch.nn.Linear(64, 4, device=device)
+            linear.bias = torch.nn.Parameter(torch.randn(bias_shape, dtype=torch.float32, device=device))
+            y = linear(x)
+            device = "mps"
+            x_mps = x.to(device)
+            linear.to(device)
+            y_mps = linear(x_mps)
+            self.assertEqual(y, y_mps)
+
+        helper(())
+        helper((2, 4))
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
@@ -2003,9 +2018,19 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_batch_norm_backward(self):
-        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
+        inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
         x = torch.nn.BatchNorm2d(8).to("mps")
         y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
+    def test_layer_norm_backward(self):
+        inputs = torch.rand(4, 4, device="mps", requires_grad=True)
+        x = torch.nn.LayerNorm(4).to("mps")
+        y = torch.nn.LayerNorm(4).to("mps")
         y.weight.requires_grad = False
         y.bias.requires_grad = False
         outputs = y(x(inputs))
@@ -2060,6 +2085,34 @@ class TestMPS(TestCaseMPS):
         res = torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         res_cpu = torch.norm(d_cpu[0, :, :]), torch.norm(d_cpu[1, :, :])
         self.assertEqual(res, res_cpu)
+
+    def test_linalg_vector_norm(self):
+        x_mps = torch.tensor([0, 0, 0, 2, 3], dtype=torch.float, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.linalg.vector_norm(x_mps, ord=0)
+        res_cpu = torch.linalg.vector_norm(x_cpu, ord=0)
+        self.assertEqual(res_mps, res_cpu)
+
+        a_mps = torch.arange(27, dtype=torch.float, device="mps") - 4
+        a_cpu = torch.arange(27, dtype=torch.float, device="cpu") - 4
+
+        B_mps = a_mps.reshape(3, 3, 3)
+        B_cpu = a_cpu.reshape(3, 3, 3)
+
+        res_mps = torch.linalg.vector_norm(a_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(a_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        res_mps = torch.linalg.vector_norm(B_mps, ord=3.5)
+        res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5)
+        self.assertEqual(res_mps, res_cpu)
+
+        for dim in range(0, B_mps.dim()):
+            res_mps = torch.linalg.vector_norm(B_mps, ord=3.5, dim=dim)
+            res_cpu = torch.linalg.vector_norm(B_cpu, ord=3.5, dim=dim)
+            self.assertEqual(res_mps, res_cpu)
+
 
     def test_layer_norm(self):
         # TODO: Test non-contiguous
@@ -10377,7 +10430,7 @@ class TestConsistency(TestCaseMPS):
                 elif (op.name == "native_layer_norm"):
                     atol = 1e-4
                     rtol = 1.3e-5
-                elif op.name == "norm" and dtype == torch.float16:
+                elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
                     atol = 7e-4
                     rtol = 1.5e-3
                 elif op.name == "unique" and cpu_kwargs["sorted"] is False:
@@ -10429,7 +10482,9 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
-class TestErrorInputs(TestCaseMPS):
+class TestErrorInputs(TestCase):
+    _ignore_not_implemented_error = True
+
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps")
