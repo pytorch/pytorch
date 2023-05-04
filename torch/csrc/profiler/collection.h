@@ -126,7 +126,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       TorchOpBasicFields&& f,
       uint64_t correlation_id,
       time_t end_time_ns,
-      std::vector<op_input_t>&& inputs,
+      std::vector<op_input_t>&& input_shapes,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
@@ -136,7 +136,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
-        inputs_{std::move(inputs)},
+        input_shapes_{std::move(input_shapes)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
@@ -145,7 +145,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
-  std::vector<op_input_t> inputs_;
+  std::vector<op_input_t> input_shapes_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;

@@ -76,7 +76,7 @@ void calculateUniqueTensorIDs(
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
-            for (auto& i : torch_op.inputs_) {
+            for (auto& i : torch_op.input_shapes_) {
               c10::visit(raw_tensors, i);
             }
           },

@@ -181,7 +181,7 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    const auto shapes_and_dtypes = shapesAndDtypes(op_event.inputs_);
+    const auto shapes_and_dtypes = shapesAndDtypes(op_event.input_shapes_);
     if (!shapes_and_dtypes.first.empty()) {
       addMetadata("Input Dims", shapesToStr(shapes_and_dtypes.first));
     }
@@ -717,7 +717,7 @@ KinetoEvent::KinetoEvent(
   }
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
-    std::tie(shapes_, dtypes_) = shapesAndDtypes(op.inputs_);
+    std::tie(shapes_, dtypes_) = shapesAndDtypes(op.input_shapes_);
   });
 }
 

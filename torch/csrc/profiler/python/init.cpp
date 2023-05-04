@@ -169,10 +169,10 @@ void initPythonBindings(PyObject* module) {
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
       .def_readonly("name", &torch_op_t::name_)
       .def_property_readonly(
-          "inputs",
+          "input_shapes",
           [](const torch_op_t& op) {
             py::list out;
-            for (const auto& input : op.inputs_) {
+            for (const auto& input : op.input_shapes_) {
               c10::visit(
                   c10::overloaded(
                       [&](const c10::IValue& v) {
