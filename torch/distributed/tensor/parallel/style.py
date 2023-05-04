@@ -25,6 +25,7 @@ __all__ = [
     "make_input_reshard_replicate",
     "make_input_shard_1d",
     "make_input_shard_1d_last_dim",
+    "make_sharded_output_tensor",
     "make_output_replicate_1d",
     "make_output_reshard_tensor",
     "make_output_tensor",
@@ -82,70 +83,6 @@ class PairwiseSequenceParallel(PairwiseParallel):
 
     def __init__(self) -> None:
         super().__init__(make_input_reshard_replicate, make_output_reshard_tensor)
-
-
-class RowwiseParallel(ParallelStyle):
-    """
-    Partitioning the row of a module.
-    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_shard_1d_last_dim, make_output_replicate_1d)
-
-
-class ColwiseParallel(ParallelStyle):
-    """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_output_replicate_1d)
-
-
-class ColwiseParallelForPairwise(ParallelStyle):
-    """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
-    We don't perform reshard for output.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, None)
-
-
-class RowwiseParallelForPairwise(ParallelStyle):
-    """
-    Partitioning the row of a module.
-    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
-    We don't perform reshard for input.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(None, make_output_replicate_1d)
-
-
-class ColwiseParallelForAttn(ParallelStyle):
-    """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
-    We don't perform reshard for output.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_sharded_output_tensor)
-
-
-class RowwiseParallelForAttn(ParallelStyle):
-    """
-    Partitioning the row of a module.
-    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
-    We don't perform reshard for input.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_shard_1d_last_dim, make_output_tensor)
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
@@ -388,3 +325,67 @@ def make_output_reshard_tensor(
     """
 
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined]
+
+
+class RowwiseParallel(ParallelStyle):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
+    """
+
+    def __init__(self, _prepare_input=make_input_shard_1d_last_dim, _prepare_output=make_output_replicate_1d) -> None:
+        super().__init__(_prepare_input, _prepare_output)
+
+
+class ColwiseParallel(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    """
+
+    def __init__(self, _prepare_input=make_input_replicate_1d, _prepare_output=make_output_replicate_1d) -> None:
+        super().__init__(_prepare_input, _prepare_output)
+
+
+class ColwiseParallelForPairwise(ColwiseParallel):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    We don't perform reshard for output.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, None)
+
+
+class RowwiseParallelForPairwise(RowwiseParallel):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
+    We don't perform reshard for input.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(None, make_output_replicate_1d)
+
+
+class ColwiseParallelForAttn(ColwiseParallel):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
+    We don't perform reshard for output.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_replicate_1d, make_sharded_output_tensor)
+
+
+class RowwiseParallelForAttn(RowwiseParallel):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
+    We don't perform reshard for input.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(make_input_shard_1d_last_dim, make_output_tensor)
