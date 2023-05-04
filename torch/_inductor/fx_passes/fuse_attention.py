@@ -116,7 +116,7 @@ def _sfdp_replacement_5(query, key, value, attn_mask):
         query.contiguous(),
         key.contiguous(),
         value.contiguous(),
-        attn_mask=attn_mask,
+        attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
     )
@@ -136,7 +136,7 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
         query.contiguous(),
         key.contiguous(),
         value.contiguous(),
-        attn_mask=attn_mask,
+        attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
         is_causal=False,
     )
@@ -163,9 +163,10 @@ def _sfdp_params_check(match):
         if not hasattr(attn_mask_node, "meta"):
             return False
         attn_mask = attn_mask_node.meta["val"]
+        # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
         if (
             not isinstance(attn_mask, torch.Tensor)
-            or attn_mask.dtype != query.dtype
+            or not (attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool)
             or query.device != attn_mask.device
         ):
             return False

@@ -149,7 +149,7 @@ class TestSDPAPatternRewriter(TestCase):
         self._check_common(dot_prod_attention, contains=False)
 
     def test_sdpa_rewriter_5(self):
-        def sfdp_pattern_5(query, key, value):
+        def sfdp_pattern_5_v1(query, key, value):
             attn_mask = torch.ones(
                 query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
             ).tril(diagonal=0)
@@ -162,7 +162,19 @@ class TestSDPAPatternRewriter(TestCase):
             )
             return attn_weight @ value
 
-        self._check_common(sfdp_pattern_5, contains=False)
+        def sfdp_pattern_5_v2(query, key, value):
+            # https://github.com/pytorch/pytorch/issues/100318.
+            attn_mask = torch.zeros(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).bool()
+            attn_weight = torch.softmax(
+                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
+                dim=-1,
+            )
+            return attn_weight @ value
+
+        self._check_common(sfdp_pattern_5_v1, contains=False)
+        self._check_common(sfdp_pattern_5_v2, contains=False)
 
     def test_sdpa_rewriter_6(self):
         def sfdp_pattern_6(query, key, value):
@@ -212,7 +224,6 @@ class TestSDPAPatternRewriter(TestCase):
 
     def test_pattern_fails_with_unsupported_mask(self):
         # https://github.com/pytorch/pytorch/issues/100315
-        # and https://github.com/pytorch/pytorch/issues/100318.
         class Model(torch.nn.Module):
             def __init__(
                 self,
@@ -230,10 +241,9 @@ class TestSDPAPatternRewriter(TestCase):
         tensor_shape = (2, 4, 4, 4)
 
         upsupported_masks = [
-            torch.randn((2, 4, 4, 4), device="cuda").to(dtype=mask_dtype)
-            for mask_dtype in [torch.bool, torch.int]
+            torch.randn((2, 4, 4, 4), device="cuda").to(dtype=torch.int),
+            2.0,
         ]
-        upsupported_masks.append(2.0)
         for atte_mask in upsupported_masks:
             args = [
                 torch.randn(tensor_shape, device="cuda"),
