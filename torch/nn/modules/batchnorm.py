@@ -412,6 +412,16 @@ class BatchNorm2d(_BatchNorm):
         if input.dim() != 4:
             raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
 
+import os
+if os.environ.get("ABLATE_BATCHNORM", "0") == "1":
+    print("ABLATE BATCHNORM")
+    class BatchNorm2d(Module):
+        def __init__(self, C, *args, **kwargs):
+            super().__init__()
+            self.param = Parameter(torch.rand(C, 1, 1,))
+
+        def forward(self, x):
+            return x + self.param
 
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of

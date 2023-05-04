@@ -1073,12 +1073,12 @@ def skip_layout_opt(name):
         "yolov3",
 
         # timm
-        "cspdarknet53",
-        "dla102",
-        "jx_nest_base",
-        "res2net101_26w_4s",
-        "res2net50_14w_8s", # slow iteration
-        "sebotnet33ts_256", # slow iteration
+        "cspdarknet53", # down 0.1
+        "dla102", # down 0.18
+        "jx_nest_base", # down 0.12
+        "res2net101_26w_4s", # down 0.09
+        "res2net50_14w_8s", # down 0.37 <===
+        "sebotnet33ts_256", # down 0.46 <===
     ]:
         torch._inductor.config.layout_opt = False
 

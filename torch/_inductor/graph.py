@@ -174,7 +174,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - pytorch_unet
         # - phlippe_densenet
         # - Background_Matting
-        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes ):
+        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
 
@@ -584,7 +584,8 @@ class GraphLowering(torch.fx.Interpreter):
                     stride_order = ir.get_stride_order(strides)
 
                     if len(result.get_size()) == 4 and (n in self.nodes_prefer_channels_last):
-                        stride_order = ir.NHWC_STRIDE_ORDER
+                        if not (config.force_mix_layout and n.target == torch.ops.aten.convolution.default): 
+                            stride_order = ir.NHWC_STRIDE_ORDER
 
                     result = ir.ExternKernel.require_stride_order(
                         result, stride_order
