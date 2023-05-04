@@ -2732,6 +2732,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA and not HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and is_cuda and torch.version.cuda and Vh.is_complex():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
