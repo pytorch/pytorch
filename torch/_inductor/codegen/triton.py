@@ -1645,19 +1645,28 @@ class TritonScheduling:
             if numel1 != numel2:
                 return False
 
+            loop_order = list(
+                FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
+            )
+            loop_order1 = loop_order[: len(node1.get_nodes())]
+            loop_order2 = loop_order[len(node1.get_nodes()) :]
+
+            if not config.aggressive_fusion:
+                deps1 = set()
+                for n in loop_order1:
+                    deps1.update(n.read_writes.reads_and_writes())
+                deps2 = set()
+                for n in loop_order2:
+                    deps2.update(n.read_writes.reads_and_writes())
+                if len(deps1 & deps2) == 0:
+                    return False
+
             if (
                 config.triton.tiling_prevents_pointwise_fusion
                 and not node1.is_template()
             ):
-                loop_order = list(
-                    FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
-                )
-                tiling1 = self.select_tiling(
-                    loop_order[: len(node1.get_nodes())], numel1
-                )
-                tiling2 = self.select_tiling(
-                    loop_order[len(node1.get_nodes()) :], numel1
-                )
+                tiling1 = self.select_tiling(loop_order1, numel1)
+                tiling2 = self.select_tiling(loop_order2, numel1)
                 # TODO(jansel): this doesn't handle 3D tiling (disabled by config)
                 if len(tiling1) > 2 and len(tiling2) > 2 and tiling1 != tiling2:
                     return False  # tiled differently
