@@ -185,7 +185,7 @@ optimize_for_inference = True
 optimize_for_inference_discard_parameters = False
 
 
-# config specific to codegen/cpp.pp
+# config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
     threads = -1
@@ -216,6 +216,16 @@ class cpp:
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = True
+
+    # Inject a bug into our relu implementation; useful for testing our repro
+    # extraction and minification functionality.
+    # Valid values: "compile_error", "runtime_error", "accuracy"
+    inject_relu_bug_TESTING_ONLY = None
+    inject_log1p_bug_TESTING_ONLY = None
+
+    # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
+    # force usage as specified, without testing.
+    vec_isa_ok = None
 
 
 # config specific to codegen/triton.py
@@ -295,6 +305,11 @@ class triton:
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     spill_threshold = 0
+
+    # Inject a bug into our relu implementation; useful for testing our repro
+    # extraction and minification functionality.
+    # Valid values: "compile_error", "runtime_error", "accuracy"
+    inject_relu_bug_TESTING_ONLY = None
 
 
 # create a directory containing lots of debug information
