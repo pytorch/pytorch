@@ -167,7 +167,10 @@ def should_pad_bench(mat1, mat2, op, input=None):
     import triton.testing
 
     do_bench = functools.partial(
-        triton.testing.do_bench, warmup=5, rep=100, fast_flush=True, percentiles=None
+        triton.testing.do_bench,
+        warmup=5,
+        rep=100,
+        fast_flush=True,
     )
 
     with no_dispatch():
