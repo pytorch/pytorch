@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import copy
 import functools
 from .quantizer import (
@@ -16,7 +17,7 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
 from .qnnpack_quantizer import (
     _is_annotated,
 )
-from typing import Callable, List, Dict, Optional
+from typing import Callable, List, Dict, Optional, Set
 from torch.fx import Node
 
 __all__ = [
@@ -40,15 +41,29 @@ def register_annotator(quantization_configs: List[QuantizationConfig]):
 
     return decorator
 
+
 def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     supported_operators: Dict[str, List[OperatorPatternType]] = {
         "conv2d": [
-            [torch.ops.aten.convolution.default],
+            [torch.nn.Conv2d],
+            [F.conv2d],
         ],
     }
     return copy.deepcopy(supported_operators)
 
 
+def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
+    supported_config_and_operators: List[OperatorConfig] = []
+    for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
+        ops = supported_quantized_operators()
+        for op_string, pattern_list in ops.items():
+            supported_config_and_operators.append(
+                OperatorConfig(quantization_config, pattern_list)
+            )
+    return copy.deepcopy(supported_config_and_operators)
+
+
+@functools.lru_cache
 def get_default_x86_inductor_quantization_config():
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
     act_quantization_spec = QuantizationSpec(
@@ -72,18 +87,10 @@ def get_default_x86_inductor_quantization_config():
     )
     return quantization_config
 
-def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
-    supported_config_and_operators: List[OperatorConfig] = []
-    for quantization_config in [get_default_x86_inductor_quantization_config(), ]:
-        ops = supported_quantized_operators()
-        for op_string, pattern_list in ops.items():
-            supported_config_and_operators.append(
-                OperatorConfig(quantization_config, pattern_list)
-            )
-    return copy.deepcopy(supported_config_and_operators)
 
 def get_supported_config_and_operators() -> List[OperatorConfig]:
     return get_supported_x86_inductor_config_and_operators()
+
 
 class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = get_supported_config_and_operators()
@@ -92,6 +99,13 @@ class X86InductorQuantizer(Quantizer):
         super().__init__()
         self.global_config: QuantizationConfig = None  # type: ignore[assignment]
         self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+
+    @classmethod
+    def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
+        op_configs: Set[QuantizationConfig] = set({})
+        for spec, _ in cls.supported_config_and_operators:
+            op_configs.add(spec)
+        return list(op_configs)
 
     @classmethod
     def get_supported_operator_for_quantization_config(
@@ -110,6 +124,12 @@ class X86InductorQuantizer(Quantizer):
 
     def set_global(self, quantization_config: QuantizationConfig):
         self.global_config = quantization_config
+        return self
+
+    def set_config_for_operator_type(
+        self, operator_type: str, quantization_config: QuantizationConfig
+    ):
+        self.operator_type_config[operator_type] = quantization_config
         return self
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
