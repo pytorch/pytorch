@@ -448,8 +448,7 @@ def _reduce_with_dtype(onnx_op, name):
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
             result = symbolic(g, self)
             if dtype_onnx is not None:
-                result_dtype_scalar = result.type().scalarType()
-                result_dtype_onnx = _type_utils.JitScalarType._from_name(result_dtype_scalar).onnx_type()
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(result).onnx_type()
                 if result_dtype_onnx != dtype_onnx:
                     result = g.op(
                         "Cast", result, to_i=dtype_onnx
@@ -470,8 +469,7 @@ def _reduce_with_dtype(onnx_op, name):
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
             result = symbolic(g, self, dim, keepdim)
             if dtype_onnx is not None:
-                result_dtype_scalar = result.type().scalarType()
-                result_dtype_onnx = _type_utils.JitScalarType._from_name(result_dtype_scalar).onnx_type()
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(result).onnx_type()
                 if result_dtype_onnx != dtype_onnx:
                     result = g.op(
                         "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
