@@ -3841,6 +3841,9 @@ class MutableBox(IRNode):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
 
+    def realize(self):
+        return self.data.realize()
+
     @property
     def layout(self):
         return self.data.layout
