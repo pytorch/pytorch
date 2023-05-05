@@ -6,7 +6,24 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, rand_strided
+from torch._dynamo.utils import ifdyn, ifdynstaticdefault
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+
+
+def maybe_dupe_op(x):
+    y = x + 1
+    z = x + 2
+    if x.numel() < 5:
+        return y, y
+    else:
+        return y, z
+
+
+aten = torch.ops.aten
+lib = torch.library.Library("custom", "DEF")
+lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
+lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
+lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
 class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
@@ -385,12 +402,13 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy(x1, y1)
         fxy(x2, y2)
 
-        self.assertTrue(failure_reason is None)
+        if not torch._dynamo.config.dynamic_shapes:
+            self.assertTrue(failure_reason is None)
 
         # Reset failure reason
         failure_reason = None
 
-        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.frame_count, ifdyn(ifdynstaticdefault(1, 2), 1))
 
         torch._dynamo.reset()  # for new backend
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -424,10 +442,19 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(a)
         f(a)
         self.assertEqual(cc.frame_count, 2)
-        self.assertExpectedInline(
-            failure_reason,
-            """tensor 'L['a']' stride mismatch at index 0. expected 3, actual 1""",
-        )
+        if (
+            torch._dynamo.config.dynamic_shapes
+            and not torch._dynamo.config.assume_static_by_default
+        ):
+            self.assertExpectedInline(
+                failure_reason,
+                """tensor 'L['a']' stride mismatch at index 1. expected 1, actual 3""",
+            )
+        else:
+            self.assertExpectedInline(
+                failure_reason,
+                """tensor 'L['a']' stride mismatch at index 0. expected 3, actual 1""",
+            )
 
         torch._dynamo.reset()
 
@@ -665,21 +692,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @patch("torch._functorch.config.debug_assert", True)
+    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_multiple_aot_autograd_calls_dupe_args(self):
-        def maybe_dupe_op(x):
-            y = x + 1
-            z = x + 2
-            if x.numel() < 5:
-                return y, y
-            else:
-                return y, z
-
-        aten = torch.ops.aten
-        lib = torch.library.Library("custom", "DEF")
-        lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
-        lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
-        lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
-
         # this is just dealing with the fact that
         # aot_module_simplified expects submods to always return tuples/lists
         class WrapperModule(torch.nn.Module):
