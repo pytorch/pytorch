@@ -153,7 +153,7 @@ struct FileCheckImpl {
   TORCH_API void run(const std::string& test_file) {
     has_run = true;
 
-    if (groups.size() == 0 || groups[0].size() == 0) {
+    if (groups.empty() || groups[0].empty()) {
       throw std::runtime_error(
           "No checks have been added to this instance of"
           "Filecheck! Check for bad input.");
@@ -172,7 +172,7 @@ struct FileCheckImpl {
 
   TORCH_API void addCheck(const Check& check) {
     // consecutive CHECK_DAGs & CHECK_NOTs need to be evaluated as a group
-    if (groups.size() == 0 ||
+    if (groups.empty() ||
         (check.type_ != CHECK_NOT && check.type_ != CHECK_DAG)) {
       groups.push_back({check});
     } else {
@@ -391,7 +391,7 @@ struct FileCheckImpl {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
 
-    AT_ASSERT(groups.size() != 0);
+    AT_ASSERT(!groups.empty());
     for (const auto& check : group) {
       AT_ASSERT(check.type_ == group[0].type_);
       auto pos = assertFind(source, check.search_str_, prev.end(), check);
@@ -406,7 +406,7 @@ struct FileCheckImpl {
       const std::vector<Check>& group,
       const std::shared_ptr<Source>& source,
       const SourceRange& prev) {
-    AT_ASSERT(group.size() != 0);
+    AT_ASSERT(!group.empty());
     CheckType type = group[0].type_;
 
     if (type == CHECK_DAG) {

@@ -20,7 +20,7 @@ class ModelReport:
     The ModelReport class aims to provide users an easy way to diagnose issues that they run into
     with their models. The class works with all traceable GraphModules to help diagnose issues,
     though the requirements on the type of model more-so depends on the specific report the user
-    is trying to generate. With respect to the reports, the ModelReport class is intialized with
+    is trying to generate. With respect to the reports, the ModelReport class is initialized with
     a set of Detector classes, each of which generate reports on quantization configuration
     issues a use might have.
 
@@ -64,7 +64,7 @@ class ModelReport:
     General Flow for Fx workflow:
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects and model
     2.) Prepare your model with prepare_fx
-    3.) Call model_report.prepare_detailed_calibration to add relavent observers
+    3.) Call model_report.prepare_detailed_calibration to add relevant observers
     4.) Callibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     Optional
@@ -120,7 +120,7 @@ class ModelReport:
 
         # keep the reports private so they can't be modified
         self._desired_report_detectors = desired_report_detectors
-        self._desired_detector_names = set([detector.get_detector_name() for detector in desired_report_detectors])
+        self._desired_detector_names = {detector.get_detector_name() for detector in desired_report_detectors}
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
@@ -129,14 +129,14 @@ class ModelReport:
 
         # initialize each report to have empty set of observers of interest
         for desired_report in self._desired_detector_names:
-            self._detector_name_to_observer_fqns[desired_report] = set([])
+            self._detector_name_to_observer_fqns[desired_report] = set()
 
         # flags to ensure that we can only prepare and remove observers once
         self._prepared_flag = False
         self._removed_observers = False
 
         # store the reports that we generated for visualization purposes
-        # intially empty since no reports generated
+        # initially empty since no reports generated
         self._generated_reports: Dict[str, Dict] = {}
 
     def get_desired_reports_names(self) -> Set[str]:
@@ -152,7 +152,7 @@ class ModelReport:
         Takes in a graph model and inserts the following observers:
         - ModelReportObserver
 
-        Each observer is inserted based on the desired_reports into the relavent locations
+        Each observer is inserted based on the desired_reports into the relevant locations
 
         Right now, each report in self._desired_detector_names has independent insertions
             However, if a module already has a Observer of the same type, the insertion will not occur
@@ -250,7 +250,7 @@ class ModelReport:
         Generates all the requested reports.
 
         Note:
-            You should have callibrated the model with relavent data before calling this
+            You should have callibrated the model with relevant data before calling this
 
         The reports generated are specified by the desired_reports specified in desired_reports
 
@@ -261,7 +261,7 @@ class ModelReport:
 
         Returns a mapping of each desired report name to a tuple with:
             The textual summary of that report information
-            A dictionary containing relavent statistics or information for that report
+            A dictionary containing relevant statistics or information for that report
 
         Note:
             Throws exception if we try to generate report on model we already removed observers from
@@ -287,7 +287,7 @@ class ModelReport:
         if remove_inserted_observers:
             self._removed_observers = True
             # get the set of all Observers inserted by this instance of ModelReport
-            all_observers_of_interest: Set[str] = set([])
+            all_observers_of_interest: Set[str] = set()
             for desired_report in self._detector_name_to_observer_fqns:
                 observers_of_interest = self._detector_name_to_observer_fqns[desired_report]
                 all_observers_of_interest.update(observers_of_interest)

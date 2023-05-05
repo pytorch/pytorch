@@ -276,7 +276,7 @@ const Variable& AutogradMeta::fw_grad(
     return ForwardGrad::undef_grad();
   }
 
-  // Ensure that concurent fw_grad() "reads" are thread safe
+  // Ensure that concurrent fw_grad() "reads" are thread safe
   std::lock_guard<std::mutex> lock(mutex_);
 
   const auto& direct_fw_grad =

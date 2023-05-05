@@ -5,6 +5,7 @@ import traceback
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
+from torch._guards import detect_fake_mode
 
 __all__ = ['TensorMetadata', 'ShapeProp']
 
@@ -80,7 +81,7 @@ class ShapeProp(torch.fx.Interpreter):
 
         class TwoLayerNet(torch.nn.Module):
             def __init__(self, D_in, H, D_out):
-                super(TwoLayerNet, self).__init__()
+                super().__init__()
                 self.linear1 = torch.nn.Linear(D_in, H)
                 self.linear2 = torch.nn.Linear(H, D_out)
             def forward(self, x):
@@ -114,6 +115,8 @@ class ShapeProp(torch.fx.Interpreter):
     """
     def __init__(self, gm, fake_mode=None):
         super().__init__(gm)
+        if fake_mode is None:
+            fake_mode = detect_fake_mode()
         if fake_mode is not None:
             from torch._dynamo.utils import deepcopy_to_fake_tensor
             # Note:
@@ -182,4 +185,8 @@ class ShapeProp(torch.fx.Interpreter):
         Returns:
             Any: The value returned from executing the Module
         """
-        return super().run(*args)
+        if self.fake_mode is not None:
+            fake_args = [self.fake_mode.from_tensor(t) for t in args]
+        else:
+            fake_args = args
+        return super().run(*fake_args)

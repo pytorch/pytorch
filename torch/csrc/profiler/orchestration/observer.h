@@ -3,6 +3,8 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/Export.h>
 
+#include <utility>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -12,7 +14,9 @@ namespace impl {
 // ----------------------------------------------------------------------------
 enum class C10_API_ENUM ActivityType {
   CPU = 0,
+  XPU, // XPU kernels, runtime
   CUDA, // CUDA kernels, runtime
+  MTIA, // MTIA kernels, runtime
   NUM_KINETO_ACTIVITIES, // must be the last one
 };
 
@@ -112,7 +116,7 @@ struct TORCH_API ProfilerStateBase : public c10::MemoryReportingInfoBase {
   static std::shared_ptr<ProfilerStateBase> pop(bool global);
   static std::shared_ptr<ProfilerStateBase> pop() {
     auto out = pop(/*global=*/true);
-    return out ? out : pop(/*global=*/false);
+    return out ? std::move(out) : pop(/*global=*/false);
   }
 
   const ProfilerConfig& config() const {

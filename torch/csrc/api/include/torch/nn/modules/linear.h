@@ -18,7 +18,6 @@ namespace nn {
 /// A placeholder identity operator that is argument-insensitive.
 /// See https://pytorch.org/docs/master/generated/torch.nn.Identity.html to
 /// learn about the exact behavior of this module.
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
  public:
   void reset() override;
@@ -48,7 +47,6 @@ TORCH_MODULE(Identity);
 /// ```
 /// Linear model(LinearOptions(5, 2).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in_features, int64_t out_features)
@@ -97,7 +95,6 @@ TORCH_MODULE(Linear);
 /// ```
 /// Flatten model(FlattenOptions().start_dim(2).end_dim(4));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
   explicit FlattenImpl(const FlattenOptions& options_ = {});
@@ -136,7 +133,6 @@ TORCH_MODULE(Flatten);
 /// Unflatten model(UnflattenOptions(0, {2, 2}));
 /// Unflatten model(UnflattenOptions("B", {{"B1", 2}, {"B2", 2}}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API UnflattenImpl : public Cloneable<UnflattenImpl> {
  public:
   UnflattenImpl(int64_t dim, std::vector<int64_t> sizes)
@@ -177,7 +173,6 @@ TORCH_MODULE(Unflatten);
 /// ```
 /// Bilinear model(BilinearOptions(3, 2, 4).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
  public:
   BilinearImpl(int64_t in1_features, int64_t in2_features, int64_t out_features)

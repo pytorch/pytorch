@@ -10,13 +10,14 @@ from sys import platform
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import torch.testing._internal.common_utils as common
-from torch._six import string_classes
 from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_tcp_store
@@ -60,7 +61,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class StoreTestBase(object):
+class StoreTestBase:
     def _create_store(self, i):
         raise RuntimeError("not implemented")
 
@@ -111,6 +112,15 @@ class StoreTestBase(object):
     def test_compare_set(self):
         self._test_compare_set(self._create_store())
 
+    def _test_simple_wait(self, fs):
+        with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
+            fs.wait(["bad_key"], timedelta(seconds=0.25))
+        fs.add("good_key", 1)
+        fs.wait(["good_key"])
+
+    def test_simple_wait(self):
+        self._test_simple_wait(self._create_store())
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -122,7 +132,7 @@ class StoreTestBase(object):
 
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(FileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
     def _create_store(self):
@@ -162,13 +172,11 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):
-    def setUp(self):
-        super(HashStoreTest, self).setUp()
-
     def _create_store(self):
         store = dist.HashStore()
         store.set_timeout(timedelta(seconds=300))
         return store
+
 
 class PrefixStoreTest(TestCase):
     def setUp(self):
@@ -184,9 +192,10 @@ class PrefixStoreTest(TestCase):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
 
+
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixFileStoreTest, self).setUp()
+        super().setUp()
         self.file = tempfile.NamedTemporaryFile(delete=False)
         self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
@@ -315,9 +324,10 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
-        super(PrefixTCPStoreTest, self).setUp()
+        super().setUp()
         self.tcpstore = create_tcp_store()
         self.prefix = "test_prefix"
         self.tcpstore.set_timeout(timedelta(seconds=300))
@@ -335,11 +345,11 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 
 class MyPythonStore(dist.Store):
     def __init__(self):
-        super(MyPythonStore, self).__init__()
+        super().__init__()
         self.store = {}
 
     def set(self, key, value):
-        if not isinstance(key, string_classes):
+        if not isinstance(key, (str, bytes)):
             raise AssertionError("Expected set to be called with string key")
         if type(value) is not bytes:
             raise AssertionError("Expected set to be called with bytes value")
@@ -358,9 +368,6 @@ class MyPythonStore(dist.Store):
 
 
 class PythonStoreTest(TestCase):
-    def setUp(self):
-        super(PythonStoreTest, self).setUp()
-
     def test_set_get(self):
         # If we were to inherit from StoreTestBase and try to use
         # its test_set_get function, we would exercise the Python
@@ -492,6 +499,39 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
+
+class TestMultiThreadedWait(MultiThreadedTestCase):
+    # TODO: Use less hacky means of instantiating stores.
+    # Note, stores accumulate values per test.
+    stores = [
+        dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
+        dist.HashStore(),
+        dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
+        create_tcp_store(),
+        dist.PrefixStore("pre", create_tcp_store())
+    ]
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    # Iterates over self.stores, keep 5 in sync with len(self.stores).
+    @parametrize("i", range(5))
+    def test_wait(self, i):
+        store = self.stores[i]
+        store.set_timeout(timedelta(seconds=2))
+        if dist.get_rank() == 0:
+            store.wait(["key1"])
+            self.assertEqual(b"value1", store.get("key1"))
+        if dist.get_rank() == 1:
+            store.set("key1", "value1")
+
+
+instantiate_parametrized_tests(TestMultiThreadedWait)
 
 if __name__ == "__main__":
     assert (

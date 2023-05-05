@@ -300,7 +300,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
         output = workspace.FetchBlob('t')
         expected_output_shape = (3, 3, 2)
-        self.assertEquals(output.shape, expected_output_shape)
+        self.assertEqual(output.shape, expected_output_shape)
 
         presence_mask = workspace.FetchBlob('p')
         expected_presence_mask = np.array(
@@ -323,7 +323,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
 
         output = workspace.FetchBlob('p')
         expected_output_shape = (0, 0)
-        self.assertEquals(output.shape, expected_output_shape)
+        self.assertEqual(output.shape, expected_output_shape)
 
     @given(**hu.gcs_cpu_only)
     @settings(deadline=10000)

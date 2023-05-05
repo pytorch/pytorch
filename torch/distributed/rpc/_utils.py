@@ -28,7 +28,7 @@ def _group_membership_management(store, name, is_join):
             try:
                 store.wait([returned])
             except RuntimeError:
-                logger.error(f"Group membership token {my_token} timed out waiting for {returned} to be released.")
+                logger.error("Group membership token %s timed out waiting for %s to be released.", my_token, returned)
                 raise
 
 def _update_group_membership(worker_info, my_devices, reverse_device_map, is_join):

@@ -1,12 +1,12 @@
 Quantization API Reference
 -------------------------------
 
-torch.quantization
+torch.ao.quantization
 ~~~~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
 
-.. currentmodule:: torch.quantization
+.. currentmodule:: torch.ao.quantization
 
 Top level APIs
 ^^^^^^^^^^^^^^
@@ -49,12 +49,12 @@ Utility functions
     propagate_qconfig_
     default_eval_fn
 
-torch.quantization.quantize_fx
+torch.ao.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
 
-.. currentmodule:: torch.quantization.quantize_fx
+.. currentmodule:: torch.ao.quantization.quantize_fx
 
 .. autosummary::
     :toctree: generated
@@ -178,13 +178,13 @@ regular full-precision tensor.
     topk
 
 
-torch.quantization.observer
+torch.ao.quantization.observer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 
-.. currentmodule:: torch.quantization.observer
+.. currentmodule:: torch.ao.quantization.observer
 
 .. autosummary::
     :toctree: generated
@@ -211,13 +211,13 @@ the values observed during calibration (PTQ) or training (QAT).
     default_dynamic_quant_observer
     default_float_qparams_observer
 
-torch.quantization.fake_quantize
+torch.ao.quantization.fake_quantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
 during QAT.
 
-.. currentmodule:: torch.quantization.fake_quantize
+.. currentmodule:: torch.ao.quantization.fake_quantize
 
 .. autosummary::
     :toctree: generated
@@ -240,13 +240,13 @@ during QAT.
     disable_observer
     enable_observer
 
-torch.quantization.qconfig
+torch.ao.quantization.qconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
 
-.. currentmodule:: torch.quantization.qconfig
+.. currentmodule:: torch.ao.quantization.qconfig
 
 .. autosummary::
     :toctree: generated
@@ -481,14 +481,14 @@ This module implements the quantized versions of the functional layers such as
     upsample_bilinear
     upsample_nearest
 
-torch.nn.quantizable
-~~~~~~~~~~~~~~~~~~~~
+torch.ao.nn.quantizable
+~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantizable versions of some of the nn layers.
 These modules can be used in conjunction with the custom module mechanism,
 by providing the ``custom_module_config`` argument to both prepare and convert.
 
-.. currentmodule:: torch.nn.quantizable
+.. currentmodule:: torch.ao.nn.quantizable
 
 .. autosummary::
     :toctree: generated
@@ -585,21 +585,30 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 
 
 .. These modules are missing docs. Adding them here only for tracking
-.. automodule:: torch.nn.intrinsic
-.. automodule:: torch.nn.intrinsic.modules
-.. automodule:: torch.nn.quantizable
-.. automodule:: torch.nn.quantizable.modules
-.. automodule:: torch.nn.quantized
+.. automodule:: torch.ao.nn.quantizable.modules
    :noindex:
-
 .. automodule:: torch.ao.nn.quantized.reference
    :noindex:
 .. automodule:: torch.ao.nn.quantized.reference.modules
    :noindex:
 
-.. py:module:: torch.nn.intrinsic.qat
-.. py:module:: torch.nn.intrinsic.qat.modules
-.. py:module:: torch.nn.intrinsic.quantized
-.. py:module:: torch.nn.intrinsic.quantized.modules
-.. py:module:: torch.nn.intrinsic.quantized.dynamic
-.. py:module:: torch.nn.intrinsic.quantized.dynamic.modules
+.. automodule:: torch.nn.quantizable
+.. automodule:: torch.nn.qat.dynamic.modules
+.. automodule:: torch.nn.qat.modules
+.. automodule:: torch.nn.qat
+.. automodule:: torch.nn.intrinsic.qat.modules
+.. automodule:: torch.nn.quantized.dynamic
+.. automodule:: torch.nn.intrinsic
+.. automodule:: torch.nn.intrinsic.quantized.modules
+.. automodule:: torch.quantization.fx
+.. automodule:: torch.nn.intrinsic.quantized.dynamic
+.. automodule:: torch.nn.qat.dynamic
+.. automodule:: torch.nn.intrinsic.qat
+.. automodule:: torch.nn.quantized.modules
+.. automodule:: torch.nn.intrinsic.quantized
+.. automodule:: torch.nn.quantizable.modules
+.. automodule:: torch.nn.quantized
+.. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
+.. automodule:: torch.nn.quantized.dynamic.modules
+.. automodule:: torch.quantization
+.. automodule:: torch.nn.intrinsic.modules

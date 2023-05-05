@@ -95,12 +95,12 @@ class SavePlanner(abc.ABC):
 
     SavePlanners are stateful objects that can be used to customize the whole save process.
 
-    SavePlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    SavePlanner acts as an access proxy to the state_dict, so any transformation done to it
     will be visible to the whole process.
 
     A planner subclass can expect the following sequence of calls during save_state_dict:
 
-    1) init - called on all ranks.
+    1) set_up_planner - called on all ranks.
         Signals the start of a checkpoint save.
 
     2) create_local_plan - called on all ranks.
@@ -115,7 +115,7 @@ class SavePlanner(abc.ABC):
     5) resolve_data - called multiple times on each rank
         Lookups a value on the `state_dict` for the storage layer to write.
 
-    Users are recomended to extend DefaultSavePlanner instead of this interface directly as
+    Users are recommended to extend DefaultSavePlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
     There are 3 usual patterns of extension:
@@ -125,9 +125,9 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def init(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(self, state_dict, is_coordinator):
     >>>         # prefix all keys with `foo_``
-    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -179,9 +179,9 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         """
-        Intialize this planner to save ``state_dict``.
+        Initialize this planner to save ``state_dict``.
 
         Implementations should save those values as they won't be provided lated in the save process.
 
@@ -225,19 +225,19 @@ class SavePlanner(abc.ABC):
         self, write_item: WriteItem
     ) -> Union[torch.Tensor, io.BytesIO]:
         """
-        Lookup the object associated with ``write_item``in `state_dict` and apply any
+        Lookup the object associated with ``write_item`` in ``state_dict`` and apply any
         transformation (such as serialization) prior to the storage layer consuming it.
 
         Called on each rank multiple times, at least once per WriteItem in the final SavePlan.
 
-        This method should be idepotent and thread-save. StorageWriter implementations
+        This method should be idempotent and thread-save. StorageWriter implementations
         are free to call it as frequently as they need.
 
         Any transformation that allocates memory should be lazily done when his method
         is called in order to reduce peak memory required by checkpointing.
 
         When returning tensors, they can be on any device or format, they can be views too.
-        It's the storage layer responsiblity to figure out how to save them.
+        It's the storage layer responsibility to figure out how to save them.
         """
         pass
 
@@ -248,12 +248,12 @@ class LoadPlanner:
 
     LoadPlanner are stateful objects that can be used to customize the whole load process.
 
-    LoadPlanner acts as an access proxy to the state_dict, so any transfomation done to it
+    LoadPlanner acts as an access proxy to the state_dict, so any transformation done to it
     will be visible to the whole process.
 
     A planner subclass can expect the following sequence of calls during load_state_dict:
 
-    1) init - called on all ranks.
+    1) set_up_planner - called on all ranks.
         Signals the start of loading a checkpoint.
 
     2) create_local_plan - called on all ranks.
@@ -268,7 +268,7 @@ class LoadPlanner:
     5) resolve_tensor and commit_tensor - called multiple times on each rank
         They are called in pair for each Tensor value in state_dict.
 
-    Users are recomended to extend DefaultLoadPlanner instead of this interface directly as
+    Users are recommended to extend DefaultLoadPlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
     There are two usual patterns of extension:
@@ -280,9 +280,9 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def init(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
     >>>         self.original_state_dict = state_dict
-    >>>         super().init(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
@@ -302,7 +302,7 @@ class LoadPlanner:
     """
 
     @abc.abstractmethod
-    def init(
+    def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
@@ -318,7 +318,7 @@ class LoadPlanner:
     @abc.abstractmethod
     def create_local_plan(self) -> LoadPlan:
         """
-        Create a LoadPlan based on state_dict and metadata provided by init.
+        Create a LoadPlan based on state_dict and metadata provided by set_up_planner.
 
         . N.B. This is called on every rank.
         """

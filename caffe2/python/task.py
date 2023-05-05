@@ -5,7 +5,6 @@ from caffe2.python import core, context
 from caffe2.python.schema import Field, from_blob_list
 from collections import defaultdict
 from copy import copy
-from future.utils import viewitems
 
 
 def _merge_node_kwargs(a, b):
@@ -90,7 +89,7 @@ class Node(context.DefaultManaged):
         return self._kwargs
 
 
-class WorkspaceType(object):
+class WorkspaceType:
     """
     Determines whether tasks of a TaskGroup will run directly at the global
     workspace, which is kept alive across runs, or whether a new child
@@ -276,7 +275,7 @@ class TaskGroup(context.Managed):
             return tasks_by_node
 
         # now we have report_steps. report_net is deprecated
-        for node, (net, interval) in viewitems(self._report_nets):
+        for node, (net, interval) in self._report_nets.items():
             self.report_step(net, node=node, interval_ms=interval * 1000)
         self._report_nets = {}
 
@@ -290,7 +289,7 @@ class TaskGroup(context.Managed):
             report_steps_by_node[node_map[original_node]].append(step)
 
         grouped_by_node = TaskGroup()
-        for node, tasks in viewitems(tasks_by_node):
+        for node, tasks in tasks_by_node.items():
             report_steps = report_steps_by_node[node]
             node_inits, node_exits = get_setup_nets(
                 TaskGroup.LOCAL_SETUP,
@@ -352,7 +351,7 @@ class TaskGroup(context.Managed):
             self.remote_nets())
 
 
-class TaskOutput(object):
+class TaskOutput:
     """
     Represents the output of a task. An output can be a blob,
     a list of blob, or a record.
@@ -410,7 +409,7 @@ def final_output(blob_or_record):
     return cur_task.add_output(blob_or_record)
 
 
-class TaskOutputList(object):
+class TaskOutputList:
     """ Keeps a list of outputs for a task """
     def __init__(self, outputs=None):
         self.outputs = outputs or []
@@ -536,7 +535,7 @@ class Task(context.Managed):
         self._num_instances = num_instances
 
     def __enter__(self):
-        super(Task, self).__enter__()
+        super().__enter__()
 
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
@@ -549,7 +548,7 @@ class Task(context.Managed):
         return self
 
     def __exit__(self, type, value, traceback):
-        super(Task, self).__exit__(type, value, traceback)
+        super().__exit__(type, value, traceback)
 
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
@@ -645,7 +644,7 @@ class Task(context.Managed):
             self.name, self.node, self.outputs())
 
 
-class SetupNets(object):
+class SetupNets:
     """
     Allow to register a list of nets to be run at initialization
     and finalization of Tasks or TaskGroups.

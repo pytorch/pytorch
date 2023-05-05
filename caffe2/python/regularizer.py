@@ -6,12 +6,12 @@ from caffe2.python import core, utils
 import numpy as np
 
 
-class RegularizationBy(object):
+class RegularizationBy:
     AFTER_OPTIMIZER = "after_optimizer"
     ON_LOSS = "on_loss"
 
 
-class Regularizer(object):
+class Regularizer:
     def __init__(self):
         self.kEpsilon = 1e-9
 
@@ -89,7 +89,7 @@ class Regularizer(object):
 
 class L1Norm(Regularizer):
     def __init__(self, reg_lambda):
-        super(L1Norm, self).__init__()
+        super().__init__()
         assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
 
         self.reg_lambda = reg_lambda
@@ -109,7 +109,7 @@ class LpNorm(Regularizer):
                     we will calculate Lp norm with the formula:
                     pow( sum_i { pow(theda_i, p) } ,  1/p)
         """
-        super(LpNorm, self).__init__()
+        super().__init__()
         assert reg_lambda > 0, "factor ahead of regularization should be greater than 0"
         assert p_value > 0, "p_value factor should be greater than 0"
         self.p_value = p_value
@@ -158,7 +158,7 @@ class L0ApproxNorm(Regularizer):
                     budget, no penalization will be applied. Optional parameter, if
                     0, then no budget is used
         """
-        super(L0ApproxNorm, self).__init__()
+        super().__init__()
         assert reg_lambda > 0, "factor ahead of regularization should be greater than 0"
         assert alpha > 0, "alpha factor must be a positive value greater than 0"
         assert budget >= 0, "budget factor must be greater than or equal to 0"
@@ -204,7 +204,7 @@ class L1NormTrimmed(Regularizer):
     The Trimmed Lasso: Sparsity and Robustness. https://arxiv.org/abs/1708.04527
     """
     def __init__(self, reg_lambda, k):
-        super(L1NormTrimmed, self).__init__()
+        super().__init__()
         assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
         assert isinstance(k, int), "k should be an interger as expected #. after selection"
         assert k >= 1, "k should be larger than 1"
@@ -225,7 +225,7 @@ class L1NormTrimmed(Regularizer):
 
 class L2Norm(Regularizer):
     def __init__(self, reg_lambda):
-        super(L2Norm, self).__init__()
+        super().__init__()
         assert reg_lambda >= 0, "factor ahead of regularization should be 0 or positive"
 
         self.reg_lambda = reg_lambda
@@ -239,7 +239,7 @@ class L2Norm(Regularizer):
 
 class ElasticNet(Regularizer):
     def __init__(self, l1, l2):
-        super(ElasticNet, self).__init__()
+        super().__init__()
         self.l1 = l1
         self.l2 = l2
 
@@ -257,7 +257,7 @@ class ElasticNet(Regularizer):
 
 class ElasticNetL1NormTrimmed(Regularizer):
     def __init__(self, l1, l2, k):
-        super(ElasticNetL1NormTrimmed, self).__init__()
+        super().__init__()
         self.l1 = l1
         self.l2 = l2
         self.k = k
@@ -282,7 +282,7 @@ class ElasticNetL1NormTrimmed(Regularizer):
 
 class MaxNorm(Regularizer):
     def __init__(self, norm=1.0, dtype=None):
-        super(MaxNorm, self).__init__()
+        super().__init__()
         self.norm = norm
         self.dtype = dtype
 
@@ -309,7 +309,7 @@ class MaxNorm(Regularizer):
 
 class ConstantNorm(Regularizer):
     def __init__(self, norm=1.0):
-        super(ConstantNorm, self).__init__()
+        super().__init__()
         self.norm = norm
 
     def _run_after_optimizer(self, net, param_init_net, param, grad):
@@ -329,7 +329,7 @@ class ConstantNorm(Regularizer):
 
 class SparseLpNorm(Regularizer):
     def __init__(self, p, reg_lambda):
-        super(SparseLpNorm, self).__init__()
+        super().__init__()
         assert p in (1.0, 2.0), "Sparse Lp regularization only implemented for p = 1.0 and p = 2.0."
         assert reg_lambda > 0, "factor ahead of regularization should be greater than 0."
         self.p = p
@@ -349,12 +349,12 @@ class SparseLpNorm(Regularizer):
 
 class SparseL1Norm(SparseLpNorm):
     def __init__(self, reg_lambda):
-        super(SparseL1Norm, self).__init__(p=1.0, reg_lambda=reg_lambda)
+        super().__init__(p=1.0, reg_lambda=reg_lambda)
 
 
 class SparseL2Norm(SparseLpNorm):
     def __init__(self, reg_lambda):
-        super(SparseL2Norm, self).__init__(p=2.0, reg_lambda=reg_lambda)
+        super().__init__(p=2.0, reg_lambda=reg_lambda)
 
 
 class LogBarrier(Regularizer):
@@ -369,7 +369,7 @@ class LogBarrier(Regularizer):
         similar to the learning rate. It is specified by a learning rate policy and
         corresponding options
         """
-        super(LogBarrier, self).__init__()
+        super().__init__()
         assert reg_lambda > 0, "factor ahead of regularization should be 0 or positive"
         self.reg_lambda = reg_lambda
         self.discount_policy = discount_policy
@@ -412,7 +412,7 @@ class BoundedGradientProjection(Regularizer):
     def __init__(
         self, lb=None, ub=None, left_open=False, right_open=False, epsilon=None
     ):
-        super(BoundedGradientProjection, self).__init__()
+        super().__init__()
         lb = float(lb) if lb is not None else None
         ub = float(ub) if ub is not None else None
         epsilon = float(epsilon) if epsilon is not None else self.kEpsilon
@@ -481,7 +481,7 @@ class GroupL1Norm(Regularizer):
                 of the gradient operator of Sqrt has taken into stability into
                 consideration, this term won't be necessary.
         """
-        super(GroupL1Norm, self).__init__()
+        super().__init__()
         assert (
             (reg_lambda) >= 0
         ), "regularization weight should be 0 or positive"

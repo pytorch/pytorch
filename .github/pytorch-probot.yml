@@ -1,2 +1,21 @@
 tracking_issue: 24422
 ciflow_tracking_issue: 64124
+ciflow_push_tags:
+- ciflow/binaries
+- ciflow/binaries_conda
+- ciflow/binaries_libtorch
+- ciflow/binaries_wheel
+- ciflow/inductor
+- ciflow/inductor-perf-compare
+- ciflow/mps
+- ciflow/nightly
+- ciflow/periodic
+- ciflow/slow
+- ciflow/trunk
+- ciflow/unstable
+retryable_workflows:
+- lint
+- pull
+- trunk
+- linux-binary
+- windows-binary

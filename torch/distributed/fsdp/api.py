@@ -20,6 +20,11 @@ __all__ = [
     "FullStateDictConfig",
     "LocalStateDictConfig",
     "ShardedStateDictConfig",
+    "OptimStateDictConfig",
+    "FullOptimStateDictConfig",
+    "LocalOptimStateDictConfig",
+    "ShardedOptimStateDictConfig",
+    "StateDictSettings",
 ]
 
 
@@ -47,13 +52,13 @@ class ShardingStrategy(Enum):
       synchronizes them (via all-reduce) after the backward computation. The
       unsharded optimizer states are updated locally per rank.
     - ``HYBRID_SHARD``: Apply ``FULL_SHARD`` within a node, and replicate parameters across
-        nodes. This results in reduced communication volume as expensive all-gathers and
-        reduce-scatters are only done within a node, which can be more performant for medium
-        -sized models.
+      nodes. This results in reduced communication volume as expensive all-gathers and
+      reduce-scatters are only done within a node, which can be more performant for medium
+      -sized models.
     - ``_HYBRID_SHARD_ZERO2``: Apply ``SHARD_GRAD_OP`` within a node, and replicate parameters across
-        nodes. This is like ``HYBRID_SHARD``, except this may provide even higher throughput
-        since the unsharded parameters are not freed after the forward pass, saving the
-        all-gathers in the pre-backward.
+      nodes. This is like ``HYBRID_SHARD``, except this may provide even higher throughput
+      since the unsharded parameters are not freed after the forward pass, saving the
+      all-gathers in the pre-backward.
     """
 
     FULL_SHARD = auto()
@@ -68,10 +73,11 @@ class BackwardPrefetch(Enum):
     This configures explicit backward prefetching, which can improve throughput
     but may slightly increase peak memory usage.
 
-    For NCCL backend, any collectives, even if issued in different streams,
-    contend for the same per-device NCCL stream, which is why the relative
-    order in which the collectives are issued matters for overlapping. The
-    different backward prefetching settings correspond to different orderings.
+    For a single process group using NCCL backend, any collectives, even if
+    issued in different streams, contend for the same per-device NCCL stream,
+    which is why the relative order in which the collectives are issued matters
+    for overlapping. The different backward prefetching settings correspond to
+    different orderings.
 
     - ``BACKWARD_PRE``: This prefetches the next set of parameters before the
       current set of parameter's gradient computation. This improves backward
@@ -301,3 +307,38 @@ class LocalStateDictConfig(StateDictConfig):
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
+
+
+@dataclass
+class OptimStateDictConfig:
+    """
+    ``OptimStateDictConfig`` is the base class for all optimizer state_dict
+    configuration classes.  Users should instantiate a child version
+    (i.e. ``FullOptimStateDictConfig``) in order to configure settings for the
+    particular type of ``optim_state_dict`` implementation FSDP will use.
+    """
+
+    # TODO: actually use this flag in the _optim_utils.py
+    offload_to_cpu: bool = True
+
+
+@dataclass
+class FullOptimStateDictConfig(OptimStateDictConfig):
+    rank0_only: bool = False
+
+
+@dataclass
+class LocalOptimStateDictConfig(OptimStateDictConfig):
+    offload_to_cpu: bool = False
+
+
+@dataclass
+class ShardedOptimStateDictConfig(OptimStateDictConfig):
+    pass
+
+
+@dataclass
+class StateDictSettings:
+    state_dict_type: StateDictType
+    state_dict_config: StateDictConfig
+    optim_state_dict_config: OptimStateDictConfig

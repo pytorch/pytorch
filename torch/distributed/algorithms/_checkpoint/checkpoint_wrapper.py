@@ -125,6 +125,8 @@ class CheckpointWrapper(ActivationWrapper):
                 use_reentrant=(
                     self.checkpoint_impl == CheckpointImpl.REENTRANT
                 ),
+                *checkpoint_fn_args,
+                **checkpoint_fn_kwargs,
             )
         else:
             # Construct user-specified checkpoint function.
@@ -229,7 +231,7 @@ def checkpoint_wrapper(
     """
 
     return CheckpointWrapper(
-        module, checkpoint_impl, checkpoint_fn, checkpoint_fn_args, checkpoint_fn_kwargs
+        module, checkpoint_impl, checkpoint_fn, *checkpoint_fn_args, **checkpoint_fn_kwargs
     )
 
 
@@ -262,7 +264,7 @@ def apply_activation_checkpointing(
         checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
             A ``Callable`` which will wrap modules
         check_fn (Optional[Callable[nn.Module, nn.Module]])
-            A lambda function which will be passed each child submoule of ``model`` and returns
+            A lambda function which will be passed each child submodule of ``model`` and returns
             ``True`` or ``False`` depending on whether the submodule should be wrapped.
     Returns: None (`model` is modified inplace)
     """

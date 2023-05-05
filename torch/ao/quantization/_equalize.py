@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 _supported_types = {torch.nn.Conv2d, torch.nn.Linear}
-_supported_intrinsic_types = {torch.nn.intrinsic.ConvReLU2d, torch.nn.intrinsic.LinearReLU}
+_supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intrinsic.LinearReLU}
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
 
 def set_module_weight(module, weight) -> None:
@@ -160,7 +160,7 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     being less than the given threshold
 
     Takes two dictionaries mapping names to modules, the set of names for each dictionary
-    should be the same, looping over the set of names, for each name take the differnce
+    should be the same, looping over the set of names, for each name take the difference
     between the associated modules in each dictionary
 
     '''

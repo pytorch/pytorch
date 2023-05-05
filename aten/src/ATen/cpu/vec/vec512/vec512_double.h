@@ -181,6 +181,9 @@ public:
   Vectorized<double> exp() const {
     return Vectorized<double>(Sleef_expd8_u10(values));
   }
+  Vectorized<double> exp2() const {
+    return Vectorized<double>(Sleef_exp2d8_u10(values));
+  }
   Vectorized<double> expm1() const {
     return Vectorized<double>(Sleef_expm1d8_u10(values));
   }
@@ -290,7 +293,7 @@ public:
   }
 
   Vectorized<double> operator!=(const Vectorized<double>& other) const {
-    auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_OQ);
+    auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }

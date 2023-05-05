@@ -98,7 +98,6 @@ coverage_ignore_functions = [
     "cudart",
     "is_bf16_supported",
     # torch.cuda._sanitizer
-    "format_log_message",
     "zip_arguments",
     "zip_by_key",
     # torch.distributed.autograd
@@ -175,6 +174,7 @@ coverage_ignore_classes = [
     "AnyType",
     "Argument",
     "ArgumentSpec",
+    "AwaitType",
     "BenchmarkConfig",
     "BenchmarkExecutionStats",
     "Block",
@@ -238,6 +238,7 @@ coverage_ignore_classes = [
     "StaticModule",
     "StringType",
     "SymIntType",
+    "SymBoolType",
     "ThroughputBenchmark",
     "TracingState",
     "TupleType",
@@ -274,6 +275,7 @@ coverage_ignore_classes = [
     # torch.cuda._sanitizer
     "Access",
     "AccessType",
+    "Await",
     "CUDASanitizer",
     "CUDASanitizerDispatchMode",
     "CUDASanitizerErrors",
@@ -336,8 +338,6 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    "SymInt",
-    "SymFloat",
 ]
 
 # The suffix(es) of source filenames.
@@ -351,7 +351,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2022, PyTorch Contributors'
+copyright = '2023, PyTorch Contributors'
 author = 'PyTorch Contributors'
 torch_version = str(torch.__version__)
 
@@ -361,10 +361,10 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'master (' + torch_version + ' )'
+version = 'main (' + torch_version + ' )'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'master'
+release = 'main'
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set

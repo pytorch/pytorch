@@ -38,7 +38,7 @@ class SingletonTypePtr {
   }
 
  private:
-  T* repr_;
+  T* repr_{nullptr};
 };
 
 template <typename T, typename U>

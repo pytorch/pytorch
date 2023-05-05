@@ -27,8 +27,292 @@
 
 #pragma once
 
-#include <ATen/native/transformers/cuda/flash_attn/gemm.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda_fp16.h>
+#include <cuda_bf16.h>
+
+#include <ATen/native/transformers/cuda/flash_attn/utils.h>
+
 namespace fmha {
+
+template<
+    // The dimensions of the tile computed by the CTA.
+    typename Cta_tile_,
+    // The number of bits per element.
+    int BITS_PER_ELEMENT,
+    // The number of rows of Q, K or V loaded by this tile.
+    int ROWS_,
+    // The number of columns.
+    int COLS,
+    int BYTES_PER_LDGS_ = 16
+>
+struct Gmem_tile_qkv {
+
+    using Cta_tile = Cta_tile_;
+
+    static constexpr int BYTES_PER_ELEMENT = BITS_PER_ELEMENT / 8;
+    // The size of each LDG.
+    static constexpr int BYTES_PER_LDG = BYTES_PER_LDGS_;
+    // The size of a row in bytes.
+    static constexpr int BYTES_PER_ROW = COLS * BITS_PER_ELEMENT / 8;
+
+    // The number of threads to load a "row" of the matrix.
+    static constexpr int THREADS_PER_ROW = BYTES_PER_ROW / BYTES_PER_LDG;
+
+    static constexpr int ROWS = ROWS_;
+    // The number of "rows" loaded per LDG.
+    static constexpr int ROWS_PER_LDG = Cta_tile::THREADS_PER_CTA / THREADS_PER_ROW;
+    // The number of LDGs needed to load a chunk of the Q matrix.
+    static constexpr int LDGS = DivUpConstexpr(ROWS, ROWS_PER_LDG);
+
+    // Ctor.
+    template< typename BInfo >
+    inline __device__ Gmem_tile_qkv(void *ptr_, const uint32_t row_stride_in_elts,
+                                    const uint32_t head_stride_in_elts, const int headdim,
+                                    const BInfo &binfo, const int tidx, bool use_seqlen_q)
+        : row_stride_in_bytes(row_stride_in_elts * BYTES_PER_ELEMENT)
+        , actual_seqlen(use_seqlen_q ? binfo.actual_seqlen_q : binfo.actual_seqlen_k)
+        , ptr(reinterpret_cast<char *>(ptr_))
+        , tidx_(tidx)
+        , col_predicate((tidx % THREADS_PER_ROW) * (BYTES_PER_LDG / BYTES_PER_ELEMENT) < headdim) {
+
+        // Compute the position in the sequence (within the CTA for the moment).
+        int row = tidx / THREADS_PER_ROW;
+        // Compute the position of the thread in the row.
+        int col = tidx % THREADS_PER_ROW;
+
+        // Store the row as we need it to disable the loads.
+        // TD [2022-04-16]: To minimize registers, we'll recompute row_ instead of storing it
+        // row_ = row;
+
+        // The row offset in the batched GEMM. For each seq element, we store QKV in that order.
+        // int64_t row_offset = (int64_t)row * params.qkv_stride_in_bytes;
+        uint32_t row_offset = (uint32_t)(((use_seqlen_q ? binfo.sum_s_q : binfo.sum_s_k) + row) * row_stride_in_bytes);
+        // Add the block index.
+        // row_offset += (int64_t)((binfo.sum_s * NUM_MATS + qkv_offset) * binfo.h + binfo.bidh) * BYTES_PER_ROW;
+        row_offset += (uint32_t)(binfo.bidh * head_stride_in_elts * BYTES_PER_ELEMENT);
+
+        // Assemble the final pointer.
+        ptr += row_offset + col * BYTES_PER_LDG;
+    }
+
+    // Store data to shared memory.
+    template< typename Smem_tile >
+    inline __device__ void commit(Smem_tile &smem_tile) {
+        smem_tile.store(fetch_);
+    }
+
+    inline __device__ void load() {
+        int row_ = tidx_ / THREADS_PER_ROW;
+        const void *ptrs[LDGS];
+        uint32_t preds[LDGS];
+        #pragma unroll
+        for( int ii = 0; ii < LDGS; ++ii ) {
+            // ptrs[ii] = ptr + (int64_t)ii * ROWS_PER_LDG * row_stride_in_bytes;
+            ptrs[ii] = ptr + (uint32_t)ii * ROWS_PER_LDG * row_stride_in_bytes;
+            preds[ii] = col_predicate && ((row_ + ii * ROWS_PER_LDG) < min(ROWS, actual_seqlen));
+            fetch_[ii] = make_uint4(0, 0, 0, 0);
+        }
+
+        // not packing predicates removes restrictions (e.g. FP16 384, 4 warps)
+        Ldg_functor<uint4, LDGS> fct(fetch_, ptrs);
+        #pragma unroll
+        for( int ii = 0; ii < LDGS; ++ii ) {
+            fct.load(ii, preds[ii]);
+        }
+    }
+
+    // Store data to memory.
+    inline __device__ void store(const uint4 (&data)[LDGS]) {
+        int row_ = tidx_ / THREADS_PER_ROW;
+        #pragma unroll
+        for( int ii = 0; ii < LDGS; ++ii ) {
+            // char *ptr_ = ptr + (int64_t)ii * ROWS_PER_LDG * row_stride_in_bytes;
+            char *ptr_ = ptr + (uint32_t)ii * ROWS_PER_LDG * row_stride_in_bytes;
+            if (col_predicate && (row_ + ii * ROWS_PER_LDG) < min(ROWS, actual_seqlen)) {
+                fmha::stg(ptr_, data[ii]);
+            }
+        }
+    }
+
+    inline __device__ void move(const int steps = 1) {
+        // ptr += (int64_t)ROWS * row_stride_in_bytes * steps;
+        ptr += (uint32_t)ROWS * row_stride_in_bytes * steps;
+        actual_seqlen -= ROWS * steps;
+    }
+
+    // The stride between rows for the QKV matrice.
+    // int64_t row_stride_in_bytes;
+    const uint32_t row_stride_in_bytes;
+    // The pointer.
+    char *ptr;
+    // The fetch registers.
+    uint4 fetch_[LDGS];
+    // Keep track of the row the thread is processing as we move the tile.
+    // int row_;
+    const int tidx_;
+    // The length of the sequence loaded by that memory tile.
+    int actual_seqlen;
+    const bool col_predicate;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<
+    typename Cta_tile,
+    int BYTES_PER_ELEMENT = 2
+>
+struct Gmem_tile_o {
+
+    static_assert(BYTES_PER_ELEMENT == 2 || BYTES_PER_ELEMENT == 4);
+
+    // The mma tile.
+    using Mma_tile = fmha::Hmma_tile<Cta_tile>;
+
+    // The size of each element.
+    // static constexpr int BYTES_PER_ELEMENT = 2;
+    // The size of each STG.
+    static constexpr int BYTES_PER_STG = BYTES_PER_ELEMENT * 4;
+    static constexpr int COLS = Cta_tile::N;
+    // The size of a row in bytes.
+    static constexpr int BYTES_PER_ROW = COLS * BYTES_PER_ELEMENT;
+
+    // The number of threads to store a "row" of the matrix.
+    static constexpr int THREADS_PER_ROW = BYTES_PER_ROW / BYTES_PER_STG;
+    // The number of "rows" stored per iteration of the loop. The output of 1 MMA.
+    static constexpr int ROWS = Cta_tile::M;
+    // The number of "rows" stored per iteration of the loop. The output of 1 MMA.
+    static constexpr int ROWS_PER_LOOP = ROWS <= 64 ? ROWS : (int)Mma_tile::M_PER_MMA_PER_CTA;
+    // The number of outter loop for the stores.
+    static constexpr int LOOPS = ROWS / ROWS_PER_LOOP;
+
+    // The number of "rows" stored per STG.
+    static constexpr int ROWS_PER_STG = Cta_tile::THREADS_PER_CTA / THREADS_PER_ROW;
+    // Do we have to guard against partial writes/reads.
+    static constexpr bool HAS_INCOMPLETE_STG = Cta_tile::M % ROWS_PER_STG != 0;
+    // The number of STGs needed to store a chunk of the Q matrix.
+    static constexpr int STGS_PER_LOOP = DivUpConstexpr(ROWS_PER_LOOP, ROWS_PER_STG);
+    // The number of STGs needed to store a chunk of the Q matrix in total.
+    static constexpr int STGS = STGS_PER_LOOP * LOOPS;
+
+    // Ctor.
+    template<typename BInfo>
+    // inline __device__ Gmem_tile_o(void *ptr, const size_t row_stride_in_elts, const BInfo &binfo, const int tidx)
+    inline __device__ Gmem_tile_o(void *ptr, const uint32_t row_stride_in_elts,
+                                  const uint32_t head_stride_in_elts, const int headdim,
+                                  const BInfo &binfo, const int tidx)
+        : row_stride_in_bytes(row_stride_in_elts * BYTES_PER_ELEMENT)
+        , actual_seqlen_q(binfo.actual_seqlen_q)
+        , ptr_(reinterpret_cast<char *>(ptr))
+        , tidx_(tidx)
+        , col_predicate((tidx % THREADS_PER_ROW) * (BYTES_PER_STG / BYTES_PER_ELEMENT) < headdim) {
+
+        // Compute the position in the sequence (within the CTA for the moment).
+        int row = tidx / THREADS_PER_ROW;
+        // Compute the position of the thread in the row.
+        int col = tidx % THREADS_PER_ROW;
+
+        // Store the row as we need it to disable loads.
+        // row_ = row;
+
+        // The row offset in the batched GEMM.
+        // int64_t row_offset = (int64_t)row * row_stride_in_bytes + binfo.bidx * BYTES_PER_ROW;
+        uint32_t row_offset = (uint32_t)((binfo.sum_s_q + row) * row_stride_in_bytes);
+        row_offset += (uint32_t)(binfo.bidh * head_stride_in_elts * BYTES_PER_ELEMENT);
+        // Assemble the final pointer.
+        ptr_ += row_offset + col * BYTES_PER_STG;
+
+        // Is that thread active on the last STG?
+        if( HAS_INCOMPLETE_STG ) {
+            is_active_for_last_stg_ = row + (STGS - 1) * ROWS_PER_STG < Cta_tile::M;
+        }
+    }
+
+    // Store data to global memory.
+    template<typename elem_type=__half>
+    inline __device__ void store(const uint4 (&src)[STGS_PER_LOOP], int mi) {
+        int row_ = tidx_ / THREADS_PER_ROW;
+        #pragma unroll
+        for( int ii = 0; ii < STGS_PER_LOOP; ++ii ) {
+            int jj = mi * STGS_PER_LOOP + ii;
+            if ((!col_predicate) || (row_ + jj * ROWS_PER_STG >= this->actual_seqlen_q)) {
+                break;
+            }
+
+            if (BYTES_PER_ELEMENT == 4) {
+                if( !HAS_INCOMPLETE_STG || (jj < STGS - 1 || this->is_active_for_last_stg_) ) {
+                    fmha::stg(this->ptr_ + jj * ROWS_PER_STG * this->row_stride_in_bytes, src[ii]);
+                }
+            } else if (BYTES_PER_ELEMENT == 2) {
+                float x = reinterpret_cast<const float &>(src[ii].x);
+                float y = reinterpret_cast<const float &>(src[ii].y);
+                float z = reinterpret_cast<const float &>(src[ii].z);
+                float w = reinterpret_cast<const float &>(src[ii].w);
+                uint2 out = fmha::float4_pack<elem_type>(x, y, z, w);
+                if( !HAS_INCOMPLETE_STG || (jj < STGS - 1 || this->is_active_for_last_stg_) ) {
+                    fmha::stg(this->ptr_ + jj * ROWS_PER_STG * this->row_stride_in_bytes, out);
+                }
+            }
+        }
+    }
+
+    // Store data to global memory with atomicAdd.
+    inline __device__ void atomic_add(const uint4 (&src)[STGS_PER_LOOP], int mi) {
+        static_assert(BYTES_PER_ELEMENT == 4);  // Only do atomic add on floats
+        int row_ = tidx_ / THREADS_PER_ROW;
+        #pragma unroll
+        for( int ii = 0; ii < STGS_PER_LOOP; ++ii ) {
+            int jj = mi * STGS_PER_LOOP + ii;
+            if ((!col_predicate) || (row_ + jj * ROWS_PER_STG >= this->actual_seqlen_q)) {
+                break;
+            }
+
+            if( !HAS_INCOMPLETE_STG || (jj < STGS - 1 || this->is_active_for_last_stg_) ) {
+                float *ptr_ = reinterpret_cast<float *>(this->ptr_ + jj * ROWS_PER_STG * this->row_stride_in_bytes);
+                #pragma unroll
+                for (int jj = 0; jj < 4; ++jj) {
+                    atomicAdd(ptr_ + jj, reinterpret_cast<const float(&)[4]>(src[ii])[jj]);
+                }
+            }
+        }
+    }
+
+    // Load data from global memory.
+    inline __device__ void load(uint4 (&dst)[STGS_PER_LOOP], int mi) {
+        static_assert(BYTES_PER_ELEMENT == 4);
+        int row_ = tidx_ / THREADS_PER_ROW;
+        #pragma unroll
+        for( int ii = 0; ii < STGS_PER_LOOP; ++ii ) {
+            int jj = mi * STGS_PER_LOOP + ii;
+            if ((!col_predicate) || (row_ + jj * ROWS_PER_STG >= this->actual_seqlen_q)) {
+                break;
+            }
+
+            if( !HAS_INCOMPLETE_STG || (jj < STGS - 1 || this->is_active_for_last_stg_) ) {
+                fmha::ldg(dst[ii], this->ptr_ + jj * ROWS_PER_STG * this->row_stride_in_bytes);
+            }
+        }
+    }
+
+    inline __device__ void move(const int steps = 1) {
+        // row_ += ROWS * steps;
+        // ptr_ += (int64_t)ROWS * row_stride_in_bytes * steps;
+        ptr_ += (uint32_t)ROWS * row_stride_in_bytes * steps;
+        actual_seqlen_q -= ROWS * steps;
+    }
+
+    // The stride between rows for the QKV matrice.
+    // int64_t row_stride_in_bytes;
+    const uint32_t row_stride_in_bytes;
+    // The pointer.
+    char *ptr_;
+    // Is the thread active for the last STG?
+    int is_active_for_last_stg_;
+    // The length of the sequence loaded by that memory tile.
+    int actual_seqlen_q;
+    const int tidx_;
+    const bool col_predicate;
+};
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -118,16 +402,15 @@ struct Gmem_tile_mma_s : public Base {
     // Store to global memory.
     template<typename Mask, typename Fragment>
     inline __device__ void store(const Fragment (&frag)[N][M], const Mask& mask){
-        static_assert(Fragment::kStorageElements == 4, "");
         #pragma unroll
         for( int mi = 0; mi < M; mi++ ) {
             #pragma unroll
             for( int ni = 0; ni < N; ni++ ) {
                 uint4 dst;
-                dst.x = frag[ni][mi].raw_data()[0];
-                dst.y = frag[ni][mi].raw_data()[2];
-                dst.z = frag[ni][mi].raw_data()[1];
-                dst.w = frag[ni][mi].raw_data()[3];
+                dst.x = frag[ni][mi].reg(0);
+                dst.y = frag[ni][mi].reg(2);
+                dst.z = frag[ni][mi].reg(1);
+                dst.w = frag[ni][mi].reg(3);
                 if( mask.any_valid(mi, ni) ) {
                     Base::store(dst, mi, ni);
                 }

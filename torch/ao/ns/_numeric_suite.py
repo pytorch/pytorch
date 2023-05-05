@@ -171,7 +171,7 @@ class Logger(nn.Module):
     """
 
     def __init__(self):
-        super(Logger, self).__init__()
+        super().__init__()
         self.stats = {}
         # We only insert observer if the op is quantized with static quantization,
         # which is identified by activation_observer.dtype == quint8.  This is needed
@@ -190,7 +190,7 @@ class ShadowLogger(Logger):
     """
 
     def __init__(self):
-        super(ShadowLogger, self).__init__()
+        super().__init__()
         self.stats["float"] = []
         self.stats["quantized"] = []
 
@@ -210,7 +210,7 @@ class OutputLogger(Logger):
     """
 
     def __init__(self):
-        super(OutputLogger, self).__init__()
+        super().__init__()
         self.stats["tensor_val"] = []
 
 
@@ -222,12 +222,12 @@ class OutputLogger(Logger):
 
 
 def _convert_tuple_to_list(t: Any) -> Any:
-    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+    return [_convert_tuple_to_list(x) for x in t] if type(t) is tuple else t
 
 
 def _dequantize_tensor_list(t: Any) -> Any:
     return (
-        list(_dequantize_tensor_list(x) for x in t)
+        [_dequantize_tensor_list(x) for x in t]
         if type(t) is list
         else t.dequantize()
         if t.is_quantized
@@ -248,7 +248,7 @@ class Shadow(nn.Module):
     """
 
     def __init__(self, q_module, float_module, logger_cls):
-        super(Shadow, self).__init__()
+        super().__init__()
         self.orig_module = q_module
         self.shadow_module = float_module
         self.dequant = nnq.DeQuantize()

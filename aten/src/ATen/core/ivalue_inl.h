@@ -92,6 +92,14 @@ inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const& {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
 }
+inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() && {
+  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  return moveToIntrusivePtr<ivalue::Await>();
+}
+inline c10::intrusive_ptr<ivalue::Await> IValue::toAwait() const& {
+  AT_ASSERT(isAwait(), "Expected Await but got ", tagKind());
+  return toIntrusivePtr<ivalue::Await>();
+}
 inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
   AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
   return moveToIntrusivePtr<c10::RRefInterface>();
@@ -254,6 +262,23 @@ inline c10::SymFloat IValue::toSymFloat() const& {
     return c10::SymFloat(toIntrusivePtr<c10::SymNodeImpl>());
   } else {
     return c10::SymFloat(payload.u.as_double);
+  }
+}
+inline c10::SymBool IValue::toSymBool() && {
+  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  if (isSymBool()) {
+    return c10::SymBool(moveToIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymBool(payload.u.as_bool);
+  }
+}
+
+inline c10::SymBool IValue::toSymBool() const& {
+  AT_ASSERT(isSymBool() || isBool(), "Expected SymBool or boolean but got ", tagKind());
+  if (isSymBool()) {
+    return c10::SymBool(toIntrusivePtr<c10::SymNodeImpl>());
+  } else {
+    return c10::SymBool(payload.u.as_bool);
   }
 }
 
@@ -944,7 +969,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
           "an error):\n",
-          tryRetrieveErrorMessageInternal(eptr));
+          tryRetrieveErrorMessageInternal(std::move(eptr)));
       if (eptr_) {
         msg += c10::str(
             ", \nOriginal exception:\n",
@@ -1199,7 +1224,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // Tries to retrieve the error message from std::exception_ptr.
   std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) const {
     try {
-      std::rethrow_exception(eptr);
+      std::rethrow_exception(std::move(eptr));
     } catch (const std::exception& e) {
       return e.what();
     } catch (...) {
@@ -1364,6 +1389,78 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const std::vector<c10::Device> devices_;
 };
 
+struct C10_EXPORT ivalue::Await final : c10::intrusive_ptr_target {
+ private:
+  explicit Await(TypePtr elType, std::function<IValue()> fn)
+      : elType_(std::move(elType)), type_(AwaitType::create(elType_)), fn_(std::move(fn)) {}
+
+  explicit Await(TypePtr elType) : elType_(std::move(elType)), type_(AwaitType::create(elType_)) { }
+
+  friend c10::intrusive_ptr<Await>;
+
+ public:
+  Await(const Await&) = delete;
+  Await(Await&&) = delete;
+  Await& operator=(const Await&) = delete;
+  Await& operator=(Await&&) = delete;
+
+  IValue wait() {
+    if (!completed_) {
+      TORCH_CHECK(fn_, "Incompleted Await: fn can't be None");
+      value_ = fn_();
+      completed_ = true;
+      args_ = {};
+    }
+    return value_;
+  }
+
+  IValue value() {
+    TORCH_CHECK(completed_, "Await must be completed");
+    return value_;
+  }
+
+  void setFn(std::function<IValue()> fn) {
+    fn_ = std::move(fn);
+  }
+
+  bool completed() {
+    return completed_;
+  }
+
+  void markCompleted(IValue value) {
+    value_ = std::move(value);
+    completed_ = true;
+  }
+
+  TORCH_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const Await& v);
+
+  TypePtr elementType() const {
+    return elType_;
+  }
+
+  TypePtr type() const {
+    return type_;
+  }
+
+  void setArgs(std::vector<IValue> args) {
+    args_ = std::move(args);
+  }
+
+  std::vector<IValue>& args() {
+    return args_;
+  }
+
+ private:
+  TypePtr elType_;
+  TypePtr type_;
+  std::vector<IValue> args_;
+  std::function<IValue()> fn_;
+  IValue value_;
+  bool completed_{};
+};
+
 // Input is a list of Futures with the same target type.
 // Output is a Future to the List of completed Futures.
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1510,7 +1607,7 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
-  virtual ~PyObjectHolder()= default;
+  ~PyObjectHolder() override = default;
 };
 
 struct ivalue::EnumHolder : c10::intrusive_ptr_target {
@@ -1621,6 +1718,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::string_view, toStringView)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
+DEFINE_TO(c10::intrusive_ptr<ivalue::Await>, toAwait)
 DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(c10::intrusive_ptr<at::Quantizer>, toQuantizer)
 DEFINE_TO(IValue, toIValue)
@@ -1633,6 +1731,7 @@ DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
 DEFINE_TO(c10::SymFloat, toSymFloat)
+DEFINE_TO(c10::SymBool, toSymBool)
 
 template <class T>
 struct _fake_type {};
@@ -2179,6 +2278,11 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
     : tag(Tag::Future) {
+  payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
+}
+
+inline IValue::IValue(c10::intrusive_ptr<ivalue::Await> v)
+    : tag(Tag::Await) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 

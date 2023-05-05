@@ -5,7 +5,8 @@ import pickle
 import random
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Union
+import sympy
 
 import torch
 from torch import SymInt
@@ -96,7 +97,6 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     return f
 
 
-@make_boxed_compiler
 def _draw_graph_compile(fx_g, _, name, clear_meta=True):
     print(fx_g.code)
     draw_graph(fx_g, name, clear_meta=clear_meta)
@@ -104,7 +104,9 @@ def _draw_graph_compile(fx_g, _, name, clear_meta=True):
 
 
 def draw_graph_compile(name):
-    return partial(_draw_graph_compile, name=name)
+    return make_boxed_compiler(
+        partial(_draw_graph_compile, name=name)
+    )
 
 
 @make_boxed_compiler
@@ -125,7 +127,6 @@ class DebugInterpreter(fx.Interpreter):
         super().run(*args)
 
     def run_node(self, n):
-        import sympy
 
         def subst_symint(ni):
             if not isinstance(ni, SymInt):
@@ -187,8 +188,8 @@ def simple_ts_compile(fx_g, _):
     return f
 
 
-def nnc_jit(f, static_argnums=None):
-    return aot_function(f, simple_ts_compile, static_argnums=static_argnums)
+def nnc_jit(f):
+    return aot_function(f, simple_ts_compile)
 
 
 aten = torch.ops.aten
@@ -228,7 +229,6 @@ def print_compile(fx_g, _):
 
 def memory_efficient_fusion(
     fn: Union[Callable, nn.Module],
-    static_argnums: Optional[Tuple[int]] = None,
     **kwargs,
 ):
     """
@@ -244,8 +244,6 @@ def memory_efficient_fusion(
     Args:
         fn (Union[Callable, nn.Module]): A Python function or a ``nn.Module``
             that takes one ore more arguments. Must return one or more Tensors.
-        static_argnums (Optional[Tuple[Int]]): An option tuple of ints to mark
-            the arguments of the function as static.
         **kwargs: Any other overrides you want to make to the settings
 
     Returns:
@@ -260,7 +258,6 @@ def memory_efficient_fusion(
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
         "decompositions": default_decompositions,
-        "static_argnums": static_argnums,
     }
     config.update(kwargs)
     if isinstance(fn, torch.nn.Module):
@@ -370,7 +367,10 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         if len(gm_to_save.graph.nodes) == 0:
             log.log(
                 logging.WARNING,
-                f"No nodes in graph {current_name}_{type_name}_{graph_index}.",
+                "No nodes in graph {%s}_{%s}_{%s}.",
+                current_name,
+                type_name,
+                graph_index,
             )
             return
 

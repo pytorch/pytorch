@@ -10,11 +10,11 @@ import random
 import itertools
 import math
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
+    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
@@ -273,6 +273,23 @@ class TestPoolingNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_nhwc_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        input = input.contiguous(memory_format=torch.channels_last)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
@@ -353,6 +370,10 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool3d_input_check(self):
+        x = torch.ones(1, 3, 1, 1, 1)
+        with self.assertRaises(RuntimeError):
+            F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
@@ -707,6 +728,7 @@ torch.cuda.synchronize()
                     output = module(input)
 
     @onlyNativeDeviceTypes
+    @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
@@ -794,6 +816,7 @@ torch.cuda.synchronize()
         check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 
     @onlyCUDA
+    @gcIfJetson
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):
             x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
@@ -817,6 +840,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
@@ -853,6 +877,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.float, torch.double)
     @onlyCUDA
+    @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, h, w, d, kernel_size, stride=None):
             batch = n
@@ -942,6 +967,7 @@ torch.cuda.synchronize()
         helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
     @onlyCUDA
+    @gcIfJetson
     def test_max_pool2d_indices(self, device):
         def helper(n, c, h, w, ks):
             if n is None:
@@ -1255,6 +1281,7 @@ torch.cuda.synchronize()
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
+    @gcIfJetson
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:

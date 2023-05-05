@@ -21,6 +21,7 @@ from collections import OrderedDict
 from pickle import (
     APPEND,
     APPENDS,
+    BINFLOAT,
     BINGET,
     BININT,
     BININT1,
@@ -226,6 +227,8 @@ class Unpickler:
                 self.append(self.read(1)[0])
             elif key[0] == BININT2[0]:
                 self.append(unpack("<H", read(2))[0])
+            elif key[0] == BINFLOAT[0]:
+                self.append(unpack(">d", self.read(8))[0])
             elif key[0] == BINUNICODE[0]:
                 strlen = unpack("<I", read(4))[0]
                 if strlen > maxsize:

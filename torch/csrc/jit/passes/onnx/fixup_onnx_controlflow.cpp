@@ -74,7 +74,7 @@ bool IsErasableSequence(const Node* loop_node, size_t i) {
   const auto init_seq_node_kind = init_seq_node->kind();
   if ((init_seq_node_kind != ::c10::onnx::SequenceEmpty) &&
       (init_seq_node_kind != ::c10::prim::ListConstruct ||
-       init_seq_node->inputs().size() != 0)) {
+       !init_seq_node->inputs().empty())) {
     // Initial sequence must be empty.
     return false;
   }

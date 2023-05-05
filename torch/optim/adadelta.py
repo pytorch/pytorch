@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
@@ -9,56 +10,6 @@ __all__ = ["Adadelta", "adadelta"]
 
 
 class Adadelta(Optimizer):
-    r"""Implements Adadelta algorithm.
-
-    .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)},
-                \: f(\theta) \text{ (objective)}, \: \rho \text{ (decay)},
-                \: \lambda \text{ (weight decay)}                                                \\
-            &\textbf{initialize} :  v_0  \leftarrow 0 \: \text{ (square avg)},
-                \: u_0 \leftarrow 0 \: \text{ (accumulate variables)}                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
-            &\hspace{5mm} v_t      \leftarrow v_{t-1} \rho + g^2_t (1 - \rho)                    \\
-            &\hspace{5mm}\Delta x_t    \leftarrow   \frac{\sqrt{u_{t-1} +
-                \epsilon }}{ \sqrt{v_t + \epsilon}  }g_t \hspace{21mm}                           \\
-            &\hspace{5mm} u_t  \leftarrow   u_{t-1}  \rho +
-                 \Delta x^2_t  (1 - \rho)                                                        \\
-            &\hspace{5mm}\theta_t      \leftarrow   \theta_{t-1} - \gamma  \Delta x_t            \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
-
-    For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        rho (float, optional): coefficient used for computing a running average
-            of squared gradients (default: 0.9)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-6)
-        lr (float, optional): coefficient that scale delta before it is applied
-            to the parameters (default: 1.0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer is used.
-            Since the foreach implementation is usually significantly faster than
-            the for-loop implementation on CUDA, we try to use it whenever possible
-            (all parameters are on CUDA). Else, we continue with the for-loop
-            implementation. (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-
-    .. _ADADELTA\: An Adaptive Learning Rate Method:
-        https://arxiv.org/abs/1212.5701
-    """
-
     def __init__(
         self,
         params,
@@ -89,7 +40,7 @@ class Adadelta(Optimizer):
             foreach=foreach,
             differentiable=differentiable,
         )
-        super(Adadelta, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -171,6 +122,54 @@ class Adadelta(Optimizer):
         return loss
 
 
+Adadelta.__doc__ = r"""Implements Adadelta algorithm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{ (lr)}, \: \theta_0 \text{ (params)},
+                \: f(\theta) \text{ (objective)}, \: \rho \text{ (decay)},
+                \: \lambda \text{ (weight decay)}                                                \\
+            &\textbf{initialize} :  v_0  \leftarrow 0 \: \text{ (square avg)},
+                \: u_0 \leftarrow 0 \: \text{ (accumulate variables)}                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
+            &\hspace{5mm} v_t      \leftarrow v_{t-1} \rho + g^2_t (1 - \rho)                    \\
+            &\hspace{5mm}\Delta x_t    \leftarrow   \frac{\sqrt{u_{t-1} +
+                \epsilon }}{ \sqrt{v_t + \epsilon}  }g_t \hspace{21mm}                           \\
+            &\hspace{5mm} u_t  \leftarrow   u_{t-1}  \rho +
+                 \Delta x^2_t  (1 - \rho)                                                        \\
+            &\hspace{5mm}\theta_t      \leftarrow   \theta_{t-1} - \gamma  \Delta x_t            \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        rho (float, optional): coefficient used for computing a running average
+            of squared gradients (default: 0.9)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-6)
+        lr (float, optional): coefficient that scale delta before it is applied
+            to the parameters (default: 1.0)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        {foreach}
+        {maximize}
+        {differentiable}
+
+    .. _ADADELTA\: An Adaptive Learning Rate Method:
+        https://arxiv.org/abs/1212.5701
+
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+
+
 def adadelta(
     params: List[Tensor],
     grads: List[Tensor],
@@ -192,19 +191,9 @@ def adadelta(
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    # We try to use the foreach implementation on CUDA whenever possible since
-    # it is faster than the for-loop implementation. However, the foreach
-    # implementation is not differentiable, so we must check differentiable=False.
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        all_tensors = []
-        all_tensors.extend(params)
-        all_tensors.extend(grads)
-        all_tensors.extend(square_avgs)
-        all_tensors.extend(acc_deltas)
-        foreach = not torch.jit.is_scripting() and not differentiable and all(
-            p.is_cuda for p in all_tensors
-        )
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -293,7 +282,7 @@ def _multi_tensor_adadelta(
             device_grads = torch._foreach_neg(device_grads)
 
         if weight_decay != 0:
-            torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         torch._foreach_mul_(device_square_avgs, rho)
         torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/dispatch/Dispatcher.h>
 
 // TODO: this can probably live in c10

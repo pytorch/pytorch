@@ -57,7 +57,7 @@ DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map'
 UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sharding']
 
 
-class Capture(object):
+class Capture:
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
 
     def __init__(self, schema_df=None):
@@ -217,7 +217,7 @@ class CaptureCall(Capture):
 
     def execute(self):
 
-        # TODO: VitalyFedyunin execute kwargs and maybe nestted structures
+        # TODO: VitalyFedyunin execute kwargs and maybe nested structures
         executed_args = []
         for arg in self.kwargs['args']:
             if isinstance(arg, Capture):

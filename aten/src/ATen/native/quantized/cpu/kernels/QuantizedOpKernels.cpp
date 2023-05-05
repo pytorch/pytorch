@@ -2874,7 +2874,7 @@ void qmean_inner_dim_kernel(
 void qstd_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    optional<int64_t> unbiased,
+    const c10::optional<Scalar>& correction_opt,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();
@@ -2896,10 +2896,8 @@ void qstd_inner_dim_kernel(
   if (!keepdim) {
     out_dims.erase(out_dims.end() - num_dims_to_squeeze, out_dims.end());
   }
-  int64_t den = N; // Denominator when computing mean and deviation
-  if (unbiased.has_value() && unbiased.value() == 1) {
-    den -= 1;
-  }
+  const auto correction = correction_opt.value_or(1).toDouble();
+  double den = std::max(N - correction, 0.0); // Denominator when computing mean and deviation
   auto x_scale = self.q_scale();
   auto x_zp = self.q_zero_point();
   result = at::_empty_affine_quantized(
@@ -3000,7 +2998,7 @@ void quantized_groupnorm_nhwc_kernel(
 
     // Buffer for x and x^2
     Tensor buffer = at::empty({M, 2 * channels_per_group}, X.options().dtype(at::kFloat));
-    float* buffer_data = buffer.data_ptr<float>();
+    float* buffer_data = buffer.mutable_data_ptr<float>();
 
     // We can parallel in the following 2 impls:
     //
@@ -3092,11 +3090,11 @@ void quantized_groupnorm_nhwc_kernel(
       // To avoid thread conflict, we use a temp buffer of {T, Bs, 2*C}
       int num_threads = at::get_num_threads();
       Tensor buffer = at::empty({num_threads, Bs, 2 * C}, X.options().dtype(at::kFloat)).zero_();
-      float* buffer_data = buffer.data_ptr<float>();
+      float* buffer_data = buffer.mutable_data_ptr<float>();
       Tensor mean = at::empty(M, X.options().dtype(at::kFloat));
-      float* mean_data = mean.data_ptr<float>();
+      float* mean_data = mean.mutable_data_ptr<float>();
       Tensor rstd = at::empty(M, X.options().dtype(at::kFloat));
-      float* rstd_data = rstd.data_ptr<float>();
+      float* rstd_data = rstd.mutable_data_ptr<float>();
 
       // Step 1: Accumulate on C dimension
       at::parallel_for(0, Bs * HxW, 1, [&](int64_t begin, int64_t end) {
@@ -4098,17 +4096,14 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
 }
 
 // This function expects quantized_val input to already be quantized
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, scalar_t quantized_val) {
-  auto is_mask_bool = std::is_same<mask_t, bool>::value;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* mask = data[1];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
-      if (!is_mask_bool) {
-        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
-      }
+      bool mask_value = *reinterpret_cast<bool*>(mask + strides[1] * i);
+
       if (mask_value) {
         *(scalar_t*)(dst + strides[0] * i) = quantized_val;
       }
@@ -4122,11 +4117,9 @@ void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value,
     float float_val = value.to<float>();
     auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
     auto mask_dtype = iter.input_dtype(0);
-    if (mask_dtype == ScalarType::Bool) {
-      cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, quantized_val);
-    } else {
-      cpu_masked_fill_kernel_quantized_cpu<scalar_t, unsigned char>(iter, quantized_val);
-    }
+    TORCH_CHECK(mask_dtype == ScalarType::Bool, "masked_fill only supports boolean masks, "
+      "but got mask with dtype ", mask_dtype);
+    cpu_masked_fill_kernel_quantized_cpu<scalar_t>(iter, quantized_val);
   });
 }
 

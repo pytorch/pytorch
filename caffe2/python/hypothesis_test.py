@@ -2,7 +2,6 @@ import numpy as np
 import copy
 import time
 from functools import partial, reduce
-from future.utils import viewitems, viewkeys
 from hypothesis import assume, given, settings, HealthCheck
 import hypothesis.strategies as st
 import unittest
@@ -85,7 +84,10 @@ def _test_binary(name, ref, filter_=None, gcs=hu.gcs,
                 elements=hu.elements_of_type(dtype, filter_=filter_))),
         out=st.sampled_from(('Y', 'X1', 'X2') if allow_inplace else ('Y',)),
         **gcs)
-    @settings(max_examples=20, deadline=None)
+    @settings(
+        max_examples=20,
+        deadline=None,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary(self, inputs, out, gc, dc):
         op = core.CreateOperator(name, ["X1", "X2"], [out])
         X1, X2 = inputs
@@ -106,7 +108,10 @@ def _test_binary_broadcast(name, ref, filter_=None,
             elements=hu.elements_of_type(dtype, filter_=filter_))),
         in_place=(st.booleans() if allow_inplace else st.just(False)),
         **gcs)
-    @settings(max_examples=3, deadline=100)
+    @settings(
+        max_examples=3,
+        deadline=100,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary_broadcast(self, inputs, in_place, gc, dc):
         op = core.CreateOperator(
             name, ["X1", "X2"], ["X1" if in_place else "Y"], broadcast=1)
@@ -130,7 +135,7 @@ class TestOperators(hu.HypothesisTestCase):
                "LE": lambda x1, x2: [x1 <= x2],
                "GT": lambda x1, x2: [x1 > x2],
                "GE": lambda x1, x2: [x1 >= x2]}
-        for name, ref in viewitems(ops):
+        for name, ref in ops.items():
             _test_binary(name, ref, gcs=hu.gcs_cpu_only)(self)
             _test_binary_broadcast(name, ref, gcs=hu.gcs_cpu_only)(self)
 
@@ -2116,8 +2121,8 @@ class TestOperators(hu.HypothesisTestCase):
 
 
     @given(a=hu.tensor(),
-           src=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
-           dst=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
+           src=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
+           dst=st.sampled_from(list(_NUMPY_TYPE_TO_ENUM.keys())),
            use_name=st.booleans(),
            **hu.gcs)
     @settings(deadline=1000)
@@ -2284,7 +2289,7 @@ class TestOperators(hu.HypothesisTestCase):
         backward_ops, backward_mapping = core.GradientRegistry.GetBackwardPass(
             step_net.Proto().op, {"hidden_t": "hidden_t_grad"})
         backward_mapping = {
-            str(k): str(v) for k, v in viewitems(backward_mapping)
+            str(k): str(v) for k, v in backward_mapping.items()
         }
         backward_step_net = core.Net("ElmanBackward")
         del backward_step_net.Proto().op[:]

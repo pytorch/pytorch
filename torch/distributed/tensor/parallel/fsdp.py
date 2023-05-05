@@ -8,6 +8,7 @@ import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
 import torch.distributed.distributed_c10d as c10d
 
+from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
 from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
@@ -29,7 +30,63 @@ from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 
 from torch.distributed.remote_device import _remote_device
 
-__all__ = ["is_available"]
+__all__ = ["enable_2d_with_fsdp"]
+
+
+def enable_2d_with_fsdp() -> bool:
+    """
+    The API registers the extension which is needed for Tensor Parallelism (TP)
+    to work with FullyShardedDataParallel (FSDP). We first parallelize parameters
+    within one module or sub_modules based on a parallelize_plan and will let FSDP
+    reshard the local tensor of distributed parameter which is essentially a DTensor.
+
+    Return:
+        A `bool` indicated whether extension registration succeeds or not.
+    """
+    try:
+        from torch.distributed.fsdp._fsdp_extensions import (
+            _set_fsdp_extensions,
+            FSDPExtensions,
+        )
+
+        class DTensorExtensions(FSDPExtensions):
+            def pre_flatten_transform(
+                self,
+                tensor: torch.Tensor,
+            ) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
+                return _flatten_tensor(tensor)
+
+            def post_unflatten_transform(
+                self, tensor: torch.Tensor, param_extension: _STShardingInfo
+            ) -> torch.Tensor:
+                return _unflatten_tensor(tensor, param_extension)
+
+            def chunk_tensor(
+                self,
+                tensor: torch.Tensor,
+                rank: int,
+                world_size: int,
+                num_devices_per_node: int,
+                pg: dist.ProcessGroup,
+            ) -> torch.Tensor:
+                return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
+
+            def pre_load_state_dict_transform(
+                self,
+                tensor: torch.Tensor,
+            ) -> Tuple[torch.Tensor, List[Shard]]:
+                return _pre_load_state_dict(tensor)
+
+        _set_fsdp_extensions(DTensorExtensions())
+        return True
+
+    except BaseException as e:
+        warnings.warn(
+            "PyTorch doesn't have TensorFlattener extension point available"
+            "2D parallelism won't work with FSDP"
+            f"exception: {e}"
+        )
+        return False
 
 
 class _STShardingInfo(NamedTuple):
@@ -65,9 +122,9 @@ def _get_box_for(tensor: DistributedTensor, idx: int) -> Tuple[torch.Size, torch
 
 def _get_local_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    dim_0_coord = device_mesh.get_coordinate_on_dim(0)
-    assert dim_0_coord is not None
-    return _get_box_for(tensor, dim_0_coord)
+    coord = device_mesh.get_coordinate()
+    assert coord is not None
+    return _get_box_for(tensor, coord[0])
 
 
 def _create_shard_md_from_dt(dt: DistributedTensor, current_rank: int) -> ShardMetadata:
@@ -292,54 +349,3 @@ def _pre_load_state_dict(
         tensor = inner_tensor
 
     return (tensor, shards if len(shards) > 0 else [])
-
-
-try:
-    from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
-    from torch.distributed.fsdp._fsdp_extensions import (
-        _set_fsdp_extensions,
-        FSDPExtensions,
-    )
-
-    class DTensorExtensions(FSDPExtensions):
-        def pre_flatten_transform(
-            self,
-            tensor: torch.Tensor,
-        ) -> Tuple[torch.Tensor, Optional[_STShardingInfo]]:
-            return _flatten_tensor(tensor)
-
-        def post_unflatten_transform(
-            self, tensor: torch.Tensor, param_extension: _STShardingInfo
-        ) -> torch.Tensor:
-            return _unflatten_tensor(tensor, param_extension)
-
-        def chunk_tensor(
-            self,
-            tensor: torch.Tensor,
-            rank: int,
-            world_size: int,
-            num_devices_per_node: int,
-            pg: dist.ProcessGroup,
-        ) -> torch.Tensor:
-            return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
-
-        def pre_load_state_dict_transform(
-            self,
-            tensor: torch.Tensor,
-        ) -> Tuple[torch.Tensor, List[Shard]]:
-            return _pre_load_state_dict(tensor)
-
-    _set_fsdp_extensions(DTensorExtensions())
-
-    def is_available() -> bool:
-        return True
-
-except BaseException as e:
-    warnings.warn(
-        "PyTorch doesn't have TensorFlattener extension point available"
-        "2D parallelism won't work with FSDP"
-        f"exception: {e}"
-    )
-
-    def is_available() -> bool:
-        return False

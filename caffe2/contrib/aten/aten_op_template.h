@@ -1,7 +1,7 @@
 #pragma once
 #include <unordered_map>
 #include <string>
-#include <ATen/ATen.h>
+#include <ATen/Functions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/context.h>
@@ -118,7 +118,7 @@ private:
     dst->Resize(dims);
     dst->ShareExternalPointer(
         at::DataPtr(
-            src_impl->data(),
+            src_impl->mutable_data(),
             static_cast<void*>(src_impl),
             [](void* t_ptr) -> void {
               at::TensorImpl* local_impl = static_cast<at::TensorImpl*>(t_ptr);

@@ -33,7 +33,7 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
 env:
@@ -43,8 +43,10 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, windows.4xlarge]
+    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
     timeout-minutes: 240
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -60,9 +62,15 @@ jobs:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
               call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
 
+      # Duplicated in win-test because this MUST go before a checkout
+      - name: Enable git symlinks on Windows
+        shell: bash
+        run: |
+          git config --global core.symlinks true
+
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -70,18 +78,6 @@ jobs:
         uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
-
-      - name: Setup conda
-        shell: bash
-        run: |
-          # Windows conda is baked into the AMI at this location
-          CONDA="C:\Jenkins\Miniconda3\condabin\conda.bat"
-
-          {
-            echo "CONDA_RUN=${CONDA} run --no-capture-output";
-            echo "CONDA_BUILD=${CONDA} run conda-build";
-            echo "CONDA_INSTALL=${CONDA} install";
-          } >> "${GITHUB_ENV}"
 
       - name: Parse ref
         id: parse-ref
@@ -128,7 +124,7 @@ jobs:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
-          .jenkins/pytorch/win-build.sh
+          .ci/pytorch/win-build.sh
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3

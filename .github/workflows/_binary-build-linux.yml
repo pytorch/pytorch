@@ -68,7 +68,7 @@ on:
 jobs:
   build:
     runs-on: linux.12xlarge
-    timeout-minutes: 150
+    timeout-minutes: 180
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -131,7 +131,7 @@ jobs:
         with:
           github-secret: ${{ secrets.github-token }}
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
       - name: Chown workspace

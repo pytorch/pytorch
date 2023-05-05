@@ -6,8 +6,6 @@ def _basic_validation(op, args=(), kwargs=None):
     """
     Common validation across all ops go in here.
     """
-    from torch.distributed._shard.partial_tensor import _PartialTensor
-    from torch.distributed._shard.replicated_tensor import ReplicatedTensor
     from torch.distributed._shard.sharded_tensor import ShardedTensor
 
     if len(args) == 0 and (kwargs is None or len(kwargs) == 0):
@@ -18,7 +16,7 @@ def _basic_validation(op, args=(), kwargs=None):
 
     def is_distributed_tensor(e):
         nonlocal has_distributed_tensor
-        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor) or isinstance(e, ShardedTensor):
+        if isinstance(e, ShardedTensor):
             has_distributed_tensor = True
 
     tree_map(is_distributed_tensor, args)
@@ -35,7 +33,7 @@ def _basic_validation(op, args=(), kwargs=None):
 
     def validate_pg(e):
         nonlocal cur_pg
-        if isinstance(e, ReplicatedTensor) or isinstance(e, _PartialTensor) or isinstance(e, ShardedTensor):
+        if isinstance(e, ShardedTensor):
             if cur_pg is not None and e._process_group is not cur_pg:
                 raise RuntimeError(
                     'All distributed tensors should use the '

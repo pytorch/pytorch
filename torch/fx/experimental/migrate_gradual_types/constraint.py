@@ -11,7 +11,7 @@ class Constraint:
 class Conj(Constraint):
     def __init__(self, conjuncts):
         """
-        :param conjuncts: Conjuction of constraints
+        :param conjuncts: Conjunction of constraints
         """
         self.conjucts = conjuncts
 
@@ -94,7 +94,7 @@ class BinaryConstraint(Constraint):
         """
         :param lhs: lhs of the constraint
         :param rhs: rhs of the constraint
-        :param op: string reprsenting the operation
+        :param op: string representing the operation
         """
         self.lhs = lhs
         self.rhs = rhs
@@ -115,8 +115,8 @@ class BinConstraintT(BinaryConstraint):
     Binary constraints about tensors
     """
     def __init__(self, lhs, rhs, op):
-        assert (isinstance(lhs, TVar) or isinstance(lhs, TensorType) or isinstance(lhs, int) or lhs == Dyn) and \
-               (isinstance(rhs, TVar) or isinstance(rhs, TensorType) or isinstance(rhs, int) or rhs == Dyn)
+        assert (isinstance(lhs, (TVar, TensorType, int)) or lhs == Dyn) and \
+               (isinstance(rhs, (TVar, TensorType, int)) or rhs == Dyn)
         super().__init__(lhs, rhs, op)
 
     def __eq__(self, other):
@@ -221,7 +221,7 @@ class IndexSelect(Constraint):
             tensor_size: tensor size we are considering
             dim_replace: the dimension of the output at "index"
             index: location of the dimensions to replace in the input
-            outut: variable to store the result
+            output: variable to store the result
         """
         assert isinstance(input_var, TVar)
         assert isinstance(output, TVar)
@@ -552,7 +552,7 @@ def is_bool_expr(constraint):
     if isinstance(constraint, BinConstraintD):
         return constraint.op in [op_gt, op_lt, op_neq, op_eq]
     else:
-        return isinstance(constraint, BVar) or isinstance(constraint, Conj) or isinstance(constraint, Disj)
+        return isinstance(constraint, (BVar, Conj, Disj))
 
 def is_dim(d):
-    return isinstance(d, DVar) or isinstance(d, int) or d == Dyn
+    return isinstance(d, (DVar, int)) or d == Dyn

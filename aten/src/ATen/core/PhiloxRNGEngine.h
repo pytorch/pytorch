@@ -87,6 +87,23 @@ public:
   }
 
   /**
+   * Set the offset field of Philox Generator to the desired offset.
+   */
+  C10_HOST_DEVICE inline void set_offset(uint64_t offset) {
+    counter_[0] = static_cast<uint32_t>(offset);
+    counter_[1] = static_cast<uint32_t>(offset >> 32);
+  }
+
+  /**
+   * Gets the current offset of the Philox Generator.
+   */
+  C10_HOST_DEVICE uint64_t get_offset() const {
+    uint64_t lo = static_cast<uint64_t>(counter_[0]);
+    uint64_t hi = static_cast<uint64_t>(counter_[1]) << 32;
+    return lo | hi;
+  }
+
+  /**
    * Produces a unique 32-bit pseudo random number on every invocation. Bookeeps state to avoid waste.
    */
   C10_HOST_DEVICE inline uint32_t operator()(int32_t n_rounds = 10) { // 10 here to preserve back-compat behavior
@@ -105,15 +122,17 @@ public:
     #ifdef __CUDA_ARCH__
     AT_ASSERT(false, "Unsupported invocation of randn on CUDA");
     #endif
-    reset_state(); // Reset state for randn - a little wasteful, but easier to ensure correctness.
-    detail::UINT4 counter = counter_;
-    detail::UINT2 key = key_;
-    detail::UINT4 i = rand(counter, key, n_rounds);
-    detail::FLOAT2 prenorm;
-    prenorm[0] = 1 - uint32_to_uniform_float(i[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
-    prenorm[1] = 1 - uint32_to_uniform_float(i[1]);
-    detail::FLOAT2 ret = normalize_pair_uniform(prenorm);
-    return ret[0];
+    if(STATE == 0) {
+      detail::UINT4 counter = counter_;
+      detail::UINT2 key = key_;
+      output_ = rand(counter, key, n_rounds);
+      incr();
+    }
+    // TODO(min-jean-cho) change to Polar method, a more efficient version of Box-Muller method
+    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
+    float u1 = 1 - uint32_to_uniform_float(output_[0]); // uint32_to_uniform_float returns [0,1), we need (0,1] to avoid passing 0 to log.
+    float u2 = 1 - uint32_to_uniform_float(output_[1]);
+    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * M_PI * u2);
   }
 
   /**
@@ -208,21 +227,6 @@ private:
         key[0] += (kPhilox10A); key[1] += (kPhilox10B);
       }
     return single_round(counter, key);
-  }
-
-  inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
-    // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
-    float u1 = in[0];
-
-    constexpr float two_pi = 2.0 * M_PI;
-
-    float mag = std::sqrt(-2.0 * std::log(u1));
-
-    detail::FLOAT2 ret;
-
-    ret[0] = mag * std::cos(two_pi);
-    ret[1] = mag * std::sin(two_pi);
-    return ret;
   }
 
 

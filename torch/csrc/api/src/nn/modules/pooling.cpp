@@ -272,9 +272,8 @@ template class MaxUnpoolImpl<3, MaxUnpool3dImpl>;
 // ============================================================================
 
 FractionalMaxPool2dImpl::FractionalMaxPool2dImpl(
-    const FractionalMaxPool2dOptions&
-        options_) // NOLINT(modernize-pass-by-value)
-    : options(options_) {
+    FractionalMaxPool2dOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }
@@ -332,9 +331,8 @@ void FractionalMaxPool2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 FractionalMaxPool3dImpl::FractionalMaxPool3dImpl(
-    const FractionalMaxPool3dOptions&
-        options_) // NOLINT(modernize-pass-by-value)
-    : options(options_) {
+    FractionalMaxPool3dOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }

@@ -39,7 +39,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 template <
     typename T,
     typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
-inline bool _isnan(T val) {
+inline C10_HOST_DEVICE bool _isnan(T val) {
   return std::isnan(val.real()) || std::isnan(val.imag());
 }
 
@@ -126,6 +126,25 @@ C10_HOST_DEVICE inline T log(T x) {
 template <>
 C10_HOST_DEVICE inline double log<double>(double x) {
   return ::log(x);
+}
+
+template <typename T>
+C10_HOST_DEVICE inline T log1p(T x) {
+  static_assert(
+      !std::is_same<T, double>::value,
+      "this template must be used with float or less precise type");
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
+  // use __logf fast approximation for peak bandwidth
+  // NOTE: There is no __log1pf so unfortunately we lose precision.
+  return __logf(1.0f + x);
+#else
+  return ::log1p(x);
+#endif
+}
+
+template <>
+C10_HOST_DEVICE inline double log1p<double>(double x) {
+  return ::log1p(x);
 }
 
 template <typename T>

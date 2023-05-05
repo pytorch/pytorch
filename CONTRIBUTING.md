@@ -4,8 +4,6 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Prerequisites](#prerequisites)
-  - [Instructions](#instructions)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -79,73 +77,37 @@ to PyTorch.  For more non-technical guidance about how to contribute to
 PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
-
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
-
-To develop PyTorch on your machine, here are some tips:
-
-### Prerequisites
-* CMake. You can install it via `pip install cmake`
-* Python >= 3.7 (3.7.6+ recommended)
-
-### Instructions
-_**Note**: If you get stuck at any step, check out the [tips and debugging](#tips-and-debugging) section below for common solutions_
-
-1. Uninstall all existing PyTorch installs. You may need to run `pip
-uninstall torch` multiple times. You'll know `torch` is fully
-uninstalled when you see `WARNING: Skipping torch as it is not
-installed`. (You should only have to `pip uninstall` a few times, but
-you can always `uninstall` with `timeout` or in a loop if you're feeling
-lazy.)
-
-```bash
-conda uninstall pytorch -y
-yes | pip uninstall torch
-```
-
-2. Clone a copy of PyTorch from source:
-
-```bash
-git clone https://github.com/pytorch/pytorch
-cd pytorch
-```
-
-If you already have PyTorch from source, update it:
-
-```bash
-git pull --rebase
-git submodule sync --recursive
-git submodule update --init --recursive
-```
-
-If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
-
-3. Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), but instead of installing PyTorch via `python setup.py install`, use `python setup.py develop`.
-
-This mode will symlink the Python files from the current local source
-tree into the Python install.  This way when you modify a Python file, you
-won't need to reinstall PyTorch again and again.  This is especially
-useful if you are only changing Python files.
-
-For example:
-- Install local PyTorch in `develop` mode
-- modify your Python file `torch/__init__.py` (for example)
-- test functionality
-
-You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
-if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
-
-In case you want to reinstall, make sure that you uninstall PyTorch
-first by running `pip uninstall torch` until you see `WARNING: Skipping
-torch as it is not installed`; next run `python setup.py clean`. After
-that, you can install in `develop` mode again.
+Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
 
 ### Tips and Debugging
+
+* If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
+
+* When installing with `python setup.py develop` (in contrast to `python setup.py install`) you will symlink
+   the Python files from the current local source-tree into the Python install.
+  This way you do not need to repeatedly install after modifying Python files (`.py`).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
+   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+
+  To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
+  uninstall torch` multiple times. You'll know `torch` is fully
+  uninstalled when you see `WARNING: Skipping torch as it is not
+  installed`. (You should only have to `pip uninstall` a few times, but
+  you can always `uninstall` with `timeout` or in a loop if you're feeling
+  lazy.)
+
+  ```bash
+  conda uninstall pytorch -y
+  yes | pip uninstall torch
+  ```
+
+  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
   Note that changing the pull request body or title on GitHub itself has no effect.
+
 * If you run into errors when running `python setup.py develop`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
@@ -154,18 +116,19 @@ that, you can install in `develop` mode again.
   `rm -rf build` from the toplevel `pytorch` directory and start over.
   3. If you have made edits to the PyTorch repo, commit any change you'd like to keep and clean the repo with the
   following commands (note that clean _really_ removes all untracked files and changes.):
-  ```bash
-  git submodule deinit -f .
-  git clean -xdf
-  python setup.py clean
-  git submodule update --init --recursive # very important to sync the submodules
-  python setup.py develop                 # then try running the command again
-  ```
+      ```bash
+      git submodule deinit -f .
+      git clean -xdf
+      python setup.py clean
+      git submodule update --init --recursive # very important to sync the submodules
+      python setup.py develop                 # then try running the command again
+      ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
-  experiment with some environment variables, you can pass them into the command:
-  ```bash
-  ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
-  ```
+    experiment with some environment variables, you can pass them into the command:
+      ```bash
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ```
+
 * If you run into issue running `git submodule update --init --recursive`. Please try the following:
   - If you encounter an error such as
     ```
@@ -426,7 +389,7 @@ ghstack submit
 of very low signal to reviewers.
 
 ## Merging your Change
-If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
 If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
 
@@ -995,8 +958,8 @@ than Linux, which are worth keeping in mind when fixing these problems.
    transitive dependencies can be used to fulfill unresolved symbols.)
 
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
-   you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
-   If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
+   you want to run the build, the easiest way is to just run `.ci/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .ci/pytorch/win-build.sh` (this will avoid
    blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
@@ -1097,7 +1060,7 @@ Note: There's a [compilation issue](https://github.com/oneapi-src/oneDNN/issues/
 linter and static analysis tool based on the clang compiler. We run clang-tidy
 in our CI to make sure that new C++ code is safe, sane and efficient. See the
 [`clang-tidy` job in our GitHub Workflow's
-lint.yml file](https://github.com/pytorch/pytorch/blob/master/.github/workflows/lint.yml)
+lint.yml file](https://github.com/pytorch/pytorch/blob/main/.github/workflows/lint.yml)
 for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
@@ -1137,7 +1100,7 @@ If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  flake8 $(git diff --name-only $(git merge-base --fork-point main))
   ```
 
 You'll need to install an appropriately configured flake8; see
@@ -1278,11 +1241,11 @@ our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-f
 
 ### Which commit is used in CI?
 
-For CI run on `master`, this repository is checked out for a given `master`
+For CI run on `main`, this repository is checked out for a given `main`
 commit, and CI is run on that commit (there isn't really any other choice).
 
 For PRs, however, it's a bit more complicated. Consider this commit graph, where
-`master` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
+`main` is at commit `A`, and the branch for PR #42 (just a placeholder) is at
 commit `B`:
 
 ```
@@ -1290,7 +1253,7 @@ commit `B`:
       /         \
      /           C (refs/pull/42/merge)
     /           /
----o---o---o---A (merge-destination) - usually master
+---o---o---o---A (merge-destination) - usually main
 ```
 
 There are two possible choices for which commit to use:
@@ -1298,7 +1261,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `master`).
+   were merged into it's destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
@@ -1306,7 +1269,7 @@ commit `B` (choice **1**).
 However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
-PR and the `master` branch. But only the workflow files get taken from that merged
+PR and the `main` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
 

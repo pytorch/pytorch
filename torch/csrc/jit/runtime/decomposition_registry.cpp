@@ -51,7 +51,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadDecompositionFunctions() {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_decomposition.size() != 0) {
+  if (!schema_to_decomposition.empty()) {
     return;
   }
 
@@ -133,7 +133,7 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   auto& func = toGraphFunction(*cache_it->second);
   // Simple Executor:
   // To allow decomposition to run on tensor subclasses such as batched tensors,
-  // we set decompostion execution to use the simple executor so that
+  // we set decomposition execution to use the simple executor so that
   // optimizations that do not compose with arbitrary subclasses (such as
   // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);

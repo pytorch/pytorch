@@ -125,7 +125,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, ::c10d::Store::kDefaultTimeout);
     }
 
     void wait(
@@ -227,7 +227,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
 
-  virtual ~ProcessGroupGloo();
+  ~ProcessGroupGloo() override;
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;

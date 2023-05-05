@@ -15,17 +15,27 @@ import sys
 import sysconfig
 import tempfile
 import types
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
+from functools import partial
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List
 
 import torch
 
+from torch._inductor import config, cuda_properties, exc
+from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
-from torch.utils import cpp_extension
-from . import config, cuda_properties, exc
+
+if config.is_fbcode():
+    from torch._inductor.fb.logging import global_cache_log
+else:
+
+    def global_cache_log(*args, **kwargs):
+        pass
+
 
 LOCK_TIMEOUT = 600
 
@@ -50,45 +60,140 @@ def _compile_end():
 
 
 log = logging.getLogger(__name__)
-logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
 @functools.lru_cache(None)
 def cache_dir():
-    return os.environ.get(
+    cache_dir = os.environ.get(
         "TORCHINDUCTOR_CACHE_DIR",
         f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
-class DiskCache:
-    @staticmethod
+@functools.lru_cache(None)
+def cubin_cache_dir():
+    cubin_dir = os.path.join(cache_dir(), "cubin")
+    os.makedirs(cubin_dir, exist_ok=True)
+    return cubin_dir
+
+
+class PersistentCache:
+    def __init__(self):
+        if not torch.cuda.is_available():
+            return
+
+        try:
+            import triton
+
+            triton_version = triton.__version__
+        except ModuleNotFoundError:
+            triton_version = None
+
+        self.system = {
+            "device": torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).name,
+            "version": {
+                "cuda": torch.version.cuda,
+                "triton": triton_version,
+            },
+        }
+        self.system["hash"] = hashlib.sha256(
+            json.dumps(self.system, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        self.global_cache_path = (
+            os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
+            if config.global_cache_dir is not None
+            else None
+        )
+
+    def get_local_cache(self):
+        if not os.path.isfile(self.local_cache_path):
+            return {}
+        with open(self.local_cache_path, "r") as local_cache_fp:
+            local_cache = json.load(local_cache_fp)
+        if local_cache["system"]["hash"] != self.system["hash"]:
+            os.remove(self.local_cache_path)
+            return {}
+        return local_cache["cache"]
+
+    def update_local_cache(self, local_cache):
+        write_atomic(
+            self.local_cache_path,
+            json.dumps({"system": self.system, "cache": local_cache}, indent=4),
+        )
+
     @functools.lru_cache(None)
-    def _subdir():
-        subdir = os.path.join(cache_dir(), "cached_tunings")
-        os.makedirs(subdir, exist_ok=True)
-        return subdir
+    def get_global_cache(self):
+        if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
+            return {}
+        with open(self.global_cache_path, "r") as global_cache_fp:
+            global_cache = json.load(global_cache_fp)
+        return global_cache["cache"]
 
-    @staticmethod
-    @functools.lru_cache(4096)
-    def _read_file(path):
-        with open(path, "r") as fd:
-            return json.loads(fd.read())
-
-    def __init__(self, unique_name):
-        super().__init__()
-        self.unique_name = unique_name
-
-    def lookup(self, key: Any, generate: Callable[[], Any]):
+    def lookup(
+        self,
+        choices,
+        name: str,
+        inputs: str,
+        benchmark: Callable[[Any], float],
+    ):
         """
-        Check if we have already generated key, if not call generate()
-        to populate the cache.
+        Check to see if we have benchmarked the given choice callers. For each
+        choice caller:
+
+            1. Check global_cache[name][inputs][choice], return benchmark if cached.
+            2. Check local_cache[name][inputs][choice], return benchmark if cached.
+            3.
+                a. `max_autotune_gemm=True`: benchmark the choice, update
+                    local_cache[name][inputs][choice], and return the benchmark.
+                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
-        path = os.path.join(self._subdir(), code_hash(self.unique_name + repr(key)))
-        if not os.path.exists(path):
-            value = generate()
-            write_atomic(path, json.dumps(value))
-        return self._read_file(path)
+
+        gc_log = partial(global_cache_log, self.system, name, inputs)
+        timings = {}
+
+        def check_cache(cache, callback=None):
+            """Check if `cache` contains data for all the choices"""
+            hit = True
+            for choice in choices:
+                choice_hash = choice.hash_key()
+                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                    # cache hit
+                    timings[choice] = cache[name][inputs][choice_hash]
+                    if callback:
+                        callback(choice_hash, cached=True)
+                else:
+                    # cache miss
+                    hit = False
+                    if callback:
+                        callback(choice_hash, cached=False)
+            return hit
+
+        if config.max_autotune or config.max_autotune_gemm:
+            local_cache = self.get_local_cache()
+            # check local cache first since it is data specific to the current machine
+            if not check_cache(local_cache) and not check_cache(
+                self.get_global_cache(), callback=gc_log
+            ):
+                # re-benchmark everything to try to get consistent numbers from the same machine
+                for choice in choices:
+                    timings[choice] = benchmark(choice)
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
+
+                self.update_local_cache(local_cache)
+        else:
+            # only check global cache, not local one
+            check_cache(self.get_global_cache(), callback=gc_log)
+            # may have a partial cache hit, where not everything is benchmarked
+
+        return timings
 
 
 def get_lock_dir():
@@ -111,7 +216,7 @@ def get_code_path(source_code, ext, extra):
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
-    return basename, subdir, path
+    return extra + basename, subdir, path
 
 
 def write(source_code, ext, extra=""):
@@ -196,7 +301,7 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-class VecISA(object):
+class VecISA:
     _bit_width: int
     _macro: str
     _arch_flags: str
@@ -252,7 +357,10 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
-        key, input_path = write(VecISA._avx_code, "cpp", extra="")
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -346,7 +454,7 @@ def pick_vec_isa():
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determin the vectroization length automatically
+    # If the simdlen is None, it indicates determin the vectorization length automatically
     if config.cpp.simdlen is None:
         assert _valid_vec_isa_list
         return _valid_vec_isa_list[0]
@@ -371,7 +479,15 @@ def cpp_flags():
 
 
 def optimization_flags():
-    return "-march=native -O3 -ffast-math -fno-finite-math-only -fopenmp"
+    base_flags = "-O3 -ffast-math -fno-finite-math-only"
+
+    if sys.platform == "darwin":
+        # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
+        # Also, `-march=native` is unrecognized option on M1
+        base_flags += " -Xclang -fopenmp"
+    else:
+        base_flags += " -march=native -fopenmp"
+    return base_flags
 
 
 def use_custom_generated_macros():
@@ -379,31 +495,55 @@ def use_custom_generated_macros():
 
 
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    from torch.utils import cpp_extension
+
+    macros = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
+        or cuda
         or config.cpp.enable_kernel_profile
     ):
         # Note - We include pytorch only on linux right now. There is more work
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
-        lpaths = cpp_extension.library_paths() + [sysconfig.get_config_var("LIBDIR")]
-        libs = ["c10", "torch", "torch_cpu", "torch_python", "gomp"]
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        lpaths = cpp_extension.library_paths(cuda) + [
+            sysconfig.get_config_var("LIBDIR")
+        ]
+        libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        libs += ["gomp"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
+        if cuda:
+            libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
-        ipaths = cpp_extension.include_paths() + [sysconfig.get_path("include")]
+        ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
-        libs = ["gomp"]
-        macros = ""
+        if sys.platform == "darwin":
+            # GNU OpenMP generally is not available on MacOS
+            # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
+            libs = ["omp"]
+            if os.getenv("CONDA_PREFIX") is not None:
+                # On MacOS OpenMP is not available via the system install
+                # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
+                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
+                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                lpaths.append(conda_lib_path)
+                # Prefer Intel OpenMP on x86 machine
+                if os.uname().machine == "x86_64" and os.path.exists(
+                    os.path.join(conda_lib_path, "libiomp5.dylib")
+                ):
+                    libs = ["iomp5"]
+        else:
+            libs = ["gomp"]
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
     libs = " ".join(["-l" + p for p in libs])
@@ -417,22 +557,89 @@ def cpp_compile_command(
     shared=True,
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
+    cuda=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa
+        include_pytorch, vec_isa, cuda
     )
 
     return re.sub(
         r"[ \n]+",
         " ",
         f"""
-            {cpp_compiler()} {input} {get_shared(shared)} {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {cpp_compiler()} {input} {get_shared(shared)}
+            {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
             {optimization_flags()}
             {use_custom_generated_macros()}
-            -o{output}
+            -o {output}
         """,
     ).strip()
+
+
+class CudaKernelParamCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def set(cls, key, params, cubin):
+        from filelock import FileLock
+
+        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+        params["cubin_path"] = cubin_path
+        lock_dir = get_lock_dir()
+        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+        with lock:
+            cls.cache[key] = params
+            with open(cubin_path, "wb") as f:
+                f.write(cubin)
+
+    @classmethod
+    def get(cls, key):
+        return cls.cache.get(key, None)
+
+
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, graph, source_code, cuda):
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(
+                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+            ),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = f"{input_path[:-4]}.so"
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+
+        def wrapper_call(*args):
+            assert len(graph.graph_outputs) > 0
+            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
+
+        return wrapper_call
 
 
 class CppCodeCache:
@@ -464,7 +671,7 @@ class CppCodeCache:
         key, input_path = write(
             source_code,
             "cpp",
-            extra=cpp_compile_command("i", "o", vec_isa=picked_vec_isa),
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -490,61 +697,85 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code):
-        key, path = write(source_code, "py")
+    def load(cls, source_code, extra="", linemap=()):
+        key, path = write(source_code, "py", extra)
+        return cls.load_by_key_path(key, path, linemap)
+
+    @classmethod
+    def load_by_key_path(cls, key, path, linemap=()):
         if key not in cls.cache:
             with open(path) as f:
-                code = compile(f.read(), path, "exec")
+                try:
+                    code = compile(f.read(), path, "exec")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to import {path}\n{type(e).__name__}: {e}"
+                    )
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key
                 exec(code, mod.__dict__, mod.__dict__)
+                sys.modules[mod.__name__] = mod
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
+
         return cls.cache[key]
 
+    @classmethod
+    @functools.lru_cache(None)
+    def stack_frames_for_code(cls, path, lineno):
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
+        if p == 0:
+            return None
+        entry = nodes[p - 1]
+        if not entry:
+            return None
 
-@functools.lru_cache(None)
-def patch_triton_dir():
-    os.environ["TRITON_CACHE_DIR"] = os.environ.get(
-        "TRITON_CACHE_DIR", os.path.join(cache_dir(), "triton")
-    )
+        def parse_stack_trace(stack_trace):
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:
-    @staticmethod
-    def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
-        return name
-
     @classmethod
-    def load(cls, source_code):
-        patch_triton_dir()
+    def load(cls, kernel_name, source_code):
         mod = PyCodeCache.load(source_code)
-        return getattr(mod, cls.get_name(mod))
+        return getattr(mod, kernel_name)
 
 
-def _worker_compile(source_code, cc, device):
+def _worker_compile(kernel_name, source_code, cc, device):
     cuda_properties.set_compiler_worker_current_device(device)
-    kernel = TritonCodeCache.load(source_code)
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
 
-def _load_kernel(source_code):
-    kernel = TritonCodeCache.load(source_code)
+def _load_kernel(kernel_name, source_code):
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
     return kernel
 
 
-def _load_kernel_name(source_code):
-    return TritonCodeCache.get_name(PyCodeCache.load(source_code))
-
-
 class TritonFuture:
-    def __init__(self, source_code, future):
+    def __init__(self, kernel_name, source_code, future):
+        self.kernel_name = kernel_name
         self.source_code = source_code
         self.future = future
 
@@ -555,15 +786,14 @@ class TritonFuture:
             return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
-        kernel = self.kernel = _load_kernel(self.source_code)
+        kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
         latency = time() - t0
         if latency > 50:
-            name = _load_kernel_name(self.source_code)
-            log.warning(
-                f"Detected long compilation time of {latency} seconds for kernel name {name}"
+            developer_warning(
+                f"Detected long compilation time of {latency} seconds for kernel name {self.kernel_name}"
             )
-            log.warning(self.source_code)
-        del self.source_code, self.future
+            developer_warning(self.source_code)
+        del self.kernel_name, self.source_code, self.future
         return kernel
 
 
@@ -657,7 +887,7 @@ class AsyncCompile:
             return list(map(fn, seq))
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
-    def triton(self, source_code):
+    def triton(self, kernel_name, source_code):
         _compile_start()
 
         if config.compile_threads > 1:
@@ -665,11 +895,11 @@ class AsyncCompile:
             device = torch.cuda.current_device()
             cc = major * 10 + minor
             future = self.process_pool().submit(
-                _worker_compile, source_code, cc, device
+                _worker_compile, kernel_name, source_code, cc, device
             )
-            return TritonFuture(source_code, future)
+            return TritonFuture(kernel_name, source_code, future)
         else:
-            return _load_kernel(source_code)
+            return _load_kernel(kernel_name, source_code)
 
     def cpp(self, source_code):
         def task():

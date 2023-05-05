@@ -17,6 +17,7 @@
 #endif
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -103,9 +104,9 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
-      t->addAttribute("bias", optional_tensor_type, true);
+      t->addAttribute("bias", std::move(optional_tensor_type), true);
       auto optional_tensor = c10::optional<at::Tensor>();
-      module.setattr("bias", optional_tensor);
+      module.setattr("bias", std::move(optional_tensor));
       replaceConvBiasWithGetAttr(module);
     }
   }

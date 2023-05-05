@@ -55,6 +55,8 @@ namespace at {
 // if not use the same mechanism. In order to accomplish that we might have to
 // do some refactoring.
 
+namespace{
+
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -69,7 +71,7 @@ Tensor sum_batching_rule(const Tensor& self, OptionalIntArrayRef opt_dims, bool 
     // >>> x = torch.randn(B0)  # the per-examples are all scalars
     // >>> vmap(partial(torch.sum, dim=0), x)
     // then we replicate the behavior of sum(scalar_tensor, dim=0).
-    if (/*logical*/self.dim() == 0 && (dims.size() == 0 || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
+    if (/*logical*/self.dim() == 0 && (dims.empty() || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
       return self.clone();
     }
   }
@@ -296,6 +298,13 @@ Tensor squeeze_dim_batching_rule(const Tensor& self, int64_t dim) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor squeeze_dims_batching_rule(const Tensor& self, IntArrayRef dims) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dims_physical = self_physical.getPhysicalDims(dims);
+  auto result = self_physical.tensor().squeeze(dims_physical);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 Tensor trace_batching_rule(const Tensor& self) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   // Batched Diagonal View
@@ -470,7 +479,7 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
 Tensor view_as_complex_batching_rule(const Tensor& self) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
-  TORCH_CHECK(self.sizes().size() != 0, "Input tensor must have one or more dimensions");
+  TORCH_CHECK(!self.sizes().empty(), "Input tensor must have one or more dimensions");
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto result = at::view_as_complex(self_physical.tensor());
   return self_physical.getPhysicalToLogicalMap().apply(result);
@@ -924,7 +933,7 @@ Tensor cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   auto result = at::cat(physical_tensors, physical_views[0].getPhysicalDim(dim));
   return physical_views[0].getPhysicalToLogicalMap().apply(result);
 }
@@ -934,7 +943,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // NB: stack wraps the dimensionality to (logical dim + 1), so we have to
   // manually handle that here.
   auto dim_physical =
@@ -1062,7 +1071,7 @@ Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& othe
   auto result = Func(physical_args[0].tensor(), physical_args[1].tensor());
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
-
+}
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -1116,6 +1125,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
   m.impl("squeeze", squeeze_batching_rule);
   m.impl("squeeze.dim", squeeze_dim_batching_rule);
+  m.impl("squeeze.dims", squeeze_dims_batching_rule);
   m.impl("t", native::t); // composite wrt autograd
   m.impl("trace", trace_batching_rule);
   m.impl("transpose.int", transpose_int_batching_rule);

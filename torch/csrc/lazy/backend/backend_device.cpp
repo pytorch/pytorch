@@ -75,7 +75,7 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
 }
 
 c10::optional<BackendDevice> GetBackendDevice(
-    const c10::optional<c10::Device> device) {
+    const c10::optional<c10::Device>& device) {
   if (device) {
     return c10::make_optional(atenDeviceToBackendDevice(*device));
   }

@@ -15,13 +15,13 @@ namespace jit {
 
 static const auto countsAttribute = Symbol::attr("none_counts");
 
-bool hasGradSumToSizeUses(Value* v) {
+static bool hasGradSumToSizeUses(Value* v) {
   return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
     return use.user->kind() == aten::_grad_sum_to_size;
   });
 }
 
-void insertProfileNodesForSpecializeAutogradZero(
+static void insertProfileNodesForSpecializeAutogradZero(
     Block* block,
     ProfilingRecord* pr) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
@@ -240,7 +240,7 @@ struct AutogradZeroSpecializer {
         continue;
       }
 
-      if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {
+      if (inp->uses().empty() || !inp->type()->cast<TensorType>()) {
         continue;
       }
 
@@ -265,7 +265,7 @@ struct AutogradZeroSpecializer {
     }
     GRAPH_DUMP("After for loop", graph_);
     // unable to specialize any of the inputs
-    if (nonzero_values.size() == 0 && zero_values.size() == 0) {
+    if (nonzero_values.empty() && zero_values.empty()) {
       GRAPH_DUMP("Unable to add any specialization guards", graph_);
       versioning_if->destroy();
       // the checks we inserted will be cleaned up
@@ -302,8 +302,8 @@ struct AutogradZeroSpecializer {
     }
 
     // We've created:
-    // succesful_checks = Guards(...)
-    // if (succesful_checks)
+    // successful_checks = Guards(...)
+    // if (successful_checks)
     // -> optimized graph
     // else:
     // -> fallback graph
@@ -367,7 +367,7 @@ struct AutogradZeroSpecializer {
           // if we decided to specialize this graph
           // its input may have undefinedness info
           // otherwise it should be Unknown
-          if (n->inputs().size() > 0) {
+          if (!n->inputs().empty()) {
             state_[n->output()] = !state_.count(n->input())
                 ? State::Unknown
                 : state_[n->output()] = state_[n->input()];

@@ -63,7 +63,7 @@ bool Module::compareMethodSchemas(
 
 void Module::unsafeRemoveMethod(const std::string& basename) {
   int64_t i = 0;
-  for (; i < cu_->methods().size(); ++i) {
+  for (; i < static_cast<int64_t>(cu_->methods().size()); ++i) {
     if ((cu_->methods()[i])->name() == basename) {
       break;
     }
@@ -141,8 +141,7 @@ void slot_named_params_recurse(
   size_t nslots = slots.size();
   for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
-    std::string name =
-        parent_name.size() == 0 ? parent_name : parent_name + ".";
+    std::string name = parent_name.empty() ? parent_name : parent_name + ".";
     name += obj->type()->getAttributeName(i);
     // TODO: Fix this filter. Requires_grad is not the appropriate
     // filter of a parameter, but is a temporary hack to help probable
@@ -335,7 +334,7 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
   std::vector<std::string> type_name_list;
   for (const auto& func_ptr : module.compilation_unit().methods()) {
     const auto& function = *func_ptr;
-    for (int i = 0; i < function.get_code().op_names_.size(); i++) {
+    for (const auto i : c10::irange(function.get_code().op_names_.size())) {
       const auto& op = function.get_code().op_names_[i];
       minfo.opname_to_num_args[mobile::operator_str(op)] =
           function.get_code().operator_input_sizes_[i];

@@ -10,6 +10,8 @@ from torch.utils import set_module
 from torch._jit_internal import (
     Final,
     Future,
+    _Await,
+    _drop,
     _IgnoreContextManager,
     _overload,
     _overload_method,
@@ -48,6 +50,7 @@ from torch.jit._trace import (
     _get_trace_graph,
 )
 from torch.jit._async import fork, wait
+from torch.jit._await import _awaitable, _awaitable_wait, _awaitable_nowait
 from torch.jit._decomposition_utils import _register_decomposition
 from torch.jit._serialization import (
     save,
@@ -175,7 +178,7 @@ def isinstance(obj, target_type):
 
         class MyModule(torch.nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
 
             def forward(self, input: Any): # note the Any type
                 if torch.jit.isinstance(input, List[torch.Tensor]):
@@ -193,7 +196,7 @@ def isinstance(obj, target_type):
     """
     return _isinstance(obj, target_type)
 
-class strict_fusion(object):
+class strict_fusion:
     """
     This class errors if not all nodes have been fused in
     inference, or symbolically differentiated in training.

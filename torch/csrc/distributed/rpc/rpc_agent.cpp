@@ -178,7 +178,7 @@ void RpcAgent::retryExpiredRpcs() {
     }
 
     // If there are no more RPC's set to be retried at the current timepoint,
-    // we can remove the corresponsing unordered_set from the retry map.
+    // we can remove the corresponding unordered_set from the retry map.
     if (earliestRpcList.empty()) {
       rpcRetryMap_.erase(earliestTimeout);
     }

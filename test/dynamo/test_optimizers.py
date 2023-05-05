@@ -1,3 +1,9 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_adam in OptimizerTests)
+"""
+import functools
+
 # Owner(s): ["module: dynamo"]
 
 import inspect
@@ -7,7 +13,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
+from torch.nn import Parameter
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
@@ -53,15 +59,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
-exclude = set(
-    [
-        "SGD",  # Handled above
-        "Optimizer",
-        "SparseAdam",  # Unsupported
-        "LBFGS",  # Unsupported
-        "RAdam",  # Has data dependent control for rectification (needs symint)
-    ]
-)
+exclude = {
+    "SGD",  # Handled above
+    "Optimizer",
+    "SparseAdam",  # Unsupported
+    "LBFGS",  # Unsupported
+    "RAdam",  # Has data dependent control for rectification (needs symint)
+}
 
 optimizers = [
     opt
@@ -80,9 +84,6 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
         class Net(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = torch.bmm(x, y)
                 z = torch.flatten(z, 1)
@@ -108,6 +109,27 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         for _ in range(2):
             opt_training_iter_fn(batch, net, optimizer)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_state_dict(self):
+        @torch.compile(backend="eager")
+        def _test_state_dict(weight, bias, input):
+            def fn_base(optimizer, weight, bias):
+                optimizer.zero_grad()
+                i = input
+                loss = (weight.mv(i) + bias).pow(2).sum()
+                loss.backward()
+                return loss
+
+            optimizer = torch.optim.Adagrad([weight, bias])
+            fn = functools.partial(fn_base, optimizer, weight, bias)
+            return optimizer, fn
+
+        optimizer, fn = _test_state_dict(
+            Parameter(torch.randn(10, 5)),
+            Parameter(torch.randn(10)),
+            torch.randn(5, requires_grad=True),
+        )
+        optimizer.step(fn)
 
 
 if __name__ == "__main__":

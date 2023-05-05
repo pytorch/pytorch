@@ -16,7 +16,6 @@
 #include <stack>
 
 using ::c10::Dispatcher;
-using ::c10::DispatchKey;
 namespace torch {
 namespace jit {
 namespace onnx {
@@ -157,8 +156,7 @@ std::vector<Node*> CreateQuantizedWeights(
     case c10::kPerChannelAffine:
     case c10::kPerChannelAffineFloatQParams: {
       auto q_scales = weight.q_per_channel_scales();
-      auto* scale_data_raw =
-          reinterpret_cast<double*>(q_scales.data_ptr<double>());
+      auto* scale_data_raw = q_scales.const_data_ptr<double>();
       scale_shapes = q_scales.sizes().vec();
       TORCH_INTERNAL_ASSERT(
           scale_shapes.size() == 1,
@@ -172,8 +170,7 @@ std::vector<Node*> CreateQuantizedWeights(
           [](double x) { return static_cast<float>(x); });
 
       auto q_zero_points = weight.q_per_channel_zero_points();
-      auto* zero_point_data_raw =
-          reinterpret_cast<int64_t*>(q_zero_points.data_ptr<int64_t>());
+      auto* zero_point_data_raw = q_zero_points.const_data_ptr<int64_t>();
       zero_point_shapes = q_zero_points.sizes().vec();
       TORCH_INTERNAL_ASSERT(
           zero_point_shapes.size() == 1,
@@ -211,7 +208,7 @@ std::vector<Node*> CreateQuantizedWeights(
   zero_point_node->t_(Symbol::attr("value"), zero_point_value.clone());
 
   Node* axis_node = graph->create(prim::Constant);
-  if (axis_data.size() > 0) {
+  if (!axis_data.empty()) {
     auto axis_value =
         at::from_blob(
             axis_data.data(), c10::IntArrayRef(axis_data.size()), at::kLong)
@@ -269,7 +266,8 @@ void ConvertQuantizedWeight(
   // Remove packed_params
   node->removeInput(1);
 
-  auto* wt_data = reinterpret_cast<int8_t*>(weight.data_ptr<c10::qint8>());
+  auto* wt_data =
+      reinterpret_cast<int8_t*>(weight.mutable_data_ptr<c10::qint8>());
 
   if (is_caffe2) {
     // Convert from int8 to uint8
@@ -545,7 +543,7 @@ void unpackQuantizedWeightsHelper(
           original_bias, weight_scale * input_scale, 0, at::kQInt32);
       std::vector<int64_t> bias_values;
       bias_values.reserve(q_bias.numel());
-      auto bias_data = (int32_t*)q_bias.data_ptr<c10::qint32>();
+      auto bias_data = (const int32_t*)q_bias.const_data_ptr<c10::qint32>();
       for (const auto i : c10::irange(q_bias.numel())) {
         bias_values.push_back(bias_data[i]);
       }
@@ -559,7 +557,7 @@ void unpackQuantizedWeightsHelper(
       qlinear_node->insertInput(2, c2_bias->output());
     } else {
       std::vector<float> bias_values(original_bias.numel());
-      auto bias_data = original_bias.data_ptr<float>();
+      auto bias_data = original_bias.const_data_ptr<float>();
       for (const auto i : c10::irange(original_bias.numel())) {
         bias_values[i] = bias_data[i];
       }

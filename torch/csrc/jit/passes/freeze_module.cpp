@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -61,7 +62,7 @@ class AttributePropagator {
         const auto& attr_name = resolved_name->second;
         if (parent_module.hasattr(attr_name)) {
           auto value = parent_module.attr(attr_name);
-          // Freezing client wants to presever this submodule. When cleaning
+          // Freezing client wants to preserve this submodule. When cleaning
           // the frozen module, make sure it will be preserved entirely.
           if (value.isModule()) {
             preservedSubModule_.insert(value.toModule()._ivalue());
@@ -441,21 +442,21 @@ class AttributePropagator {
       for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
-      attr = std::move(elems);
+      attr = elems;
     } else if (attr.isGenericDict()) {
       auto dict = std::move(attr).toGenericDict();
       for (const auto& pair : dict) {
         auto val = pair.value();
-        val = overrideGradient(val);
+        val = overrideGradient(std::move(val));
       }
-      attr = std::move(dict);
+      attr = dict;
     } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
       auto obj_type = attr.type()->expect<ClassType>();
       auto obj_value = std::move(attr).toObject();
       auto sub_attributes = obj_type->getAttributes();
       for (const auto& sub_attr : sub_attributes) {
         auto sub_attr_val = obj_value->getAttr(sub_attr.getName());
-        sub_attr_val = overrideGradient(sub_attr_val);
+        sub_attr_val = overrideGradient(std::move(sub_attr_val));
       }
       return obj_value;
     }
@@ -812,7 +813,7 @@ class AttributePropagator {
     removeUnusedAttrs();
   }
 
-  // Prepraring for clean up phase. At this point, record all subModules that
+  // Preparing for clean up phase. At this point, record all subModules that
   // contains mutable attributes.
   void recordReferencedAttrs(std::shared_ptr<Graph>& graph) {
     std::stack<Block*> blocks({graph->block()});
@@ -882,7 +883,7 @@ class AttributePropagator {
     auto type = module.type();
     size_t N = type->numAttributes();
     if (moduleEscapes(module, graph)) {
-      // Perserve all its attributes and methods.
+      // Preserve all its attributes and methods.
       attrsToKeep_[type].insert(N);
       return;
     }
@@ -918,7 +919,7 @@ class AttributePropagator {
   }
 
   // Remove unused attributes and methods for each sub module of the frozen
-  // module. This function iterates over the Calsstypes of its submodule
+  // module. This function iterates over the Classtypes of its submodule
   // attributes including its own type.
   void removeUnusedAttrs() {
     std::vector<std::string> attrsToRemove;

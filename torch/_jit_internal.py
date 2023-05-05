@@ -22,6 +22,8 @@ from typing import (  # noqa: F401
     Any,
     Callable,
     Dict,
+    Final,
+    ForwardRef,
     Generic,
     List,
     Optional,
@@ -38,14 +40,10 @@ import torch
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 import torch.package._mangling as package_mangling
-from torch._C import Future as CFuture
+from torch._awaits import _Await
+from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
-
-if sys.version_info[:2] > (3, 7):
-    from typing import Final
-else:
-    from typing_extensions import Final
 
 LockType: Type
 try:
@@ -79,6 +77,9 @@ class SourceLoader:
 
 
 loader = SourceLoader()
+
+
+IS_PY39_PLUS = sys.version_info >= (3, 9)
 
 
 def createResolutionCallbackFromEnv(lookup_base):
@@ -186,7 +187,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
-    class env(object):
+    class env:
         def __getattr__(self, key):
             if key in f_locals:
                 return f_locals[key]
@@ -263,7 +264,7 @@ def createResolutionCallbackFromClosure(fn):
     """
     closure = get_closure(fn)
 
-    class closure_lookup(object):
+    class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
         def __getattr__(self, key):
@@ -323,7 +324,7 @@ def get_callable_argument_names(fn) -> List[str]:
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
         if not param.kind == param.POSITIONAL_OR_KEYWORD:
-            return []
+            continue
 
         argument_names.append(name)
 
@@ -341,13 +342,11 @@ def get_annotation_str(annotation):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
+        subscript_slice = annotation.slice if IS_PY39_PLUS else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
-    elif isinstance(annotation, ast.Constant) or isinstance(
-        annotation, ast.NameConstant
-    ):
+    elif isinstance(annotation, (ast.Constant, ast.NameConstant)):
         return f"{annotation.value}"
 
     # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
@@ -516,7 +515,7 @@ def boolean_dispatch(
     return fn
 
 
-class FunctionModifiers(object):
+class FunctionModifiers:
     """
     Used to denote the behavior of a function in TorchScript. See export() and
     ignore() for details.
@@ -529,6 +528,7 @@ class FunctionModifiers(object):
     COPY_TO_SCRIPT_WRAPPER = (
         "if this method is not scripted, copy the python method onto the scripted model"
     )
+    _DROP = "_drop (function is fully ignored, declaration can be unscriptable)"
 
 
 def export(fn):
@@ -591,7 +591,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
@@ -743,6 +743,11 @@ def ignore(drop=False, **kwargs):
     return decorator
 
 
+def _drop(fn):
+    fn._torchscript_modifier = FunctionModifiers._DROP
+    return fn
+
+
 def _copy_to_script_wrapper(fn):
     fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
     return fn
@@ -765,12 +770,21 @@ def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
         return False
-    return attr is FunctionModifiers.UNUSED
+    return attr is FunctionModifiers.UNUSED or attr is FunctionModifiers._DROP
 
 
 def is_ignored_fn(fn) -> bool:
     mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
+    return (
+        mod is FunctionModifiers.UNUSED
+        or mod is FunctionModifiers.IGNORE
+        or mod is FunctionModifiers._DROP
+    )
+
+
+def _is_drop_fn(fn) -> bool:
+    mod = get_torchscript_modifier(fn)
+    return mod is FunctionModifiers._DROP
 
 
 def is_static_fn(cls, fn) -> bool:
@@ -972,10 +986,11 @@ def is_tuple(ann) -> bool:
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is Tuple
-        or getattr(ann, "__origin__", None) is tuple
-    )
+
+    ann_origin = getattr(ann, "__origin__", None)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
 
 
 def is_list(ann) -> bool:
@@ -984,10 +999,11 @@ def is_list(ann) -> bool:
 
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is List
-        or getattr(ann, "__origin__", None) is list
-    )
+
+    ann_origin = getattr(ann, "__origin__", None)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
 
 
 def is_dict(ann) -> bool:
@@ -996,10 +1012,11 @@ def is_dict(ann) -> bool:
 
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is Dict
-        or getattr(ann, "__origin__", None) is dict
-    )
+
+    ann_origin = getattr(ann, "__origin__", None)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
 
 
 def is_union(ann):
@@ -1041,6 +1058,12 @@ def is_future(ann) -> bool:
     return getattr(ann, "__origin__", None) is Future
 
 
+def is_await(ann) -> bool:
+    if ann is _Await:
+        return True
+    return getattr(ann, "__origin__", None) is _Await
+
+
 if torch.distributed.rpc.is_available():
     from torch._C._distributed_rpc import PyRRef
     from torch.distributed.rpc import RRef
@@ -1071,7 +1094,7 @@ def is_final(ann) -> bool:
 
 
 # allows BroadcastingList instance to be subscriptable
-class BroadcastingListCls(object):
+class BroadcastingListCls:
     def __getitem__(self, types):
         return
 
@@ -1182,7 +1205,12 @@ def _try_get_dispatched_fn(fn):
     return boolean_dispatched.get(fn)
 
 
-def _get_named_tuple_properties(obj):
+def _get_named_tuple_properties(
+    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None, rcb=None
+):
+    if loc is None:
+        loc = fake_range()
+
     assert issubclass(obj, tuple) and hasattr(obj, "_fields")
     if hasattr(obj, "_field_defaults"):
         defaults = [
@@ -1204,9 +1232,53 @@ def _get_named_tuple_properties(obj):
     annotations = []
     for field in obj._fields:
         if field in obj_annotations:
-            the_type = torch.jit.annotations.ann_to_type(
-                obj_annotations[field], fake_range()
-            )
+            field_type = obj_annotations[field]
+            # [Note: ForwardRef annotations in NamedTuple attributes]
+            # NamedTuple types are slightly different from normal types.
+            #
+            # Normally, annotations are evaluted like this (during jit.script):
+            # 1. Load strings of python code into c++ and parse.
+            # 2. Get annotations as strings
+            # 3. Use the PythonResolver's resolution callback (rcb) to convert
+            #    the string into a python object
+            # 4. We call into annotations.py:ann_to_type to convert python obj
+            #    from step 3 into a type that torchscript understands.
+            #
+            # NamedTuples are more complicated, because it has sub-types.
+            # Normally, once we have the NamedTuple type object from #3,
+            # we can just look at the annotation literal values and use
+            # ann_to_type directly on them.
+            #
+            # But sometimes, users will annotate with string literals, e.g.
+            #    x: 'int'
+            # This also happens with PEP563 (from __forward__ import annotations)
+            #
+            # These annotations appear in the annotation dict as ForwardRef('int').
+            #
+            # Then, we need to convert the string into a python object. This
+            # requires having local context for custom objects or imported types.
+            # rcb() is what gives us this. So, we plumb rcb through the stack so
+            # it can be used in this context for the if block below.
+            #
+            # FAQ:
+            # - Why do we need this special handling for NamedTuple but string
+            #   annotations work fine for normal types? Normally, we parse the
+            #   string directly and then call rcb() directly from C++.
+            # - Why not use ForwardRef._evaluate? For that, we need globals()
+            #   and locals() for the local context where the NamedTuple was defined.
+            #   rcb is what lets us look up into these. So, basically rcb does the
+            #   hard work for us.
+            if isinstance(field_type, ForwardRef) and rcb is not None:
+                rcb_type = rcb(field_type.__forward_arg__)
+                # rcb returns None if it can't find anything.
+                if rcb_type is None:
+                    raise ValueError(
+                        f"Unknown type annotation: '{field_type}' in NamedTuple {obj.__name__}."
+                        f" Likely due to partial support for ForwardRef parameters in NamedTuples, see #95858."
+                        f" Issue occurred at {loc.highlight()}"
+                    )
+                field_type = rcb_type
+            the_type = torch.jit.annotations.ann_to_type(field_type, loc, rcb)
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
@@ -1216,12 +1288,7 @@ def _get_named_tuple_properties(obj):
 def _create_named_tuple(
     t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
 ):
-    # mypy: namedtuple() expects a string literal as the first argument
-    if sys.version_info < (3, 7, 0):
-        TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[no-redef, misc]
-        TupleType.__new__.__defaults__ = defaults  # type: ignore[attr-defined]
-    else:
-        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
+    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
 
 
@@ -1229,8 +1296,10 @@ def _create_named_tuple(
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
-    yield
-    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+    try:
+        yield
+    finally:
+        torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
 def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
@@ -1401,6 +1470,8 @@ class _TensorExtractor(pickle.Pickler):
         # Futures and RRefs don't technically contain a value, they just offer
         # the means to access a value.
         if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, CAwait):
             return ""
         if isinstance(obj, torch.cuda.Event):
             return ""

@@ -101,7 +101,7 @@ def _decompose_type(t, to_list=True):
             return None
         ts = [t]
     # Ignored: Generator has incompatible item type "object"; expected "Type[Any]"
-    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)  # type: ignore[misc]
+    ts = [TYPE2ABC.get(_t, _t) for _t in ts]  # type: ignore[misc]
     return ts
 
 
@@ -366,7 +366,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             namespace['reset'] = conditional_reset
 
         if '__iter__' in namespace:
-            hook_iterator(namespace, 'enumerate(DataPipe)#{}'.format(name))
+            hook_iterator(namespace)
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 

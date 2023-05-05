@@ -6,7 +6,7 @@ from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
-class RemovableHandle(object):
+class RemovableHandle:
     r"""
     A handle which provides the capability to remove a hook.
 
@@ -89,7 +89,7 @@ def warn_if_has_hooks(tensor):
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
                               "to suppress this warning".format(repr(hook)))
 
-class BackwardHook(object):
+class BackwardHook:
     """
     A wrapper class to implement nn.Module backward hooks.
     It handles:
@@ -223,6 +223,11 @@ class BackwardHook(object):
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
+
+                if self.grad_outputs is not None:
+                    assert self.output_tensors_index is not None  # mypy
+                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
+
             grad_fn.register_hook(hook)
 
         is_tuple = True

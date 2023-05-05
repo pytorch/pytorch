@@ -3,6 +3,8 @@ import dis
 import functools
 import logging
 import os.path
+import re
+import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -10,7 +12,7 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config, eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -32,6 +34,16 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
+def skip_if_pytest(fn):
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters
@@ -43,10 +55,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -93,8 +102,10 @@ def requires_bwd_pass(out):
     if isinstance(out, torch.Tensor):
         return out.requires_grad
     elif isinstance(out, (list, tuple)):
-        return any([requires_bwd_pass(x) for x in out])
+        return any(requires_bwd_pass(x) for x in out)
     elif out is None:
+        return False
+    elif isinstance(out, int):
         return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
@@ -135,7 +146,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -175,7 +186,7 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from torch._dynamo.eval_frame import lookup_backend
+        from .backends.registry import lookup_backend
 
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -242,6 +253,37 @@ def requires_static_shapes(fn):
     return _fn
 
 
+@contextlib.contextmanager
+def trace_numpy() -> None:
+    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
+    try:
+        yield
+    finally:
+        config.numpy_ndarray_as_tensor = prev
+
+
+def requires_numpy_pytorch_interop(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+
+    return _fn
+
+
+def requires_numpy(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires numpy")
+
+    return _fn
+
+
 def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(size, stride))
@@ -259,8 +301,8 @@ def _make_fn_with_patches(fn, *patches):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
-            for attr, val in patches:
-                stack.enter_context(patch.object(config, attr, val))
+            for module, attr, val in patches:
+                stack.enter_context(patch.object(module, attr, val))
 
             return fn(*args, **kwargs)
 
@@ -272,6 +314,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
         pass
 
     DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
@@ -281,7 +324,13 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             new_name = f"{name}{fn_suffix}"
             fn = _make_fn_with_patches(fn, *patches)
             fn.__name__ = new_name
-            setattr(DummyTestClass, name, None)
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
+
+
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
+        return fn
+    return unittest.skip(fn)

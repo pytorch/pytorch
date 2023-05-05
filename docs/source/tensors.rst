@@ -199,6 +199,8 @@ Tensor class reference
     Tensor.ndim
     Tensor.real
     Tensor.imag
+    Tensor.nbytes
+    Tensor.itemsize
 
     Tensor.abs
     Tensor.abs_
@@ -650,7 +652,6 @@ Tensor class reference
     Tensor.svd
     Tensor.swapaxes
     Tensor.swapdims
-    Tensor.symeig
     Tensor.t
     Tensor.t_
     Tensor.tensor_split
