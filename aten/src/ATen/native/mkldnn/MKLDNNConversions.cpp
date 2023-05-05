@@ -101,7 +101,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  mkldnn_check_low_precision(self.scalar_type());
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv2d_weight");
 
   auto w = itensor_from_mkldnn(self);
 
@@ -151,7 +151,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
-  mkldnn_check_low_precision(self.scalar_type());
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv3d_weight");
 
   auto w = itensor_from_mkldnn(self);
 
@@ -175,7 +175,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
-  mkldnn_check_low_precision(self.scalar_type());
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_linear_weight");
   auto out_features = self.size(0);
   auto in_features = self.size(1);
   auto w = itensor_from_mkldnn(self);
@@ -243,7 +243,7 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  mkldnn_check_low_precision(self.scalar_type());
+  mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv_transpose2d_weight");
 
   ideep::tensor w = itensor_from_tensor(self);
 

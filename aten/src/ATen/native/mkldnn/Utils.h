@@ -78,13 +78,13 @@ inline bool mkldnn_fp16_device_check() {
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512fp16();
 }
 
-inline void mkldnn_check_low_precision(ScalarType input_t){
+inline void mkldnn_check_low_precision(ScalarType input_t, std::string name){
   if (input_t == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+    TORCH_CHECK(mkldnn_bf16_device_check(), name,
+        ": bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   } else if (input_t  == ScalarType::Half) {
-    TORCH_CHECK(mkldnn_fp16_device_check(),
-        "mkldnn_convolution_transpose: fp16 path needs the cpu support avx512fp16");
+    TORCH_CHECK(mkldnn_fp16_device_check(), name,
+        ": fp16 path needs the cpu support avx512fp16");
   }
 }
 
