@@ -372,6 +372,7 @@ class NNModuleVariable(VariableTracker):
                 ),
                 **options,
             )
+
         if name in ["_call_impl", "_wrapped_call_impl"]:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
@@ -705,7 +706,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import VariableBuilder
-        
+
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
