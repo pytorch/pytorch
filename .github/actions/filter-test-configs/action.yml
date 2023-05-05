@@ -85,7 +85,9 @@ runs:
         echo "Workflow: ${GITHUB_WORKFLOW}"
         echo "Job name: ${JOB_NAME}"
 
-        .github/scripts/filter_test_configs.py \
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
