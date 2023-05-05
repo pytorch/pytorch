@@ -134,7 +134,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Call function with a py::bytes object for the value.
     fn(key,
        py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
@@ -148,7 +148,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "get");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
@@ -168,13 +168,19 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "compare_set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
-    std::string str =
-        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
+    std::string str = pybind11::cast<py::bytes>(
+        fn(key,
+           py::bytes(
+               reinterpret_cast<const char*>(expectedValue.data()),
+               expectedValue.size()),
+           py::bytes(
+               reinterpret_cast<const char*>(desiredValue.data()),
+               desiredValue.size())));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
