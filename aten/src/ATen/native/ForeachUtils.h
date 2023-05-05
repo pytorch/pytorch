@@ -227,7 +227,7 @@ using nested_optional_tensorvec_t = std::vector<std::vector<c10::optional<at::Te
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
 using FlatMap = std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, ParamsHash<DeviceDtypeKey>>;
 
-FlatMap group_tensors_by_first_tensors_device_and_dtype(const nested_optional_tensorvec_t& nested_tensorlist, const bool with_indices) {
+FlatMap _group_tensors_by_first_tensors_device_and_dtype(const nested_optional_tensorvec_t& nested_tensorlist, const bool with_indices) {
   FlatMap grouped_tensors_with_indices;
 
   TORCH_CHECK_GT(nested_tensorlist.size(), 0);

@@ -1737,11 +1737,11 @@ Call this whenever a new thread is created in order to propagate values from
          const bool with_indices) {
         _FlatMap map;
         for (const auto& iter :
-             at::native::group_tensors_by_first_tensors_device_and_dtype(
+             at::native::_group_tensors_by_first_tensors_device_and_dtype(
                  nested_tensorlist, with_indices)) {
-          const auto scalar_type =
+          const auto scalar_type_name =
               torch::utils::getDtypeNames(iter.first.second).first;
-          map.insert({{iter.first.first, scalar_type}, iter.second});
+          map.insert({{iter.first.first, scalar_type_name}, iter.second});
         }
         return map;
       });
