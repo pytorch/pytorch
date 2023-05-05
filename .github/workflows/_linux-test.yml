@@ -236,8 +236,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
-          aws-access-key-id: ${{ secrets.aws-access-key-id }}
-          aws-secret-access-key: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
 
       - name: Print remaining test logs
         shell: bash
