@@ -38,6 +38,9 @@ def main():
 
     args = parser.parse_args()
 
+    pr_identifier = PRIdentifier(args.pr_identifier)
+    print(f"PR identifier for `{args.pr_identifier}` is `{pr_identifier}`")
+
     if args.upload:
         print(f"Uploading cache with args {args}")
 
@@ -50,7 +53,7 @@ def main():
         #    Does the cache even mark any failed tests?
 
         upload_pytest_cache(
-            pr_identifier=PRIdentifier(args.pr_identifier),
+            pr_identifier=pr_identifier,
             job_identifier=args.job_identifier,
             shard=args.shard,
             cache_dir=args.cache_dir,
@@ -61,7 +64,7 @@ def main():
     if args.download:
         print(f"Downloading cache with args {args}")
         download_pytest_cache(
-            pr_identifier=PRIdentifier(args.pr_identifier),
+            pr_identifier=pr_identifier,
             job_identifier=args.job_identifier,
             dest_cache_dir=args.cache_dir,
             bucket=args.bucket,

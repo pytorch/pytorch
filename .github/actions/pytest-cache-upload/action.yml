@@ -10,8 +10,8 @@ inputs:
     description: Shard number for the current job
     required: false
     default: "0"
-  build_environment:
-    description: The build environment
+  job_identifier:
+    description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
   github-token:
     description: GITHUB_TOKEN
@@ -30,17 +30,17 @@ runs:
         max_attempts: 5
         retry_wait_seconds: 30
         command: |
-          set -eux
+          set -eu
           python3 -m pip install boto3==1.19.12
 
     - name: Upload the cache
       shell: bash
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
-        JOB_IDENTIFIER: ${{ github.workflow }}_${{ github.job }}_${{ inputs.build_environment }}
+        JOB_IDENTIFIER: ${{ inputs.job_identifier }}
         SHARD: ${{ inputs.shard }}
       run: |
-        set -x
+        set -eux
 
         echo "all the commands sent to the below script:"
         echo "cache_dir: $GITHUB_WORKSPACE/$CACHE_DIR"
