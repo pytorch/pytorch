@@ -6,6 +6,9 @@ inputs:
   cache_dir:
     description: Path to the pytest cache directory, relative to $GITHUB_WORKSPACE. This is where the merged cache will be placed.
     required: true
+  build_environment:
+    description: The build environment
+    required: true
   github-token:
     description: GITHUB_TOKEN
     required: true
@@ -30,8 +33,7 @@ runs:
       shell: bash
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
-        WORKFLOW: ${{ github.workflow }}
-        JOB: ${{ github.job }}
+        JOB_IDENTIFIER: ${{ github.workflow}_${{ github.job }}_${{ inputs.build_environment }}
         SHARD: ${{ inputs.shard }}
       run: |
         set +x
@@ -39,8 +41,7 @@ runs:
         echo "all the commands sent to the below script:"
         echo "cache_dir: $GITHUB_WORKSPACE/$CACHE_DIR"
         echo "pr_identifier: $GITHUB_REF"
-        echo "workflow: $WORKFLOW"
-        echo "job: $JOB"
+        echo "JOB_IDENTIFIER: $JOB_IDENTIFIER"
         echo "shard: $SHARD"
         echo "temp_dir: $RUNNER_TEMP"
 
@@ -49,6 +50,5 @@ runs:
           --download \
           --cache_dir $GITHUB_WORKSPACE/$CACHE_DIR \
           --pr_identifier $GITHUB_REF \
-          --workflow $WORKFLOW \
-          --job $JOB \
+          --job_identifier $JOB_IDENTIFIER \
           --temp_dir $RUNNER_TEMP \

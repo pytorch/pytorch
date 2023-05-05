@@ -120,6 +120,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
+          build_environment: ${{ inputs.build-environment }}
 
       - name: Set Test step time
         id: test-timeout
@@ -236,6 +237,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
+          build_environment: ${{ inputs.build-environment }}
 
       - name: Print remaining test logs
         shell: bash
