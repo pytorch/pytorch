@@ -26,6 +26,14 @@ except (unittest.SkipTest, ImportError) as e:
 class ForeachTests(TestCase):
     check_model = check_model_cuda
 
+    def setUp(self):
+        super().setUp()
+        torch._inductor.metrics.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        torch._inductor.metrics.reset()
+
     @requires_cuda()
     def test_single(self):
         def fn(a0, a1, b0, b1):
