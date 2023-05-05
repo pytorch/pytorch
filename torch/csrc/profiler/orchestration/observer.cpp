@@ -32,6 +32,7 @@ ExperimentalConfig::ExperimentalConfig(
 ProfilerConfig::ProfilerConfig(
     ProfilerState state,
     bool report_input_shapes,
+    bool report_concrete_inputs,
     bool profile_memory,
     bool with_stack,
     bool with_flops,
@@ -40,6 +41,7 @@ ProfilerConfig::ProfilerConfig(
     : state{state},
       experimental_config{experimental_config},
       report_input_shapes{report_input_shapes},
+      report_concrete_inputs{report_concrete_inputs},
       profile_memory{profile_memory},
       with_stack{with_stack},
       with_flops{with_flops},

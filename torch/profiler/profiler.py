@@ -79,6 +79,7 @@ class _KinetoProfile:
             *,
             activities: Optional[Iterable[ProfilerActivity]] = None,
             record_shapes: bool = False,
+            record_concrete_inputs: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
@@ -86,6 +87,7 @@ class _KinetoProfile:
             experimental_config: Optional[_ExperimentalConfig] = None):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
+        self.record_concrete_inputs = record_concrete_inputs
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
@@ -106,6 +108,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             record_shapes=self.record_shapes,
+            record_concrete_inputs=self.record_concrete_inputs,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
             with_stack=self.with_stack,
@@ -455,6 +458,7 @@ class profile(_KinetoProfile):
             schedule: Optional[Callable[[int], ProfilerAction]] = None,
             on_trace_ready: Optional[Callable[..., Any]] = None,
             record_shapes: bool = False,
+            record_concrete_inputs: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
@@ -475,6 +479,7 @@ class profile(_KinetoProfile):
         super().__init__(
             activities=activities,
             record_shapes=record_shapes,
+            record_concrete_inputs=record_concrete_inputs,
             profile_memory=profile_memory,
             with_stack=with_stack,
             with_flops=with_flops,

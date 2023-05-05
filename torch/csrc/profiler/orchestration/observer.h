@@ -75,6 +75,7 @@ struct TORCH_API ProfilerConfig {
   ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
+      bool report_concrete_inputs = false,
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
@@ -88,6 +89,7 @@ struct TORCH_API ProfilerConfig {
   ProfilerState state;
   ExperimentalConfig experimental_config;
   bool report_input_shapes;
+  bool report_concrete_inputs;
   bool profile_memory;
   bool with_stack;
   bool with_flops;

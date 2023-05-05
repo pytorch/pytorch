@@ -171,13 +171,14 @@ class profile:
             *,
             use_cuda=False,
             record_shapes=False,
+            record_concrete_inputs=False,
             with_flops=False,
             profile_memory=False,
             with_stack=False,
             with_modules=False,
             use_kineto=False,
             use_cpu=True,
-            experimental_config=None):
+            experimental_config=None,):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -185,6 +186,7 @@ class profile:
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
+        self.record_concrete_inputs = record_concrete_inputs
         self.with_flops = with_flops
         self.record_shapes |= self.with_flops
         self.profile_memory = profile_memory
@@ -225,6 +227,7 @@ class profile:
         return ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,
+            self.record_concrete_inputs,
             self.profile_memory,
             self.with_stack,
             self.with_flops,
@@ -616,6 +619,7 @@ class emit_itt:
         self.enabled = enabled
         self.entered = False
         self.record_shapes = record_shapes
+        self.record_concrete_inputs = False
 
     def __enter__(self):
         if not self.enabled:
@@ -627,6 +631,7 @@ class emit_itt:
             ProfilerConfig(
                 ProfilerState.ITT,
                 self.record_shapes,
+                self.record_concrete_inputs,
                 False,
                 False,
                 False,
@@ -731,6 +736,7 @@ class emit_nvtx:
         self.enabled = enabled
         self.entered = False
         self.record_shapes = record_shapes
+        self.record_concrete_inputs = False
 
     def __enter__(self):
         if not self.enabled:
@@ -743,6 +749,7 @@ class emit_nvtx:
             ProfilerConfig(
                 ProfilerState.NVTX,
                 self.record_shapes,
+                self.record_concrete_inputs,
                 False,
                 False,
                 False,

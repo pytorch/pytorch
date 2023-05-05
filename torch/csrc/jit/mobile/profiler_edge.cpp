@@ -34,6 +34,7 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   torch::profiler::impl::ProfilerConfig config(
       torch::profiler::impl::ProfilerState::KINETO,
       report_input_shapes,
+      false, // report_concrete_inputs | TODO(dberard): plumb this arg through
       profile_memory,
       with_stack,
       with_flops,
