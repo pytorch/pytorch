@@ -414,8 +414,12 @@ def _linalg_svd_meta(
 
         V_shape = batch_dims + [n if full_matrices else k, n]
         V = A.new_empty(V_shape)
-        # TODO: need to distinguish cuSOLVER case? (see original code)
-        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=False))
+        # NB: This checks for CUDA since there is no way to check for cuSolver.
+        # Also, this might not work correctly on CPU when fake_device is not
+        # available as device_hint just defaults to CUDA in that case. See
+        # _linalg_svd meta in core.
+        is_cuda = device_hint(A) == "cuda"
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))
     else:
         # doesn't matter
         U = A.new_empty([0])
@@ -3101,6 +3105,51 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     result_size = list(self.size())
     return self.new_empty(result_size)
+
+
+@register_meta(torch.ops.aten.transpose_)
+def transpose_(self, dim0, dim1):
+    assert self.layout not in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }, f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+
+    ndims = self.ndim
+
+    dim0 = maybe_wrap_dim(dim0, ndims)
+    dim1 = maybe_wrap_dim(dim1, ndims)
+
+    if dim0 == dim1:
+        return self
+
+    size = list(self.size())
+    stride = list(self.stride())
+
+    stride[dim0], stride[dim1] = stride[dim1], stride[dim0]
+    size[dim0], size[dim1] = size[dim1], size[dim0]
+
+    self.as_strided_(size, stride)
+    return self
+
+
+@register_meta(torch.ops.aten.t_)
+def t_(self):
+    ndims = self.ndim
+
+    if self.is_sparse:
+        sparse_dim = self.sparse_dim()
+        dense_dim = self.dense_dim()
+        assert (
+            sparse_dim <= 2 and dense_dim == 0
+        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"  # noqa: B950
+    else:
+        assert (
+            self.dim() <= 2
+        ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+
+    return transpose_(self, 0, 0 if ndims < 2 else 1)
 
 
 # We must also trigger meta registrations from PrimTorch ref

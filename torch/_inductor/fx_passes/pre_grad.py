@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -22,7 +22,13 @@ from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
-patterns = PatternMatcherPass()
+normalize_split_pass = PatternMatcherPass()
+merge_splits_pass = PatternMatcherPass()
+
+pattern_matcher_passes: List[PatternMatcherPass] = [
+    normalize_split_pass,
+    merge_splits_pass,
+]
 
 
 @init_once_fakemode
@@ -56,7 +62,8 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
-        patterns.apply(gm.graph)
+        for pattern_matcher_pass in pattern_matcher_passes:
+            pattern_matcher_pass.apply(gm.graph)
 
     gm.graph.lint()
     gm.recompile()
