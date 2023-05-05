@@ -392,7 +392,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
                     del node.meta["example_value"]
-                    self.remove_node(node)
+                self.remove_node(node)
                 self.real_value_cache.pop(node, None)
                 removed_nodes += 1
         log.debug("restore_graphstate: removed %s nodes", removed_nodes)
