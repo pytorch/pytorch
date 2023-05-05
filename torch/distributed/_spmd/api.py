@@ -28,9 +28,16 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from torch import fx
+
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._spmd.data_parallel import gradients_tagging
 from torch.distributed._spmd.distribute import distribute, Schema
 from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._spmd.parallel_mode import DTensorExpandMode, ParallelMode
+from torch.distributed._spmd.parallel_mode import (
+    DataParallel,
+    DTensorExpandMode,
+    ParallelMode,
+)
 from torch.distributed._tensor import Placement, Replicate
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
@@ -98,13 +105,14 @@ class Override(ABC):
     """
 
     @abstractmethod
-    def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+    def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
         r"""
         Implement this method to return a new :class:`nn.Module` instance to
         replace the ``orig_submodule`` argument in the model. This helps if
         ``orig_submodule`` is not traceable or should not be traced.
 
         Args:
+            fqn (str): fully quantified name of the submodule.
             orig_submodule (class:`nn.Module`): original submodule instance to replace.
 
         Returns:
@@ -297,7 +305,10 @@ def _fused_adam_decomp(
         found_inf=found_inf,
     )
 
-    for orig, updated in zip(orig_tuple, updated_tuple):
+    for idx, (orig, updated) in enumerate(zip(orig_tuple, updated_tuple)):
+        if idx == 1:
+            # skip gradient copying as we don't need to copy gradients back
+            continue
         for o, u in zip(orig, updated):
             o.copy_(u)
 
@@ -397,14 +408,14 @@ def _compile(
 
         # FIXME(@mrshenli): type might overlap with fqns
         for typ_or_fqn, override in module_override.items():
-            for name, submodule in mod.named_modules():
+            for fqn, submodule in mod.named_modules():
                 if (
                     isinstance(typ_or_fqn, str)
-                    and typ_or_fqn == name
+                    and typ_or_fqn == fqn
                     or isinstance(typ_or_fqn, type)
                     and isinstance(submodule, typ_or_fqn)
                 ):
-                    accessor.swap_submodule(name, override.replacement(submodule))
+                    accessor.swap_submodule(fqn, override.replacement(fqn, submodule))
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))
@@ -421,6 +432,8 @@ def _compile(
                 # Parameter as keys
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
+    is_data_parallel_mode = isinstance(parallel_mode, DataParallel)
+
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
@@ -429,14 +442,39 @@ def _compile(
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
-            ret = func(*args, **kwargs)
+            # For DataParallel mode, install hooks first to tag the gradients
+            with gradients_tagging(params) if is_data_parallel_mode else nullcontext():
+                ret = func(*args, **kwargs)
+
             # make sure updated parameters are returned
             return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
 
-    # FIXME: Using symbolic tracing to work around. Otherwise it hits
-    # shape mismatch error, as we use local inputs to trace local graph
-    # and use DTensor to expand operators, where DTensor's shape is the
-    # global shape.
+    # FIXME: Using symbolic tracing to work around in DTensor expand mode.
+    # Otherwise it hits shape mismatch error, as we use local inputs to
+    # trace local graph and use DTensor to expand operators, where
+    # DTensor's shape is the global shape.
+    tracing_mode = "fake" if is_data_parallel_mode else "symbolic"
+
+    if is_data_parallel_mode:
+        fake_mode = FakeTensorMode()
+
+        def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
+            # since compilation happens in the first iteration and we
+            # receives mini-batch input, convert them to full batch
+            # fake tensor input first for data parallel sharding
+            # propagations
+            fake_arg = fake_mode.from_tensor(arg)
+            arg_dims = [1] * arg.ndim
+            # we assume the first dim is batch dim in data parallel
+            arg_dims[0] *= dist.get_world_size()
+            return fake_arg.repeat(arg_dims)
+
+        args = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            args,
+        )
+
     with _enable_compile():
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
@@ -444,7 +482,7 @@ def _compile(
         # Issue: https://github.com/pytorch/pytorch/issues/97852
         gm = make_fx(
             partial(stateless_func, func),
-            tracing_mode="symbolic",
+            tracing_mode=tracing_mode,
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)

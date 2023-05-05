@@ -24,7 +24,9 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, SYMPY_INTERP
+
+from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -477,6 +479,8 @@ class GuardBuilder(GuardBuilderBase):
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
             source_ref=self.source_ref,
+            # Export keeps static.
+            ignore_static=(not self.check_fn_manager.output_graph.export),
         )
         output_graph.shape_env.freeze()
         for shape_guard in guards:
@@ -566,7 +570,7 @@ class GuardBuilder(GuardBuilderBase):
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                        f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -574,7 +578,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
@@ -738,8 +741,40 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
+            dynamic_dims_sizes = None
+            dynamic_dims_strides = None
+
+            def convert(size_or_stride):
+                converted: List[Optional[int]] = []
+                for dim in size_or_stride:
+                    if is_concrete_int(dim):
+                        converted.append(int(dim))
+                    else:
+                        converted.append(None)
+                return converted
+
+            dynamic_dims_sizes = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "size"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_dims_strides = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "stride"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
             tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+                *tensor_check_examples,
+                dynamic_dims_sizes=dynamic_dims_sizes,
+                dynamic_dims_strides=dynamic_dims_strides,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
@@ -785,7 +820,14 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        set_guard_fail_hook(guard_fail_hook)
+
+        if config.report_guard_failures or guard_fail_fn is not None:
+            # Guard fail hook is called everytime guard eval fails. For a cache
+            # lookup where there are multiple entries in the same cache line,
+            # this can lead to very high performance overhead. So, we have
+            # decided to hide this behing a config flag.
+            set_guard_fail_hook(guard_fail_hook)
+
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
