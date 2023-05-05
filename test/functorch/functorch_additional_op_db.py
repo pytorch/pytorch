@@ -302,7 +302,7 @@ def sample_inputs_aten_index_put(op_info, device, dtype, requires_grad, **kwargs
             values_shape = inp[tmp_indices].shape
             values = make_arg(values_shape)
             inputs.append(SampleInput(inp, args=(tuple(indices), values)))
-            
+
             # broatcasted value
             values_shape = values_shape[3:]
             values = make_arg(values_shape)
