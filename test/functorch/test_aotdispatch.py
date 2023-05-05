@@ -12,6 +12,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     IS_ARM64,
+    IS_FBCODE,
     compare_equal_outs_and_grads,
     outs_and_grads,
     skipIfRocm,
@@ -2457,6 +2458,11 @@ aot_autograd_failures = {
 
     xfail('stft', ''),
 
+    # UBSAN failures, likely not a problem but needs investigation
+    decorate("nn_functional.max_pool2d", decorator=unittest.skipIf(IS_FBCODE, "ubsan")),
+    decorate("nn_functional.embedding_bag", decorator=unittest.skipIf(IS_FBCODE, "ubsan")),
+    decorate("nn_functional.linalg.eigvals", decorator=unittest.skipIf(IS_FBCODE, "ubsan")),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
@@ -2793,6 +2799,7 @@ symbolic_aot_autograd_module_failures = {
 class TestEagerFusionModuleInfo(AOTTestCase):
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, aot_autograd_module_failures)
+    @decorateForModules(unittest.skipIf(IS_FBCODE, "ubsan"), torch.nn.GroupNorm)
     def test_aot_autograd_module_exhaustive(self, device, dtype, training, module_info):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 

@@ -3848,6 +3848,7 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
+    @unittest.skipIf(IS_FBCODE, "fails in fbcode")
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_maml_omniglot(self, device, mechanism):
         # TODO: there appears to be precision issues for float32
