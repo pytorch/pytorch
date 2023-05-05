@@ -1,0 +1,3 @@
+# Allow build/ to exist in this directory, even though it is excluded
+# by the root .gitignore.
+!build/

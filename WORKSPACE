@@ -3,6 +3,13 @@ workspace(name = "pytorch")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
+# The implementation of the @rules repository specification for Build
+# Unification. See tools/build/README.md.
+local_repository(
+    name = "rules",
+    path = "tools/build/bazel/",
+)
+
 http_archive(
     name = "rules_cc",
     strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",

@@ -1,0 +1,2 @@
+# Marks this directory as a new repository. This is registered in
+# PyTorch Bazel builds as the @rules repository.

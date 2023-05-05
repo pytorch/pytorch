@@ -1,0 +1,14 @@
+# The Buck 1 configuration. To build with Buck 1, obtain a buck1
+# binary and install this config in the root of the repository (copy
+# or symlink). Then build as normal.
+
+[repositories]
+root = .
+# The @rules overrides for Buck 1. Mostly just forward to the native
+# rules.
+rules = tools/build/buck1/
+
+[buildfile]
+# Build-unification: use "BUILD" as the file name for Bazel and Buck
+# both.
+name = BUILD
