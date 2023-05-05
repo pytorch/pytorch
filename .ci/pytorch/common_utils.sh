@@ -189,7 +189,7 @@ function install_huggingface() {
   version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install transformers==${version}
+  pip_install "transformers==${version}"
 }
 
 function install_timm() {
