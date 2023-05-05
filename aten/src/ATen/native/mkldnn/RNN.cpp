@@ -548,7 +548,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   auto hx_prev = hx_;
   auto cx_prev = cx_tmp;
 
-  // Re-culate gates and hidden states during one layer, which will be used in backward.
+  // Re-calculate gates and hidden states during one layer, which will be used in backward.
   std::vector<std::tuple<Tensor, Tensor, Tensor, Tensor>> layer_gates(rnn.seq_length);
   std::vector<std::tuple<Tensor, Tensor>> layer_states(rnn.seq_length + 1);
   layer_states[0] = std::make_tuple(hx_, cx_tmp);
