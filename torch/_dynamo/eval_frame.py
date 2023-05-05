@@ -246,7 +246,9 @@ class _TorchDynamoContext:
             filename = None
         if (
             (filename is None or skipfiles.check(filename))
-            and (getattr(fn, "__name__", "") != "_call_impl")
+            and (
+                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+            )
             and filename not in DONT_WRAP_FILES
         ):
             # call to a builtin without a frame for us to capture
@@ -701,6 +703,7 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: List[Constraint] = None,
     assume_static_by_default: bool = False,
+    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -724,6 +727,9 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
+
+        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
+        set aten_graph=True to see the effect. By default, this flag will be false.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -749,6 +755,12 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
+
+    if functionalize and not aten_graph:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
+        )
 
     graph = None
     out_guards = None
@@ -904,10 +916,40 @@ def export(
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
+        memo: Dict[torch.Tensor, torch.Tensor] = {}
+
+        def to_fun(t):
+            if isinstance(t, torch.Tensor):
+                if t in memo:
+                    return memo[t]
+                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+                memo[t] = r
+                return r
+            else:
+                return t
+
+        def from_fun(t):
+            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
-                return torch.fx.Interpreter(graph).run(*args)
+                if functionalize:
+                    torch._enable_functionalization(reapply_views=True)
+                    try:
+                        return pytree.tree_map(
+                            from_fun,
+                            torch.fx.Interpreter(graph).run(
+                                *pytree.tree_map(to_fun, args)
+                            ),
+                        )
+                    finally:
+                        torch._disable_functionalization()
+                else:
+                    return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             try:
@@ -1031,9 +1073,7 @@ def export(
     )
 
     new_graph.recompile()
-
     # TODO remove this once Executorch uses proper functionalization
-    new_graph._example_fake_inputs = example_fake_inputs
     new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
