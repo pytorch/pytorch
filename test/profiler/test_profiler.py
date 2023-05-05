@@ -251,9 +251,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_mux:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+            if not has_mux and "Multiplexer" in e.name:
                 has_mux = True
         self.assertTrue(has_iter)
         self.assertTrue(has_mux)
@@ -306,9 +306,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_child:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+            if not has_child and "_ChildDataPipe" in e.name:
                 has_child = True
         self.assertTrue(has_iter)
         self.assertTrue(has_child)

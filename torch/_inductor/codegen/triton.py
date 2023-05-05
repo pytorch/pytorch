@@ -1195,8 +1195,10 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
+            use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
+            if reduction_type in {"max", "min"}:
+                return f"{module}.{reduction_type}2({value}, {dim})[{', '.join(sizes)}]"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         def final_argreduce(buffer, result_var, value, index):
