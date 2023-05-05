@@ -48,9 +48,9 @@ if [ "$remove" ]; then
 fi
 echo "INFO: PR SIZE is ${pr_size}"
 
-if ((pr_size > 1000)); then
+if ((pr_size > 2000)); then
     echo
-    echo 'Your PR is '"$pr_size"' LOC which is more than the 1000 maximum'
+    echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
     echo 'allowed within PyTorch infra. PLease make sure to split up'
     echo 'your PR into smaller pieces that can be reviewed.'
     echo 'If you think that this rule should not apply to your PR,'
