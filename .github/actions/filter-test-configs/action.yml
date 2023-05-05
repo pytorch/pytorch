@@ -42,9 +42,14 @@ runs:
           python3 -m pip install requests==2.26.0 pyyaml==6.0
 
     - name: Parse ref
-      shell: bash
       id: parse-ref
-      run: .github/scripts/parse_ref.py
+      shell: bash
+      run: |
+        set -x
+
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
