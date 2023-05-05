@@ -1408,90 +1408,6 @@ def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional
     return message
 
 
-def run_tests(
-    selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
-) -> None:
-    failure_messages = []
-
-    if len(selected_tests) == 0:
-        print_to_stderr(f"No tests in group `{group_name}`")
-        return failure_messages
-
-    # See Note [ROCm parallel CI testing]
-    pool = get_context("spawn").Pool(
-        NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-    )
-
-    def handle_error_messages(err_message):
-        if err_message is None:
-            return False
-        failure_messages.append(err_message)
-        print_to_stderr(err_message)
-        return True
-
-    def parallel_test_completion_callback(err_message):
-        test_failed = handle_error_messages(err_message)
-        if test_failed and not options.continue_through_error:
-            pool.terminate()
-
-    # parallel = in parallel with other files
-    # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
-    selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
-    selected_tests_serial = [
-        x for x in selected_tests if x not in selected_tests_parallel
-    ]
-    print(f"TEST GROUP: {group_name}")
-    print_to_stderr(
-        "parallel (file granularity) tests :\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
-        )
-    )
-    print_to_stderr(
-        "serial (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_serial)
-        )
-    )
-
-    try:
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
-        for test in selected_tests_parallel:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            pool.apply_async(
-                run_test_module,
-                args=(test, test_directory, options_clone),
-                callback=parallel_test_completion_callback,
-            )
-        pool.close()
-        pool.join()
-        del os.environ["NUM_PARALLEL_PROCS"]
-
-        if not options.continue_through_error and len(failure_messages) != 0:
-            raise RuntimeError(
-                "\n".join(failure_messages)
-                + "\n\nTip: You can keep running tests even on failure by "
-                "passing --keep-going to run_test.py.\n"
-                "If running on CI, add the 'keep-going' label to "
-                "your PR and rerun your jobs."
-            )
-
-        for test in selected_tests_serial:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            err_message = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(err_message)
-            if test_failed and not options.continue_through_error:
-                raise RuntimeError(err_message)
-
-    finally:
-        pool.terminate()
-        pool.join()
-
-    return failure_messages
-
-
 def main():
     options = parse_args()
 
@@ -1524,6 +1440,90 @@ def main():
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     failure_messages = []
+
+        
+    def run_tests(
+        selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
+    ) -> None:
+        failure_messages = []
+
+        if len(selected_tests) == 0:
+            print_to_stderr(f"No tests in group `{group_name}`")
+            return failure_messages
+
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def handle_error_messages(err_message):
+            if err_message is None:
+                return False
+            failure_messages.append(err_message)
+            print_to_stderr(err_message)
+            return True
+
+        def parallel_test_completion_callback(err_message):
+            test_failed = handle_error_messages(err_message)
+            if test_failed and not options.continue_through_error:
+                pool.terminate()
+
+        # parallel = in parallel with other files
+        # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
+        selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
+        selected_tests_serial = [
+            x for x in selected_tests if x not in selected_tests_parallel
+        ]
+        print(f"TEST GROUP: {group_name}")
+        print_to_stderr(
+            "parallel (file granularity) tests :\n {}".format(
+                "\n".join(str(x) for x in selected_tests_parallel)
+            )
+        )
+        print_to_stderr(
+            "serial (file granularity) tests:\n {}".format(
+                "\n ".join(str(x) for x in selected_tests_serial)
+            )
+        )
+
+        try:
+            os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+            for test in selected_tests_parallel:
+                options_clone = copy.deepcopy(options)
+                if can_run_in_pytest(test):
+                    options_clone.pytest = True
+                pool.apply_async(
+                    run_test_module,
+                    args=(test, test_directory, options_clone),
+                    callback=parallel_test_completion_callback,
+                )
+            pool.close()
+            pool.join()
+            del os.environ["NUM_PARALLEL_PROCS"]
+
+            if not options.continue_through_error and len(failure_messages) != 0:
+                raise RuntimeError(
+                    "\n".join(failure_messages)
+                    + "\n\nTip: You can keep running tests even on failure by "
+                    "passing --keep-going to run_test.py.\n"
+                    "If running on CI, add the 'keep-going' label to "
+                    "your PR and rerun your jobs."
+                )
+
+            for test in selected_tests_serial:
+                options_clone = copy.deepcopy(options)
+                if can_run_in_pytest(test):
+                    options_clone.pytest = True
+                err_message = run_test_module(test, test_directory, options_clone)
+                test_failed = handle_error_messages(err_message)
+                if test_failed and not options.continue_through_error:
+                    raise RuntimeError(err_message)
+
+        finally:
+            pool.terminate()
+            pool.join()
+
+        return failure_messages
 
     # First run the prioritized tests, then the remaining tests.
     try:
