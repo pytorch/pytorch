@@ -151,7 +151,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
-        return lowerings[aten.addmm](lowerings[aten.mm](mat1, mat2), mat3, mat4)
+        return lowerings[aten.addmm](lowerings[aten.mm](mat3, mat4), mat1, mat2)
 
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
