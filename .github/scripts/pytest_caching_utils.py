@@ -22,10 +22,11 @@ TEMP_DIR = "/tmp"  # a backup location in case one isn't provided
 
 # create a custom string type to be used as pr identifiers to know we've gotten the right one
 class PRIdentifier(str):
-    def __init__(self, value):
+    def __new__(cls, value):
         # Since the pr identifier can be based on include user defined text (like a branch name)
         # we hash it to get a clean input and dodge corner cases
-        self.value = hashlib.md5(value.encode()).hexdigest()
+        md5 = hashlib.md5(value.encode('utf-8')).hexdigest()
+        return super().__new__(cls, md5)
 
 
 def get_s3_key_prefix(
@@ -139,16 +140,6 @@ def download_pytest_cache(
         # shutil.rmtree(zip_download_dir)  suppress deletes while testing
         pass
 
-def unzip_cache_folder(zip_file_path, dest_dir):
-    # the file name of the zip is the shard id
-    shard_id = os.path.splitext(os.path.basename(zip_file_path))[0]
-    cache_dir_for_shard = os.path.join(
-        dest_dir,
-        get_s3_key_prefix(pr_identifier, workflow, job, shard_id),
-        PYTEST_CACHE_DIR_NAME,
-    )
-
-    unzip_folder(downloaded_zip, cache_dir_for_shard)
 
 def copy_file(source_file, dest_file):
     ensure_dir_exists(os.path.dirname(dest_file))

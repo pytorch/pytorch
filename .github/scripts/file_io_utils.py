@@ -84,4 +84,7 @@ def download_s3_objects_with_prefix(bucket, prefix, download_folder):
         downloads.append(download_path)
         print("done")
 
+    if len(downloads) == 0:
+        print(f"There were no files matching the prefix `{prefix}` in bucket `{bucket.name}`")
+
     return downloads
