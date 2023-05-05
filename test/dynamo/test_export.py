@@ -1,4 +1,8 @@
 # Owner(s): ["module: dynamo"]
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_export_persist_assert)
+"""
 import functools
 import inspect
 import math
@@ -7,6 +11,8 @@ import unittest
 from enum import Enum
 from typing import Dict, List, Sequence
 from unittest.mock import patch
+
+import pytest
 
 import torch
 import torch._dynamo
@@ -2269,6 +2275,77 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata(self):
+        from torch._export.constraints import constrain_as_size
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertEqual(
+            gm.meta["input_shape_constraints"],
+            [c.serializable_spec for c in constraints],
+        )
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
+    @pytest.mark.xfail(reason="Saving example_fake_inputs breaks the serialization")
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_exported_graph_serialization(self):
+        import io
+
+        from torch._export.constraints import constrain_as_size
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        # Ensure the exported graph module with metadata is serializable,
+        # metadata won't be saved in the serialized module
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
+
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
 
@@ -2508,6 +2585,31 @@ def forward(self, x):
             "Dynamic control flow is not supported at the moment",
         ):
             gm, _ = torch._dynamo.export(f, torch.randn(5, 6), aten_graph=True)
+
+    @config.patch(assume_static_by_default=False)
+    def test_export_persist_assert(self):
+        def f(x):
+            assert x.shape[0] > 4, "Shape must be more than 4"
+            return x.cos() + x.sin()
+
+        gm, guard = torch._dynamo.export(
+            f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        def has_aten_op(gm, op):
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
+
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
+            gm(torch.randn(3, 4, 5))
 
     def test_access_class_method_from_user_class(self):
         class A:
