@@ -57,7 +57,7 @@ class SaveStateDict(FileSetup):
         model = torch.nn.Linear(10, 10)
         torch.nn.init.constant_(model.weight, 2.0)
         torch.nn.init.constant_(model.bias, 3.0)
-        
+
         torch.save(model.state_dict(), self.path, _use_new_zipfile_serialization=True)
 
 # See testTorchSaveError in test/cpp/jit/tests.h for usage
