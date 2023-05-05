@@ -16,7 +16,13 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton
+from .utils import (
+    cache_on_self,
+    cmp,
+    free_symbol_has,
+    get_scheduling_for_device,
+    has_triton,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -1184,6 +1190,8 @@ class Scheduler:
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
+        elif get_scheduling_for_device(device.type):
+            return get_scheduling_for_device(device.type)(self)
         else:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
