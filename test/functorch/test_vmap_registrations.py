@@ -178,6 +178,7 @@ xfail_not_implemented = {
     "aten::min.names_dim",
     "aten::min.names_dim_min",
     "aten::mish_backward",
+    "aten::mkldnn_rnn_layer_differentiable_backward",
     "aten::moveaxis.int",
     "aten::movedim.intlist",
     "aten::multilabel_margin_loss",

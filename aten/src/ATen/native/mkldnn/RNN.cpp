@@ -12,6 +12,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/mkldnn_convolution_native.h>
+#include <ATen/ops/mkldnn_rnn_layer_differentiable_backward_native.h>
 #endif
 
 #if !AT_MKLDNN_ENABLED()
@@ -64,6 +65,33 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     bool batch_first,
     const at::Tensor& workspace) {
       AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+    }
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_differentiable_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace) {
+      AT_ERROR("mkldnn_rnn_layer_differentiable_backward: ATen not compiled with MKLDNN support");
     }
 
 REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
