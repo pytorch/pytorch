@@ -62,7 +62,7 @@ class LARS(Optimizer):
             state = self.state[p]
 
             if group["momentum"] > 0:
-                momentum_buffer_list.append(state["momentum_buffer"])
+                momentum_buffer_list.append(state.get("momentum_buffer"))
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -78,9 +78,9 @@ class LARS(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            momentum_buffer_list = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            momentum_buffer_list: List[Optional[Tensor]] = []
 
             self._init_group(group, params_with_grad, grads, momentum_buffer_list)
 
@@ -189,16 +189,15 @@ def _single_tensor_lars(
     for i, param in enumerate(params):
         d_p = grads[i] if not maximize else -grads[i]
 
-        p_norm = torch.norm(param.data)
-        g_norm = torch.norm(d_p.data)
-
         if weight_decay != 0:
-            # LARS scaling:
-            if p_norm * g_norm > 0:
-                lars_lr = trust_coefficient * p_norm / (g_norm + p_norm * weight_decay + eps)
+            p_norm = torch.norm(param)
+            g_norm = torch.norm(d_p)
 
-                d_p = d_p.add(param, alpha=weight_decay)
-                d_p.mul_(lars_lr)
+            # LARS scaling:
+            lars_lr = trust_coefficient * p_norm / max(g_norm + p_norm * weight_decay, eps)
+
+            d_p = d_p.add(param, alpha=weight_decay)
+            d_p = d_p * lars_lr
 
         if momentum != 0:
             buf = momentum_buffer_list[i]
