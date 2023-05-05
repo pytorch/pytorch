@@ -399,10 +399,6 @@ class TestCustomOp(TestCase):
             custom_op('_torch_testing::foo', '(Tensor(a!) x) -> Tensor(a)')(foo)
         with self.assertRaisesRegex(ValueError, 'does not support view functions'):
             custom_op('_torch_testing::foo', '(Tensor(a) x) -> Tensor(a)')(foo)
-        with self.assertRaisesRegex(ValueError, 'no Tensor inputs'):
-            custom_op('_torch_testing::foo', '() -> Tensor')(foo)
-        with self.assertRaisesRegex(ValueError, 'no Tensor inputs'):
-            custom_op('_torch_testing::foo', '(int[] shape) -> Tensor')(foo)
         with self.assertRaisesRegex(ValueError, 'no outputs'):
             custom_op('_torch_testing::foo', '(Tensor x) -> ()')(foo)
         with self.assertRaisesRegex(ValueError, 'self'):
@@ -513,6 +509,12 @@ class TestCustomOp(TestCase):
                 return [3.14]
             if typ is bool:
                 return [True]
+            if typ is str:
+                return ["foo"]
+            if typ is torch.dtype:
+                return [torch.float32]
+            if typ is torch.device:
+                return [torch.device('cpu')]
             if typ == torch.types.Number:
                 return [2.718]
             if typ is torch.Tensor:
@@ -530,7 +532,7 @@ class TestCustomOp(TestCase):
                 assert len(args) == 2 and args[1] == ...
                 examples = generate_examples(args[0])
                 return list(itertools.product(examples, examples)) + []
-            raise AssertionError("can't get here")
+            raise AssertionError(f"unsupported param type {typ}")
 
         for typ in torch._custom_op.SUPPORTED_PARAM_TYPES:
             @custom_op('_torch_testing::foo')

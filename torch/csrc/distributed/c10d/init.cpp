@@ -1154,7 +1154,8 @@ Example::
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
           py::arg("wait_for_workers") = true,
-          py::arg("multi_tenant") = false)
+          py::arg("multi_tenant") = false,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,

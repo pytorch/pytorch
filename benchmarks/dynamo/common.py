@@ -541,17 +541,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    prof = torch._dynamo.utils.CompileProfiler()
-    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-        model_iter_fn
-    )
-    opt_model_iter_fn(model, example_inputs)
-    output_csv(
-        output_filename, ["model", "profiler report"], [current_name, prof.report()]
-    )
-    met = prof.get_metrics()
-    guard_failures = len(met["guard_failures"])
-    return [guard_failures]
+    with torch._dynamo.utils.CompileProfiler() as prof:
+        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+            model_iter_fn
+        )
+        opt_model_iter_fn(model, example_inputs)
+        output_csv(
+            output_filename, ["model", "profiler report"], [current_name, prof.report()]
+        )
+        met = prof.get_metrics()
+        guard_failures = len(met["guard_failures"])
+        return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -1177,6 +1177,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1391,13 +1395,16 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
-            if not same(
-                correct_result,
-                correct_rerun_result,
-                fp64_ref=None,
-                cos_similarity=False,
-                tol=0,
-                equal_nan=self.equal_nan,
+            if (
+                name not in self.skip_accuracy_check_as_eager_non_deterministic
+                and not same(
+                    correct_result,
+                    correct_rerun_result,
+                    fp64_ref=None,
+                    cos_similarity=False,
+                    tol=0,
+                    equal_nan=self.equal_nan,
+                )
             ):
                 accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
@@ -1439,6 +1446,10 @@ class BenchmarkRunner:
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
+
+            if name in self.skip_accuracy_check_as_eager_non_deterministic:
+                return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
             if not same(
                 correct_result,
                 new_result,
