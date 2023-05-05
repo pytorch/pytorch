@@ -1779,9 +1779,11 @@ class FlatParamHandle:
             ):
                 # NOTE: This is a hack using `.data` to side step the check
                 # that parameter/gradient sizes/dtypes/devices match. From
-                # calling `reshard()`, `param` has the sharded size, the full
-                # precision dtype, and is on CPU. Thus, one or more of the
-                # following cases can hold when in `no_sync()`:
+                # calling `reshard()`, `param` has the sharded size, has the
+                # full precision dtype, and if CPU offloading is enabled, is on
+                # CPU. Thus, one or more of the following cases can hold when
+                # in `no_sync()`, where `view` is the original parameter's
+                # gradient:
                 # 1. `view` can have the unsharded size.
                 # 2. `view` can have the parameter low precision dtype.
                 # 3. `view` can be on GPU.
