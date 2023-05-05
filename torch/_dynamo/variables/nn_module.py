@@ -326,7 +326,6 @@ class NNModuleVariable(VariableTracker):
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
-
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
@@ -682,7 +681,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = self.value
-
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
             if mod.cls_to_become is not None:
@@ -707,7 +705,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .builder import VariableBuilder
-
+        
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
