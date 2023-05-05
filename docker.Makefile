@@ -12,9 +12,6 @@ CUDA_VERSION              = 11.7.0
 CUDNN_VERSION             = 8
 BASE_RUNTIME              = ubuntu:18.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
-
-# Will be used when running cmake from setup.py (see script for specific vars)
-# e.g CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON"
 CMAKE_VARS               ?= 
 
 # The conda channel to use to install cudatoolkit
