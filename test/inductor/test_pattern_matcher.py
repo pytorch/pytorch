@@ -162,7 +162,6 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-
         for fn in (fn1, fn2):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
