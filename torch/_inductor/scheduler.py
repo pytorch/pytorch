@@ -1068,11 +1068,10 @@ class Scheduler:
         """
         The first term in our fusion score that estimates number of saved memory operations.
         """
-        deps = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
-        keys = set(deps.keys()) & {
-            dep.name for dep in node2.read_writes.reads_and_writes()
-        }
-        return sum(deps[key].numbytes_hint() for key in sorted(keys))
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
+        )
+        return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def score_fusion_key(self, nodes):
         """
