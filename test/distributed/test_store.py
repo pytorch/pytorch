@@ -112,7 +112,7 @@ class StoreTestBase:
         self._test_compare_set(self._create_store())
 
     def _test_append(self, store):
-        if not store.has_extended_api:
+        if not store.has_extended_api():
             self.skipTest("Store doesn't support extended APIs")
         store.set("foo", "po")
         store.append("foo", "tato")
@@ -125,7 +125,7 @@ class StoreTestBase:
         self._test_append(self._create_store())
 
     def _test_multi_set(self, store):
-        if not store.has_extended_api:
+        if not store.has_extended_api():
             self.skipTest("Store doesn't support extended APIs")
         store.multi_set(["foo", "bar"], ["po", "tato"])
         self.assertEqual(b"po", store.get("foo"))
@@ -135,7 +135,7 @@ class StoreTestBase:
         self._test_multi_set(self._create_store())
 
     def _test_multi_get(self, store):
-        if not store.has_extended_api:
+        if not store.has_extended_api():
             self.skipTest("Store doesn't support extended APIs")
         store.set("foo", "po")
         store.set("bar", "tato")
@@ -571,7 +571,7 @@ class TestPythonStore(TestCase):
         class TestStore(dist.Store):
             pass
         store = TestStore()
-        self.assertFalse(store.has_extended_api)
+        self.assertFalse(store.has_extended_api())
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
             store.append("foo", "bar")
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
@@ -584,7 +584,7 @@ class TestPythonStore(TestCase):
             pass
         test_store = TestStore()
         store = dist.PrefixStore("p", test_store)
-        self.assertFalse(store.has_extended_api)
+        self.assertFalse(store.has_extended_api())
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
             store.append("foo", "bar")
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
@@ -595,7 +595,7 @@ class TestPythonStore(TestCase):
     def test_has_extended_api_roundtrip(self):
         store = DummyStore()
         prefix = dist.PrefixStore("p", store)
-        self.assertTrue(prefix.has_extended_api)
+        self.assertTrue(prefix.has_extended_api())
 
     def test_append_roundtrip(self):
         store = DummyStore()
