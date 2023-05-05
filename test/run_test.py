@@ -1451,23 +1451,6 @@ def main():
             print_to_stderr(f"No tests in group `{group_name}`")
             return failure_messages
 
-        # See Note [ROCm parallel CI testing]
-        pool = get_context("spawn").Pool(
-            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-        )
-
-        def handle_error_messages(err_message):
-            if err_message is None:
-                return False
-            failure_messages.append(err_message)
-            print_to_stderr(err_message)
-            return True
-
-        def parallel_test_completion_callback(err_message):
-            test_failed = handle_error_messages(err_message)
-            if test_failed and not options.continue_through_error:
-                pool.terminate()
-
         # parallel = in parallel with other files
         # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
         selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
@@ -1485,6 +1468,23 @@ def main():
                 "\n ".join(str(x) for x in selected_tests_serial)
             )
         )
+        
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def handle_error_messages(err_message):
+            if err_message is None:
+                return False
+            failure_messages.append(err_message)
+            print_to_stderr(err_message)
+            return True
+
+        def parallel_test_completion_callback(err_message):
+            test_failed = handle_error_messages(err_message)
+            if test_failed and not options.continue_through_error:
+                pool.terminate()
 
         try:
             os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
