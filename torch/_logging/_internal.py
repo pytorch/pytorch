@@ -258,8 +258,8 @@ def set_logs(
     modules = modules or {}
 
     def _set_logs(**kwargs):
-        if "all" in kwargs and kwargs["all"]:
-            default_level = kwargs["all"]
+        default_level = kwargs.pop("all", None)
+        if default_level:
             if default_level not in logging._levelToName:
                 raise ValueError(
                     f"Unrecognized log level for kwarg all: {default_level}, valid level values "
@@ -270,7 +270,6 @@ def set_logs(
             for alias in log_registry.log_alias_to_log_qname.keys():
                 if alias not in kwargs:
                     kwargs[alias] = default_level
-
         else:
             default_level = DEFAULT_LOG_LEVEL
 
