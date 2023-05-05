@@ -151,7 +151,10 @@ class GraphLowering(torch.fx.Interpreter):
         GraphLowering.ITER += 1
 
         if GraphLowering.ITER == -1:
-            from fxana import analyze; analyze(gm)
+            from fxana import analyze, print_upstream, print_downstream
+            # analyze(gm)
+            print_upstream(gm.graph, "gt_142")
+            breakpoint()
 
         # it's hard to optimize layout for models with both normal conv
         # and group conv. Normal conv prefers channels last while grouped
@@ -241,10 +244,7 @@ class GraphLowering(torch.fx.Interpreter):
         """
         output_set = set()
         for n in reversed(self.module.graph.nodes):
-            # convolution schema: 
-            # - func: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, SymInt[] padding, int[] dilation, bool transposed, SymInt[] output_padding, int groups) -> Tensor
-            # skip grouped convolution.
-            if n.target == torch.ops.aten.convolution.default and n.args[-1] == 1:
+            if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
                 continue
 
@@ -252,6 +252,21 @@ class GraphLowering(torch.fx.Interpreter):
                 if user in output_set:
                     output_set.add(n)
                     break
+
+        # need a second pass to add downstream nodes of those channel last nodes to the sets.
+        # This pass is especially needed to avoid mix-layout kernel inputs in backward pass.
+        #
+        # Let's say a conv-batchnorm 's output is passed to relu whose output is in turn returned
+        # from the fwd graph. Without this second pass, we will force relu's output to be contiguous.
+        # Then in the kernel in backward pass, the contiguous output of relu may be mix with other channels last
+        # tensors and passed to a kernel.
+        #
+        # This pass improve yolov3 training speedup from 1.116x (worse than disabling layout optimization 1.196x) to 1.457x.
+        for n in self.module.graph.nodes:
+            if n in output_set:
+                for child in n.users:
+                    output_set.add(child)
+
         return output_set
 
     def warn_fallback(self, name):
