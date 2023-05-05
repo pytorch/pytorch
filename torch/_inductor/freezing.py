@@ -5,13 +5,16 @@ import weakref
 from typing import Optional
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import detect_fake_mode
+from torch._functorch.compile_utils import fx_graph_cse
+from torch._inductor.fx_passes.freezing_patterns import get_freezing_patterns
 from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
 from .decomposition import select_decomp_table
-import torch.fx.traceback as fx_traceback
+
 
 aten = torch.ops.aten
 
@@ -65,7 +68,7 @@ def replace_params_with_constants(fake_gm, real_inputs, example_inputs_, fw_meta
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_fold(gm, num_inputs):
+def constant_fold(gm):
     unknown_value = object()
 
     node_replacements = {}
@@ -92,7 +95,14 @@ def constant_fold(gm, num_inputs):
 
             return out
 
-    ConstantFolder(gm).run(*[unknown_value for _ in range(num_inputs)])
+        def run(self):
+            env = {}
+            for n in self.module.graph.nodes:
+                if n.op == "placeholder":
+                    env[n] = unknown_value
+            return super().run(initial_env=env)
+
+    ConstantFolder(gm).run()
 
     for node, constant in node_replacements.items():
         replace_node_with_constant(gm, node, constant)
@@ -146,10 +156,21 @@ def optimize_for_inference(
         gm, params_flat, example_inputs_, fw_metadata
     )
 
-    constant_fold(gm, len(preserved_arg_indices))
+    constant_fold(gm)
+
+    cse_graph = fx_graph_cse(gm.graph)
+    gm.graph = cse_graph
+    gm.recompile()
+
     fuse_conv_bn(gm)
     # now, decomp batch norm if we were unable to fuse it
     gm = decompose_unfused_batchnorms(gm, example_inputs_, preserved_arg_indices)
+
+    patterns = get_freezing_patterns()
+
+    patterns.apply(gm.graph)
+    torch.fx.passes.tools_common.legalize_graph(gm)
+    constant_fold(gm)
 
     # invalidate nn Modules
     if config.optimize_for_inference_discard_parameters:

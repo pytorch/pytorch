@@ -120,6 +120,33 @@ class OptimizeForInferenceTemplate(TestCase):
         # TODO - torch.compile gives different answers than eager
         self.assertEqual(out_optimized_for_infernece, out_compiled)
 
+    def test_mm_concat(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t3 = torch.nn.Parameter(torch.rand(10, 10))
+
+            def forward(self, x):
+                return x @ self.t1, x @ self.t2, x @ self.t3
+
+        mod = Mod().to(self.device)
+        inp = torch.rand([10, 10]).to(self.device)
+
+        @torch.compile()
+        def foo(mod, inp):
+            return mod(inp)
+
+        kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+
+        with torch.no_grad():
+            _, code = run_and_get_code(foo, mod, inp)
+            FileCheck().check_not(kernel_invoke).check_count(
+                ".mm(", count=1, exactly=True
+            ).run(code[0])
+
     def test_mutation(self):
         class Mod(torch.nn.Module):
             def __init__(self):
