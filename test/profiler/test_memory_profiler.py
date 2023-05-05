@@ -345,7 +345,7 @@ class TestDataFlow(TestCase):
             destroyed = {k for k, v in node._edges.items() if v.is_deletion}
 
             inputs: List[str] = []
-            for key, (_, v) in node.input_shapes.items():
+            for key, (_, v) in node.inputs.items():
                 inputs.append(f"T{key.id}(v{v}{'*' if key in destroyed else ''})")
 
             outputs = [f"T{key.id}(v{v})" for key, v in node.outputs.items()]
@@ -882,7 +882,7 @@ class TestMemoryProfilerE2E(TestCase):
         # TensorKey representation.
         for op in memory_profile._op_tree.dfs():
             if op.typed[0] == _EventType.TorchOp:
-                inputs = tree_flatten(op.typed[1].input_shapes)[0]
+                inputs = tree_flatten(op.typed[1].inputs)[0]
                 for t in (i for i in inputs if isinstance(i, _TensorMetadata)):
                     key = _memory_profiler.TensorKey.from_tensor(t)
                     if key:
