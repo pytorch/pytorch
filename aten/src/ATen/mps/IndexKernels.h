@@ -170,7 +170,7 @@ kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
 REGISTER_INDEX_OP_ALL_DTYPES(select);
 REGISTER_INDEX_OP_ALL_DTYPES(put);
 
-
+#if __METAL_VERSION__ < 300
 #define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
 template                                                        \
 [[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
@@ -184,6 +184,21 @@ kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
     constant uint32_t & num_indices       [[buffer(6)]],        \
     constant uint    * numIters          [[buffer(7)]],         \
     uint thread_index [[thread_position_in_grid]]);
+#else
+#define REGISTER_SINGLE_THREADED_INDEX_OP(DTYPE_SIZE, DTYPE, INDEX_OP_TYPE)     \
+template                                                        \
+[[host_name("index_" #INDEX_OP_TYPE "_" #DTYPE_SIZE)]]          \
+kernel void index_ ## INDEX_OP_TYPE<DTYPE>(                     \
+    constant IndexAB * indexAB           [[buffer(0)]],         \
+    constant void    * indexSizes        [[buffer(1)]],         \
+    constant void    * indexStrides      [[buffer(2)]],         \
+    constant uint3   * offsets           [[buffer(3)]],         \
+    constant void    * inputData         [[buffer(4)]],         \
+    device   void    * outputData        [[buffer(5)]],         \
+    constant uint32_t & num_indices       [[buffer(6)]],        \
+    constant uint    * numIters          [[buffer(7)]],         \
+    uint thread_index [[thread_position_in_grid]]);
+#endif
 
 #define REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)     \
     REGISTER_SINGLE_THREADED_INDEX_OP(8bit,  char,  INDEX_OP_TYPE);     \
