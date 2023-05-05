@@ -876,7 +876,6 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
             result =  symbolic(g, self, dim, keepdim)
             result_type = result.type().scalarType()
             if result_type != original_dtype:
-                # cast back to the dtype requested if result type is diffrent
                 result = g.op(
                     "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
