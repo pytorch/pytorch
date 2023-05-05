@@ -246,7 +246,9 @@ class _TorchDynamoContext:
             filename = None
         if (
             (filename is None or skipfiles.check(filename))
-            and (getattr(fn, "__name__", "") != "_call_impl")
+            and (
+                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+            )
             and filename not in DONT_WRAP_FILES
         ):
             # call to a builtin without a frame for us to capture
