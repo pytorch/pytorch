@@ -26,6 +26,18 @@ class TestPaternMatcher(TestCase):
                 torch.randn(1, 2, device="cuda"),
                 torch.randn(2, 1, device="cuda"),
             ),
+            (
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
         ]
         for args in args_list:
             counters.clear()
