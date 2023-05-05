@@ -395,7 +395,7 @@ Tensor empty_like(
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty_symint(self.sym_sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+    result = at::empty_symint(self.sym_sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {
