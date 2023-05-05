@@ -1,5 +1,5 @@
 import unittest
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, skipIfRocm
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyOn, skipIfRocm, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests, expectedFailureMeta, skipIfNoLapack, TEST_NUMPY
 
 class TestDecorators(TestCase):
@@ -34,6 +34,14 @@ class TestDecorators(TestCase):
     def test_only_cpu(self):
         self.assertEqual(str(self.device), 'cpu')
 
+    @onlyCUDA
+    def test_only_cuda(self):
+        self.assertIn("cuda", str(self.device).lower())
+
+    @onlyOn('cpu', 'cuda')
+    def test_only_on_cpu_or_cuda(self):
+        self.assertIn(str(self.device), ['cpu', 'cuda'])
+
     @skipIfRocm
     def test_skip_if_rocm(self):
         self.assertNotIn("rocm", str(self.device).lower())
@@ -48,6 +56,10 @@ class TestDecorators(TestCase):
         import numpy as np
         self.assertIsNotNone(np)
 
+    @dtypes(torch.float32, torch.float64)
+    def test_dtypes(self, dtype):
+        expected_dtypes = (torch.float32, torch.float64)
+        self.assertIn(dtype, expected_dtypes)
+
 if __name__ == '__main__':
-    run_tests(
-)
+    run_tests()
