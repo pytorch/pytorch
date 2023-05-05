@@ -387,7 +387,7 @@ void check_inputs(
   int64_t numel = inputs[0].numel();
   auto dtype = inputs[0].scalar_type();
 
-  for (const auto i : c10::irange(len)) {
+  for (auto i : c10::irange(len)) {
     auto input = inputs[i];
 
     check_tensor(
@@ -609,7 +609,7 @@ void reduce(
 
   AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
-  for (const auto i : c10::irange(len)) {
+  for (auto i : c10::irange(len)) {
     int device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
