@@ -35,6 +35,7 @@ aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
+aten::_assert_async.msg
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -574,8 +575,6 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
-aten::all_gather_into_tensor
-aten::all_reduce
 aten::allclose
 aten::angle
 aten::angle.out
@@ -974,8 +973,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_
@@ -1060,7 +1057,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reduce_scatter_tensor
 aten::reflection_pad1d
 aten::reflection_pad1d.out
 aten::reflection_pad1d_backward
@@ -1163,8 +1159,6 @@ aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::smooth_l1_loss
 aten::smooth_l1_loss.out
-aten::smooth_l1_loss_backward
-aten::smooth_l1_loss_backward.grad_input
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
@@ -1331,7 +1325,6 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
-aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out
