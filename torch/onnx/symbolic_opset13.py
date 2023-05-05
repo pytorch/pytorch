@@ -472,7 +472,7 @@ def _reduce_with_dtype(onnx_op, name):
                 result_dtype_onnx = _type_utils.JitScalarType.from_value(result).onnx_type()
                 if result_dtype_onnx != dtype_onnx:
                     result = g.op(
-                        "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
+                        "Cast", result, to_i=dtype_onnx
                     )
             return result
 
