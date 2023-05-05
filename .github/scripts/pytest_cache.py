@@ -24,7 +24,6 @@ def main():
         help="Path to the folder pytest uses for its cache",
     )
     parser.add_argument("--pr_identifier", required=True, help="A unique PR identifier")
-    parser.add_argument("--workflow", required=True, help="The workflow name")
     parser.add_argument("--job_identifier", required=True, help="A unique job identifier that should be the same for all runs of job")
     parser.add_argument(
         "--shard", required="--upload" in sys.argv, help="The shard id"
