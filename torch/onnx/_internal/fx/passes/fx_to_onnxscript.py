@@ -33,7 +33,7 @@ def _fx_node_to_onnx_message_formatter(
     *args,
     **kwargs,
 ) -> str:
-    return f"FX Node: {node.op}:{node.target}[name={node.name}]"
+    return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
 
 
 def _location_from_fx_stack_trace(

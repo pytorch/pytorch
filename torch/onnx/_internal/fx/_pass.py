@@ -102,7 +102,7 @@ def _transform_diagnose_call_message_formatter(
     *args: Any,
     **kwargs: Any,
 ) -> str:
-    return f"Running {self.__class__.__name__} pass."
+    return f"Running {self.__class__.__name__} pass. "
 
 
 def fx_graph_tabular(graph: torch.fx.Graph) -> str:

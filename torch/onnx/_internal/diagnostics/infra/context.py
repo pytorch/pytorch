@@ -261,7 +261,9 @@ class DiagnosticContext:
     def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
-            raise RuntimeErrorWithDiagnostic(diagnostic) from diagnostic.source_exception
+            raise RuntimeErrorWithDiagnostic(
+                diagnostic
+            ) from diagnostic.source_exception
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(

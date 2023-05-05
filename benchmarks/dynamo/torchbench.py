@@ -198,6 +198,11 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
+}
+
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
@@ -249,6 +254,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
     def load_model(
         self,
         device,
@@ -279,10 +290,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
             batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
-
-        # See https://github.com/pytorch/benchmark/issues/1560
-        if model_name == "speech_transformer":
-            batch_size = 10
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
