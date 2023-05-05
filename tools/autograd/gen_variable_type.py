@@ -794,7 +794,6 @@ ${fw_grad_opt_definition}
 for (const auto& i : c10::irange(${vector_of_optional_tensor}.size())) {
   if (${recompute_any_has_forward_grad_for_current_index}) {
       ${unpacked_arguments}
-      // ${out_arg}_new_fw_grad_opt = ${formula};
       ${vector_of_optional_tensor}[i] = ${formula};
   }
 }
@@ -1928,7 +1927,6 @@ def emit_body(
                             )
                         ),
                         formula=inplace_foreach_forward_grad_formula,
-                        out_arg="_".join(res),
                         unpacked_arguments=unpacked_arguments,
                     )
                 )
