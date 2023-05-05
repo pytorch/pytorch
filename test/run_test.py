@@ -932,11 +932,7 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         # failure
         rerun_options = ["-x", "--reruns=2"]
         if IS_CI:
-            if is_cpp_test:
-                # TODO: Figure out why pytest-cpp doesn't work with the local conftest
-                rerun_options.append("--sw")
-            else:
-                rerun_options.append(f"--sc={stepcurrent_key}")
+            rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
@@ -948,13 +944,10 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.append("--use-pytest")
     elif IS_CI:
-        # NB: Use --junit-xml to generate the C++ test report for now in
-        # pytest format. Note that this format is different than the one
-        # used by unittest via --junit-xml-reruns. But this is ok as we
-        # only need to deal with this later to support disable flaky and
-        # slow C++ tests
+        # Add the option to generate XML test report here as C++ tests
+        # won't go into common_utils
         test_report_path = get_report_path(pytest=True)
-        pytest_args.extend(["--junit-xml", test_report_path])
+        pytest_args.extend(["--junit-xml-reruns", test_report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
@@ -1482,6 +1475,13 @@ def main():
         NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
     )
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
+    # NB: This is a hack to make conftest.py available on CPP_TESTS_DIR. We should
+    # see if the file could be turned into a full-fledge ptest plugin instead
+    cpp_conftest_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
+    if not os.path.exists(cpp_conftest_file) or not os.path.isfile(cpp_conftest_file):
+        # Take the conftest file from the test directory
+        shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
 
     def handle_error_messages(err_message):
         if err_message is None:
