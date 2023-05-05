@@ -600,6 +600,7 @@ def mps_ops_modifier(ops):
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
         'nonzero_static': None,
+        'nn.functional.conv3d': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,
