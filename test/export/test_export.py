@@ -79,8 +79,8 @@ class TestExperimentalExport(TestCase):
             return cond(torch.tensor(x.shape[0] > 4), true_fn, false_fn, [x])
 
 
-class TestExport(TestCase):
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDynamismExpression(TestCase):
     def test_export_constraints(self):
 
         def f(x):
@@ -100,7 +100,6 @@ class TestExport(TestCase):
         res = gm(*inp)
         self.assertTrue(torchdynamo.utils.same(ref, res))
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_export_constraints_error(self):
         def invalid_size(x):
             b = x.item()
@@ -132,7 +131,21 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
             _export(conflicting_constraints, inp)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+    def test_export_assume_static_by_default(self):
+        def branch_on_shape(x: torch.Tensor):
+            if x.shape[0] == 4:
+                return x + 1
+            else:
+                return x
+
+        inp = (torch.rand(4, 5),)
+
+        # Being able to export means shape is preserved as static
+        _export(branch_on_shape, inp)
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestExport(TestCase):
     def test_capture_multiple(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -168,7 +181,6 @@ class TestExport(TestCase):
 
             self.assertTrue(torch.allclose(eager_results, exported_results))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_merge(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -230,7 +242,6 @@ class TestExport(TestCase):
 
             self.assertTrue(torch.allclose(eager_results, exported_results))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_merge_failure(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -272,7 +283,6 @@ class TestExport(TestCase):
         ):
             mmep1.merge(mmep2)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_part_of_method(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -309,7 +319,6 @@ class TestExport(TestCase):
 
             self.assertTrue(torch.allclose(eager_results, exported_results))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_no_method_specified(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -327,7 +336,6 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(AssertionError, "Expected at least 1 graph module"):
             _ = export(module, method_name_to_args)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_program_property_access_success_forward(self) -> None:
         """
         A MultiMethodExportedProgram should allow property access even if
@@ -363,7 +371,6 @@ class TestExport(TestCase):
         self.assertEqual(mmep.graph, forward_method.graph)
         self.assertEqual(mmep.code, forward_method.code)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_program_property_access_success_non_forward(self) -> None:
         """
         A MultiMethodExportedProgram should allow property access if it only
@@ -394,7 +401,6 @@ class TestExport(TestCase):
         self.assertEqual(mmep.graph, method1_gm.graph)
         self.assertEqual(mmep.code, method1_gm.code)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_program_property_access_failure(self) -> None:
         """
         A MultiMethodExportedProgram should NOT allow property access when
@@ -450,7 +456,6 @@ class TestExport(TestCase):
         ):
             _ = mmep.code
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_non_module_callable(self) -> None:
         def fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             return x + y
@@ -467,7 +472,6 @@ class TestExport(TestCase):
 
         self.assertTrue(torch.allclose(eager_results, exported_results))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_non_module_callable_dict_args(self) -> None:
         def fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             return x + y
@@ -481,7 +485,6 @@ class TestExport(TestCase):
         ):
             _ = export(fn, method_name_to_args)
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple_capture_default_forward(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
             def __init__(self) -> None:
