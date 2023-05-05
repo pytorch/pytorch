@@ -383,7 +383,7 @@ def end_graph():
     print()
 
 
-class DebugAutotuner(CachingAutotuner):
+class ProfilingAutotuner(CachingAutotuner):
     def __init__(self, *args, regex_filter="", **kwargs):
         self.regex_filter = regex_filter
         super().__init__(*args, **kwargs)
@@ -510,7 +510,7 @@ def cached_autotune(
 
     def decorator(fn):
         if config.profile_bandwidth:
-            return DebugAutotuner(
+            return ProfilingAutotuner(
                 fn,
                 meta=meta,
                 regex_filter=config.profile_bandwidth_regex,

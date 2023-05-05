@@ -272,12 +272,6 @@ def setup_compile_debug():
     compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
 
     if compile_debug:
-        torch._logging.set_logs(
-            dynamo=logging.DEBUG,
-            aot=logging.DEBUG,
-            inductor=logging.DEBUG,
-            output_code=True,  # this is off by default
-        )
         return add_file_handler()
 
     return contextlib.ExitStack()

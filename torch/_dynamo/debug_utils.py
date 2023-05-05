@@ -249,7 +249,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning("Writing minified repro to %s", minified_repro_path)
+    log.warning("Writing minifier launcher to %s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
