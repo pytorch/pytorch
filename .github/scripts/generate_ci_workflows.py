@@ -268,6 +268,9 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             libtorch_variants=["shared-with-deps"],
         ),
         branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -280,6 +283,9 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             libtorch_variants=["shared-with-deps"],
         ),
         branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
     ),
 ]
 
