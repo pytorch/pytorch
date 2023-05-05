@@ -90,7 +90,6 @@ void unary_op(const Tensor& self,
       self_ = self;
     }
 
-
     bool gatherTensorData = true;
     // NS: This check is wrong and needs to be fixed, as it would produce wrong results for transposed outputs
     // See https://github.com/pytorch/pytorch/issues/100764

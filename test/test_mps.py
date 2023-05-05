@@ -6627,7 +6627,6 @@ class TestNLLLoss(TestCaseMPS):
         z = y + y.neg()
         self.assertEqual(z.abs().max().item(), 0.0)
 
-
     # Test index add
     def test_index_add(self):
         def helper(shape, dim, index, source_shape, alpha, x_dtype=torch.float32, idx_dtype=torch.int32):

@@ -20,7 +20,6 @@ void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedB
   return (void*)alignedAddress;
 }
 
-
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
 void copy_cast_mps(at::Tensor& dst,
