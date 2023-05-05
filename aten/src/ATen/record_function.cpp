@@ -536,6 +536,8 @@ RecordFunction::RecordFunction(StepCallbacks&& step_callbacks)
 }
 
 void RecordFunction::runStartCallbacks() {
+  at::AutoFwGradMode fw_grad_mode(false);
+  at::AutoGradMode grad_mode(false);
   for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
     tryRunCallback</*is_start=*/true>(
         step_callbacks_.callbacks_[i], *this, ctx_[i]);
@@ -544,6 +546,8 @@ void RecordFunction::runStartCallbacks() {
 }
 
 void RecordFunction::end() {
+  at::AutoFwGradMode fw_grad_mode(false);
+  at::AutoGradMode grad_mode(false);
   if (called_start_callbacks_) {
     for (const auto i : c10::irange(step_callbacks_.callbacks_.size())) {
       tryRunCallback</*is_start=*/false>(

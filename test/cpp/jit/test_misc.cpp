@@ -898,6 +898,7 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     auto inputs = fn.inputs();
     std::vector<std::vector<int64_t>> sizes;
     for (const auto& input : inputs) {
+      TORCH_CHECK(!at::GradMode::is_enabled());
       if (input.isTensor()) {
         sizes.push_back(input.toTensor().sizes().vec());
       } else if (input.isScalar()) {
