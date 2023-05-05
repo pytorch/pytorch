@@ -820,7 +820,14 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        set_guard_fail_hook(guard_fail_hook)
+
+        if config.report_guard_failures or guard_fail_fn is not None:
+            # Guard fail hook is called everytime guard eval fails. For a cache
+            # lookup where there are multiple entries in the same cache line,
+            # this can lead to very high performance overhead. So, we have
+            # decided to hide this behing a config flag.
+            set_guard_fail_hook(guard_fail_hook)
+
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())

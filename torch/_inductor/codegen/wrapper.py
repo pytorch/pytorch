@@ -12,6 +12,7 @@ from sympy import Expr
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -617,7 +618,10 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_str(self, s):
-        return repr(s)
+        if isinstance(s, SymTypes):
+            return pexpr(sympy.expand(repr(s)))
+        else:
+            return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
