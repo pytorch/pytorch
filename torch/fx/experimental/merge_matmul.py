@@ -29,7 +29,7 @@ def split_result_tensors(result: torch.Tensor, inputs: List[torch.Tensor]) -> Li
     else:
         splits = [x.shape[0] for x in inputs]
 
-    return torch.split(result, splits)
+    return list(torch.split(result, splits))
 
 
 def may_depend_on(a: Node, b: Node, search_depth: int = 6):
