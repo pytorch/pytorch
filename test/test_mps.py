@@ -760,6 +760,9 @@ def mps_ops_error_inputs_modifier(ops):
         'nn.functional.gelu',
         'masked_scatter',
 
+        # unsupported float32 dtype
+        'nn.functional.conv3d',
+
         # unsupported float64 dtype
         'cat',
         'complex',
