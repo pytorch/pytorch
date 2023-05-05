@@ -112,6 +112,12 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache_dir: .pytest_cache
+
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
         id: filter
