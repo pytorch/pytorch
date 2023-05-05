@@ -8,8 +8,6 @@ from enum import Enum
 from typing import Dict, List, Sequence
 from unittest.mock import patch
 
-import pytest
-
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
