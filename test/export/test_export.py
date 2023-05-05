@@ -3,7 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._dynamo.eval_frame import is_dynamo_supported
+from torchdynamo import is_dynamo_supported
 from torch._export import _export, export
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size
@@ -11,7 +11,7 @@ from torch._export.graph_module import get_export_meta
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-
+@unittest.skipIf(not is_dynamo_supported(), "dynamo not supported")
 class TestExperimentalExport(TestCase):
     @unittest.skip("TypeError: <lambda>() missing 1 required positional argument")
     def test_export_simple_model_with_attr(self):
@@ -30,7 +30,6 @@ class TestExperimentalExport(TestCase):
         exported_program = do_not_use_experimental_export(mod, inp)
         self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_export_simple_model(self):
         class Foo(torch.nn.Module):
             def __init__(self, float_val):
