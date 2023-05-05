@@ -18,16 +18,12 @@ const HIPHooksInterface& getHIPHooks() {
   c10::call_once(once, [] {
     hip_hooks = HIPHooksRegistry()->Create("HIPHooks", HIPHooksArgs{});
     if (!hip_hooks) {
-      hip_hooks =
-          // NOLINTNEXTLINE(modernize-make-unique)
-          std::unique_ptr<HIPHooksInterface>(new HIPHooksInterface());
+      hip_hooks = std::make_unique<HIPHooksInterface>();
     }
   });
 #else
   if (hip_hooks == nullptr) {
-    hip_hooks =
-        // NOLINTNEXTLINE(modernize-make-unique)
-        std::unique_ptr<HIPHooksInterface>(new HIPHooksInterface());
+    hip_hooks = std::make_unique<HIPHooksInterface>();
   }
 #endif
   return *hip_hooks;

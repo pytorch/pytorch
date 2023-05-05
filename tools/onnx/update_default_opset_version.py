@@ -107,6 +107,9 @@ def main(args: Any) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--skip_build", action="store_true", help="Skip building pytorch"
+        "--skip-build",
+        "--skip_build",
+        action="store_true",
+        help="Skip building pytorch",
     )
     main(parser.parse_args())

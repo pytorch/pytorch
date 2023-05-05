@@ -17,7 +17,7 @@ class TestGenUnboxing(unittest.TestCase):
         mock_parse_native_yaml: NonCallableMock,
         mock_get_custom_build_selector: NonCallableMock,
     ) -> None:
-        args = ["--op_registration_allowlist=op1", "--op_selection_yaml_path=path2"]
+        args = ["--op-registration-allowlist=op1", "--op-selection-yaml-path=path2"]
         gen_unboxing.main(args)
         mock_get_custom_build_selector.assert_called_once_with(["op1"], "path2")
 
@@ -32,8 +32,8 @@ class TestGenUnboxing(unittest.TestCase):
         temp_file.write(b"- aten::add.Tensor")
         temp_file.seek(0)
         args = [
-            f"--TEST_ONLY_op_registration_allowlist_yaml_path={temp_file.name}",
-            "--op_selection_yaml_path=path2",
+            f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
+            "--op-selection-yaml-path=path2",
         ]
         gen_unboxing.main(args)
         mock_get_custom_build_selector.assert_called_once_with(
@@ -52,9 +52,9 @@ class TestGenUnboxing(unittest.TestCase):
         temp_file.write(b"- aten::add.Tensor")
         temp_file.seek(0)
         args = [
-            "--op_registration_allowlist=op1",
-            "--TEST_ONLY_op_registration_allowlist_yaml_path={temp_file.name}",
-            "--op_selection_yaml_path=path2",
+            "--op-registration-allowlist=op1",
+            "--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
+            "--op-selection-yaml-path=path2",
         ]
         gen_unboxing.main(args)
         mock_get_custom_build_selector.assert_called_once_with(["op1"], "path2")

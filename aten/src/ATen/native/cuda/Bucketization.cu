@@ -92,10 +92,10 @@ void searchsorted_cuda_contiguous(Tensor& result, const Tensor& input, const Ten
   int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
-  const input_t *data_in = input.data_ptr<input_t>();
-  const input_t *data_bd = boundaries.data_ptr<input_t>();
-  const int64_t *data_sort = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr;
-  output_t *data_out = result.data_ptr<output_t>();
+  const input_t *data_in = input.const_data_ptr<input_t>();
+  const input_t *data_bd = boundaries.const_data_ptr<input_t>();
+  const int64_t *data_sort = sorter.defined() ? sorter.const_data_ptr<int64_t>() : nullptr;
+  output_t *data_out = result.mutable_data_ptr<output_t>();
 
   int64_t maxThread = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t maxGrid = 1024;
@@ -116,12 +116,12 @@ void dispatch(
     bool right,
     const Tensor& sorter) {
   if (!out_int32) {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int64_t>(result, input, boundaries, right, sorter);
     });
   }
   else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, input.scalar_type(), "searchsorted_out_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(), "searchsorted_out_cuda", [&] {
       searchsorted_cuda_contiguous<scalar_t, int>(result, input, boundaries, right, sorter);
     });
   }

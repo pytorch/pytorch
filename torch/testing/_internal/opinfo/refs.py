@@ -103,7 +103,6 @@ class PythonRefInfo(OpInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -115,7 +114,7 @@ class PythonRefInfo(OpInfo):
 
         inherited = self.torch_opinfo._original_opinfo_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
-        super(PythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 
 class ReductionPythonRefInfo(ReductionOpInfo):
@@ -134,7 +133,6 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -169,7 +167,6 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -182,7 +179,7 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         inherited = self.torch_opinfo._original_unary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
-        super(ElementwiseUnaryPythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)
 
 
 class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
@@ -201,7 +198,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo_variant_name = torch_opinfo_variant_name
         self.torch_opinfo = _find_referenced_opinfo(
@@ -213,4 +209,4 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         inherited = self.torch_opinfo._original_binary_ufunc_args
         ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
 
-        super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
+        super().__init__(**ukwargs)

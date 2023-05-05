@@ -11,6 +11,7 @@
 
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
@@ -33,10 +34,11 @@
 #include "caffe2/opt/shape_info.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch.pb.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/python/pybind_workspace.h"
 #include "caffe2/utils/cpuid.h"
-#include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/module_python.h"
@@ -59,15 +61,8 @@ constexpr bool kPyBindFalse = false;
 namespace py = pybind11;
 
 // NOLINTNEXTLINE(modernize-use-equals-default)
-BlobFetcherBase::~BlobFetcherBase() {}
-// NOLINTNEXTLINE(modernize-use-equals-default)
 BlobFeederBase::~BlobFeederBase() {}
 
-C10_DEFINE_TYPED_REGISTRY(
-    BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
-    std::unique_ptr);
 C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,

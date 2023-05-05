@@ -57,6 +57,10 @@ runs:
             exit 1
         fi
 
+    - name: Runner diskspace health check
+      uses: ./.github/actions/diskspace-cleanup
+      if: always()
+
     - name: Runner health check disconnect on failure
       if: ${{ failure() }}
       shell: bash

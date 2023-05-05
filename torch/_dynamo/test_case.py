@@ -1,7 +1,6 @@
 import contextlib
 import importlib
 import sys
-from unittest.mock import patch
 
 import torch
 import torch.testing
@@ -24,7 +23,7 @@ def run_tests(needs=()):
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
         or TEST_WITH_ROCM
-        or sys.version_info >= (3, 11)
+        or sys.version_info >= (3, 12)
     ):
         return  # skip testing
 
@@ -52,7 +51,7 @@ class TestCase(TorchTestCase):
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
-            patch.object(config, "raise_on_ctx_manager_usage", True)
+            config.patch(raise_on_ctx_manager_usage=True, suppress_errors=False),
         )
 
     def setUp(self):

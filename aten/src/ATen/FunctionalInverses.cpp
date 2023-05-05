@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 
 #include <utility>
 namespace at {
@@ -12,7 +13,7 @@ namespace functionalization {
 // We can't easily share it though, because (eventually) these functions
 // will all call `permute/unsqueeze_copy()` instead of `permute/unsqueeze`.
 
-Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
+static Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
   // invert the permutation
   auto ndims = dims.size();
   std::vector<int64_t> dims_(ndims);
@@ -26,7 +27,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_v
   }
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
+static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
   auto result = self;
 
   int64_t nDims = sizes.size();
@@ -42,18 +43,26 @@ Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool re
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, int64_t dim, c10::SymIntArrayRef sizes, bool reapply_views) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
+static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
+  const auto ndim = sizes.size();
+  const auto mask = at::dim_list_to_bitset(dim, ndim);
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
-  if (sizes.size() > 0 && sizes[dim] == 1) {
-    if (reapply_views) {
-      return at::unsqueeze(self, dim);
-    } else {
-      return at::unsqueeze_copy(self, dim);
+  if (ndim == 0) {
+    return self;
+  }
+
+  Tensor result = self;
+  for (const auto d : c10::irange(ndim)) {
+    if (mask.test(d) && sizes[d] == 1) {
+      if (reapply_views) {
+        result = at::unsqueeze(result, d);
+      } else {
+        result = at::unsqueeze_copy(result, d);
+      }
     }
   }
-  return self;
+  return result;
 }
 
 // Note [Functionalization Pass: View Inverses].
@@ -163,7 +172,7 @@ Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.select_scatter_symint(mutated_view, dim, index);
+    return base.select_scatter_symint(mutated_view, dim, std::move(index));
 }
 
 Tensor FunctionalInverses::detach_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
@@ -215,6 +224,10 @@ Tensor FunctionalInverses::squeeze_copy_dim_inverse(const Tensor& base, const Te
     return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
 }
 
+Tensor FunctionalInverses::squeeze_copy_dims_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, IntArrayRef dim) {
+    return unsqueeze_copy_to(mutated_view, dim, base.sym_sizes(), reapply_views);
+}
+
 Tensor FunctionalInverses::t_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
     if (reapply_views) {
       return at::t(mutated_view);
@@ -231,7 +244,7 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     }
 }
 
-Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_size_tensor, const Tensor& nested_stride_tensor, IntArrayRef offsets) {
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
 }
@@ -317,6 +330,13 @@ Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor&
     // unfold_backward() is safe to use here because it is NOT a view op.
     // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
     // We'd need to add an aliasing version of unfold_backward to fix that though).
+    TORCH_CHECK(
+      !(reapply_views && size > step),
+      "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
+When using torch.compile (or running functionalization directly), this is banned \
+as the behavior is not well defined. Consider cloning the tensor before mutating it, \
+or removing the mutation from your model."
+        );
     return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
 }
 

@@ -10,12 +10,14 @@
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <iostream>
@@ -34,7 +36,7 @@ static ska::flat_hash_map<
     ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>
     python_registrations_;
 
-torch::Library::Kind parseKind(const std::string& k) {
+static torch::Library::Kind parseKind(const std::string& k) {
   static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
       {"DEF", torch::Library::DEF},
       {"IMPL", torch::Library::IMPL},
@@ -44,7 +46,7 @@ torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
+static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
       {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
       {"FROM_SCHEMA", c10::AliasAnalysisKind::FROM_SCHEMA},
@@ -58,7 +60,7 @@ c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
 
 template <typename Func>
 inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
-  auto mb_key = std::string(key) == ""
+  auto mb_key = std::string(key).empty()
       ? c10::nullopt
       : c10::make_optional(c10::parseDispatchKey(key));
   if (mb_key) {
@@ -178,7 +180,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
-torch::_RegisterOrVerify register_or_verify() {
+static torch::_RegisterOrVerify register_or_verify() {
   if (isMainPyInterpreter()) {
     return torch::_RegisterOrVerify::REGISTER;
   } else {
@@ -186,11 +188,29 @@ torch::_RegisterOrVerify register_or_verify() {
   }
 }
 
+static py::object ophandle_call_boxed(
+    const c10::OperatorHandle& handle,
+    py::args args,
+    py::kwargs kwargs) {
+  auto stack = torch::jit::createStackForSchema(
+      handle.schema(),
+      args,
+      kwargs,
+      /*self=*/c10::nullopt);
+  {
+    pybind11::gil_scoped_release no_gil_guard;
+    handle.callBoxed(stack);
+  }
+  return torch::jit::createPyObjectForStack(std::move(stack));
+}
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema);
+
+  m.def("_dispatch_call_boxed", &ophandle_call_boxed);
 
   // TODO: figure out how to do chaining
   py::class_<torch::Library>(m, "_DispatchModule")
@@ -345,7 +365,7 @@ void initDispatchBindings(PyObject* module) {
         return std::make_unique<torch::Library>(
             parseKind(kind),
             std::move(name),
-            std::string(dispatch) == ""
+            std::string(dispatch).empty()
                 ? c10::nullopt
                 : c10::make_optional(c10::parseDispatchKey(dispatch)),
             "/dev/null", // temporary workaround
@@ -358,6 +378,13 @@ void initDispatchBindings(PyObject* module) {
       py::arg("dispatch"),
       py::arg("file") = "/dev/null",
       py::arg("linenum") = 0);
+
+  m.def(
+      "_dispatch_find_schema_or_throw",
+      [](const char* name, const char* overload_name) -> c10::OperatorHandle {
+        return c10::Dispatcher::singleton().findSchemaOrThrow(
+            name, overload_name);
+      });
 
   m.def("_dispatch_dump", [](const char* name) -> std::string {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
@@ -436,7 +463,7 @@ void initDispatchBindings(PyObject* module) {
     std::vector<std::string> states;
     states.reserve(danglingImpls.size());
     for (auto& danglingImpl : danglingImpls) {
-      states.push_back(danglingImpl.dumpState());
+      states.emplace_back(danglingImpl.dumpState());
     }
 
     return states;
@@ -453,7 +480,7 @@ void initDispatchBindings(PyObject* module) {
       if (!op.overload_name.empty()) {
         ss << "." << op.overload_name;
       }
-      names.push_back(ss.str());
+      names.emplace_back(ss.str());
     }
 
     return names;
@@ -488,6 +515,27 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(k);
   });
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
+  m.def("_to_functionality_key", [](c10::DispatchKey k) {
+    return c10::toFunctionalityKey(k);
+  });
+  // E.g. given `DispatchKey::AutogradFunctionality`, returns a keyset of:
+  //  AutogradCPU
+  //  AutogradCUDA
+  //  ...
+  //  AutogradPrivateUse3
+  m.def("_functionality_to_backend_keys", [](c10::DispatchKey key) {
+    std::vector<c10::DispatchKey> keys;
+    if (c10::isPerBackendFunctionalityKey(key)) {
+      auto ks = c10::DispatchKeySet(key) |
+          c10::DispatchKeySet(c10::DispatchKeySet::RAW, c10::full_backend_mask);
+      for (auto k : ks) {
+        keys.push_back(k);
+      }
+    } else {
+      keys.push_back(key);
+    }
+    return keys;
+  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)
@@ -507,12 +555,17 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(Python)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
+      DEF_ONE(FuncTorchBatchedDecomposition)
+      DEF_ONE(FuncTorchBatched)
+      DEF_ONE(FuncTorchVmapMode)
+      DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
       DEF_ONE(AutocastCUDA)
+      DEF_ONE(AutocastPrivateUse1)
   // clang-format on
 
 #define DEF_SINGLE(n, prefix) .value(#prefix #n, c10::DispatchKey::prefix##n)
@@ -536,6 +589,16 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def(
+          "remove",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.remove(k);
+          })
+      .def(
+          "add",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.add(k);
+          })
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
@@ -549,6 +612,12 @@ void initDispatchBindings(PyObject* module) {
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
   });
+
+  m.def("_dispatch_keyset_full", []() {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL);
+  });
+
+  m.def("_dispatch_is_alias_key", c10::isAliasDispatchKey);
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);
@@ -590,7 +659,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_print_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -604,7 +673,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_get_registrations_for_dispatch_key",
       [](const char* dispatch_key = "") {
-        auto k = std::string(dispatch_key) == ""
+        auto k = std::string(dispatch_key).empty()
             ? c10::nullopt
             : c10::make_optional(c10::parseDispatchKey(dispatch_key));
         auto op_names =
@@ -612,8 +681,9 @@ void initDispatchBindings(PyObject* module) {
         std::vector<std::string> names;
         names.reserve(op_names.size());
         for (auto& op : op_names) {
-          names.push_back(
-              op.name + (op.overload_name == "" ? "" : "." + op.overload_name));
+          names.emplace_back(
+              op.name +
+              (op.overload_name.empty() ? "" : "." + op.overload_name));
         }
         return names;
       },

@@ -87,7 +87,7 @@ def _test_nested(i, pids_queue, nested_child_sleep, start_method):
     # Kill self. This should take down the child processes as well.
     os.kill(os.getpid(), signal.SIGTERM)
 
-class _TestMultiProcessing(object):
+class _TestMultiProcessing:
     start_method = None
 
     def test_success(self):

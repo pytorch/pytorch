@@ -49,7 +49,7 @@ TEST(DeviceCachingAllocator, check_reporter) {
   // alloc2 remain, it is a memory free operation, so it shouldn't reserve more
   // memory.
   EXPECT_TRUE(
-      alloc2_true_alloc_size <= r.total_reserved &&
+      alloc2_true_alloc_size <= static_cast<int64_t>(r.total_reserved) &&
       r.total_reserved <= max_reserved);
   EXPECT_TRUE(r.device.is_cuda());
 
@@ -58,7 +58,7 @@ TEST(DeviceCachingAllocator, check_reporter) {
   EXPECT_EQ(alloc2_true_ptr, r.ptr);
   EXPECT_EQ(-alloc2_true_alloc_size, r.alloc_size);
   EXPECT_EQ(0, r.total_allocated);
-  EXPECT_TRUE(0 <= r.total_reserved && r.total_reserved <= max_reserved);
+  EXPECT_TRUE(r.total_reserved <= max_reserved);
   EXPECT_TRUE(r.device.is_cuda());
 }
 

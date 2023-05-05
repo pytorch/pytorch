@@ -73,6 +73,7 @@ template <typename scalar_t, template<class> class Op> void foreach_unary_op_(Te
                                          /* r_args_depth */ 1,
                                          /* res_arg_index */ 0>(),
                           Op<opmath_t>());
+    increment_version(tensors);
 }
 
 template <template<class> class Op>
@@ -190,7 +191,6 @@ STD_FUNCTOR(op_name, functor_name);                 \
 OP_CUSTOM_FUNCTOR(function, op_name, functor_name); \
 
 OP(floating_half_bfloat16, erfc, Erfc);
-OP(floating_half_bfloat16, expm1, Expm1);
 OP(floating_half, lgamma, Lgamma);
 OP(floating_half_bfloat16, trunc, Truncf);
 OP(floating_half_bfloat16, floor, Floor);
@@ -205,6 +205,7 @@ OP(floating_complex_half_bfloat16, sin, Sin);
 OP(floating_complex_half_bfloat16, sinh, Sinh);
 
 OP(floating_complex_half_bfloat16, exp, Exp);
+OP(floating_complex_half_bfloat16, expm1, Expm1);
 OP(floating_complex_half_bfloat16, tanh, Tanh);
 OP(floating_complex_half_bfloat16, log, Log);
 OP(floating_complex_half_bfloat16, log10, Log10);

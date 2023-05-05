@@ -46,7 +46,6 @@ class DTensorAPITest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
-
             tensor_to_shard = torch.randn(
                 3 * self.world_size, 3, requires_grad=requires_grad
             )
@@ -95,8 +94,8 @@ class DTensorAPITest(DTensorTestBase):
         for input_size, shard_dim in input_sizes_and_shard_dims:
             shard_spec = [Shard(shard_dim)]
             tensor_to_shard = torch.randn(input_size)
-            splitted_tensor_list = tensor_to_shard.tensor_split(
-                self.world_size, dim=shard_dim
+            splitted_tensor_list = list(
+                torch.chunk(tensor_to_shard, self.world_size, dim=shard_dim)
             )
             dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
             self.assertEqual(dist_tensor.size(), torch.Size(input_size))
@@ -161,7 +160,7 @@ class DTensorAPITest(DTensorTestBase):
         dist_module = distribute_module(module_to_distribute, device_mesh, shard_fn)
         for name, param in dist_module.named_parameters():
             self.assertIsInstance(param, DTensor)
-            if name.startswith("seq.0") or name.startswith("seq.8"):
+            if name.startswith(("seq.0", "seq.8")):
                 self.assertEqual(param.placements, shard_spec)
             else:
                 self.assertEqual(param.placements, replica_spec)

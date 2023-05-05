@@ -4,9 +4,6 @@ from torch.fx import (
     map_arg
 )
 from torch.fx.graph import Graph
-from .graph_module import (
-    FusedGraphModule
-)
 from .match_utils import (
     _is_match,
     MatchAllNode,
@@ -67,9 +64,7 @@ def fuse(
             "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
-    input_root = model
-    input_graph = model.graph
-    named_modules = dict(input_root.named_modules())
+    named_modules = dict(model.named_modules())
 
     if backend_config is None:
         backend_config = get_native_backend_config()
@@ -81,7 +76,9 @@ def fuse(
 
     # find fusion
     fusion_pairs = _find_matches(
-        input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
+        model, model.graph, fusion_pattern_to_fuse_handler_cls)
+    # TODO: change this to inplace changes to graph, since we no longer construct
+    # new GraphModule anymore
     fused_graph = Graph()
     env: Dict[Any, Any] = {}
 
@@ -93,7 +90,7 @@ def fuse(
             node_pattern = node_pattern[-1]
         return node_pattern[-1]
 
-    for node in input_graph.nodes:
+    for node in model.graph.nodes:
         maybe_last_node, pattern, matched_node_pattern, obj, node_to_subpattern = \
             fusion_pairs.get(node.name, (None, None, None, None, None))
         # get the corresponding subpattern for the current node
@@ -118,8 +115,7 @@ def fuse(
             env[node.name] = fused_graph.node_copy(node, load_arg)
         # node matched in patterns and is not root is removed here
 
-    preserved_attributes = set(fuse_custom_config.preserved_attributes)
-    model = FusedGraphModule(input_root, fused_graph, preserved_attributes)
+    model = GraphModule(model, fused_graph)
     return model
 
 def _find_matches(

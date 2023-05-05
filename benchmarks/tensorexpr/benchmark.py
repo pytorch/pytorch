@@ -7,7 +7,7 @@ import torch
 import json
 
 
-class Benchmark(object):
+class Benchmark:
     def __init__(self, mode, device, dtype):
         self.mode = mode
         self.deterministic = False
@@ -228,17 +228,18 @@ def cuda_pointwise_context(loop_levels, block_count, block_size):
         old_block_size = torch._C._jit_get_te_cuda_pointwise_block_size()
         torch._C._jit_set_te_cuda_pointwise_block_size(block_size)
 
-    yield
-
-    if loop_levels:
-        torch._C._jit_set_te_cuda_pointwise_loop_levels(old_loop_levels)
-    if block_count:
-        torch._C._jit_set_te_cuda_pointwise_block_count(old_block_count)
-    if block_size:
-        torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
+    try:
+        yield
+    finally:
+        if loop_levels:
+            torch._C._jit_set_te_cuda_pointwise_loop_levels(old_loop_levels)
+        if block_count:
+            torch._C._jit_set_te_cuda_pointwise_block_count(old_block_count)
+        if block_size:
+            torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
 
 # Auxiliary class to facilitate dynamic input shape
-class DynamicShape(object):
+class DynamicShape:
     r'''
     An Auxiliary class for dynamic shape benchmarks
 

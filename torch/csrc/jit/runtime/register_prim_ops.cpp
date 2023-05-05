@@ -1360,7 +1360,7 @@ void dictDelete(Stack& stack) {
 
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
-  if (dict.size() == 0) {
+  if (dict.empty()) {
     AT_ERROR("popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
@@ -1974,7 +1974,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           LOG(WARNING)
               << "The isidentifier() implementation being used is from Python 2\n";
-          if (string.size() < 1) {
+          if (string.empty()) {
             push(stack, false);
             return;
           }
@@ -2274,6 +2274,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::device.with_index(str type, int index) -> Device"),
+        device_with_index,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
@@ -2397,11 +2402,29 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          if (a.name() == "") {
+          if (a.name().empty()) {
             push(stack, IValue());
           } else {
             push(stack, a.name());
           }
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::nbytes(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto nbytes = static_cast<int64_t>(a.nbytes());
+          push(stack, nbytes);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::itemsize(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto itemsize = static_cast<int64_t>(a.itemsize());
+          push(stack, itemsize);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

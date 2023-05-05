@@ -25,7 +25,7 @@ def ChannelLast(arr):
     return arr.swapaxes(ndim - 3, ndim - 2).swapaxes(ndim - 2, ndim - 1)
 
 
-class PatchVisualizer(object):
+class PatchVisualizer:
     """PatchVisualizer visualizes patches.
   """
 
@@ -139,7 +139,7 @@ explicitly instantiate a patch visualizer, and call those functions.
 """
 
 
-class NHWC(object):
+class NHWC:
     @staticmethod
     def ShowSingle(*args, **kwargs):
         _default_visualizer.ShowSingle(*args, **kwargs)
@@ -157,7 +157,7 @@ class NHWC(object):
         _default_visualizer.ShowChannels(*args, **kwargs)
 
 
-class NCHW(object):
+class NCHW:
     @staticmethod
     def ShowSingle(patch, *args, **kwargs):
         _default_visualizer.ShowSingle(ChannelLast(patch), *args, **kwargs)

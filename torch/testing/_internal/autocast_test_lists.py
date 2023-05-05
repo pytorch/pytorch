@@ -2,7 +2,7 @@ import torch
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-class AutocastTestLists(object):
+class AutocastTestLists:
     def _rnn_cell_args(self, n, num_chunks, is_lstm, dev, dtype):
         input = (torch.randn((n, n), device=dev, dtype=torch.float32),)
 
@@ -230,7 +230,7 @@ class AutocastTestLists(object):
                                       torch.rand((n, n), device=dev, dtype=torch.float32)), torch._C._nn),
         ]
 
-class AutocastCPUTestLists(object):
+class AutocastCPUTestLists:
     # Supplies ops and arguments for test_autocast_* in test/test_cpu.py
     def __init__(self, dev):
         super().__init__()
@@ -314,11 +314,12 @@ class AutocastCPUTestLists(object):
                           torch.randn((5, 3, 5), device=dev, dtype=torch.float32),
                           torch.randn(5, device=dev, dtype=torch.float32),
                           0)),
+            ("conv_transpose1d", conv_args_fp32[0]),
+            ("conv_transpose2d", conv_args_fp32[1]),
+            ("conv_transpose3d", conv_args_fp32[2]),
+            ("prelu", pointwise0_fp32 + element0_fp32),
         ]
         self.torch_fp32 = [
-            ("conv_transpose1d", conv_args_bf16[0]),
-            ("conv_transpose2d", conv_args_bf16[1]),
-            ("conv_transpose3d", conv_args_bf16[2]),
             ("poisson_nll_loss", mat0_bf16 + mat1_bf16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),
             ("cosine_embedding_loss", (torch.tensor([[1, 2, 3]], device=dev, dtype=torch.bfloat16),
                                        torch.tensor([[1, 3, 4]], device=dev, dtype=torch.bfloat16),

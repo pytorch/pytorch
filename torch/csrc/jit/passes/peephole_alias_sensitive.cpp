@@ -13,7 +13,7 @@ namespace torch {
 namespace jit {
 
 // This pass only does optimizations which requires Alias Analysis
-// It is seprated out from Peephole Pass so that Peephole does not have
+// It is separated out from Peephole Pass so that Peephole does not have
 // maintain alias db correctness throughout the pass.
 struct PeepholeOptimizeAliasSensitiveImpl {
   PeepholeOptimizeAliasSensitiveImpl(
@@ -52,7 +52,7 @@ struct PeepholeOptimizeAliasSensitiveImpl {
         auto dim_uses = c10::filter(node->output()->uses(), [](const Use& use) {
           return use.user->kind() == aten::dim;
         });
-        if (dim_uses.size() == 0) {
+        if (dim_uses.empty()) {
           continue;
         }
         auto kind = node->kind();

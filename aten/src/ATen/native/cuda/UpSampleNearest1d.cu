@@ -129,11 +129,11 @@ static void upsample_nearest1d_out_cuda_template(
   TORCH_CHECK(output.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest1d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.data_ptr<scalar_t>();
-        auto odata = output.data_ptr<scalar_t>();
+        auto idata = input.const_data_ptr<scalar_t>();
+        auto odata = output.mutable_data_ptr<scalar_t>();
 
         const float scale_factor = compute_scales_value<float>(scales, input_width, output_width);
 
@@ -177,11 +177,11 @@ static void upsample_nearest1d_backward_out_cuda_template(
   TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest1d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.data_ptr<scalar_t>();
-        auto odata = grad_output.data_ptr<scalar_t>();
+        auto idata = grad_input.mutable_data_ptr<scalar_t>();
+        auto odata = grad_output.const_data_ptr<scalar_t>();
 
         const float scale_factor = compute_scales_value_backwards<float>(scales, output_width, input_width);
 

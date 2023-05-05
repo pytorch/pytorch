@@ -30,9 +30,6 @@ class IdListFeature:
 
 
 class UsesIdListFeature(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, feature: Any):
         if isinstance(feature, IdListFeature):
             return feature.id_list

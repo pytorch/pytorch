@@ -33,7 +33,7 @@ if NO_MULTIPROCESSING_SPAWN:
     sys.exit(0)
 
 
-class AbstractProcessGroupShareTensorTest(object):
+class AbstractProcessGroupShareTensorTest:
     world_size = 2
 
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
@@ -103,11 +103,11 @@ class AbstractProcessGroupShareTensorTest(object):
 
 class TestDistributedNNFunctions(MultiProcessTestCase):
     def setUp(self):
-        super(TestDistributedNNFunctions, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(TestDistributedNNFunctions, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

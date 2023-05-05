@@ -22,6 +22,7 @@
 
 #include <memory> // for unique_ptr
 #include <unordered_set>
+#include <utility>
 
 using namespace torch::autograd;
 
@@ -108,7 +109,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(graph_task, fn, e);
+  Engine::thread_on_exception(std::move(graph_task), fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -148,7 +149,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     InputBuffer&& input_buffer) {
   try {
     return Engine::execute_with_graph_task(
-        graph_task, graph_root, std::move(input_buffer));
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } catch (python_error& e) {
     pybind11::gil_scoped_acquire gil;
     if (!PyErr_Occurred()) {
@@ -178,20 +179,20 @@ PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
-  const char* accepted_kwargs[] = {// NOLINT
-                                   "tensors",
-                                   "grad_tensors",
-                                   "keep_graph",
-                                   "create_graph",
-                                   "inputs",
-                                   "allow_unreachable",
-                                   "accumulate_grad",
-                                   nullptr};
+  constexpr const char* accepted_kwargs[] = {// NOLINT
+                                             "tensors",
+                                             "grad_tensors",
+                                             "keep_graph",
+                                             "create_graph",
+                                             "inputs",
+                                             "allow_unreachable",
+                                             "accumulate_grad",
+                                             nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
           "OObb|Obb",
-          (char**)accepted_kwargs,
+          const_cast<char**>(accepted_kwargs),
           &tensors,
           &grad_tensors,
           &keep_graph,

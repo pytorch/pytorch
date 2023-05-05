@@ -69,41 +69,41 @@ static inline void swapBytes64(void* ptr) {
   memcpy(ptr, &output, sizeof(uint64_t));
 }
 
-static inline uint16_t decodeUInt16LE(const uint8_t* data) {
+static inline uint16_t decodeUInt16(const uint8_t* data) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint16_t output;
   memcpy(&output, data, sizeof(uint16_t));
   return output;
 }
 
-static inline uint16_t decodeUInt16BE(const uint8_t* data) {
-  uint16_t output = decodeUInt16LE(data);
+static inline uint16_t decodeUInt16ByteSwapped(const uint8_t* data) {
+  uint16_t output = decodeUInt16(data);
   swapBytes16(&output);
   return output;
 }
 
-static inline uint32_t decodeUInt32LE(const uint8_t* data) {
+static inline uint32_t decodeUInt32(const uint8_t* data) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint32_t output;
   memcpy(&output, data, sizeof(uint32_t));
   return output;
 }
 
-static inline uint32_t decodeUInt32BE(const uint8_t* data) {
-  uint32_t output = decodeUInt32LE(data);
+static inline uint32_t decodeUInt32ByteSwapped(const uint8_t* data) {
+  uint32_t output = decodeUInt32(data);
   swapBytes32(&output);
   return output;
 }
 
-static inline uint64_t decodeUInt64LE(const uint8_t* data) {
+static inline uint64_t decodeUInt64(const uint8_t* data) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   uint64_t output;
   memcpy(&output, data, sizeof(uint64_t));
   return output;
 }
 
-static inline uint64_t decodeUInt64BE(const uint8_t* data) {
-  uint64_t output = decodeUInt64LE(data);
+static inline uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
+  uint64_t output = decodeUInt64(data);
   swapBytes64(&output);
   return output;
 }
@@ -121,11 +121,11 @@ THPByteOrder THP_nativeByteOrder() {
 void THP_decodeInt16Buffer(
     int16_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] =
-        (int16_t)(order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
+        (int16_t)(do_byte_swap ? decodeUInt16ByteSwapped(src) : decodeUInt16(src));
     src += sizeof(int16_t);
   }
 }
@@ -133,11 +133,11 @@ void THP_decodeInt16Buffer(
 void THP_decodeInt32Buffer(
     int32_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] =
-        (int32_t)(order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+        (int32_t)(do_byte_swap ? decodeUInt32ByteSwapped(src) : decodeUInt32(src));
     src += sizeof(int32_t);
   }
 }
@@ -145,11 +145,11 @@ void THP_decodeInt32Buffer(
 void THP_decodeInt64Buffer(
     int64_t* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] =
-        (int64_t)(order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+        (int64_t)(do_byte_swap ? decodeUInt64ByteSwapped(src) : decodeUInt64(src));
     src += sizeof(int64_t);
   }
 }
@@ -157,7 +157,7 @@ void THP_decodeInt64Buffer(
 void THP_decodeHalfBuffer(
     c10::Half* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -165,7 +165,7 @@ void THP_decodeHalfBuffer(
       uint16_t x;
       c10::Half f;
     };
-    x = (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
+    x = (do_byte_swap ? decodeUInt16ByteSwapped(src) : decodeUInt16(src));
     dst[i] = f;
     src += sizeof(uint16_t);
   }
@@ -174,11 +174,11 @@ void THP_decodeHalfBuffer(
 void THP_decodeBFloat16Buffer(
     at::BFloat16* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     uint16_t x =
-        (order == THP_BIG_ENDIAN ? decodeUInt16BE(src) : decodeUInt16LE(src));
+        (do_byte_swap ? decodeUInt16ByteSwapped(src) : decodeUInt16(src));
     std::memcpy(&dst[i], &x, sizeof(dst[i]));
     src += sizeof(uint16_t);
   }
@@ -187,7 +187,7 @@ void THP_decodeBFloat16Buffer(
 void THP_decodeBoolBuffer(
     bool* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     dst[i] = (int)src[i] != 0 ? true : false;
@@ -197,7 +197,7 @@ void THP_decodeBoolBuffer(
 void THP_decodeFloatBuffer(
     float* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -205,7 +205,7 @@ void THP_decodeFloatBuffer(
       uint32_t x;
       float f;
     };
-    x = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    x = (do_byte_swap ? decodeUInt32ByteSwapped(src) : decodeUInt32(src));
     dst[i] = f;
     src += sizeof(float);
   }
@@ -214,7 +214,7 @@ void THP_decodeFloatBuffer(
 void THP_decodeDoubleBuffer(
     double* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -222,7 +222,7 @@ void THP_decodeDoubleBuffer(
       uint64_t x;
       double d;
     };
-    x = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    x = (do_byte_swap ? decodeUInt64ByteSwapped(src) : decodeUInt64(src));
     dst[i] = d;
     src += sizeof(double);
   }
@@ -231,7 +231,7 @@ void THP_decodeDoubleBuffer(
 void THP_decodeComplexFloatBuffer(
     c10::complex<float>* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -245,9 +245,9 @@ void THP_decodeComplexFloatBuffer(
       float im;
     };
 
-    x = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    x = (do_byte_swap ? decodeUInt32ByteSwapped(src) : decodeUInt32(src));
     src += sizeof(float);
-    y = (order == THP_BIG_ENDIAN ? decodeUInt32BE(src) : decodeUInt32LE(src));
+    y = (do_byte_swap ? decodeUInt32ByteSwapped(src) : decodeUInt32(src));
     src += sizeof(float);
 
     dst[i] = c10::complex<float>(re, im);
@@ -257,27 +257,109 @@ void THP_decodeComplexFloatBuffer(
 void THP_decodeComplexDoubleBuffer(
     c10::complex<double>* dst,
     const uint8_t* src,
-    THPByteOrder order,
+    bool do_byte_swap,
     size_t len) {
   for (const auto i : c10::irange(len)) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t x;
+      uint64_t x;
       double re;
     };
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
-      uint32_t y;
+      uint64_t y;
       double im;
     };
+    static_assert(sizeof(uint64_t) == sizeof(double));
 
-    x = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    x = (do_byte_swap ? decodeUInt64ByteSwapped(src) : decodeUInt64(src));
     src += sizeof(double);
-    y = (order == THP_BIG_ENDIAN ? decodeUInt64BE(src) : decodeUInt64LE(src));
+    y = (do_byte_swap ? decodeUInt64ByteSwapped(src) : decodeUInt64(src));
     src += sizeof(double);
 
     dst[i] = c10::complex<double>(re, im);
   }
+}
+
+void THP_decodeInt16Buffer(
+    int16_t* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeInt16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeInt32Buffer(
+    int32_t* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeInt32Buffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeInt64Buffer(
+    int64_t* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeInt64Buffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeHalfBuffer(
+    c10::Half* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeHalfBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeBFloat16Buffer(
+    at::BFloat16* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeBFloat16Buffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeBoolBuffer(
+    bool* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeBoolBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeFloatBuffer(
+    float* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeFloatBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeDoubleBuffer(
+    double* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeDoubleBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeComplexFloatBuffer(
+    c10::complex<float>* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeComplexFloatBuffer(dst, src, (order != THP_nativeByteOrder()), len);
+}
+
+void THP_decodeComplexDoubleBuffer(
+    c10::complex<double>* dst,
+    const uint8_t* src,
+    THPByteOrder order,
+    size_t len) {
+  THP_decodeComplexDoubleBuffer(
+      dst, src, (order != THP_nativeByteOrder()), len);
 }
 
 void THP_encodeInt16Buffer(
@@ -383,7 +465,7 @@ void THP_encodeComplexFloatBuffer(
   }
 }
 
-void THP_encodeCompelxDoubleBuffer(
+void THP_encodeComplexDoubleBuffer(
     uint8_t* dst,
     const c10::complex<double>* src,
     THPByteOrder order,

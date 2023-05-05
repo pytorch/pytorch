@@ -35,7 +35,7 @@ from torch.distributed.launcher.api import (
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -92,7 +92,7 @@ def elastic_launch_wrapper(
             rdzv_endpoint, min_nodes, max_nodes, nproc_per_node, run_id
         ),
         sys.executable,
-    )("-u", path("bin/test_script.py"), f"--touch_file_dir={test_dir}")
+    )("-u", path("bin/test_script.py"), f"--touch-file-dir={test_dir}")
 
 
 def _dist_sum(wait=0):
@@ -155,7 +155,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python(self):
         nnodes = 1
         nproc_per_node = 4
@@ -163,14 +163,14 @@ class ElasticLaunchTest(unittest.TestCase):
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         # make sure all the workers ran.
         # each worker touches a file with its global rank as the name.
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
@@ -178,14 +178,14 @@ class ElasticLaunchTest(unittest.TestCase):
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         # make sure all the workers ran.
         # each worker touches a file with its global rank as the name.
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_bash(self):
         nnodes = 1
         nproc_per_node = 4
@@ -198,7 +198,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_function(self):
         nnodes = 1
         nproc_per_node = 4
@@ -212,7 +212,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
         nproc_per_node = 4
@@ -241,14 +241,14 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         nproc_per_node = 4
 
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, 1, 2, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         world_size = nproc_per_node
         self.check_works_ran(world_size)
@@ -283,10 +283,10 @@ class ElasticLaunchTest(unittest.TestCase):
             elastic_launch(
                 get_test_launch_config(self._etcd_endpoint, 1, 2, 4),
                 sys.executable,
-            )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+            )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
         record_mock.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_multiple_agents(self):
         min_nodes = 1
         max_nodes = 2
@@ -345,7 +345,7 @@ class ElasticLaunchTest(unittest.TestCase):
             elastic_launch(
                 get_test_launch_config(self._etcd_endpoint, 1, 1, 4),
                 sys.executable,
-            )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+            )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
             rdzv_handler_mock.shutdown.assert_called_once()
 

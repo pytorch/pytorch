@@ -1,5 +1,4 @@
 /******************************************************************************
- * Copyright (c) 2022, Tri Dao.
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,6 +28,15 @@
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
+
+#include <ATen/native/transformers/cuda/flash_attn/fmha.h>
+#include <ATen/native/transformers/cuda/flash_attn/utils.h>
+#include <ATen/native/transformers/cuda/flash_attn/smem_tile.h>
+#include <ATen/native/transformers/cuda/flash_attn/gmem_tile.h>
+#include <ATen/native/transformers/cuda/flash_attn/mask.h>
+#include <ATen/native/transformers/cuda/flash_attn/softmax.h>
+#include <ATen/native/transformers/cuda/flash_attn/philox.cuh>
+
 namespace fmha {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -56,14 +64,14 @@ struct BlockInfoPadded {
         return actual_seqlen_k <= start_col;
     }
 
-    uint32_t actual_seqlen_q;
-    uint32_t actual_seqlen_k;
-    uint32_t sum_s_q;
-    uint32_t sum_s_k;
-    uint32_t bidh;
-    uint32_t bidb;
-    uint32_t tidx_global;
-    uint32_t h;
+    int actual_seqlen_q;
+    int actual_seqlen_k;
+    int sum_s_q;
+    int sum_s_k;
+    int bidh;
+    int bidb;
+    int tidx_global;
+    int h;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -60,7 +60,7 @@ struct TORCH_API HIPHooksInterface {
 // for the "..." in a variadic macro"
 struct TORCH_API HIPHooksArgs {};
 
-C10_DECLARE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs);
+TORCH_DECLARE_REGISTRY(HIPHooksRegistry, HIPHooksInterface, HIPHooksArgs);
 #define REGISTER_HIP_HOOKS(clsname) \
   C10_REGISTER_CLASS(HIPHooksRegistry, clsname, clsname)
 

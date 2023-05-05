@@ -11,15 +11,13 @@ import subprocess
 from typing import Any, List
 from unittest.mock import patch
 
-from functorch.compile import (
-    config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
+
+from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -32,7 +30,6 @@ from .scheduler import (
     OutputNode,
     SchedulerNode,
 )
-from .utils import dynamo_config, dynamo_debug_utils, dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -97,7 +94,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         func1.__name__ = name
         return func1
 
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
+    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
@@ -130,15 +127,15 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
+                return any(in_output(x) for x in snode.snodes)
+            return any(isinstance(user.node, OutputNode) for user in snode.users)
 
         if in_output(snode):
             outputs.append(fx_node)
         name = snode.get_name()
         fx_node.name = name
 
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
+        fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
@@ -172,23 +169,25 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    if not bool(os.environ.get("TORCH_COMPILE_DEBUG", False)):
-        yield
-        return
-
-    # Enable all graphs to be logged to a file by setting the flags to True
-    # and the log level of the file logger to DEBUG
-
-    stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
-    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
-    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
-    path = os.path.join(dynamo_utils.get_debug_dir(), "aot_torchinductor")
+
+    stack = contextlib.ExitStack()
+    if not compile_debug:
+        try:
+            yield
+        finally:
+            stack.close()
+        return
+
+    # Enable all graphs to be logged to a file by setting the flags to True
+    # and the log level of the file logger to DEBUG
+    stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
+
+    path = os.path.join(get_debug_dir(), "torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -220,14 +219,14 @@ class DebugContext:
             with DebugContext():
                 return fn(*args, **kwargs)
 
-        return dynamo_debug_utils.wrap_compiler_debug(inner, compiler_name="inductor")
+        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir(folder_name):
         for n in DebugContext._counter:
             dirname = os.path.join(
-                dynamo_utils.get_debug_dir(),
-                "aot_torchinductor",
+                get_debug_dir(),
+                "torchinductor",
                 f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
@@ -272,17 +271,15 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger(config.inductor_import)
-        if not log.handlers:
-            dynamo_utils.init_logging()
-
         if config.debug:
+            log = logging.getLogger("torch._dynamo")
+            prev_level = log.level
+            log.setLevel(logging.DEBUG)
 
             def reset_log_level(level):
-                dynamo_config.log_level = level
+                log.setLevel(level)
 
-            self._stack.callback(reset_log_level, dynamo_config.log_level)
-            dynamo_config.log_level = logging.DEBUG
+            self._stack.callback(reset_log_level, prev_level)
 
         self._stack.enter_context(V.set_debug_handler(self))
 
@@ -300,7 +297,7 @@ class DebugContext:
             self._prof.enable()
 
     def _setup_log_capture(self, filename, level):
-        log = logging.getLogger(config.inductor_import)
+        log = logging.getLogger("torch._inductor")
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
         ch.setLevel(level)
@@ -356,9 +353,15 @@ class DebugFormatter:
 
     def fx_graph(self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]):
         with self.fopen("fx_graph_runnable.py") as fd:
-            dynamo_debug_utils.save_graph_repro(fd, gm, inputs, "inductor")
+            save_graph_repro(fd, gm, inputs, "inductor")
 
         with self.fopen("fx_graph_readable.py") as fd:
+            fd.write(gm.print_readable(print_output=False))
+
+    def fx_graph_transformed(
+        self, gm: torch.fx.GraphModule, inputs: List[torch.Tensor]
+    ):
+        with self.fopen("fx_graph_transformed.py") as fd:
             fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList):

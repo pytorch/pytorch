@@ -52,8 +52,8 @@ class TestTorchrun(TestCase):
 
     def test_multi_threads(self):
         num = 0
-        with subprocess.Popen(f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use_default_allocator \
-            --disable_iomp --disable_numactl --log_path {self._test_dir} --no_python pwd",
+        with subprocess.Popen(f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
+            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
                               shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
             for line in p.stdout.readlines():
                 segs = str(line, "utf-8").strip().split("-")

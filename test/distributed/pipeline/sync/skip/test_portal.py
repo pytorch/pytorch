@@ -12,6 +12,7 @@ import torch
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.skip.portal import Portal
 from torch.distributed.pipeline.sync.stream import default_stream
+from torch.testing._internal.common_utils import run_tests
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
@@ -155,3 +156,7 @@ class TestTensorLife:
         another_tensor = torch.rand(1, requires_grad=True)
         portal.put_tensor(another_tensor, tensor_life=1)
         portal.blue()
+
+
+if __name__ == "__main__":
+    run_tests()

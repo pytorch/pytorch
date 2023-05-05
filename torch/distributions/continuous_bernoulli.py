@@ -50,7 +50,7 @@ class ContinuousBernoulli(ExponentialFamily):
             # validate 'probs' here if necessary as it is later clamped for numerical stability
             # close to 0 and 1, later on; otherwise the clamped 'probs' would always pass
             if validate_args is not None:
-                if not self.arg_constraints['probs'].check(getattr(self, 'probs')).all():
+                if not self.arg_constraints['probs'].check(self.probs).all():
                     raise ValueError("The parameter {} has invalid values".format('probs'))
             self.probs = clamp_probs(self.probs)
         else:
@@ -62,7 +62,7 @@ class ContinuousBernoulli(ExponentialFamily):
         else:
             batch_shape = self._param.size()
         self._lims = lims
-        super(ContinuousBernoulli, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ContinuousBernoulli, _instance)

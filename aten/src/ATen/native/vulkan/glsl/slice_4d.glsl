@@ -1,26 +1,46 @@
 #version 450 core
 #define PRECISION $precision
-#define FORMAT    $format
+#define FORMAT $format
 
 layout(std430) buffer;
 
-/* Qualifiers: layout - storage - precision - memory */
+/*
+ * Output Image
+ */
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION image3D uOutput;
 
-layout(set = 0, binding = 0, FORMAT) uniform PRECISION           image3D uOutput;
-layout(set = 0, binding = 1)         uniform PRECISION           sampler3D uInput;
-layout(set = 0, binding = 2)         uniform PRECISION restrict  Block {
-  ivec4 size;            // output texture size (x=width,y=height,z=depth,w=unused)
-  ivec4 isize;           // input texture size (x=width,y=height,z=depth,w=unused)
-  uvec4 tensor_size;     // output tensor size
-  uvec4 itensor_size;    // input tensor size
-  uvec4 args;            // input arguments (dim, start, end, step)
-} uBlock;
+/*
+ * Input Textures
+ */
+layout(set = 0, binding = 1) uniform PRECISION sampler3D uInput;
 
+/*
+ * Params Buffer
+ */
+layout(set = 0, binding = 2) uniform PRECISION restrict Block {
+  // output texture size (x=width,y=height,z=depth,w=unused)
+  ivec4 size;
+  // input texture size (x=width,y=height,z=depth,w=unused)
+  ivec4 isize;
+  // output tensor size
+  uvec4 tensor_size;
+  // input tensor size
+  uvec4 itensor_size;
+  // input arguments (dim, start, end, step)
+  uvec4 args;
+  // x = output channels aligned to 4, y = input channels aligned to 4
+  uvec2 c_info;
+}
+uBlock;
+
+/*
+ * Local Work Group
+ */
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   const ivec3 posOut = ivec3(gl_GlobalInvocationID);
-  const uint max_dst_index = uBlock.tensor_size[0] * uBlock.tensor_size[1];
+  const uint max_dst_index = uBlock.tensor_size[0] * uBlock.c_info.x;
   const uint dim = uBlock.args[0];
   const uint start = uBlock.args[1];
   const uint step = uBlock.args[3];
@@ -36,8 +56,8 @@ void main() {
       }
 
       // dst dims
-      uint b1 = int(dst_index / uBlock.tensor_size[1]);
-      uint c1 = dst_index % uBlock.tensor_size[1];
+      uint b1 = int(dst_index / uBlock.c_info.x);
+      uint c1 = dst_index % uBlock.c_info.x;
       uint h1 = posOut.y;
       uint w1 = posOut.x;
 
@@ -49,12 +69,11 @@ void main() {
 
       if (dim == 0) { // batch
         b = start + step * b1;
-      }
-      else if (dim == 1) {  // feature(channel)
+      } else if (dim == 1) { // feature(channel)
         c = start + step * c1;
       }
 
-      uint src_index = b * uBlock.itensor_size[1] + c;
+      uint src_index = b * uBlock.c_info.y + c;
       ivec3 posIn;
       posIn.x = int(w);
       posIn.y = int(h);

@@ -19,7 +19,6 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores
 /// enough information to reconstruct a variable from a certain point in time.
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
@@ -57,7 +56,7 @@ class TORCH_API SavedVariable {
   // we fall into the second case and its metadata is also saved separately.
   // In that case, the grad_fn must be passed in to the unpack function when
   // reconstructing the Variable (except when we are doing an inplace operation
-  // on a view, see below). The field saved_orignal_ below reflects the two
+  // on a view, see below). The field saved_original_ below reflects the two
   // cases: its value is true in the first case and false in the second case.
   // The value data_.defined() can be false in three cases:
   // 1. SavedVariable was constructed without a Tensor (the value to save is

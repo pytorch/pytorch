@@ -14,7 +14,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_static_shapes
+from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -22,6 +22,9 @@ tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
+
+
+clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
 
 
 def constant3(a, b):
@@ -89,6 +92,17 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_is_not_null(a, b):
         if a is not None and b is not None:
             return a + b
+
+    @make_test
+    def test_functools_partial(a, b):
+        return clip01(a + b)
+
+    @make_test
+    def test_itertools_product(a, b):
+        v = a
+        for x, i in itertools.product([a, b], [1, 2]):
+            v = v + x * i
+        return v
 
     @make_test
     def test_constant1(a, b, c):
@@ -331,6 +345,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_callable_lambda(x):
+        if callable(lambda x: True):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_callable_torch(x):
+        if callable(torch.abs):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_callable_builtin(x):
+        if callable(sum):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_len_constant_misc_iterables(x):
         a = len((1, 2, 3))
         b = len("test str")
@@ -338,10 +373,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.add(x, c)
 
     @make_test
+    def test_dict_kwargs(x):
+        z = dict(text_embed=x + 1, other=x + 2)
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
         return torch.add(x, y)
+
+    @make_test
+    def test_is_floating_point(x):
+        y = x + 1
+        return torch.is_floating_point(y), torch.is_floating_point(input=y)
 
     @make_test
     def test_dtype(x):
@@ -372,6 +417,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return m + b.type(m.type())
 
     @make_test
+    def test_tensor_type3(a, b):
+        m = a.type(torch.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
+    def test_tensor_type4(a, b):
+        m = a.type("torch.HalfTensor")
+        return b.type(m.type())
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @make_test
+    def test_tensor_type5(a, b):
+        m = a.type(torch.cuda.HalfTensor)
+        return b.type(m.type())
+
+    @make_test
     def test_ndim(x):
         if x.ndim == 2 and x.ndimension() == 2 and x.dim() == 2:
             return x + 1
@@ -379,6 +440,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_T(x):
         return torch.ones_like(x.T)
+
+    @make_test
+    def test_mT(x):
+        return torch.ones_like(x.mT)
 
     @make_test
     def test_is_sparse(x):
@@ -543,8 +608,60 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["c"] = x * 2
             return dd["b"], dd
 
-        test = make_test(fn)
-        test(self)
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
+
+    @make_test
+    def test_call_dict1(x):
+        d1 = dict()
+        d1["x"] = x + 1
+        d2 = collections.OrderedDict()
+        d2["x"] = x + 2
+        return d1["x"] + d2["x"] + 1
+
+    @make_test
+    def test_call_dict2(x):
+        d1 = dict()
+        d1["x"] = x
+        d2 = collections.OrderedDict(d1)
+        if isinstance(d2, collections.OrderedDict):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_call_dict3(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict4(x):
+        my_list = (("a", x), ("b", x + 1), ("c", x + 2))
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict5(x):
+        my_list = iter([("a", x), ("b", x + 1), ("c", x + 2)])
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
 
     @make_test
     def test_min_max(a, b):
@@ -624,6 +741,35 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a + b + next(iter(reversed(tmp)))
 
     @make_test
+    def test_list_sorted1(x):
+        tmp = [1, 10, 3, 0]
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_list_sorted2(x):
+        y = [
+            ("john", "A", 8),
+            ("jane", "B", 5),
+            ("dave", "B", 10),
+        ]
+        return (
+            x + 1,
+            sorted(y),
+            sorted(y, key=lambda student: student[2]),
+            sorted(y, key=lambda student: student[2], reverse=True),
+        )
+
+    @make_test
+    def test_tuple_sorted(x):
+        tmp = (1, 10, 3, 0)
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
+    def test_dict_sorted(x):
+        tmp = {1: "D", 10: "B", 3: "E", 0: "F"}
+        return x + 1, sorted(tmp), sorted(tmp, reverse=True)
+
+    @make_test
     def test_list_clear(a, b):
         tmp = [a + 1, a + 2]
         tmp.clear()
@@ -637,6 +783,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_namedtuple(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y", "xy"])
+        tmp = mytuple(a, b, a + b)
+        return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
     @make_test
     def test_is_quantized(a, b):
@@ -713,6 +865,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    @make_test
+    def test_torch_distributions_functions(x):
+        normal = torch.distributions.Normal(x, torch.tensor(1))
+        independent = torch.distributions.Independent(normal, 1)
+        return independent.log_prob(x)
+
+    @make_test
+    def test_context_wrapping_nested_functions_no_closure(x):
+        @torch.no_grad()
+        def augment(x: torch.Tensor) -> torch.Tensor:
+            return (x + 1) * 2
+
+        return augment(x)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
@@ -738,6 +904,61 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #         case {"b": param}:
     #             return x / param
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_meshgrid(x, y):
+        import numpy as np
+
+        r1, r2 = np.meshgrid(x.numpy(), y.numpy())
+        return torch.from_numpy(r1), torch.from_numpy(r2)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_torch_from_numpy(x):
+        a = x.numpy()
+        b = torch.from_numpy(a)
+        if b.size(0) == 1:
+            return torch.tensor(True)
+        else:
+            return torch.tensor(False)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_attributes(x):
+        a = x.numpy()
+        return (
+            a.itemsize,
+            a.strides,
+            a.shape,
+            a.ndim,
+            a.size,
+            torch.from_numpy(a.T),
+            torch.from_numpy(a.real),
+            torch.from_numpy(a.imag),
+        )
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_mean_sum_np(x: torch.Tensor):
+        import numpy as np
+
+        x_mean = np.mean(x.numpy(), 1)
+        x_sum = np.sum(x_mean)
+        x_sum_array = np.asarray(x_sum)
+        return torch.from_numpy(x_sum_array)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_return_numpy_ndarray(x):
+        a = x.numpy()
+        return a.T
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_return_multiple_numpy_ndarray(x):
+        a = x.numpy()
+        return a.T, a.imag, a.real
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
@@ -748,9 +969,6 @@ def global_func_with_default_tensor_args(
 
 
 class ModuleWithDefaultTensorArgsMethod(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
     def forward(self, x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))):
         x.add_(1)
         kw_x.add_(1)
@@ -849,6 +1067,29 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x, kw_x = compiled_mod()
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
+
+    def test_func_default_torch_args(self):
+        """
+        Tests other types of torch types as function default (size, dtype, device)
+        """
+
+        def func_with_default_torch_args(
+            dt=torch.float16, ds=torch.Size((1, 2, 3)), dd=torch.device("cpu")
+        ):
+            return torch.ones(ds, dtype=dt, device=dd)
+
+        def func():
+            return func_with_default_torch_args()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled_func = torch.compile(func, backend=cnts)
+        out = func()
+        compiled_out = compiled_func()
+        self.assertEqual(out.dtype, compiled_out.dtype)
+        self.assertEqual(out.device, compiled_out.device)
+        self.assertEqual(out.size(), compiled_out.size())
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
 
 
 if __name__ == "__main__":

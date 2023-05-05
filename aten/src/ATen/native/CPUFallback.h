@@ -11,7 +11,7 @@ namespace at { namespace native {
 
 // This function implements a boxed fallback to CPU.
 // External backends can add their own custom logging on top if it to customize their own CPU fallbacks.
-TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+TORCH_API void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views = false);
 
 // This is a helper function that backends can use to directly call their boxed CPU fallback
 // TODO: update and add a usage example after https://github.com/pytorch/pytorch/pull/58092 lands.

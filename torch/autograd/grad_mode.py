@@ -1,5 +1,5 @@
 import torch
-from typing import Any
+from typing import Any, Optional
 
 from torch.utils._contextlib import _DecoratorContextManager
 
@@ -15,6 +15,9 @@ class no_grad(_DecoratorContextManager):
 
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
+    There is an exception! All factory functions, or functions that create
+    a new Tensor and take a requires_grad kwarg, will NOT be affected by
+    this mode.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -44,6 +47,11 @@ class no_grad(_DecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
+        >>> # factory function exception
+        >>> with torch.no_grad():
+        ...     a = torch.nn.Parameter(torch.rand(10))
+        >>> a.requires_grad
+        True
     """
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
@@ -157,7 +165,7 @@ class set_grad_enabled(_DecoratorContextManager):
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
-    def clone(self):
+    def clone(self) -> "set_grad_enabled":
         return self.__class__(self.mode)
 
 
@@ -205,21 +213,21 @@ class inference_mode(_DecoratorContextManager):
         False
 
     """
-    def __init__(self, mode=True):
+    def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
         # Holds a python binding to a RAII guard that can enable or disable
         # inference mode
-        self._inference_mode_raii_guard = None
+        self._inference_mode_raii_guard: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._inference_mode_raii_guard
 
-    def clone(self):
+    def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
 
 
@@ -251,5 +259,74 @@ class set_multithreading_enabled(_DecoratorContextManager):
     def __exit__(self, *args) -> None:
         del self.multithreadeding_enabled_guard
 
+    def clone(self) -> "set_multithreading_enabled":
+        return self.__class__(self.mode)
+
+
+class _force_original_view_tracking(_DecoratorContextManager):
+    r"""Context-manager that sets whether or not to always enable view-replay in autograd.
+
+    ``set_view_replay_enabled`` will enable or disable view-replay based on its argument :attr:`mode`.
+    It can be used as a context-manager or as a function.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    When a tensor view is mutated, the autograd engine needs to decide whether or not
+    to regenerate the "updated view" by either replaying the chain of views from the updated base,
+    or with a single call to as_strided.
+
+    If set_view_replay_enabled is set to True, then autograd will always use view replay.
+    Otherwise, it will fall back to its existing logic.
+
+    Args:
+        mode (bool): Flag whether to enable view-replay (``True``), or disable
+                     (``False``).
+
+    """
+
+    def __init__(self, mode: bool) -> None:
+        self.mode = mode
+        self._force_original_view_tracking_guard = torch._C._ViewReplayEnabled(mode)
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        del self._force_original_view_tracking_guard
+
     def clone(self):
         return self.__class__(self.mode)
+
+class _unsafe_preserve_version_counter(_DecoratorContextManager):
+    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!
+
+    This context manager can lead to arbitrary silent-correctness issues in any other part of your code
+    (even the ones not touched directly by the context manager)!
+
+    Ordinarily, autograd will track mutations to tensors by incrementing it's `._version` attribute.
+    This is generally important for correctness, as for example, mutating a tensor that autograd has saved
+    for the backwards pass can result in incorrect gradients, and autograd uses the version counter to detect
+    and error out in this situation.
+
+    However, there are rare instances where it might be useful to hide mutations from autograd. For example:
+    if a tensor is very large, and you'd like to free its memory by storing it elsewhere, and re-populate
+    the tensor right before it is needed by autograd.
+
+    Args:
+        tensor (torch.Tensor): the tensor in question, that you would like to preserve the version counter of.
+
+    .. note::
+        This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
+
+    """
+
+    def __init__(self, tensor: torch.Tensor) -> None:
+        self.tensor = tensor
+        self.prev_version = tensor._version
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)

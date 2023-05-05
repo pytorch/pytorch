@@ -339,8 +339,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         ``autograd.functional.jvp`` computes the jvp by using the backward of
         the backward (sometimes called the double backwards trick). This is not
         the most performant way of computing the jvp. Please consider using
-        `functorch's jvp <https://github.com/pytorch/functorch#jvp>`_
-        or the :ref:`low-level forward-mode AD API <forward-mode-ad>` instead.
+        :func:`torch.func.jvp` or the
+        :ref:`low-level forward-mode AD API <forward-mode-ad>` instead.
 
     Example:
 
@@ -513,9 +513,9 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
         vectorize (bool, optional): This feature is experimental.
-            Please consider using
-            `functorch's jacrev or jacfwd <https://github.com/pytorch/functorch#what-are-the-transforms>`_
-            instead if you are looking for something less experimental and more performant.
+            Please consider using :func:`torch.func.jacrev` or
+            :func:`torch.func.jacfwd` instead if you are looking for something
+            less experimental and more performant.
             When computing the jacobian, usually we invoke
             ``autograd.grad`` once per row of the jacobian. If this flag is
             ``True``, we perform only a single ``autograd.grad`` call with
@@ -726,8 +726,7 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
             hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
         vectorize (bool, optional): This feature is experimental.
-            Please consider using
-            `functorch <https://github.com/pytorch/functorch#what-are-the-transforms>`_
+            Please consider using :func:`torch.func.hessian`
             instead if you are looking for something less experimental and more performant.
             When computing the hessian, usually we invoke
             ``autograd.grad`` once per row of the hessian. If this flag is

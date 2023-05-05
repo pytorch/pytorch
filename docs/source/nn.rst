@@ -51,7 +51,11 @@ Global Hooks For Module
     register_module_forward_pre_hook
     register_module_forward_hook
     register_module_backward_hook
+    register_module_full_backward_pre_hook
     register_module_full_backward_hook
+    register_module_buffer_registration_hook
+    register_module_module_registration_hook
+    register_module_parameter_registration_hook
 
 .. currentmodule:: torch
 
@@ -120,7 +124,9 @@ Padding Layers
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
+    nn.ZeroPad1d
     nn.ZeroPad2d
+    nn.ZeroPad3d
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
@@ -442,6 +448,8 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+    nn.utils.rnn.unpack_sequence
+    nn.utils.rnn.unpad_sequence
 
 .. autosummary::
     :toctree: generated

@@ -15,15 +15,13 @@ namespace at { namespace cuda { namespace detail {
 // in the same library where Magma will be used.
 TORCH_CUDA_CPP_API void set_magma_init_fn(void (*magma_init_fn)());
 
-TORCH_CUDA_CPP_API bool hasPrimaryContext(int64_t device_index);
-TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
   void initCUDA() const override;
   Device getDeviceFromPtr(void* data) const override;
-  bool isPinnedPtr(void* data) const override;
+  bool isPinnedPtr(const void* data) const override;
   const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;

@@ -213,8 +213,20 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->pre_hooks()) {
+    for (const auto& hook : cdata->tensor_pre_hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    // See NOTE [retains_grad_hook PyObject traversal]
+    for (const auto& pair : cdata->retains_grad_hooks()) {
+      if (auto pyhook =
+              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+    for (const auto& hook : cdata->pre_hooks()) {
+      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -354,7 +366,8 @@ static void _wrap_outputs(
     const variable_list& input_vars,
     PyObject* raw_output,
     PyObject* outputs,
-    bool is_executable) {
+    bool is_executable,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   auto cdata_if_executable = is_executable ? cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -450,7 +463,8 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      jvp_user_function);
+      std::move(jvp_user_function),
+      to_save_if_setup_context);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -470,36 +484,81 @@ static void _wrap_outputs(
   }
 }
 
+static void _get_tensors_to_save(
+    THPFunction* self,
+    std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    bool overridden_setup_context,
+    bool is_executable) {
+  if (self->saved_for_forward && overridden_setup_context) {
+    // We look at saved_for_forward here purely for the purpose of populating
+    // to_save_if_setup_context, the actual saving is not done here.
+    THPFunction_assert(
+        PyTuple_Check(self->saved_for_forward),
+        "autograd internal "
+        "error: saved_for_forward attribute is expected to be a tuple but is %s",
+        THPUtils_typename(self->saved_for_forward));
+    Py_ssize_t num_saved_for_forward =
+        PyTuple_GET_SIZE(self->saved_for_forward);
+    for (const auto i : c10::irange(num_saved_for_forward)) {
+      PyObject* obj = PyTuple_GET_ITEM(self->saved_for_forward, i);
+      if (THPVariable_Check(obj)) {
+        const auto& tensor = THPVariable_Unpack(obj);
+        to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+      }
+    }
+  }
+  if (self->to_save) {
+    THPFunction_assert(
+        PyTuple_Check(self->to_save),
+        "autograd internal "
+        "error: to_save attribute is expected to be a tuple but is %s",
+        THPUtils_typename(self->to_save));
+
+    Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+    for (const auto i : c10::irange(num_saved)) {
+      PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
+      if (obj == Py_None) {
+        tensors_to_save.push_back(c10::nullopt);
+        continue;
+      } else if (THPVariable_Check(obj)) {
+        const auto& tensor = THPVariable_Unpack(obj);
+        if (overridden_setup_context) {
+          to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+        }
+        if (is_executable) {
+          tensors_to_save.push_back(tensor);
+        }
+      } else {
+        if (is_executable) {
+          // TODO: We should really just ALWAYS throw an error here, but
+          // doing so will break some internal tests. We should fix those.
+          throw torch::TypeError(
+              "save_for_backward can only save variables, but argument %ld is of "
+              "type %s",
+              i,
+              Py_TYPE(obj)->tp_name);
+        }
+      }
+    }
+  }
+}
 // Save any variables that requested by to_save
 static void _save_variables(
+    const std::vector<c10::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
   if (!self->to_save)
     return;
-
-  THPFunction_assert(
-      PyTuple_Check(self->to_save),
-      "autograd internal "
-      "error: to_save attribute is expected to be a tuple but is %s",
-      THPUtils_typename(self->to_save));
-  Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+  size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
   self->saved_variables.reserve(num_saved);
-  for (const auto i : c10::irange(num_saved)) {
-    PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
-    if (obj == Py_None) {
+  for (const auto& opt_tensor : tensors_to_save) {
+    if (!opt_tensor.has_value()) {
       self->saved_variables.emplace_back();
-      continue;
-    } else if (THPVariable_Check(obj)) {
-      const auto& tensor = THPVariable_Unpack(obj);
-      bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
-      self->saved_variables.emplace_back(tensor, is_output);
     } else {
-      throw torch::TypeError(
-          "save_for_backward can only save variables, but argument %ld is of "
-          "type %s",
-          i,
-          Py_TYPE(obj)->tp_name);
+      bool is_output = opt_tensor.value().grad_fn().get() == cdata_ptr.get();
+      self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
   // Free .to_save
@@ -698,7 +757,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
-    node->output()->setType(tuple_type);
+    node->output()->setType(std::move(tuple_type));
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
@@ -719,7 +778,7 @@ static void _trace_post_record(
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   if (py::cast<bool>(is_in_onnx_export)) {
-    _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+    _append_subgraph(old_node, graph, std::move(trace_outputs), unpack_output);
   }
 
   // If TupleUnpack operator is created, we copy its output type back
@@ -733,7 +792,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
     // shape.
-    old_node->output()->setType(tuple_type);
+    old_node->output()->setType(std::move(tuple_type));
   }
 }
 
@@ -745,7 +804,8 @@ PyObject* process_outputs(
     PyObject* inputs,
     THPObjectPtr&& raw_output,
     bool is_executable,
-    torch::jit::Node* node) {
+    torch::jit::Node* node,
+    bool overridden_setup_context) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -765,9 +825,24 @@ PyObject* process_outputs(
     }
   }
 
+  std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
+  std::vector<c10::optional<at::Tensor>> tensors_to_save{};
+  _get_tensors_to_save(
+      grad_fn,
+      to_save_if_setup_context,
+      tensors_to_save,
+      overridden_setup_context,
+      is_executable);
+
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(
-      cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable);
+      cdata,
+      grad_fn,
+      unpacked.input_vars,
+      raw_output,
+      outputs,
+      is_executable,
+      to_save_if_setup_context);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -775,7 +850,7 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(cdata, grad_fn);
+    _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
     Py_XDECREF(grad_fn->to_save);
@@ -860,6 +935,31 @@ THPObjectPtr make_ctx_input_output_tuple(
 
 } // namespace
 
+static PyObject* THPFunction_setup_context = nullptr;
+
+static PyObject* get_base_setup_context() {
+  if (THPFunction_setup_context != nullptr) {
+    return THPFunction_setup_context;
+  }
+
+  auto module = THPObjectPtr(PyImport_ImportModule("torch.autograd.function"));
+  if (!module)
+    return nullptr;
+
+  auto function =
+      THPObjectPtr(PyObject_GetAttrString(module, "_SingleLevelFunction"));
+  if (!function)
+    return nullptr;
+
+  // setup_context gets "leaked" - we return a new reference and hold onto it
+  // forever.
+  auto setup_context = PyObject_GetAttrString(function, "setup_context");
+  if (!setup_context)
+    return nullptr;
+  THPFunction_setup_context = setup_context;
+  return THPFunction_setup_context;
+}
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -877,10 +977,15 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
           unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
       seq_id);
 
-  // Temporary hack to improve functorch UX. We'll find a better solution.
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
   if (functorch_tls) {
-    functorch_tls->checkSupportsAutogradFunction();
+    // autograd.Function support for functorch is handled in Python.
+    // If we have gotten here, then either we are dealing with a
+    // torch.autograd.function._SingleLevelFunction, or something in
+    // the implementation went wrong.
+    // The following code is useful for debugging when something goes wrong
+    // because it'll raise a loud error (instead of being silently incorrect).
+    functorch_tls->checkSupportsSingleLevelAutogradFunction();
   }
 
   THPObjectPtr backward_cls(PyObject_GetAttrString(cls, "_backward_cls"));
@@ -904,11 +1009,19 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
-  // autograd.Function may optionally contain a setup_context staticmethod.
+  // autograd.Function may optionally override a setup_context staticmethod.
   // In this case, autograd.Function.forward does NOT accept a ctx object.
-  bool has_separate_setup_context_fn =
-      (isAutogradFunctionExtensionEnabled() &&
-       PyObject_HasAttrString(cls, "setup_context"));
+  // Determine if this is the case.
+  auto cls_setup_context =
+      THPObjectPtr(PyObject_GetAttrString(cls, "setup_context"));
+  if (!cls_setup_context) {
+    return nullptr;
+  }
+  auto orig_setup_context = get_base_setup_context();
+  if (!orig_setup_context) {
+    return nullptr;
+  }
+  auto overridden_setup_context = cls_setup_context.get() != orig_setup_context;
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 
@@ -920,7 +1033,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
     THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
     if (!forward_fn)
       return nullptr;
-    if (has_separate_setup_context_fn) {
+    if (overridden_setup_context) {
       // call forward followed by setup_context
       output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
       if (!output) {
@@ -960,7 +1073,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       inputs,
       std::move(output),
       is_executable,
-      node);
+      node,
+      overridden_setup_context);
   END_HANDLE_TH_ERRORS
 }
 
@@ -985,7 +1099,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
       "access pattern that is no longer supported. For examples on how to use new-style "
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
-  cdata->add_pre_hook(std::move(hook));
+  cdata->add_tensor_pre_hook(std::move(hook));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

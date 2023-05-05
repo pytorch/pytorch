@@ -5,7 +5,7 @@ from functools import reduce
 from torch.distributed.remote_device import _remote_device
 
 @dataclass
-class ShardMetadata(object):
+class ShardMetadata:
     """
     Represents a shard of the overall Tensor including its
     offsets, lengths and device placement.

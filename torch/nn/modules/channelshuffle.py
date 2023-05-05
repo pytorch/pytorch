@@ -44,7 +44,7 @@ class ChannelShuffle(Module):
     groups: int
 
     def __init__(self, groups: int) -> None:
-        super(ChannelShuffle, self).__init__()
+        super().__init__()
         self.groups = groups
 
     def forward(self, input: Tensor) -> Tensor:

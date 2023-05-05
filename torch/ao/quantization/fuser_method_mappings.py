@@ -1,5 +1,5 @@
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
 from torch.ao.quantization.utils import Pattern, get_combined_dict, MatchAllNode
@@ -235,7 +235,7 @@ def _get_valid_patterns(op_pattern):
 def get_fuser_method_new(
         op_pattern: Pattern,
         fuser_method_mapping: Dict[Pattern, Union[nn.Sequential, Callable]]):
-    """ This will be made defult after we deprecate the get_fuser_method
+    """ This will be made default after we deprecate the get_fuser_method
     Would like to implement this first and have a separate PR for deprecation
     """
     op_patterns = _get_valid_patterns(op_pattern)

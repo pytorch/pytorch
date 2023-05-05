@@ -175,7 +175,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
 
   auto array = THPObjectPtr(PyArray_New(
       &PyArray_Type,
-      prepared_tensor.dim(),
+      static_cast<int>(prepared_tensor.dim()),
       sizes.data(),
       dtype,
       strides.data(),
@@ -352,6 +352,10 @@ bool is_numpy_int(PyObject* obj) {
   return is_numpy_available() && PyArray_IsScalar((obj), Integer);
 }
 
+bool is_numpy_bool(PyObject* obj) {
+  return is_numpy_available() && PyArray_IsScalar((obj), Bool);
+}
+
 bool is_numpy_scalar(PyObject* obj) {
   return is_numpy_available() &&
       (is_numpy_int(obj) || PyArray_IsScalar(obj, Bool) ||
@@ -382,6 +386,7 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
   }
 
   // Extract the `obj.__cuda_array_interface__['typestr']` attribute
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   ScalarType dtype;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int dtype_size_in_bytes;
