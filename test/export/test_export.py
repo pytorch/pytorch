@@ -3,8 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export, export
+from torch._export import _export, export, dynamic_dim
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size
 from torch._export.graph_module import get_export_meta
@@ -511,6 +510,23 @@ class TestExport(TestCase):
 
         self.assertTrue(torch.allclose(eager_results, exported_results))
 
+    def test_export_constraint_discovery(self) -> None:
+        class RangeDiscovery(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x + 1
+                else:
+                    return x - 1
+
+        m = RangeDiscovery()
+        x = torch.rand(5, 3)
+        constraints = [
+            dynamic_dim(x, 0) > 5,
+            dynamic_dim(x, 1),
+        ]
+        exported = export(m, (x,), constraints)
+        new_inp = torch.rand(6, 3)
+        self.assertEqual(exported(new_inp), RangeDiscovery()(new_inp))
 
 if __name__ == '__main__':
     run_tests()

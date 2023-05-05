@@ -653,10 +653,10 @@ class Constraint:
         return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
 
     def __ge__(self, lower):
-        return self._clone_with_range(lower=lower)
+        return self._clone_with_range(lower=lower - 1)
 
     def __gt__(self, lower):
-        return self._clone_with_range(lower=lower + 1)
+        return self._clone_with_range(lower=lower)
 
     def __le__(self, upper):
         return self._clone_with_range(upper=upper)

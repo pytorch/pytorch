@@ -83,6 +83,7 @@ class ExportDynamoConfig:
     dynamic_shapes: bool = True
     specialize_int: bool = True
     allow_rnn: bool = True
+    suppress_errors: bool = True
 
 
 DECOMP_TABLE = core_aten_decompositions()
