@@ -2805,6 +2805,11 @@ def sample_inputs_bucketize(op_info, device, dtype, requires_grad, reference_inp
 
 reference_inputs_bucketize = partial(sample_inputs_bucketize, reference_inputs_mode=True)
 
+def error_inputs_bucketize(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float, device=device, requires_grad=False)
+    yield ErrorInput(SampleInput(make_arg((S, S, S)), make_arg((S, S))),
+                     error_regex="boundaries tensor must be 1 dimension")
+
 def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -16075,6 +16080,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
            reference_inputs_func=reference_inputs_bucketize,
+           error_inputs_func=error_inputs_bucketize,
            supports_autograd=False,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
@@ -16578,9 +16584,15 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
+               # RuntimeError: "max_values_cpu" not implemented for 'ComplexDouble'
+               # Falling back to non-numerically stablized exp, causing nan in the results.
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD', dtypes=[torch.complex128]),
+               DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad', dtypes=[torch.complex128]),
            ),
            sample_inputs_func=sample_inputs_logcumsumexp,
            error_inputs_func=error_inputs_logcumsumexp),
