@@ -437,6 +437,7 @@ def _reduce_with_dtype(onnx_op, name):
         @symbolic_helper.parse_args("v", "none")
         @_beartype.beartype
         def reduce_nodim(g, self, dtype):
+            original_dtype = self.type().scalarType()
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
@@ -444,11 +445,18 @@ def _reduce_with_dtype(onnx_op, name):
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result =  symbolic(g, self)
+            result_type = result.type().scalarType()
+            if result_type != original_dtype:
+                result = g.op(
+                    "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
+                )
+            return result
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
         @_beartype.beartype
         def reduce_dim(g, self, dim, keepdim, dtype):
+            original_dtype = self.type().scalarType()
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
@@ -456,7 +464,13 @@ def _reduce_with_dtype(onnx_op, name):
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            result_type = result.type().scalarType()
+            if result_type != original_dtype:
+                result = g.op(
+                    "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
+                )
+            return result            
 
         return reduce_nodim, reduce_dim
 
