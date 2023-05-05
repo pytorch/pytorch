@@ -1193,8 +1193,7 @@ Example::
     >>> # Should return b"po"
     >>> store.get("first_key")
 )")
-
-          .def_property_readonly(
+          .def(
               "has_extended_api",
               &::c10d::Store::hasExtendedApi,
               R"(Returns true if the store supports extended operations.)");
