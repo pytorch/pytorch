@@ -3331,7 +3331,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [])
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
@@ -3365,8 +3365,9 @@ class TestSparseCompressedTritonKernels(TestCase):
 
             bsr = bsr.to_sparse_bsr(block_size)
 
-            if bsr.dim() == 2:
-                # Test against linear to check dispatch.
+            if bsr.dim() == 2 and dtype != torch.float:
+                # Test against linear to check dispatch
+                # which takes place for torch.half and torch.bfloat16.
                 res_tri = torch.nn.functional.linear(dense, bsr)
                 res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
 
@@ -3396,6 +3397,42 @@ class TestSparseCompressedTritonKernels(TestCase):
                     is_sparse_rowspace_mode=is_sparse_rowspace
                 )
                 self.assertEqual(res_tri, res_dense)
+
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half)
+    @dtypesIfCUDA(torch.half)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    def test_triton_bsr_dense_error_messages(self, device, dtype):
+        from torch.sparse._triton_ops import bsr_dense_mm
+
+        rhs = torch.rand(32, 32, dtype=dtype, device=device)
+        lhs = rhs.to_sparse_bsr(16)
+        with self.assertRaisesRegex(ValueError, "only BSR sparse format is supported"):
+            bsr_dense_mm(lhs.to_sparse_bsc(16), rhs)
+        with self.assertRaisesRegex(ValueError, "on the same GPU device"):
+            bsr_dense_mm(lhs, rhs.cpu())
+        if torch.cuda.device_count() > 1:
+            with self.assertRaisesRegex(ValueError, "on the same GPU device"):
+                bsr_dense_mm(lhs.to("cuda:0"), rhs.to("cuda:1"))
+        with self.assertRaisesRegex(ValueError, "all inputs are expected to be of the same dtype"):
+            bsr_dense_mm(lhs, rhs.to(torch.float))
+        with self.assertRaisesRegex(ValueError, r"and one of \(half, bfloat16, float32\)"):
+            bsr_dense_mm(lhs.to(torch.double), rhs.to(torch.double))
+        with self.assertRaisesRegex(ValueError, "all inputs are expected to be at least 2D"):
+            bsr_dense_mm(lhs, torch.rand(1, dtype=dtype, device=device))
+        with self.assertRaisesRegex(ValueError, "sizes are not compatible for matrix multiplication"):
+            bsr_dense_mm(lhs, torch.rand(1, 1, dtype=dtype, device=device))
+        with self.assertRaisesRegex(ValueError,
+                                    r"dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
+            bsr_dense_mm(lhs, torch.rand(32, 15, dtype=dtype, device=device))
+        # Blocksizes check
+        for blocksize in (15, 30):
+            n = blocksize * 2
+            rhs = torch.rand(n, n, dtype=dtype, device=device)
+            lhs = rhs.to_sparse_bsr(blocksize)
+            with self.assertRaisesRegex(ValueError, "should be at least 16 and a power of 2"):
+                bsr_dense_mm(lhs, rhs)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
