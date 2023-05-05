@@ -120,7 +120,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_8-cpu
           retention-days: 14
@@ -354,7 +355,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_8-cuda11_7
           retention-days: 14
@@ -590,7 +592,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_8-cuda11_8
           retention-days: 14
@@ -826,7 +829,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_8-cuda12_1
           retention-days: 14
@@ -1061,7 +1065,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_9-cpu
           retention-days: 14
@@ -1295,7 +1300,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_9-cuda11_7
           retention-days: 14
@@ -1531,7 +1537,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_9-cuda11_8
           retention-days: 14
@@ -1767,7 +1774,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_9-cuda12_1
           retention-days: 14
@@ -2002,7 +2010,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_10-cpu
           retention-days: 14
@@ -2236,7 +2245,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_10-cuda11_7
           retention-days: 14
@@ -2472,7 +2482,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_10-cuda11_8
           retention-days: 14
@@ -2708,7 +2719,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_10-cuda12_1
           retention-days: 14
@@ -2943,7 +2955,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_11-cpu
           retention-days: 14
@@ -3177,7 +3190,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_11-cuda11_7
           retention-days: 14
@@ -3413,7 +3427,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_11-cuda11_8
           retention-days: 14
@@ -3649,7 +3664,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: wheel-py3_11-cuda12_1
           retention-days: 14

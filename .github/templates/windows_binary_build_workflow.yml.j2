@@ -84,7 +84,8 @@ jobs:
       - uses: !{{ common.upload_artifact_action }}
         {%- if branches != "nightly" %}
         if: steps.filter.outputs.is-test-matrix-empty == 'False'
-        {%- else -%}
+        {%- endif %}
+        {%- if branches == "nightly" %}
         if: always()
         {%- endif %}
         with:

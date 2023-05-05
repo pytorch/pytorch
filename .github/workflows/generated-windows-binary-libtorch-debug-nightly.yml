@@ -124,7 +124,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
           retention-days: 14
@@ -369,7 +370,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cpu-shared-without-deps-debug
           retention-days: 14
@@ -614,7 +616,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cpu-static-with-deps-debug
           retention-days: 14
@@ -859,7 +862,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cpu-static-without-deps-debug
           retention-days: 14
@@ -1105,7 +1109,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_7-shared-with-deps-debug
           retention-days: 14
@@ -1353,7 +1358,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_7-shared-without-deps-debug
           retention-days: 14
@@ -1601,7 +1607,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_7-static-with-deps-debug
           retention-days: 14
@@ -1849,7 +1856,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_7-static-without-deps-debug
           retention-days: 14
@@ -2097,7 +2105,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_8-shared-with-deps-debug
           retention-days: 14
@@ -2345,7 +2354,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_8-shared-without-deps-debug
           retention-days: 14
@@ -2593,7 +2603,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_8-static-with-deps-debug
           retention-days: 14
@@ -2841,7 +2852,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda11_8-static-without-deps-debug
           retention-days: 14
@@ -3089,7 +3101,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda12_1-shared-with-deps-debug
           retention-days: 14
@@ -3337,7 +3350,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda12_1-shared-without-deps-debug
           retention-days: 14
@@ -3585,7 +3599,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda12_1-static-with-deps-debug
           retention-days: 14
@@ -3833,7 +3848,8 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3if: always()
+      - uses: actions/upload-artifact@v3
+        if: always()
         with:
           name: libtorch-cuda12_1-static-without-deps-debug
           retention-days: 14
