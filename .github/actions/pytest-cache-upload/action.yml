@@ -37,7 +37,7 @@ runs:
       shell: bash
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
-        JOB_IDENTIFIER: ${{ github.workflow}_${{ github.job }}_${{ inputs.build_environment }}
+        JOB_IDENTIFIER: ${{ github.workflow }}_${{ github.job }}_${{ inputs.build_environment }}
         SHARD: ${{ inputs.shard }}
       run: |
         set -x
