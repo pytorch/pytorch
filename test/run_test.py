@@ -1441,7 +1441,6 @@ def main():
 
     failure_messages = []
 
-        
     def run_tests(
         selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
     ) -> None:
@@ -1468,7 +1467,7 @@ def main():
                 "\n ".join(str(x) for x in selected_tests_serial)
             )
         )
-        
+
         # See Note [ROCm parallel CI testing]
         pool = get_context("spawn").Pool(
             NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
