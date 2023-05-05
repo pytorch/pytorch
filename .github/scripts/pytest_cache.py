@@ -25,7 +25,7 @@ def main():
     )
     parser.add_argument("--pr_identifier", required=True, help="A unique PR identifier")
     parser.add_argument("--workflow", required=True, help="The workflow name")
-    parser.add_argument("--job", required=True, help="The job name")
+    parser.add_argument("--job_identifier", required=True, help="A unique job identifier that should be the same for all runs of job")
     parser.add_argument(
         "--shard", required="--upload" in sys.argv, help="The shard id"
     )  # Only required for upload
@@ -50,23 +50,9 @@ def main():
         # TODO: First check if it's even worth uploading a new cache:
         #    Does the cache even mark any failed tests?
 
-        id = os.getenv("AWS_ACCESS_KEY_ID")
-        # get the first three chars if it's not none
-        if id:
-            id = id[:3]
-            print(f"Access key id prefix: {id}xxxxxxxxxx")
-        else:
-            print("No access key id found")
-
-        if os.getenv("AWS_SECRET_ACCESS_KEY"):
-            print("Secret access key found")
-        else:
-            print("No secret access key found")
-
         upload_pytest_cache(
             pr_identifier=PRIdentifier(args.pr_identifier),
-            workflow=args.workflow,
-            job=args.job,
+            job_identifier=args.job_identifier,
             shard=args.shard,
             cache_dir=args.cache_dir,
             bucket=args.bucket,
@@ -77,8 +63,7 @@ def main():
         print(f"Downloading cache with args {args}")
         download_pytest_cache(
             pr_identifier=PRIdentifier(args.pr_identifier),
-            workflow=args.workflow,
-            job=args.job,
+            job_identifier=args.job_identifier,
             dest_cache_dir=args.cache_dir,
             bucket=args.bucket,
             temp_dir=args.temp_dir,

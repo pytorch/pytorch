@@ -30,13 +30,13 @@ class PRIdentifier(str):
 
 
 def get_s3_key_prefix(
-    pr_identifier: PRIdentifier, workflow: str, job: str, shard: str = None
+    pr_identifier: PRIdentifier, job_identifier: str, shard: str = None
 ):
     """
     The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
     For example, it won't include the file extension.
     """
-    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{pr_identifier}/{sanitize_for_s3(workflow)}/{sanitize_for_s3(job)}"
+    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
 
     if shard:
         prefix += f"/{shard}"
@@ -51,8 +51,7 @@ def get_s3_key_prefix(
 #       However, in the short term the extra donloads are okay since they aren't that big
 def upload_pytest_cache(
     pr_identifier: PRIdentifier,
-    workflow: str,
-    job: str,
+    job_identifier: str,
     shard: str,
     cache_dir: str,
     bucket: str = BUCKET,
@@ -75,7 +74,7 @@ def upload_pytest_cache(
     if not temp_dir:
         temp_dir = TEMP_DIR
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job, shard)
+    obj_key_prefix = get_s3_key_prefix(pr_identifier, job_identifier, shard)
     zip_file_path_base = (
         f"{temp_dir}/zip-upload/{obj_key_prefix}"  # doesn't include the extension
     )
@@ -95,8 +94,7 @@ def upload_pytest_cache(
 
 def download_pytest_cache(
     pr_identifier: PRIdentifier,
-    workflow: str,
-    job: str,
+    job_identifier: str,
     dest_cache_dir: str,
     bucket: str = BUCKET,
     temp_dir: str = TEMP_DIR,
@@ -111,7 +109,7 @@ def download_pytest_cache(
             f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}"
         )
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, workflow, job)
+    obj_key_prefix = get_s3_key_prefix(pr_identifier, job_identifier)
 
     zip_download_dir = f"{temp_dir}/cache-zip-downloads/{obj_key_prefix}"
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
@@ -126,13 +124,13 @@ def download_pytest_cache(
             shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
             cache_dir_for_shard = os.path.join(
                 f"{temp_dir}/unzipped-caches",
-                get_s3_key_prefix(pr_identifier, workflow, job, shard_id),
+                get_s3_key_prefix(pr_identifier, job_identifier, shard_id),
                 PYTEST_CACHE_DIR_NAME,
             )
 
             unzip_folder(downloaded_zip, cache_dir_for_shard)
             print(
-                f"Merging cache for job {job} shard {shard_id} into {dest_cache_dir}"
+                f"Merging cache for job_identifier `{job_identifier}`, shard `{shard_id}` into `{dest_cache_dir}`"
             )
             merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
     finally:
