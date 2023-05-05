@@ -73,6 +73,7 @@ class BaseSchedulerNode:
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
         ]
         try:
             lines += [
@@ -130,6 +131,18 @@ class BaseSchedulerNode:
             dep.name
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
+
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        used_names = set()
+        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
+            used_names.add(dep.name)
+            if V.graph.name_to_buffer.get(dep.name):
+                layout = V.graph.name_to_buffer[dep.name].get_layout()
+                # needed to avoid deallocating aliased buffer
+                # if there are still uses of aliases ahead
+                if isinstance(layout, ir.AliasedLayout):
+                    used_names.add(layout.view.data.get_name())
+        return used_names
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -213,7 +226,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.ForceInPlace))
+                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
                 )
             )
             and config.inplace_buffers
@@ -334,7 +347,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return False
 
         if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.ForceInPlace)
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
         ):
             # TODO make this a property of the IR
             return False
@@ -518,6 +531,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
+
+    @cache_on_self
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        return functools.reduce(
+            set.union, (x.used_or_aliased_buffer_names() for x in self.snodes)
+        )
 
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes
@@ -794,15 +813,19 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        updated_nodes = []
-        for node in self.nodes:
-            if node.users:
-                updated_nodes.append(node)
-            else:
-                # dead code
-                log.debug("removed dead node: %s", node.get_name())
-                V.graph.removed_buffers.add(node.get_name())
-        self.nodes = updated_nodes
+        again = True  # repeat until a fixed point
+        while again:
+            updated_nodes = []
+            for node in self.nodes:
+                if any(n.get_name() not in V.graph.removed_buffers for n in node.users):
+                    updated_nodes.append(node)
+                else:
+                    # dead code
+                    log.debug("removed dead node: %s", node.get_name())
+                    V.graph.removed_buffers.add(node.get_name())
+
+            again = len(self.nodes) > len(updated_nodes)
+            self.nodes = updated_nodes
 
     def topological_sort_schedule(self):
         """
@@ -1079,7 +1102,7 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            used_buffers = node.used_buffer_names()
+            used_buffers = node.used_or_aliased_buffer_names()
             used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
             node.last_usage = used_buffers - future_used_buffers
             future_used_buffers.update(used_buffers)

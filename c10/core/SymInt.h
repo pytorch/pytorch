@@ -295,7 +295,6 @@ inline c10::SymInt multiply_integers(Iter begin, Iter end) {
   C10_API RetTy operator%(scalar_t a, const SymInt& b);
 
 #define DECLARE_SYMINT_OP(scalar_t, RetTy)              \
-  C10_API                                               \
   C10_API RetTy operator+(const SymInt& a, scalar_t b); \
   C10_API RetTy operator-(const SymInt& a, scalar_t b); \
   C10_API RetTy operator*(const SymInt& a, scalar_t b); \
