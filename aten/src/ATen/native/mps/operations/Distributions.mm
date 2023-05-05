@@ -144,7 +144,7 @@ Tensor& normal_mps_impl(Tensor& self,
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
 
-  TORCH_CHECK(std_s >= 0.0, op_name, " expects std >= 0.0, but found std=", std_s);
+  TORCH_CHECK(std_s >= 0.0, op_name, " expects std >= 0.0, but found std ", std_s);
   if (std_t.defined()) {
     TORCH_CHECK(!std_t.is_complex(), op_name, " expects standard deviation to be non-complex");
     if (mean_t.defined())
@@ -222,12 +222,12 @@ Tensor& uniform_mps_(Tensor& self, double from, double to, c10::optional<Generat
 }
 
 Tensor& normal_mps_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return mps::normal_mps_impl(self, mean, std, c10::nullopt, c10::nullopt, gen, __func__);
+  return mps::normal_mps_impl(self, mean, std, c10::nullopt, c10::nullopt, gen, "normal");
 }
 
 Tensor normal_mps(const Tensor& mean, double std, c10::optional<Generator> gen) {
   Tensor self = at::empty(mean.sizes(), mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, "normal");
 }
 
 Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) {
@@ -235,29 +235,29 @@ Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) 
   // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
   // multiply/add ops in random computation. So we create a mean tensor instead.
   Tensor mean_t = at::full_like(self, Scalar(mean));
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
 }
 
 Tensor normal_mps(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   auto shape = at::infer_size(mean.sizes(), std.sizes());
   Tensor self = at::empty(shape, mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
 }
 
 Tensor& normal_mps_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& self) {
-  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, "normal");
 }
 
 Tensor& normal_mps_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& self) {
   // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
   // multiply/add ops in random computation. So we create a mean tensor instead.
   Tensor mean_t = at::full_like(self, Scalar(mean));
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
 }
 
 Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& self) {
   TORCH_CHECK(mean.numel() == std.numel(), "normal_mps_out: mean and std must have same number of elements")
-  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, __func__);
+  return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
 }
 
 Tensor& bernoulli_out_mps(const Tensor& p_, c10::optional<Generator> gen, Tensor& result) {
@@ -348,7 +348,7 @@ Tensor& random_mps_(Tensor& self, c10::optional<Generator> gen) {
 
 // Exponential distribution
 Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda > 0, "exponential_mps_: lambda must be greater than zero")
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
 
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();

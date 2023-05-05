@@ -31,6 +31,7 @@ import ctypes
 import hashlib
 import os.path
 import struct
+from collections import defaultdict
 from typing import Dict, Optional, Set
 
 import torch
@@ -120,7 +121,6 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         if pad > 0:
             x = F.pad(x, (0, pad), "constant", 0)
         x = x.view(torch.int32)
-        torch._dynamo.mark_dynamic(x, 0)
         # We run the 32-bit hash five times with differing parameters to
         # reduce chance of collision
         ITER = 5
@@ -142,6 +142,7 @@ class ContentStoreWriter:
         self.seen_storage_hashes: Set[str] = set()
         self.stable_hash = stable_hash
 
+    # TODO: offer some sort of non-blocking API to speed things up
     def write_storage(self, storage: torch.UntypedStorage) -> str:
         h = hash_storage(storage, stable_hash=self.stable_hash)
         if h in self.seen_storage_hashes:
@@ -150,15 +151,17 @@ class ContentStoreWriter:
         # need any metadata for the storage
         subfolder = os.path.join(self.loc, "storages")
         os.makedirs(subfolder, exist_ok=True)
-        torch.save(storage, os.path.join(subfolder, h))
+        target = os.path.join(subfolder, h)
+        if os.path.exists(target):
+            return h
+        torch.save(storage, target)
         self.seen_storage_hashes.add(h)
         return h
 
-    def write_tensor(self, name: str, t: torch.Tensor) -> None:
-        storage = t.untyped_storage()
-        h = self.write_storage(storage)
-        # TODO: Support more advanced snapshotting of requires_grad/grad/etc
-        payload = (
+    def compute_tensor_metadata(self, t: torch.Tensor, h=None):
+        if h is None:
+            h = hash_storage(t.untyped_storage(), stable_hash=self.stable_hash)
+        return (
             t.dtype,
             h,
             t.storage_offset(),
@@ -166,35 +169,61 @@ class ContentStoreWriter:
             t.stride(),
             torch._utils.get_tensor_metadata(t),
         )
-        subfolder = os.path.join(self.loc, "tensors")
+
+    def write_tensor(self, name: str, t: torch.Tensor) -> None:
+        storage = t.untyped_storage()
+        h = self.write_storage(storage)
+        # TODO: Support more advanced snapshotting of requires_grad/grad/etc
+        d, f = os.path.split(name)
+        payload = self.compute_tensor_metadata(t, h=h)
+        subfolder = os.path.join(self.loc, "tensors", d)
         os.makedirs(subfolder, exist_ok=True)
-        torch.save(payload, os.path.join(subfolder, name))
+        torch.save(payload, os.path.join(subfolder, f))
 
 
 class ContentStoreReader:
-    def __init__(self, loc: str) -> None:
+    def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
-        self.storage_cache: Dict[str, StorageWeakRef] = {}
+        self.storage_cache: Optional[
+            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+        ] = None
+        if cache:
+            self.storage_cache = defaultdict(dict)
 
-    def read_storage(self, h: str) -> torch.UntypedStorage:
-        ws = self.storage_cache.get(h)
+    def read_storage(self, h: str, *, device=None) -> torch.UntypedStorage:
+        if device is not None:
+            device = torch.device(device)
+        ws = (
+            self.storage_cache[device].get(h)
+            if self.storage_cache is not None
+            else None
+        )
         s: Optional[torch.UntypedStorage]
         if ws is not None:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
                 return s
         s = torch.load(
-            os.path.join(self.loc, "storages", h), weights_only=True
+            os.path.join(self.loc, "storages", h),
+            weights_only=True,
+            map_location=device,
         )._untyped_storage
         assert s is not None
-        self.storage_cache[h] = StorageWeakRef(s)
+        if self.storage_cache is not None:
+            self.storage_cache[device][h] = StorageWeakRef(s)
         return s
 
-    def read_tensor(self, name: str) -> torch.Tensor:
-        dtype, h, storage_offset, size, stride, metadata = torch.load(
-            os.path.join(self.loc, "tensors", name), weights_only=True
+    def read_tensor_metadata(self, name: str):
+        fn = os.path.join(self.loc, "tensors", name)
+        if not os.path.exists(fn):
+            raise FileNotFoundError(fn)
+        return torch.load(fn, weights_only=True)
+
+    def read_tensor(self, name: str, *, device=None) -> torch.Tensor:
+        dtype, h, storage_offset, size, stride, metadata = self.read_tensor_metadata(
+            name
         )
-        storage = self.read_storage(h)
+        storage = self.read_storage(h, device=device)
         t = torch.tensor([], dtype=dtype, device=storage.device)
         t.set_(storage, storage_offset, size, stride)
         torch._utils.set_tensor_metadata(t, metadata)
