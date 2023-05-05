@@ -392,9 +392,8 @@ void check_inputs(
 
     check_tensor(
         input,
-        i == static_cast<const decltype(i)>(root)
-            ? at::optional<at::Tensor>{output}
-            : at::nullopt,
+        i == static_cast<decltype(i)>(root) ? at::optional<at::Tensor>{output}
+                                            : at::nullopt,
         input_multiplier,
         output_multiplier,
         numel,
@@ -621,7 +620,7 @@ void reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        static_cast<const decltype(i)>(root) == i ? output.data_ptr() : nullptr,
+        static_cast<decltype(i)>(root) == i ? output.data_ptr() : nullptr,
         count,
         data_type,
         to_nccl_red_op(op),
