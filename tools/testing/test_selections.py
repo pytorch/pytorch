@@ -115,7 +115,7 @@ def calculate_shards(
 
 
 def _query_changed_test_files() -> List[str]:
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
     proc = subprocess.run(cmd, capture_output=True)
 
@@ -127,7 +127,7 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def get_reordered_tests(tests: List[str]) -> List[str]:
+def get_reordered_tests(tests: List[ShardedTest]) -> List[ShardedTest]:
     """
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
@@ -152,7 +152,7 @@ def get_reordered_tests(tests: List[str]) -> List[str]:
     the_rest = []
 
     for test in tests:
-        if test in prioritized_tests:
+        if test.name in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)
