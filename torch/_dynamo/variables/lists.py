@@ -295,6 +295,14 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = value
             result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
+        elif name == "copy":
+            # List copy() doesn't have args and kwargs
+            assert not kwargs
+            assert not args
+            items = list(self.items)
+            return ListVariable(
+                items, regen_guards=False, mutable_local=MutableLocal(), **options
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
