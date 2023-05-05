@@ -924,10 +924,21 @@ def export(
         ):
             super().__init__(m)
             arg_len = len(flat_args)
-            self.new_args = [
-                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-                for i in range(0, arg_len)
-            ]
+            self.new_args = []
+            for i in range(0, arg_len):
+                arg = super(ChangeInputOutputSignature, self).placeholder(
+                    f"arg{i}", (), {}
+                )
+                # Fill node.mata["val"] with faketensolintrunner from the input,
+                # if it's not found in matched_input_elements_positions
+                if (
+                    i not in matched_input_elements_positions
+                    and fake_mode is not None
+                    and isinstance(flat_args[i], torch.Tensor)
+                ):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+                self.new_args.append(arg)
+
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions
             )

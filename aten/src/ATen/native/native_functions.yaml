@@ -5103,6 +5103,27 @@
   device_check: NoCheck
   device_guard: False
 
+- func: sym_size.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
+- func: sym_numel(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
+- func: sym_storage_offset(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5377,6 +5398,13 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+
+- func: sym_stride.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
