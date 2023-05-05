@@ -859,7 +859,7 @@ def export(
         else:
             log.warning(
                 "Summary of dimension constraints:%s",
-                dim_constraints.prettify_results(inspect.signature(f)),
+                msg,
             )
     if constraint_violation_error:
         raise constraint_violation_error
