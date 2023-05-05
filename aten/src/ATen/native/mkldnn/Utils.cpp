@@ -73,7 +73,7 @@ void check_mkldnn_binary_fusion_inputs(
           input.scalar_type() == ScalarType::BFloat16 ||
           input.scalar_type() == ScalarType::Half,
       "mkldnn pointwise binary: input's dtype should be float, bfloat16 or half");
-  mkldnn_check_low_precision(input.scalar_type());
+  mkldnn_check_low_precision(input.scalar_type(), "mkldnn pointwise binary");
 }
 
 #if AT_MKLDNN_ENABLED()
