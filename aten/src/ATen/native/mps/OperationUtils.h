@@ -313,6 +313,15 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
      ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3.");   \
   }
 
+/**
+ * Computes number of elements one needs to transfer to preserve all the elements
+ */
+size_t compute_strided_size(const at::Tensor& t);
+
+inline bool is_strided_contiguous(const at::Tensor& t) {
+  return compute_strided_size(t) == static_cast<size_t>(t.numel());
+}
+
 } // namespace mps
 } // namespace native
 } // namespace at

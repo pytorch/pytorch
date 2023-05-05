@@ -20,24 +20,6 @@ void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* alignedB
   return (void*)alignedAddress;
 }
 
-/**
- * Computes number of elements one needs to transfer to preserve all the elements
- */
-size_t compute_strided_size(const at::Tensor& t) {
-  size_t rc = 1;
-  if (t.numel() == 0) {
-    return 0;
-  }
-  for (const auto i : c10::irange(t.dim())) {
-    assert(t.size(i) > 0);
-    rc += (t.size(i) - 1) * t.stride(i);
-  }
-  return rc;
-}
-
-bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == static_cast<size_t>(t.numel());
-}
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
 // The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
