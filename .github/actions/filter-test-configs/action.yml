@@ -49,7 +49,7 @@ runs:
 
         # Use relative path here as this could be checked out anywhere, not necessarily
         # in runner workspace
-        python "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
