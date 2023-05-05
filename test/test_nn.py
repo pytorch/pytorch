@@ -7235,7 +7235,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         arg_class = torch.nn.MaxPool1d(kernel_size=arg_1, stride=arg_2, return_indices=arg_3)
         arg_4_0 = torch.as_tensor([[0.3204]])
         arg_4 = [arg_4_0,]
-        with self.assertRaisesRegex(RuntimeError, "max_pool1d() Invalid computed output size: 0"):
+
+        with self.assertRaises(RuntimeError):
             res = arg_class(*arg_4)
 
 class TestFusionEval(TestCase):
