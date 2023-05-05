@@ -914,6 +914,10 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
+  TORCH_CHECK_TYPE(
+      var.dtype() == grad.dtype(),
+      "assigned grad has data of type ", grad.dtype(),
+      " that differs from the required type ", var.dtype());
   bool gradIsSparse =
       (var.dtype() == grad.dtype() &&
        var.device().type() == grad.device().type() && grad.layout() == kSparse);
