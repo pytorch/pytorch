@@ -1142,7 +1142,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return [self]
+        return (self,)
     chunks = (dim_size + split_size - 1) // split_size
     chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
