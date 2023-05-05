@@ -446,7 +446,7 @@ def _reduce_with_dtype(onnx_op, name):
                 )
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            result =  symbolic(g, self)
+            result = symbolic(g, self)
             if dtype_onnx is not None:
                 result_dtype_scalar = result.type().scalarType()
                 result_dtype_onnx = _type_utils.JitScalarType._from_name(result_dtype_scalar).onnx_type()
@@ -476,7 +476,7 @@ def _reduce_with_dtype(onnx_op, name):
                     result = g.op(
                         "Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                     )
-            return result            
+            return result
 
         return reduce_nodim, reduce_dim
 
