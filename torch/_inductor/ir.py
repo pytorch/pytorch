@@ -4385,7 +4385,7 @@ class AllReduceCoalesced(ExternKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
-        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):
