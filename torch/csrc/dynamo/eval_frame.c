@@ -60,7 +60,7 @@ static PyObject* THPPyInterpreterFrame_f_lasti(THPPyInterpreterFrame* self, PyOb
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef THPDevice_properties[] = {
+static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {
     {"f_func", (getter)THPPyInterpreterFrame_f_func, NULL, NULL, NULL},
     {"f_globals", (getter)THPPyInterpreterFrame_f_globals, NULL, NULL, NULL},
     {"f_builtins", (getter)THPPyInterpreterFrame_f_builtins, NULL, NULL, NULL},
@@ -71,44 +71,12 @@ static struct PyGetSetDef THPDevice_properties[] = {
     {"f_lasti", (getter)THPPyInterpreterFrame_f_lasti, NULL, NULL, NULL},
     {NULL}};
 
-PyTypeObject THPPyInterpreterFrameType = {
-    PyVarObject_HEAD_INIT(NULL, 0) "torch._C.dynamo.eval_frame._PyInterpreterFrame", /* tp_name */
-    sizeof(THPPyInterpreterFrame), /* tp_basicsize */
-    0, /* tp_itemsize */
-    NULL, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    NULL, /* tp_getattr */
-    NULL, /* tp_setattr */
-    NULL, /* tp_reserved */
-    NULL, /* tp_repr */
-    NULL, /* tp_as_number */
-    NULL, /* tp_as_sequence */
-    NULL, /* tp_as_mapping */
-    NULL, /* tp_hash  */
-    NULL, /* tp_call */
-    NULL, /* tp_str */
-    NULL, /* tp_getattro */
-    NULL, /* tp_setattro */
-    NULL, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT, /* tp_flags */
-    NULL, /* tp_doc */
-    NULL, /* tp_traverse */
-    NULL, /* tp_clear */
-    NULL, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    NULL, /* tp_iter */
-    NULL, /* tp_iternext */
-    NULL, /* tp_methods */
-    NULL, /* tp_members */
-    THPDevice_properties, /* tp_getset */
-    NULL, /* tp_base */
-    NULL, /* tp_dict */
-    NULL, /* tp_descr_get */
-    NULL, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    NULL, /* tp_init */
-    NULL, /* tp_alloc */
-    NULL, /* tp_new */
+static PyTypeObject THPPyInterpreterFrameType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "torch._C.dynamo.eval_frame._PyInterpreterFrame",
+    .tp_basicsize = sizeof(THPPyInterpreterFrame),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_getset = THPPyInterpreterFrame_properties,
 };
 
 
@@ -176,15 +144,15 @@ static PyObject* profiler_start_hook = NULL;
 static PyObject* profiler_end_hook = NULL;
 static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
-size_t cache_entry_extra_index = -1;
-size_t dynamic_frame_state_extra_index = -2;
+static size_t cache_entry_extra_index = -1;
+static size_t dynamic_frame_state_extra_index = -2;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
   if (unlikely(result == NULL)) {
-    Py_RETURN_NONE;
+    return (PyObject*)Py_None;
   } else {
     return (PyObject*)result;
   }
@@ -282,16 +250,15 @@ static inline PyObject* call_callback(
 
 #if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-#else
-  PyFrameObject* frame = _frame;
-#endif
-  PyObject* args = Py_BuildValue("(OlO)", frame, cache_len, frame_state);
-  if (args == NULL) {
+  if (frame == NULL) {
     return NULL;
   }
-  PyObject* result = PyObject_CallObject(callable, args);
-  Py_DECREF(args);
-  return result;
+#else
+  PyObject* frame = Py_NewRef(_frame);
+#endif
+  PyObject* res = PyObject_CallFunction(callable, "OlO", frame, cache_len, frame_state);
+  Py_DECREF(frame);
+  return res;
 }
 
 typedef struct cache_entry {
@@ -359,38 +326,30 @@ static PyObject* call_guard_fail_hook(
     size_t index,
     PyObject* f_locals) {
   // call debugging logic when a guard fails
-  PyObject* args = PyTuple_Pack(
-      5,
+  return PyObject_CallFunction(
+      hook,
+      "OOOnO",
       e->check_fn,
       e->code,
       f_locals,
-      PyLong_FromSize_t(index),
+      (Py_ssize_t)index,
       (e->next == NULL ? Py_True : Py_False));
-  if (args == NULL) return NULL;
-  PyObject* result = PyObject_CallObject(hook, args);
-  Py_DECREF(args);
-  return result;
 }
 
 static PyObject* call_profiler_start_hook(PyObject* name_str) {
   if (profiler_start_hook == NULL) return NULL;
-  if (name_str == NULL) return NULL;
-  PyObject* args = PyTuple_Pack(1, name_str);
-  if (args == NULL) return NULL;
-  PyObject* result = PyObject_CallObject(profiler_start_hook, args);
-  Py_DECREF(args);
-  return result;
+  return PyObject_CallOneArg(profiler_start_hook, name_str);
 }
 
 static void call_profiler_end_hook(PyObject* record) {
   // 'record' obj is the return value of calling _start_hook()
-  if (profiler_end_hook == NULL) return;
-  if (record == NULL) return;
-  PyObject* args = PyTuple_Pack(1, record);
-  if (args == NULL) return;
-  PyObject* result = PyObject_CallObject(profiler_end_hook, args);
-  Py_XDECREF(result);
-  Py_DECREF(args);
+  if (profiler_end_hook == NULL || record == NULL) return;
+  PyObject* res = PyObject_CallOneArg(profiler_end_hook, record);
+  if (res == NULL) {
+    PyErr_WriteUnraisable(profiler_end_hook);
+    return;
+  }
+  Py_DECREF(res);
 }
 
 // Return value: borrowed reference
@@ -759,12 +718,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   return old_callback;
 }
 
-static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* args) {
-  PyObject* callback = NULL;
-  if (!PyArg_ParseTuple(args, "O:callback", &callback)) {
-    DEBUG_TRACE0("arg error");
-    return NULL;
-  }
+static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
   if (callback != Py_None && callback != Py_False &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
@@ -778,12 +732,7 @@ static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* args) {
   return set_eval_frame(callback, PyThreadState_GET());
 }
 
-static PyObject* reset_code(PyObject* dummy, PyObject* args) {
-  PyObject* code = NULL;
-  if (!PyArg_ParseTuple(args, "O:code", &code)) {
-    DEBUG_TRACE0("arg error");
-    return NULL;
-  }
+static PyObject* reset_code(PyObject* dummy, PyObject* code) {
   if (!PyCode_Check(code)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a code object");
@@ -809,11 +758,7 @@ static PyObject* unsupported(PyObject* dummy, PyObject* args) {
   return obj2;
 }
 
-static PyObject* skip_code(PyObject* dummy, PyObject* args) {
-  PyObject* obj = NULL;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return NULL;
-  }
+static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
   if (!PyCode_Check(obj)) {
     PyErr_SetString(PyExc_TypeError, "expected a code object");
     return NULL;
@@ -822,76 +767,52 @@ static PyObject* skip_code(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_fail_hook(PyObject* dummy, PyObject* args) {
-  PyObject* obj = NULL;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return NULL;
-  }
-  Py_XDECREF(guard_fail_hook);
+static PyObject* set_guard_fail_hook(PyObject* dummy, PyObject* obj) {
   if (obj == Py_None) {
-    guard_fail_hook = NULL;
-  } else {
-    guard_fail_hook = obj;
-    Py_INCREF(guard_fail_hook);
+    obj = NULL;
   }
+  Py_XSETREF(guard_fail_hook, Py_XNewRef(obj));
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
-  PyObject* obj = NULL;
-  if (!PyArg_ParseTuple(args, "O", &obj)) {
-    return NULL;
-  }
-  Py_XDECREF(guard_error_hook);
+static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   if (obj == Py_None) {
-    guard_error_hook = NULL;
-  } else {
-    guard_error_hook = obj;
-    Py_INCREF(guard_error_hook);
+    obj = NULL;
   }
+  Py_XSETREF(guard_error_hook, Py_XNewRef(obj));
   Py_RETURN_NONE;
 }
 
-static PyObject* clear_profiler_hooks(PyObject* dummy, PyObject* args) {
-  Py_XDECREF(profiler_start_hook);
-  profiler_start_hook = NULL;
-  Py_XDECREF(profiler_end_hook);
-  profiler_end_hook = NULL;
-  Py_XDECREF(guard_profiler_name_str);
-  guard_profiler_name_str = NULL;
+static PyObject* clear_profiler_hooks(PyObject* module, PyObject* unused) {
+  Py_CLEAR(profiler_start_hook);
+  Py_CLEAR(profiler_end_hook);
   Py_RETURN_NONE;
 }
 
-static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
+static PyObject* set_profiler_hooks(PyObject* module, PyObject* args) {
   PyObject* start = NULL;
   PyObject* end = NULL;
-  if (!PyArg_ParseTuple(args, "OO", &start, &end)) {
+  if (!PyArg_ParseTuple(args, "OO:set_profiler_hooks", &start, &end)) {
     return NULL;
   }
-  Py_XDECREF(profiler_start_hook);
-  Py_XDECREF(profiler_end_hook);
   if (start == Py_None || end == Py_None) {
-    clear_profiler_hooks(NULL, NULL);
+    clear_profiler_hooks(module, NULL);
   } else {
-    profiler_start_hook = start;
-    profiler_end_hook = end;
-    Py_INCREF(profiler_start_hook);
-    Py_INCREF(profiler_end_hook);
+    Py_XSETREF(profiler_start_hook, Py_NewRef(start));
+    Py_XSETREF(profiler_end_hook, Py_NewRef(end));
   }
-  Py_XDECREF(guard_profiler_name_str);
-  guard_profiler_name_str = Py_BuildValue("s", "TorchDynamo Cache Lookup");
   Py_RETURN_NONE;
 }
 
 static PyMethodDef _methods[] = {
-    {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
-    {"reset_code", reset_code, METH_VARARGS, NULL},
+    {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
+    {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
-    {"skip_code", skip_code, METH_VARARGS, NULL},
-    {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
-    {"set_guard_error_hook", set_guard_error_hook, METH_VARARGS, NULL},
+    {"skip_code", skip_code, METH_O, NULL},
+    {"set_guard_fail_hook", set_guard_fail_hook, METH_O, NULL},
+    {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
-    {"clear_profiler_hooks", clear_profiler_hooks, METH_VARARGS, NULL},
+    {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -903,7 +824,23 @@ static struct PyModuleDef _module = {
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
   cache_entry_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  if (cache_entry_extra_index < 0) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "dynamo: unable to register cache_entry extra index");
+    return NULL;
+  }
+
   dynamic_frame_state_extra_index = _PyEval_RequestCodeExtraIndex(ignored);
+  if (dynamic_frame_state_extra_index < 0) {
+    PyErr_SetString(PyExc_RuntimeError,
+                    "dynamo: unable to register dynamic_frame_state extra index");
+    return NULL;
+  }
+
+  guard_profiler_name_str = PyUnicode_FromString("TorchDynamo Cache Lookup");
+  if (guard_profiler_name_str == NULL) {
+    return NULL;
+  }
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
   CHECK(result == 0);
@@ -912,6 +849,9 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   eval_frame_callback_set(Py_None);
 
   PyObject* module = PyModule_Create(&_module);
+  if (module == NULL) {
+    return NULL;
+  }
 
 #if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
