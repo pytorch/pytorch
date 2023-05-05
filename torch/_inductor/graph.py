@@ -152,9 +152,17 @@ class GraphLowering(torch.fx.Interpreter):
 
         if GraphLowering.ITER == -1:
             from fxana import analyze, print_upstream, print_downstream
-            # analyze(gm)
-            print_upstream(gm.graph, "gt_142")
+            analyze(gm)
+            # print_upstream(gm.graph, "gt_142")
             breakpoint()
+
+        nconv = len([ n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default])
+
+        # Follow models are skipped due to this:
+        # jx_nest_base
+        if nconv > 0 and nconv <= 3 and len(list(gm.graph.nodes)) >= 1000:
+            print("ONLY A FEW CONV, SKIP LAYOUT OPT")
+            config.layout_opt = False
 
         # it's hard to optimize layout for models with both normal conv
         # and group conv. Normal conv prefers channels last while grouped
@@ -261,7 +269,12 @@ class GraphLowering(torch.fx.Interpreter):
         # Then in the kernel in backward pass, the contiguous output of relu may be mix with other channels last
         # tensors and passed to a kernel.
         #
-        # This pass improve yolov3 training speedup from 1.116x (worse than disabling layout optimization 1.196x) to 1.457x.
+        # This pass improve yolov3 training speedup from 1.116x (worse than disabling layout optimization speedup 1.196x) to 1.457x.
+        # It also improves dla102 training speedup from 1.240x (worse than disabling layout optimization speedup 1.523x) to 1.835x .
+        # This also helps the following models:
+        # - res2net101_26w_4s
+        # - res2net50_14w_8s
+        # - sebotnet33ts_256
         for n in self.module.graph.nodes:
             if n in output_set:
                 for child in n.users:

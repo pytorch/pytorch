@@ -1063,25 +1063,6 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
         if should_init_distributed:
             torch.distributed.destroy_process_group()
 
-def skip_layout_opt(name):
-    """
-    TODO: this is not called now. But leave it to document what models I need follow up.
-    Will remove this.
-    """
-    if name in [
-        # torchbench
-        "yolov3",
-
-        # timm
-        "cspdarknet53", # down 0.1
-        "dla102", # down 0.18
-        "jx_nest_base", # down 0.12
-        "res2net101_26w_4s", # down 0.09
-        "res2net50_14w_8s", # down 0.37 <===
-        "sebotnet33ts_256", # down 0.46 <===
-    ]:
-        torch._inductor.config.layout_opt = False
-
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
@@ -1549,7 +1530,6 @@ class BenchmarkRunner:
         explain=False,
         tag=None,
     ):
-        # skip_layout_opt(name)
         mode = "train" if self.args.training else "eval"
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
