@@ -279,7 +279,7 @@ Tensor _mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type());
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
 
   check_shape_forward(input_t, weight_t, bias, padding, stride, dilation, groups);
 
@@ -672,7 +672,7 @@ Tensor _mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input_t.scalar_type());
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
@@ -921,7 +921,7 @@ Tensor mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  mkldnn_check_low_precision(input.scalar_type());
+  mkldnn_check_low_precision(input.scalar_type(), "mkldnn_convolution_transpose");
 
   bool use_channels_last = mkldnn_conv_use_channels_last(input, weight);
   auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), use_channels_last);
