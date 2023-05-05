@@ -95,9 +95,13 @@ def prepare(
 
     for node in nodes_before_observation:
 
-        if node.op == "placeholder":
-            pass
-        elif node.op in ("call_module", "call_method", "call_function"):
+        if node.op in (
+            "placeholder",
+            "call_module",
+            "call_method",
+            "call_function",
+            "get_attr",
+        ):
             _maybe_insert_input_and_output_observers_for_node(node, model)
         elif node.op == "output":
             named_modules = dict(model.named_modules(remove_duplicate=False))

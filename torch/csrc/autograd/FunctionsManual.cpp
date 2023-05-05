@@ -181,7 +181,7 @@ Tensor restore_reduced_dims(
     return output;
   }
   int64_t total_dims = output.dim() + dims.size();
-  std::vector<int64_t> target_shape(total_dims, 0);
+  std::vector<c10::SymInt> target_shape(total_dims, 0);
   for (int64_t i : dims) {
     if (i < 0) {
       i = total_dims + i;
@@ -189,12 +189,12 @@ Tensor restore_reduced_dims(
     target_shape[i] = 1;
   }
   int64_t j = 0;
-  for (int64_t i : output.sizes()) {
+  for (c10::SymInt i : output.sym_sizes()) {
     while (target_shape[j] > 0)
       j++;
     target_shape[j++] = i;
   }
-  return output.reshape(target_shape);
+  return output.reshape_symint(target_shape);
 }
 
 Tensor scale_grad_by_count(
@@ -3369,8 +3369,8 @@ Tensor svd_backward(
     return {};
   }
 
-  const auto m = U.size(-2);
-  const auto n = Vh.size(-1);
+  const auto m = U.sym_size(-2);
+  const auto n = Vh.sym_size(-1);
 
   // Optimisation for svdvals: gA = U @ diag(gS) @ Vh
   if (!gU.defined() && !gVh.defined()) {
