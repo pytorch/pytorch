@@ -936,7 +936,7 @@ void initJitScriptBindings(PyObject* module) {
       [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
         auto method = self.find_method("__str__");
         if (!method) {
-          return py::str("ScriptObject");
+          return py::str("ScriptObject <" + self.type()->str() + ">");
         }
         return invokeScriptMethodFromPython(
             *method,
