@@ -514,7 +514,7 @@ class TestPythonStore(TestCase):
         class TestStore(dist.Store):
             pass
         store = TestStore()
-        self.assertFalse(store.has_extended_api)
+        self.assertFalse(store.has_extended_api())
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
             store.append("foo", "bar")
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
@@ -527,7 +527,7 @@ class TestPythonStore(TestCase):
             pass
         test_store = TestStore()
         store = dist.PrefixStore("p", test_store)
-        self.assertFalse(store.has_extended_api)
+        self.assertFalse(store.has_extended_api())
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
             store.append("foo", "bar")
         with self.assertRaisesRegex(RuntimeError, "Not implemented."):
@@ -538,7 +538,7 @@ class TestPythonStore(TestCase):
     def test_has_extended_api_roundtrip(self):
         store = DummyStore()
         prefix = dist.PrefixStore("p", store)
-        self.assertTrue(prefix.has_extended_api)
+        self.assertTrue(prefix.has_extended_api())
 
     def test_append_roundtrip(self):
         store = DummyStore()
