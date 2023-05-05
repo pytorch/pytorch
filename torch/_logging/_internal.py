@@ -119,8 +119,8 @@ log_state = LogState()
 def set_logs(
     *,
     all: Optional[int] = None,
-    dynamo: int = None,
-    aot: int = None,
+    dynamo: Optional[int] = None,
+    aot: Optional[int] = None,
     dynamic: int = None,
     inductor: int = None,
     bytecode: bool = False,
@@ -171,16 +171,19 @@ def set_logs(
     is set to a log level less than or equal to the log level of the artifact.
 
     Keyword args:
-        dynamo (:class:`int`):
+        all (:class:`Optional[int]`):
+            The default log level for all components. Default: ``logging.WARN``
+
+        dynamo (:class:`Optional[int]`):
             The log level for the TorchDynamo component. Default: ``logging.WARN``
 
-        aot (:class:`int`):
+        aot (:class:`Optional[int]`):
             The log level for the AOTAutograd component. Default: ``logging.WARN``
 
-        inductor (:class:`int`):
+        inductor (:class:`Optional[int]`):
             The log level for the TorchInductor component. Default: ``logging.WARN``
 
-        dynamic (:class:`int`):
+        dynamic (:class:`Optional[int]`):
             The log level for dynamic shapes. Default: ``logging.WARN``
 
         bytecode (:class:`bool`):
