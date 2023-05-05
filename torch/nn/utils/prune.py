@@ -17,6 +17,7 @@ class BasePruningMethod(ABC):
     """
     _tensor_name: str
 
+    @abstractmethod
     def __init__(self):
         pass
 

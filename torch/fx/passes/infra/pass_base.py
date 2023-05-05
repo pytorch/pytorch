@@ -31,6 +31,7 @@ class PassBase(abc.ABC):
     the PassManager's `passes` attribute.
     """
 
+    @abc.abstractmethod
     def __init__(self) -> None:
         pass
 
@@ -55,6 +56,7 @@ class PassBase(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
     def requires(self, graph_module: GraphModule) -> None:
         """
         This function will be called before the pass is run and will check that
@@ -66,6 +68,7 @@ class PassBase(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
     def ensures(self, graph_module: GraphModule) -> None:
         """
         This function will be called after the pass is run and will check that

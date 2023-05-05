@@ -3521,6 +3521,7 @@ def fn():
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
+            @abc.abstractmethod
             def read(self):
                 pass
 
