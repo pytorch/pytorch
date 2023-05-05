@@ -19,6 +19,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
+from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
@@ -2311,9 +2312,7 @@ def forward(self, x):
         specialize_int=True,
         capture_scalar_outputs=True,
     )
-    def test_export_preserve_constraints_as_metadata(self):
-        from torch._export.constraints import constrain_as_size
-
+    def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
             constrain_as_size(b, min=2, max=5)
@@ -2342,6 +2341,35 @@ def forward(self, x):
                 preserved = True
         self.assertTrue(preserved)
 
+    @torch._dynamo.config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_tensor(self):
+        def f(x):
+            b = x.nonzero()
+            constrain_as_value(b.shape[0], min=2, max=5)
+            return b
+
+        y = torch.tensor([8, 8, 6])
+        constraints = []
+        gm, _ = torch._dynamo.export(
+            f,
+            y,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
     @config.patch(
         dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
@@ -2350,8 +2378,6 @@ def forward(self, x):
     )
     def test_exported_graph_serialization(self):
         import io
-
-        from torch._export.constraints import constrain_as_size
 
         def f(x, y):
             b = x.item()
