@@ -526,6 +526,11 @@ DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
 
 @dataclass(frozen=True)
 class EqualityConstraint(Constraint):
+    """
+    Given pairs of sources corresponding to pairs of dynamic dimensions that
+    are specified equal, represent them in a union-find data structure so that
+    we can efficiently check whether two such sources are transitively equal.
+    """
     source_pairs: List[Tuple[Source, Source]]
 
     def __post_init__(self):
@@ -954,8 +959,8 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'pow': lambda a, b: Pow(a, b),
-    'and': lambda a, b: a & b,
-    'or': lambda a, b: a | b,
+    'and': lambda a, b: sympy.And(a, b),
+    'or': lambda a, b: sympy.Or(a, b),
     'truediv': lambda a, b: TrueDiv(a, b),
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
