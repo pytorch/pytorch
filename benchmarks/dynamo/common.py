@@ -154,6 +154,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "convit_base",  # fp64_OOM
     "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "lcnet_050",  # Accuracy (blocks.1.0.bn2.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM,
     "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
