@@ -251,6 +251,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+        # Map each tensor id to a list of sources. This is necessary because
+        # tensor ids cannot be recovered from tracked fakes (in general).
+        # We use this map to interpret (i.e., check for violations of) constraints,
+        # specifically equality constraints, which have shared tensor ids in them.
+        # This map should also be generally useful, e.g., for (de)serialization.
+        self.tracked_fakes_id_to_source: Dict[
+            int, List[Source]
+        ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
