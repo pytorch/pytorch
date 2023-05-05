@@ -178,7 +178,11 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
+  // Removes autograd hooks registered by the Reducer on the model parameters.
   void remove_autograd_hooks();
+
+  // Checks whether or not the reducer has finalized the current backward iteration.
+  bool has_finalized();
 
  protected:
   // Forward declaration.
