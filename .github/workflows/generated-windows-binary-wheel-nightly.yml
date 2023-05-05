@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_8-cpu
           retention-days: 14
@@ -225,24 +225,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -367,7 +354,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_8-cuda11_7
           retention-days: 14
@@ -473,24 +460,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -616,7 +590,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_8-cuda11_8
           retention-days: 14
@@ -722,24 +696,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -865,7 +826,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_8-cuda12_1
           retention-days: 14
@@ -971,24 +932,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -1113,7 +1061,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_9-cpu
           retention-days: 14
@@ -1218,24 +1166,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -1360,7 +1295,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_9-cuda11_7
           retention-days: 14
@@ -1466,24 +1401,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -1609,7 +1531,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_9-cuda11_8
           retention-days: 14
@@ -1715,24 +1637,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -1858,7 +1767,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_9-cuda12_1
           retention-days: 14
@@ -1964,24 +1873,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -2106,7 +2002,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_10-cpu
           retention-days: 14
@@ -2211,24 +2107,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -2353,7 +2236,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_10-cuda11_7
           retention-days: 14
@@ -2459,24 +2342,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -2602,7 +2472,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_10-cuda11_8
           retention-days: 14
@@ -2708,24 +2578,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -2851,7 +2708,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_10-cuda12_1
           retention-days: 14
@@ -2957,24 +2814,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -3099,7 +2943,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_11-cpu
           retention-days: 14
@@ -3204,24 +3048,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -3346,7 +3177,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_11-cuda11_7
           retention-days: 14
@@ -3452,24 +3283,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -3595,7 +3413,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_11-cuda11_8
           retention-days: 14
@@ -3701,24 +3519,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
@@ -3844,7 +3649,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3if: always()
         with:
           name: wheel-py3_11-cuda12_1
           retention-days: 14
@@ -3950,24 +3755,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default", shard: 1, num_shards: 1 },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
