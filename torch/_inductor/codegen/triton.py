@@ -1063,6 +1063,11 @@ class TritonScheduling:
             # we are guaranteed at this point that ForeachKernels only process valid lists of buffers.
             return True
 
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
+            node2, scheduler.ForeachKernelSchedulerNode
+        ):
+            return False
+
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
