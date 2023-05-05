@@ -14,7 +14,7 @@ MessageFormatterType = Callable[..., str]
 
 @_beartype.beartype
 def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
-    return f"{formatter.display_name(fn)}"
+    return f"{formatter.display_name(fn)}. "
 
 
 @_beartype.beartype
@@ -62,7 +62,6 @@ def diagnose_call(
     rule: infra.Rule,
     *,
     level: infra.Level = infra.Level.NONE,
-    exception_report_level: infra.Level = infra.Level.WARNING,
     diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
     format_argument: Callable[[Any], str] = formatter.format_argument,
     diagnostic_message_formatter: MessageFormatterType = format_message_in_text,
@@ -132,7 +131,10 @@ def diagnose_call(
                     return return_values
                 except Exception as e:
                     # Record exception.
-                    diag.level = exception_report_level
+                    diag.level = infra.levels.ERROR
+                    # TODO(bowbao): Message emitting api.
+                    diag.message = diag.message or ""
+                    diag.message += f"Raised from:\n    {type(e).__name__}: {e}"
                     diag.with_source_exception(e)
                     additional_messages.append(format_exception_in_markdown(e))
                 finally:

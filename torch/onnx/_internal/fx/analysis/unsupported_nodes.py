@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from torch.onnx._internal.fx import diagnostics, function_dispatcher, _pass
-from typing import List, Dict, Set
 import dataclasses
+from typing import Dict, List, Set
+
+from torch.onnx._internal.fx import _pass, diagnostics, function_dispatcher
 
 
 @dataclasses.dataclass
@@ -25,11 +26,11 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     errors.append(e)
 
-        op_to_target_mapping = {}
+        op_to_target_mapping: Dict[str, Set[str]] = {}
 
         if errors:
-            for e in errors:
-                node_diagnostic = e.diagnostic
+            for error in errors:
+                node_diagnostic = error.diagnostic
                 assert isinstance(
                     node_diagnostic, diagnostics.UnsupportedFxNodeDiagnostic
                 )
@@ -37,7 +38,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 assert node is not None
                 op = node.op
                 target = node.target
-                op_to_target_mapping.setdefault(op, set()).add(target)
+                op_to_target_mapping.setdefault(op, set()).add(str(target))
 
         return UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
 
