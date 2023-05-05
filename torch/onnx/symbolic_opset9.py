@@ -4360,7 +4360,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -4383,6 +4383,10 @@ def repeat_interleave(
             input,
         )
 
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)
+
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
@@ -4390,8 +4394,6 @@ def repeat_interleave(
 
     # Cases where repeats is an int or single value tensor
     if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-        if not symbolic_helper._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "repeat_interleave",
@@ -4400,11 +4402,9 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        else:
-            reps = input_sizes[dim]
-            repeats = expand(
-                g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None
-            )
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
