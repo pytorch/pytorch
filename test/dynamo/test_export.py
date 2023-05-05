@@ -185,6 +185,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_with_shallow_list_copy_wo_side_effects(self):
+        def f(x):
+            y = x.copy()
+            return y[0] + y[1]
+
+        inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
+        gm, _ = torch._dynamo.export(f, inp, aten_graph=True, tracing_mode="symbolic")
+        self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
+
+    def test_export_with_shallow_list_copy_with_side_effects(self):
+        def f(x):
+            y = x.copy()
+            x[0] = x[1]
+            y.append(torch.tensor([[100]]))
+            return x[0] + x[1], y[0] + y[1], y[2]
+
+        inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
+        gm, _ = torch._dynamo.export(f, inp, aten_graph=True, tracing_mode="symbolic")
+        res = gm(inp)
+        ref = f(inp)
+        self.assertTrue(torch._dynamo.utils.same(res, ref))
+        self.assertEqual(res[0], res[1])
+
     def test_export_mismatched_out_2(self):
         def func(x):
             y = x + 1
