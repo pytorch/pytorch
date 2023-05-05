@@ -23,6 +23,7 @@ from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -276,30 +277,6 @@ class TraceModuleTest(DTensorTestBase):
         self._test_trace_replicate(model, pt_input)
 
     @with_comms
-    def test_baked_in_shape(self):
-        class LCE(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(5)
-                self.w = torch.nn.Parameter(torch.rand((5, 10)))
-                self.b = torch.nn.Parameter(torch.rand((5)))
-
-            def forward(self, x, *args, **kwargs):
-                # the code below will bake in the shape of x_t as arguments to expand
-                x_t = x.permute(0, 2, 1)
-                y_t = kwargs["dict_test"]["value"].expand(x_t.shape) + args[0][
-                    0
-                ].expand(x_t.shape)
-                # code below triggers an "expand" with shape baked in.
-                return torch.nn.functional.linear(y_t, self.w, self.b)
-
-        model = LCE().to(self.device_type)
-        x = torch.randn(2, 10, 80).to(self.device_type)
-        y = torch.randn(2, 80, 10).to(self.device_type)
-        z = torch.randn(2, 80, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, [y], dict_test={"value": z})
-
-    @with_comms
     def test_sequential(self):
         model = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)]).to(
             self.device_type
@@ -539,7 +516,9 @@ class TraceTrainStepTest(DTensorTestBase):
             def __init__(self, outer):
                 self.outer = outer
 
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
                 return orig_submodule
 
             def transform(
@@ -600,7 +579,9 @@ class TraceTrainStepTest(DTensorTestBase):
         transform_targets = []
 
         class DDMOverride(Override):
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
                 return DummyDDM()
 
             def transform(
@@ -653,6 +634,76 @@ class TraceTrainStepTest(DTensorTestBase):
     @with_comms
     def test_module_fqn_override(self):
         self._test_train_step_override(module_override_key="ddm")
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_multi_fqn_override(self):
+        transform_targets = []
+
+        class DDMOverride(Override):
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
+                if fqn in ["ddm1", "ddm2"]:
+                    return DummyDDM()
+
+            def transform(
+                self,
+                gm: fx.GraphModule,
+                flat_state: List[torch.Tensor],
+            ) -> fx.Graph:
+                nonlocal transform_targets
+                for node in gm.graph.nodes:
+                    if node.target in [
+                        torch.ops.dummy.ddm.default,
+                        torch.ops.dummy.ddm_backward.default,
+                    ]:
+                        transform_targets.append(node.target)
+                        # N.B.: this is not a complete subgraph representing
+                        # original logic, as we are testing the ability to
+                        # modify graph after DTensor expansion.
+                        with gm.graph.inserting_before(node):
+                            new_node = gm.graph.call_function(torch.add, args=node.args)
+                        node.replace_all_uses_with(new_node)
+
+                gm.graph.eliminate_dead_code()
+
+                return gm
+
+        class MultiDDM(nn.Module):
+            def __init__(self, world_size):
+                super().__init__()
+                self.l1 = nn.Linear(10, 10)
+                self.ddm1 = DataDependentModule(world_size)
+                self.l2 = nn.Linear(10, 10)
+                self.ddm2 = DataDependentModule(world_size)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                assert len(x.size()) == 2
+
+                return self.relu(self.ddm2(self.l2(self.ddm1(self.l1(x)))))
+
+        @compile(module_override={DataDependentModule: DDMOverride()})
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = MultiDDM(self.world_size).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        inp = torch.randn(4, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+
+        # checking transforms are indeed invoked.
+        self.assertEqual(
+            transform_targets,
+            [
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm_backward.default,
+                torch.ops.dummy.ddm_backward.default,
+            ],
+        )
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -863,7 +914,45 @@ class CoverageTest(DTensorTestBase):
 
         self._test_train_step(train_step, mod, ids, tgt)
 
-    def _test_factory_ops(self, Model: Type[nn.Module]):
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_pos_embedding(self):
+        N, D, B, Block = 10, 8, 2, 20
+
+        class EmbeddingModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wte = nn.Embedding(N, D)
+                self.wpe = nn.Embedding(Block, D)
+                self.norm = nn.LayerNorm(D, elementwise_affine=False)
+                self.fc = nn.Linear(D, D)
+
+            def forward(self, ids, tgt):
+                _, t = ids.size()
+                wte = self.wte(ids)
+                wpe = self.wpe(
+                    torch.arange(0, t, dtype=torch.long, device=ids.device).unsqueeze(0)
+                )
+                emb = wpe + wte
+                norm = self.norm(emb)
+                fc = self.fc(norm)
+                log = F.softmax(fc, dim=-1)
+                return F.cross_entropy(log.view(-1, log.size(-1)), tgt.view(-1))
+
+        torch.manual_seed(0)
+        mod = EmbeddingModule().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, ids, tgt):
+            mod(ids, tgt).sum().backward()
+            opt.step()
+
+        ids = torch.randint(0, N, (B, Block)).cuda(self.rank)
+        tgt = torch.empty((B, Block), dtype=torch.long).random_(0, D).to(self.rank)
+
+        self._test_train_step(train_step, mod, ids, tgt)
+
+    def _test_op_with_train_step(self, Model: Type[nn.Module]):
         torch.manual_seed(0)
         mod = Model().cuda(self.rank)
 
@@ -887,7 +976,7 @@ class CoverageTest(DTensorTestBase):
                 y = torch.full(x.shape, 7, device=x.device)
                 return y + self.fc(x)
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -902,7 +991,7 @@ class CoverageTest(DTensorTestBase):
                 z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
                 return self.fc(x) + y + z
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -916,7 +1005,21 @@ class CoverageTest(DTensorTestBase):
                 y = self.fc.weight.numel()
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -933,7 +1036,59 @@ class CoverageTest(DTensorTestBase):
                 )
                 return self.fc(x) + y
 
-        self._test_factory_ops(Model)
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_stack(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.stack([x, self.fc(x)], dim=1)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_bulk_cat(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.cat([self.fc(x) for _ in range(100)], dim=1)
+
+        self._test_op_with_train_step(Model)
 
 
 if __name__ == "__main__":

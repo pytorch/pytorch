@@ -500,7 +500,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])
 #
-# gx = vmap(backward_no_context, dims)(gy: “Tensor[B]”)
+# gx = vmap(backward_no_context, dims)(gy: "Tensor[B]")
 #
 # This gives us the wrong result (gx has shape [B, B, 4], but it should
 # have shape [4]). Performing vmap over setup_context means the shape

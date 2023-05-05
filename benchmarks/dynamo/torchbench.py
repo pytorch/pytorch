@@ -73,8 +73,10 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
-    # https://github.com/pytorch/pytorch/issues/99201
-    "opacus_cifar10",
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    "tacotron2",
+    # https://github.com/pytorch/pytorch/issues/99438
+    "vision_maskrcnn",
 }
 
 SKIP_FOR_CUDA = {
@@ -89,11 +91,7 @@ SKIP_TRAIN = {
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
-    # Unusual training setup
-    "opacus_cifar10",
     "maml",
-    # segfault: Internal Triton PTX codegen error
-    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -200,6 +198,11 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
+}
+
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
@@ -249,6 +252,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
+        return set()
+
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
     def load_model(
@@ -317,6 +326,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # the right example_inputs
         if model_name == "yolov3":
             example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
+        # See https://github.com/pytorch/benchmark/issues/1561
+        if model_name == "maml_omniglot":
+            batch_size = 5
+            assert example_inputs[0].shape[0] == batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
