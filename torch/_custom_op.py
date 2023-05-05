@@ -279,6 +279,15 @@ class CustomOp:
 
         return inner
 
+    def impl_factory(self) -> typing.Callable:
+        r"""Register an implementation for a factory function."""
+
+        def inner(f):
+            library.impl(self._lib, self._opname, "BackendSelect")(f)
+            return f
+
+        return inner
+
     def impl_abstract(self) -> typing.Callable:
         r"""Register an abstract implementation for this operator.
 
@@ -429,11 +438,6 @@ def validate_schema(schema: FunctionSchema) -> None:
     if is_non_mutating_view:
         raise ValueError(f"custom_op does not support view functions. Got: {schema}")
 
-    # Requires us to have handling for factory functions
-    if not schema.arguments.has_tensor_arg():
-        raise ValueError(
-            f"custom_op does not support function schema with no Tensor inputs. Got: {schema}"
-        )
     # Just seems weird so banning for now
     if not schema.returns:
         raise ValueError(
@@ -709,12 +713,15 @@ def parse_param(name, param, error_fn):
     return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
 
 
-def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
+def derived_types(
+    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+):
     result = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
-        (typing.Tuple[base_type, ...], f"{cpp_type}[]"),
     ]
+    if list_base:
+        result.append((typing.Tuple[base_type, ...], f"{cpp_type}[]"))
     if optional_base_list:
         result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
     if optional_list_base:
@@ -724,12 +731,15 @@ def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
 
 def get_supported_param_types():
     data = [
-        # (python type, schema type, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, False),
-        (int, "SymInt", False, True),
-        (float, "float", False, True),
-        (bool, "bool", False, True),
-        (torch.types.Number, "Scalar", False, False),
+        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
+        (torch.Tensor, "Tensor", True, True, False),
+        (int, "SymInt", True, False, True),
+        (float, "float", True, False, True),
+        (bool, "bool", True, False, True),
+        (str, "str", False, False, False),
+        (torch.types.Number, "Scalar", True, False, False),
+        (torch.dtype, "ScalarType", False, False, False),
+        (torch.device, "Device", False, False, False),
     ]
     result = []
     for line in data:

@@ -414,8 +414,12 @@ def _linalg_svd_meta(
 
         V_shape = batch_dims + [n if full_matrices else k, n]
         V = A.new_empty(V_shape)
-        # TODO: need to distinguish cuSOLVER case? (see original code)
-        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=False))
+        # NB: This checks for CUDA since there is no way to check for cuSolver.
+        # Also, this might not work correctly on CPU when fake_device is not
+        # available as device_hint just defaults to CUDA in that case. See
+        # _linalg_svd meta in core.
+        is_cuda = device_hint(A) == "cuda"
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))
     else:
         # doesn't matter
         U = A.new_empty([0])
