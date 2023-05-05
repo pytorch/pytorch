@@ -323,7 +323,7 @@ class ModuleContextCheckpointState:
     """
 
     def diff(self, other):
-        r = self.nn_modules.keys().difference(other.nn_modules.keys())
+        r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
         if len(r) == 0:
             return None
         return r
