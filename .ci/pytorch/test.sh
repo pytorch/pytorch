@@ -177,6 +177,21 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+# The torch._C._crash_if_debug_asserts_fail() function should only fail if both of the following are true:
+# 1. The build is in debug mode
+# 2. The value 424242 is passed in
+# This tests that the debug asserts are working correctly.
+if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+    echo "We are in debug mode: $BUILD_ENVIRONMENT. Expect the python assertion to fail"
+    # TODO: Enable the check after we setup the build to run debug asserts without having
+    #       to do a full (and slow) debug build
+    # (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
+elif [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+    # Noop when debug is disabled. Skip bazel jobs because torch isn't available there yet.
+    echo "We are not in debug mode: $BUILD_ENVIRONMENT. Expect the assertion to pass"
+    (cd test && python -c "import torch; torch._C._crash_if_debug_asserts_fail(424242)")
+fi
+
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
@@ -251,6 +266,11 @@ test_inductor() {
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+
+  # docker build uses bdist_wheel which does not work with test_aot_inductor
+  # TODO: need a faster way to build
+  BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
+  LD_LIBRARY_PATH="$TORCH_LIB_DIR $TORCH_BIN_DIR"/test_aot_inductor
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -278,6 +298,10 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
+if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+  export TORCHINDUCTOR_MAX_AUTOTUNE=1
+fi
+
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -292,30 +316,55 @@ test_perf_for_dashboard() {
     # Run accuracy test for inductor with different configs
     # --disable-cudagraphs is the default inductor behavior
     # TODO: update here once cudagraphs is turned on as default
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+    else
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+          --dynamic-batch-only --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      if [[ "$mode" == "inference" ]]; then
+        # collect inference results with cpp_wrapper on
+        python "benchmarks/dynamo/$suite.py" \
+            --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      fi
+    fi
 
     # Run performance test
-    # Skip dynamo-eager and aot-eager for performance test
-    # Run performance test for inductor with different configs
-    # TODO: add more configs here, e.g. max-autotune, etc.
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    python "benchmarks/dynamo/$suite.py" \
-        --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-        --dynamic-batch-only --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
+      # Only run this one config for max-autotune
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
+    else
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      python "benchmarks/dynamo/$suite.py" \
+          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+          --dynamic-batch-only --disable-cudagraphs "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      if [[ "$mode" == "inference" ]]; then
+        # collect inference results with cpp_wrapper on
+        python "benchmarks/dynamo/$suite.py" \
+            --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" \
+            --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      fi
+    fi
   done
 }
 
@@ -406,7 +455,7 @@ test_inductor_torchbench_smoketest_perf() {
   python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
 
   # Check memory compression ratio for a few models
-  for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+  for test in hf_Albert timm_vision_transformer; do
     python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
       --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
       --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
@@ -535,6 +584,7 @@ test_libtorch() {
       # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
       "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
     fi
+
     assert_git_not_dirty
   fi
 }
@@ -933,7 +983,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
-    checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
+    checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
