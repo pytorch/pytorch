@@ -4,7 +4,6 @@ import sys
 import unittest
 
 import torch
-
 import torch._dynamo
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
@@ -13,7 +12,11 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import DeterministicGuard, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    TEST_WITH_ASAN,
+    DeterministicGuard,
+)
 
 try:
     try:
@@ -111,6 +114,9 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @unittest.skipIf(
+        IS_FBCODE, "RuntimeError: Triton Error [CUDA]: invalid device context"
+    )
     def test_backward_context(self):
         def fn(x):
             return x * 3
