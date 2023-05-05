@@ -1731,9 +1731,6 @@ def emit_body(
             return f'_any_has_forward_grad_{"_".join(var_names)}'
 
     def emit_any_has_forward_grad() -> List[str]:
-        # todo(crcrpar): enable forward AD for foreach. Out-place don't have formulas now.
-        if is_inplace_foreach and False:
-            return []
         content: List[str] = []
         for derivative in fw_derivatives:
             requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
