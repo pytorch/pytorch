@@ -855,7 +855,9 @@ def export(
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(inspect.signature(f))
         if constraint_violation_error:
-            constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
         else:
             log.warning(
                 "Summary of dimension constraints:%s",

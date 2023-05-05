@@ -1698,7 +1698,7 @@ class DimConstraints:
             buf += f"\n```\ndef specializations{str(signature)}:"
             for result in sorted_static_results:
                 buf += f"\n{indent}assert {result}"
-            buf += f"\n```\n"
+            buf += "\n```\n"
         if self._dynamic_results:
             sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
