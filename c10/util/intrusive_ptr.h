@@ -5,7 +5,6 @@
 #include <atomic>
 #include <climits>
 #include <memory>
-#include <stdexcept>
 
 namespace pybind11 {
 template <typename, typename...>
