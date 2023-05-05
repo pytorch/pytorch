@@ -25,12 +25,10 @@ void manual_seed(uint64_t seed) {
 }
 
 void synchronize() {
-  TORCH_CHECK(is_available(), "No MPS devices are available");
-  at::detail::getMPSHooks().synchronizeStream();
+  at::detail::getMPSHooks().deviceSynchronize();
 }
 
 void commit() {
-  TORCH_CHECK(is_available(), "No MPS devices are available");
   at::detail::getMPSHooks().commitStream();
 }
 

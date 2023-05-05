@@ -24,9 +24,11 @@ bool TORCH_API is_available();
 void TORCH_API manual_seed(uint64_t seed);
 
 /// Waits for all streams on a MPS device to complete.
+/// See this link for more info:
+/// https://developer.apple.com/documentation/metal/mtlcommandbuffer/1443039-waituntilcompleted
 void TORCH_API synchronize();
 
-/// Submits the command buffer to run on the GPU
+/// Submits the currently active command buffer to run on the MPS device
 void TORCH_API commit();
 
 /// Get the current command buffer to encode the Metal commands

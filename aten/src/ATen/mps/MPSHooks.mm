@@ -43,7 +43,7 @@ const Generator& MPSHooks::getDefaultMPSGenerator() const {
   return at::mps::detail::getDefaultMPSGenerator();
 }
 
-void MPSHooks::synchronizeStream() const {
+void MPSHooks::deviceSynchronize() const {
   at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
