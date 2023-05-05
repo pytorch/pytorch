@@ -118,7 +118,9 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} ^= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
-    return f"{var} = std::{reduction_type}({var}, {next_value})"
+    if reduction_type in ("min", "max"):
+        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+    raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
@@ -206,7 +208,7 @@ class CppPrinter(ExprPrinter):
         mod = self.paren(self.doprint(mod))
         if div != "1":
             x = f"({x} / {div})"
-        return f"{x} % {mod}"
+        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
@@ -518,8 +520,21 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
+    # TODO: this seems to be dead
     @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
@@ -547,14 +562,6 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
@@ -596,7 +603,15 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def log1p(x):
-        return f"{x}.log1p()"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x}.log1p()"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def masked(mask, body, other):
@@ -689,7 +704,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log1p(x):
-        return f"std::log1p({x})"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"std::log1p({x})"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def tan(x):
@@ -813,23 +836,27 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"{x} * ({x}>0)"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x} * ({x}>0)"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def minimum(a, b):
-        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
+        return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"std::min({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
