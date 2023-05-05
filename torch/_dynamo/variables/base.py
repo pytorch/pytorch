@@ -46,7 +46,7 @@ class VariableTracker(metaclass=HasPostInit):
         guards = set()
 
         def visit(var):
-            if type(var) in (list, tuple, dict_values, odict_values):
+            if type(var) in (list, tuple, set, dict_values, odict_values):
                 for i in var:
                     visit(i)
             else:
