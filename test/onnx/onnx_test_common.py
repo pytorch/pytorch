@@ -315,6 +315,12 @@ def run_ort(
         ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
+    if len(input_names) != len(pytorch_inputs):
+        raise AssertionError(
+            f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
+        )
+
     return session.run(
         None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     )

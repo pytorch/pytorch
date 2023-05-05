@@ -225,8 +225,8 @@ class MergeKwargsIntoArgsStep:
         return tuple(model_args) + tuple(model_kwargs.values()), {}
 
 
-class AppendPositionalsIntoArgsStep:
-    """Merge the input kwargs into the input args."""
+class LiftParametersAndBuffersIntoArgsStep:
+    """Append parameters and buffers to model's positional argument list."""
 
     def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
         self.inputs = inputs
@@ -234,14 +234,14 @@ class AppendPositionalsIntoArgsStep:
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
     ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Merge the input kwargs into the input args.
+        """Append model's parameters and buffers into its input.
 
         Args:
             model_args: The model args.
             model_kwargs: The model kwargs.
 
         Returns:
-            A tuple of the model args and kwargs, plus all extra appended inputs.
+            A tuple of the model args + appended inputs and kwargs.
         """
         return (*model_args, *self.inputs), model_kwargs
 

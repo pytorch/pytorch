@@ -220,7 +220,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         )
         graph_module = replace_get_attr_with_placeholder_pass.run()
         replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
-        append_extra_input_step = io_adapter.AppendPositionalsIntoArgsStep(
+        append_extra_input_step = io_adapter.LiftParametersAndBuffersIntoArgsStep(
             replaced_attrs
         )
         self.input_adapter.append_step(append_extra_input_step)
