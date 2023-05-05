@@ -1479,7 +1479,12 @@ def main():
     # NB: This is a hack to make conftest.py available on CPP_TESTS_DIR. We should
     # see if the file could be turned into a full-fledge ptest plugin instead
     cpp_conftest_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
-    if not os.path.exists(cpp_conftest_file) or not os.path.isfile(cpp_conftest_file):
+    if (
+        options.cpp
+        and os.path.exists(CPP_TESTS_DIR)
+        and os.path.isdir(CPP_TESTS_DIR)
+        and not os.path.exists(cpp_conftest_file)
+    ):
         # Take the conftest file from the test directory
         shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
 
