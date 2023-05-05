@@ -80,7 +80,7 @@ constexpr std::array<TagToIOType, tagCount> tag_map = {{
     {InputOutputEncoder::Tag::TensorListBegin,
      InputOutputEncoder::IOType::Shapes},
     {InputOutputEncoder::Tag::ScalarList,
-     InputOutputEncoder::IOType::ConcreteArgs},
+     InputOutputEncoder::IOType::ConcreteInputs},
     {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
     {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
     {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
@@ -143,6 +143,9 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 
 bool InputOutputEncoder::isSupportedScalarList(
     const c10::IValue& list_candidate) {
+  // Scalar list can be very long. If a list is too long, we shouldn't
+  // collect it. This function checks whether the list is a scalar list
+  // and whether its length is sufficiently short.
   if (!list_candidate.isList()) {
     return false;
   }
@@ -237,12 +240,12 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
   };
 }
 
-auto InputOutputEncoder::getNextShapesAndDtypes() {
+auto InputOutputEncoder::getInputShapeGenerator() {
   return getIValueGenerator(IOType::Shapes);
 }
 
-auto InputOutputEncoder::getConcreteArgGenerator() {
-  return getIValueGenerator(IOType::ConcreteArgs);
+auto InputOutputEncoder::getConcreteInputGenerator() {
+  return getIValueGenerator(IOType::ConcreteInputs);
 }
 
 void InputOutputEncoder::clear() {
@@ -405,7 +408,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
-  auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
+  auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
+  auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
   // TODO: CTAD will take care of template args when we move to C++17
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
@@ -418,7 +422,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         std::move(event->basic_fields_),
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
-        input_getter(),
+        input_shape_getter(),
+        concrete_input_getter(),
         jit_stack(),
         jit_module(),
         extra_args(),
