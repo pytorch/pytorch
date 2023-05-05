@@ -4762,7 +4762,7 @@ class TestSparseAny(TestCase):
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @dtypes(torch.int8, torch.half)
-    def test_two_four_sparse_linear(self, device, dtype):
+    def test_structured_sparse_linear(self, device, dtype):
         def make_tensor(shape, dtype):
             if dtype.is_complex:
                 return torch.zeros(shape, dtype=dtype)
@@ -4798,10 +4798,10 @@ class TestSparseAny(TestCase):
                 dtype_dense = torch.float
                 c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense))
 
-                c0, meta = torch._two_four_sparse_linear(a_sparse, b, mask)
+                c0, meta = torch._structured_sparse_linear(a_sparse, b, mask)
                 torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
-                c0, _ = torch._two_four_sparse_linear(a_sparse, b, meta)
+                c0, _ = torch._structured_sparse_linear(a_sparse, b, meta)
                 torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
 
         is_sm8x = torch.cuda.get_device_capability(0)[0] == 8

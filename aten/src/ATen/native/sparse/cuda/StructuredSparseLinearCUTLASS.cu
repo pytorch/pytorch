@@ -127,7 +127,7 @@ __global__ void two_four_reorder_meta_kernel(
 }
 
 // Wrapper function for CUTLASS sparse GEMM implementation, used
-// solely to simplify dispatching from _two_four_sparse_linear()
+// solely to simplify dispatching from _structured_sparse_linear()
 // function below.
 template <
     typename ElementInputA,
@@ -191,14 +191,14 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
     constexpr auto input_a_is_half =
         std::is_same<ElementInputA, cutlass::half_t>::value;
     TORCH_CHECK(length_m % 32 == 0,
-        "torch._two_four_sparse_linear: Number of rows of sparse matrix must "
+        "torch._structured_sparse_linear: Number of rows of sparse matrix must "
         "be divisible by 32");
     TORCH_CHECK(length_k % (input_a_is_half ? 64 : 128) == 0,
-        "torch._two_four_sparse_linear: Number of rows of dense matrix must be "
-        "divisible by ", (input_a_is_half ? 64 : 128));
+        "torch._structured_sparse_linear: Number of rows of dense matrix must "
+        "be divisible by ", (input_a_is_half ? 64 : 128));
     TORCH_CHECK(length_n % (input_a_is_half ? 8 : 16) == 0,
-        "torch._two_four_sparse_linear: Number of columns of dense matrix must "
-        "be divisible by ", (input_a_is_half ? 8 : 16));
+        "torch._structured_sparse_linear: Number of columns of dense matrix "
+        "must be divisible by ", (input_a_is_half ? 8 : 16));
 
     // Determine PyTorch datatype for the output matrix.
     auto tensor_d_dtype = at::kChar;
@@ -209,7 +209,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
         tensor_d_dtype = at::kHalf;
     }
     else {
-        AT_ERROR("torch._two_four_sparse_linear: invalid sparse GEMM output "
+        AT_ERROR("torch._structured_sparse_linear: invalid sparse GEMM output "
                  "datatype encountered");
     }
 
@@ -227,14 +227,14 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 
         // Check dimensions and format of the mask matrix.
         TORCH_CHECK(mask.layout() == Layout::Strided,
-            "torch._two_four_sparse_linear: Expected mask argument to be "
+            "torch._structured_sparse_linear: Expected mask argument to be "
             "strided, but got layout ", mask.layout());
         TORCH_CHECK(mask.dim() == 2,
-            "torch._two_four_sparse_linear: Expected mask argument to be 2D "
+            "torch._structured_sparse_linear: Expected mask argument to be 2D "
             "tensor, got ", mask.dim(), " dims");
         const auto strides_mask = mask.strides();
         TORCH_CHECK(strides_mask[1] == 1,
-            "torch._two_four_sparse_linear: Invalid strides for mask_or_meta "
+            "torch._structured_sparse_linear: Invalid strides for mask_or_meta "
             "argument: row stride = ", strides_mask[0], ", column stride = ",
                 strides_mask[1]);
 
@@ -250,7 +250,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
             meta_dtype = at::kInt;
             break;
         default:
-            AT_ERROR("torch._two_four_sparse_linear: invalid size of meta "
+            AT_ERROR("torch._structured_sparse_linear: invalid size of meta "
                      "tensor datatype encountered");
         }
 
@@ -269,7 +269,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
                 (int*)error.data_ptr());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
         TORCH_CHECK(error.item().equal(0),
-                    "torch._two_four_sparse_linear: Mask matrix is not 2:4 "
+                    "torch._structured_sparse_linear: Mask matrix is not 2:4 "
                     "sparse");
 
         // Create tensor for reordered metadata matrix, and run CUDA
@@ -384,10 +384,10 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 // with regards to sizes and alignments of input tensors, their
 // layouts and datatypes, and so on; this is the reason for large
 // number of checks throughout the code.
-std::tuple<Tensor, Tensor> _two_four_sparse_linear(
+std::tuple<Tensor, Tensor> _structured_sparse_linear(
       const Tensor& tensor_a, const Tensor& tensor_b,
       const Tensor& mask_or_meta) {
-#ifndef CUDA_ROCM
+#ifndef USE_ROCM
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
 
@@ -395,30 +395,30 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
     const auto dprops = at::cuda::getCurrentDeviceProperties();
     const auto is_sm8x = dprops->major == 8;
     TORCH_CHECK(is_sm8x,
-                "torch._two_four_sparse_linear: Supported only on GPUs with "
+                "torch._structured_sparse_linear: Supported only on GPUs with "
                 "compute capability 8.x");
 
     // Validate layouts of input tensors.
     TORCH_CHECK(tensor_a.layout() == Layout::Strided,
-                "torch._two_four_sparse_linear: Expected tensor_a argument to "
-                "be strided, but got layout ", tensor_a.layout());
+                "torch._structured_sparse_linear: Expected tensor_a argument "
+                "to be strided, but got layout ", tensor_a.layout());
     TORCH_CHECK(tensor_a.dim() == 2,
-                "torch._two_four_sparse_linear: Expected tensor_a argument to "
-                "be 2D tensor, got ", tensor_a.dim(), " dims");
+                "torch._structured_sparse_linear: Expected tensor_a argument "
+                "to be 2D tensor, got ", tensor_a.dim(), " dims");
     const auto strides_a = tensor_a.strides();
     TORCH_CHECK((strides_a[0] == 1 || strides_a[1] == 1) && strides_a[0] != strides_a[1],
-                "torch._two_four_sparse_linear: Invalid strides for tensor_a "
+                "torch._structured_sparse_linear: Invalid strides for tensor_a "
                 "argument: row stride = ", strides_a[0], ", column stride = ",
                 strides_a[1]);
     TORCH_CHECK(tensor_b.layout() == Layout::Strided,
-                "torch._two_four_sparse_linear: Expected tensor_b argument to "
-                "be strided, but got layout ", tensor_b.layout());
+                "torch._structured_sparse_linear: Expected tensor_b argument "
+                "to be strided, but got layout ", tensor_b.layout());
     TORCH_CHECK(tensor_b.dim() == 2,
-                "torch._two_four_sparse_linear: Expected tensor_b argument to "
-                "be 2D tensor, got ", tensor_b.dim(), " dims");
+                "torch._structured_sparse_linear: Expected tensor_b argument "
+                "to be 2D tensor, got ", tensor_b.dim(), " dims");
     const auto strides_b = tensor_b.strides();
     TORCH_CHECK((strides_b[0] == 1 || strides_b[1] == 1) && strides_b[0] != strides_b[1],
-                "torch._two_four_sparse_linear: Invalid strides for tensor_b "
+                "torch._structured_sparse_linear: Invalid strides for tensor_b "
                 "argument: row stride = ", strides_b[0], ", column stride = ",
                 strides_b[1]);
 
@@ -438,7 +438,7 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
     std::tuple<Tensor, Tensor> result;
     AT_DISPATCH_SWITCH(
         tensor_a.scalar_type(),
-        "_two_four_sparse_linear",
+        "_structured_sparse_linear",
         AT_DISPATCH_CASE(
             at::ScalarType::Char,
             [&]() {
@@ -475,7 +475,7 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
                         mask_or_meta);
                     return;
                 }
-                AT_ERROR("torch._two_four_sparse_linear: Combination of "
+                AT_ERROR("torch._structured_sparse_linear: Combination of "
                          "tensor_a in ",
                          tensor_a_row_major ? "row-major" : "column_major",
                          " layout and tensor_b in ",
@@ -581,7 +581,7 @@ std::tuple<Tensor, Tensor> _two_four_sparse_linear(
             }));
     return result;
 #else
-    AT_ERROR("torch._two_four_sparse_linear: ROCm doesn't support CUTLASS");
+    AT_ERROR("torch._structured_sparse_linear: ROCm doesn't support CUTLASS");
     return std::make_tuple(Tensor{}, Tensor{});
 #endif
 }
