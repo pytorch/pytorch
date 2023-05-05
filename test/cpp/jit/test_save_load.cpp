@@ -153,15 +153,14 @@ TEST(SerializationTest, TypeTags) {
 }
 
 TEST(SerializationTest, SaveStateDict) {
-
   // Requires the state_dict that should have been written in tests_setup.py
   // Refer: SaveStateDict in test/cpp/jit/tests_setup.py
   std::ifstream file("state_dict.pt", std::ios::binary);
-  std::vector<char> data((std::istreambuf_iterator<char>(file)),
-                         std::istreambuf_iterator<char>());
+  std::vector<char> data(
+      (std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
   auto dict = torch::pickle_load(data).toGenericDict();
 
-  for (auto& el: dict) {
+  for (auto& el : dict) {
     auto key = el.key().toStringRef();
     auto ten = el.value().toTensor();
     if (key == "weight") {

@@ -511,7 +511,7 @@ PickleOpCode Unpickler::readInstruction() {
           "Parsing error: stack_ contains ",
           stack_.size(),
           " elements, at least 2 expected");
-      
+
       // In the OrderedDict case, the id has already been materialized
       // and added to the stack, thus there's no <functor_idx> but a Dict
       // there, in this case we can just pop the functor args and break.
@@ -622,7 +622,7 @@ PickleOpCode Unpickler::readInstruction() {
           (dict_pos < stack_size) && (key_pos < stack_size) &&
               (val_pos < stack_size),
           "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
-      
+
       auto dict = stack_.at(dict_pos).toGenericDict();
       dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
       stack_.erase(stack_.begin() + (key_pos), stack_.end());
@@ -769,9 +769,9 @@ void Unpickler::readGlobal(
     // Python's model.state_dict() is an OrderedDict, but this is not used
     // for model loading.
     globals_.emplace_back([this] {
-        // The OrderedDict becomes a GenericDict. The inputs which are in stack.back()
-        // are fully ignored, but they are empty anyways.
-        stack_.back() = c10::impl::GenericDict(AnyType::get(), AnyType::get());
+      // The OrderedDict becomes a GenericDict. The inputs which are in
+      // stack.back() are fully ignored, but they are empty anyways.
+      stack_.back() = c10::impl::GenericDict(AnyType::get(), AnyType::get());
     });
   } else if (module_name == "torch" && class_name == "device") {
     globals_.emplace_back([this] {
