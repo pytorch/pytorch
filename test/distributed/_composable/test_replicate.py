@@ -140,6 +140,30 @@ class ReplicateTest(MultiProcessTestCase):
         self._compare_module(model, replicate_model)
 
     @skip_if_lt_x_gpu(2)
+    def test_replicate_move_args_kwargs_to_device(self):
+        class MyNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(2, 2)
+
+            def forward(self, inp, *, kwarg=None):
+                if kwarg is not None:
+                    inp = inp @ kwarg
+                return self.a(inp)
+
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch.cuda.set_device(self.rank)
+        model = MyNet().cuda()
+        replicate(model, device_ids=[torch.cuda.current_device()])
+        a, b = torch.randn(2, 2), torch.randn(2, 2)
+        model(a, kwarg=b).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
     def test_replicate_ignore_module(self):
         dist.init_process_group(
             backend="gloo",
@@ -153,6 +177,7 @@ class ReplicateTest(MultiProcessTestCase):
         torch.cuda.manual_seed(self.rank)
         model = Net().cuda()
         replicate(model, ignored_modules=[model.fc1])
+        # CPU input ensures that replicate can move input to GPU as DDP does.
         inp = torch.randn(5, 2, device="cuda") * (self.rank + 1)
         out = model(inp) * 10
         out.sum().backward()
