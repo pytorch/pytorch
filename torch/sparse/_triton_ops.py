@@ -63,14 +63,14 @@ def ptr_stride_extractor(*tensors):
         yield t
         yield from t.stride()
 
-def grid_partitioner(full_grid, max_grid, tensor_dims_map):
+def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
     assert 0 <= len(full_grid) <= 3
-    assert 0 <= len(max_grid) <= 3
+    assert 0 <= len(grid_blocks) <= 3
 
     import itertools
 
     def generate_grid_points():
-        for fg, mg in zip(full_grid, max_grid):
+        for fg, mg in zip(full_grid, grid_blocks):
             yield range(0, fg, mg)
 
     def generate_sliced_tensors(slices):
@@ -78,18 +78,18 @@ def grid_partitioner(full_grid, max_grid, tensor_dims_map):
             yield next(multidim_slicer(t_dims, slices, t))
 
     for grid_point in itertools.product(*generate_grid_points()):
-        grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, max_grid)]
+        grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)]
         slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
         # grid_points are iterated in a "contiguous" order, i.e.
         # left dimensions traversed slower than right dimensions.
         # This order is reversed for CUDA grids.
         yield grid[::-1], *generate_sliced_tensors(slices)
 
-def launch_kernel(kernel, tensor_dims_map, full_grid, max_grid=None):
+def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
     # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
-    cuda_max_grid = (2147483647, 65535, 65535)
-    if max_grid is None:
-        max_grid = cuda_max_grid
+    cuda_max_grid = (2147483647, 65535, 65535)[::-1]
+    if grid_blocks is None:
+        grid_blocks = cuda_max_grid
     else:
 
         def valid_grid_dim(g, mg):
@@ -99,11 +99,11 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, max_grid=None):
                 # grid must be at least 1 and no greater than mg
                 return max(1, min(g, mg))
 
-        max_grid = tuple(
-            valid_grid_dim(g, mg) for g, mg in zip(max_grid, cuda_max_grid)
+        grid_blocks = tuple(
+            valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
         )  # type: ignore[assignment]
 
-    for grid, *sliced_tensors in grid_partitioner(full_grid, max_grid, tensor_dims_map):
+    for grid, *sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
         kernel(grid, *sliced_tensors)
 
 if _has_triton():
@@ -381,7 +381,7 @@ if _has_triton():
                 num_warps=4
             )
 
-        launch_kernel(kernel, tensor_dims_map, full_grid, max_grid)
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
     def _run_dense_rowspace_kernel(
@@ -411,7 +411,7 @@ if _has_triton():
                 num_warps=4
             )
 
-        launch_kernel(kernel, tensor_dims_map, full_grid, max_grid)
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
     def bsr_dense_mm(
