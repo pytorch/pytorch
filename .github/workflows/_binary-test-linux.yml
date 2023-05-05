@@ -173,7 +173,7 @@ jobs:
       - name: Check if the job is disabled
         if: ${{ github.event.workflow_run.head_branch != 'nightly' }}
         id: filter
-        uses: ./.github/actions/filter-test-configs
+        uses: ./pytorch/.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # NB: Use a mock test matrix with a default value here. After filtering, if the
