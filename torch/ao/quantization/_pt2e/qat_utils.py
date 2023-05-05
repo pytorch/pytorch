@@ -4,7 +4,7 @@ from typing import Any, Callable, Tuple
 
 import torch
 from torch.fx import Graph, GraphModule, Node
-from torch.fx.subgraph_rewriter import _replace_pattern
+from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 
 
@@ -157,7 +157,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
         _fused_qat_conv2d_bn_pattern,
         example_inputs,
     )
-    mr_with_conv_bias = _replace_pattern(
+    replacements_with_conv_bias = replace_pattern_with_filters(
         m,
         match_pattern,
         replacement_pattern_with_conv_bias,
@@ -172,7 +172,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
         _fused_qat_conv2d_bn_pattern_no_conv_bias,
         example_inputs,
     )
-    mr_no_conv_bias = _replace_pattern(
+    replacements_no_conv_bias = replace_pattern_with_filters(
         m,
         match_pattern,
         replacement_pattern_no_conv_bias,
@@ -196,12 +196,12 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     # subgraph rewriter as possible, so we don't have to manually copy anything over.
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
-    for mr in mr_with_conv_bias + mr_no_conv_bias:
+    for r in replacements_with_conv_bias + replacements_no_conv_bias:
         # Find replacement conv and bn nodes by climbing upwards from anchor node
-        assert len(mr.replacements) == 1, "expected only one replacement node"
+        assert len(r.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
         replacement_bn_node = None
-        replacement_getitem_node = mr.replacements[0]
+        replacement_getitem_node = r.replacements[0]
         assert replacement_getitem_node.target == operator.getitem
         n = replacement_getitem_node
         while replacement_conv_node is None or replacement_bn_node is None:
@@ -214,7 +214,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
 
         # Copy over metadata for all three nodes in [conv - bn - getitem]
         # Also copy over constant args for conv
-        for match_pattern_node, original_node in mr.nodes_map.items():
+        for match_pattern_node, original_node in r.nodes_map.items():
             # bias can be None
             if original_node is None:
                 continue

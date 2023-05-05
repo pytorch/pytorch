@@ -203,6 +203,7 @@ def replace_pattern_with_filters(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
+    ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -214,7 +215,7 @@ def replace_pattern_with_filters(
             See matcher_utils.py for definition of InternalMatch.
     """
 
-    return _replace_pattern(gm, pattern, replacement, match_filters)
+    return _replace_pattern(gm, pattern, replacement, match_filters, ignore_literals)
 
 
 def _replace_pattern(
