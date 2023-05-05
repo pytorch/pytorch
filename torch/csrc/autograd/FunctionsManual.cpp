@@ -935,7 +935,7 @@ Tensor logcumsumexp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
     int64_t dim) {
-  // Mostly taken from longsumexp_jvp
+  // Mostly taken from logsumexp_jvp
 
   // NB: for simplicity, we recompute some values that can be reused from
   // forward
