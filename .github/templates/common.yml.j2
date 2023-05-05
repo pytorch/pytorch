@@ -57,7 +57,8 @@ concurrency:
 {%- macro apply_filter() -%}
       - name: Check if the job is disabled
         id: filter
-        uses: ./.github/actions/filter-test-configs
+        # Binary workflows checkout to pytorch subdirectory instead
+        uses: ./pytorch/.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # NB: Use a mock test matrix with a default value here. After filtering, if the

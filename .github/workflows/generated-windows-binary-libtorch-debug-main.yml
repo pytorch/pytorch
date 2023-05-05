@@ -111,14 +111,15 @@ jobs:
         working-directory: builder
       - name: Check if the job is disabled
         id: filter
-        uses: ./.github/actions/filter-test-configs
+        # Binary workflows checkout to pytorch subdirectory instead
+        uses: ./pytorch/.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # NB: Use a mock test matrix with a default value here. After filtering, if the
           # returned matrix is empty, it means that the job is disabled
           test-matrix: |
             { include: [
-              { config: "default", shard: 1, num_shards: 1 },
+              { config: "default" },
             ]}
       - name: Populate binary env
         if: steps.filter.outputs.is-test-matrix-empty == 'False'
@@ -242,14 +243,15 @@ jobs:
         working-directory: builder
       - name: Check if the job is disabled
         id: filter
-        uses: ./.github/actions/filter-test-configs
+        # Binary workflows checkout to pytorch subdirectory instead
+        uses: ./pytorch/.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # NB: Use a mock test matrix with a default value here. After filtering, if the
           # returned matrix is empty, it means that the job is disabled
           test-matrix: |
             { include: [
-              { config: "default", shard: 1, num_shards: 1 },
+              { config: "default" },
             ]}
       - name: Populate binary env
         if: steps.filter.outputs.is-test-matrix-empty == 'False'
