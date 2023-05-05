@@ -330,9 +330,13 @@ std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
   std::vector<std::string> concrete_str_inputs;
   std::stringstream ss;
   for (const auto& val : list) {
-    ss.clear();
-    ss << val;
-    concrete_str_inputs.emplace_back(ss.str());
+    if (val.isNone()) {
+      concrete_str_inputs.emplace_back("");
+    } else {
+      ss.str("");
+      ss << val;
+      concrete_str_inputs.emplace_back(ss.str());
+    }
   }
   return strListToStr(concrete_str_inputs);
 }
