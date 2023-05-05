@@ -16,7 +16,7 @@ def zip_folder(folder_to_zip, dest_file_base_name):
 
     ensure_dir_exists(os.path.dirname(dest_file_base_name))
 
-    print(f"Zipping {folder_to_zip} to {dest_file_base_name}")
+    print(f"Zipping {folder_to_zip}\n     to {dest_file_base_name}")
     return shutil.make_archive(dest_file_base_name, "zip", folder_to_zip)
 
 
@@ -58,7 +58,7 @@ def sanitize_for_s3(text):
 
 
 def upload_file_to_s3(file_name, bucket, key):
-    print(f"Uploading {file_name} to s3://{bucket}/{key}...", end="")
+    print(f"Uploading {file_name}\n        to s3://{bucket}/{key}...", end="")
 
     boto3.client("s3").upload_file(
         file_name,
@@ -78,7 +78,7 @@ def download_s3_objects_with_prefix(bucket, prefix, download_folder):
     for obj in bucket.objects.filter(Prefix=prefix):
         download_path = os.path.join(download_folder, obj.key)
         ensure_dir_exists(os.path.dirname(download_path))
-        print(f"Downloading s3://{bucket.name}/{obj.key} to {download_path}...", end="")
+        print(f"Downloading s3://{bucket.name}/{obj.key}\n         to {download_path}...", end="")
 
         s3.Object(bucket.name, obj.key).download_file(download_path)
         downloads.append(download_path)
