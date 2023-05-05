@@ -894,11 +894,12 @@ static std::unordered_set<std::string> ts_output_names;
 
 std::unique_ptr<at::ObserverContext> tracedInputsCallback(
     const RecordFunction& fn) {
+  TORCH_CHECK(!at::GradMode::is_enabled());
+  TORCH_CHECK(!c10::AutogradState::get_tls_state().get_fw_grad_mode());
   if (fn.scope() == RecordScope::FUNCTION) {
     auto inputs = fn.inputs();
     std::vector<std::vector<int64_t>> sizes;
     for (const auto& input : inputs) {
-      TORCH_CHECK(!at::GradMode::is_enabled());
       if (input.isTensor()) {
         sizes.push_back(input.toTensor().sizes().vec());
       } else if (input.isScalar()) {
