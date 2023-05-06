@@ -316,6 +316,13 @@ def set_logs(
     )
 
 
+def get_loggers():
+    """
+    Returns: a list of all registered loggers
+    """
+    return [logging.getLogger(qname) for qname in log_registry.get_log_qnames()]
+
+
 def register_log(setting_name, log_name):
     """
     Enables a log to be controlled by the env var and user API with the setting_name
