@@ -81,14 +81,6 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      #   # Temp for testing
-      # - name: Upload pytest cache
-      #   uses: ./.github/actions/pytest-cache-upload
-      #   with:
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     cache_dir: .pytest_cache
-      #     # shard: ${{ matrix.shard }}
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
@@ -111,14 +103,6 @@ jobs:
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Just for testing
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build_environment }}_${{ github.job }}_default
 
       # Apply the filter logic to the build step too if the test-config label is already there
       - name: Select all requested test configurations (if the test matrix is available)
