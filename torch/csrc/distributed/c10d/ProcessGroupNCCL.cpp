@@ -2380,9 +2380,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
             comm,
             stream.stream());
       },
-      [](std::vector<at::cuda::CUDAStream>&,
-         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-      [](std::vector<at::cuda::CUDAStream>&) {},
       OpType::_REDUCE_SCATTER_BASE,
       "nccl:_reduce_scatter_base");
 }
@@ -2943,9 +2940,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
             comm,
             stream.stream());
       },
-      [&](std::vector<at::cuda::CUDAStream>&,
-          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-      [&](std::vector<at::cuda::CUDAStream>&) {},
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base");
 }
