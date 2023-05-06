@@ -2138,6 +2138,9 @@ class BufferList(IRNode):
     def get_device(self):
         return self.data.layouts[0].device
 
+    def get_layout(self):
+        return MultiOutputLayout(self.get_device())
+
     def get_layouts(self):
         return self.data.layouts
 
