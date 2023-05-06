@@ -297,6 +297,74 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
 }
 
+// inplace memory writing
+size_t
+PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return 0;
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  TORCH_CHECK(
+      n == stat.m_uncomp_size,
+      "record size ",
+      stat.m_uncomp_size,
+      " mismatch with dst size ",
+      n);
+  valid("retrieving file meta-data for ", name.c_str());
+  mz_zip_reader_extract_to_mem(ar_.get(), key, dst, stat.m_uncomp_size, 0);
+  valid("reading file ", name.c_str());
+
+  return stat.m_uncomp_size;
+}
+
+size_t PyTorchStreamReader::getRecord(
+    const std::string& name,
+    void* dst,
+    size_t n,
+    size_t chunk_size,
+    const std::function<void(void*, const void*, size_t)>& memcpy_func) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return 0;
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  TORCH_CHECK(
+      n == stat.m_uncomp_size,
+      "record size ",
+      stat.m_uncomp_size,
+      " mismatch with dst size ",
+      n);
+  valid("retrieving file meta-data for ", name.c_str());
+
+  mz_zip_reader_extract_iter_state* iter =
+      mz_zip_reader_extract_iter_new(ar_.get(), key, 0);
+  TORCH_CHECK(
+      iter != nullptr,
+      "Failed to create zip reader iter: ",
+      mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
+  std::vector<uint8_t> buf(chunk_size);
+  for (size_t offset = 0; offset < stat.m_uncomp_size; offset += chunk_size) {
+    size_t want_size =
+        std::min(chunk_size, (size_t)stat.m_uncomp_size - offset);
+    size_t read_size =
+        mz_zip_reader_extract_iter_read(iter, buf.data(), want_size);
+    TORCH_CHECK(
+        read_size == want_size,
+        "Failed to advance zip reader iter: ",
+        mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
+    memcpy_func((char*)dst + offset, buf.data(), read_size);
+  }
+  valid("reading file ", name.c_str());
+  mz_zip_reader_extract_iter_free(iter);
+
+  return stat.m_uncomp_size;
+}
+
 static int64_t read_le_16(uint8_t* buf) {
   return buf[0] + (buf[1] << 8);
 }

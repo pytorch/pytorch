@@ -1449,7 +1449,7 @@ def gradcheck(
     masked: Optional[bool] = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
-    gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
+    gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
@@ -1606,7 +1606,7 @@ def gradgradcheck(
     masked: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
-    against analytical gradients w.r.t. tensors in :attr:`inputs` and
+    against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
     ``requires_grad=True``.
 
