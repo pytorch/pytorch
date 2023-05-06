@@ -15,7 +15,11 @@ class Scheduling(ABC):
         pass
 
     @abstractmethod
-    def codegen_nodes(self, nodes):
+    def codegen_template(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def codegen_nodes(self, *args, **kwargs):
         pass
 
     @abstractmethod

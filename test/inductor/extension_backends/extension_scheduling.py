@@ -23,7 +23,11 @@ class ExtensionScheduling(Scheduling):
         sizes = args[0]
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
-    def codegen_nodes(self, nodes):
+    def codegen_template(self, *args, **kwargs):
+        pass
+
+    def codegen_nodes(self, *args, **kwargs):
+        nodes = args[0]
         self._scheduling.codegen_nodes(nodes)
 
     def codegen_sync(self, *args, **kwargs):
