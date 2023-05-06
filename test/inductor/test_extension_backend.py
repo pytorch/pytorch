@@ -54,7 +54,7 @@ class ExtensionBackendTests(TestCase):
         super().setUpClass()
 
         # Build Extension
-        # remove_build_path()
+        remove_build_path()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
             source_file_path, "extension_backends/extension_device.cpp"
@@ -73,7 +73,7 @@ class ExtensionBackendTests(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
-        # remove_build_path()
+        remove_build_path()
 
     def setUp(self):
         torch._dynamo.reset()
@@ -107,10 +107,10 @@ class ExtensionBackendTests(TestCase):
 
         self.assertFalse(self.module.custom_op_called())
         device = self.module.custom_device()
-        x = torch.empty(2, 16).to(device=device)
-        y = torch.empty(2, 16).to(device=device)
-        z = torch.empty(2, 16).to(device=device)
-        result = torch.ones(2, 16)
+        x = torch.empty(2, 16).to(device=device).fill_(1)
+        y = torch.empty(2, 16).to(device=device).fill_(2)
+        z = torch.empty(2, 16).to(device=device).fill_(3)
+        ref = torch.empty(2, 16).fill_(5)
 
         self.assertTrue(x.device == device)
         self.assertTrue(y.device == device)
@@ -122,8 +122,8 @@ class ExtensionBackendTests(TestCase):
         metrics.reset()
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         opt_fn(x, y, z)
-        opt_fn(x, y, z)
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        res = opt_fn(x, y, z)
+        self.assertEqual(ref, res.to(device="cpu"))
 
 
 if __name__ == "__main__":

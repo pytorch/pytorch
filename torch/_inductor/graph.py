@@ -635,13 +635,12 @@ class GraphLowering(torch.fx.Interpreter):
                 return
 
         if not all(device_type in ["cuda", "cpu"] for device_type in self.device_types):
-            assert len(self.device_types) <= 2, "Unsupport mixing {}".format(
-                "+".join(self.device_types)
-            )
             device_types_copy = self.device_types
             device_types_copy.discard("cuda")
             device_types_copy.discard("cpu")
-            assert len(device_types_copy) == 1
+            assert len(device_types_copy) == 1, "Does not support mixing {}".format(
+                "+".join(device_types_copy)
+            )
             wrapper_code_gen_cls = get_wrapper_for_device(device_types_copy.pop())
             assert wrapper_code_gen_cls
             self.wrapper_code = wrapper_code_gen_cls()

@@ -48,7 +48,7 @@ at::Tensor custom_to_device(
   TORCH_CHECK(self.is_cpu() || self.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows copy from cpu -> dummy device.");
   TORCH_CHECK(device.is_cpu() || device.type() == c10::DeviceType::PrivateUse1, "Dummy test only allows copy from cpu -> dummy device.");
   // Some dummy asserts for the basic use case: inputs are the same size / dtype, all contiguous.
-  TORCH_CHECK(self.scalar_type() ==dtype);
+  TORCH_CHECK(self.scalar_type() == dtype);
   TORCH_CHECK(self.is_contiguous());
 
   op_counter += 1;
@@ -99,7 +99,15 @@ at::Tensor custom_empty_symint(c10::IntArrayRef size, c10::optional<at::ScalarTy
 }
 
 at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
-  // Not bothering to implement.
+  TORCH_CHECK(self.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows dummy device.");
+  TORCH_CHECK(self.is_contiguous());
+  TORCH_CHECK(self.scalar_type() == c10::ScalarType::Float);
+
+  auto _data = static_cast<float*>(self.mutable_data_ptr());
+  for (size_t idx = 0; idx < self.numel(); idx++) {
+    _data[idx] = value.toFloat();
+  }
+
   return self;
 }
 
