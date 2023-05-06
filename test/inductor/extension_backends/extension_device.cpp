@@ -87,22 +87,12 @@ struct DummyCustomAllocator final : at::Allocator {
 static DummyCustomAllocator global_custom_alloc;
 REGISTER_ALLOCATOR(c10::DeviceType::PrivateUse1, &global_custom_alloc);
 
-// basic dummy empty function, so we can directly construct tensors on the custom device
-// This dummy test device will just use the CPU allocator, and ignores pinned memory.
-at::Tensor custom_empty_memory_format(at::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
-  constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
-  return at::detail::empty_generic(size, &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
-}
-at::Tensor custom_empty_symint(c10::IntArrayRef size, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, c10::optional<at::MemoryFormat> memory_format) {
-  constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
-  return at::detail::empty_generic(size, &global_custom_alloc, private_use_ks, c10::dtype_or_default(dtype), memory_format);
-}
-
 at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
   TORCH_CHECK(self.device().type() == c10::DeviceType::PrivateUse1, "Dummy test only allows dummy device.");
   TORCH_CHECK(self.is_contiguous());
   TORCH_CHECK(self.scalar_type() == c10::ScalarType::Float);
 
+  op_counter += 1;
   auto _data = static_cast<float*>(self.mutable_data_ptr());
   for (size_t idx = 0; idx < self.numel(); idx++) {
     _data[idx] = value.toFloat();
@@ -121,66 +111,17 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   TORCH_CHECK(self.scalar_type() == dst.scalar_type());
   TORCH_CHECK(self.is_contiguous() && dst.is_contiguous());
 
+  op_counter += 1;
   std::memcpy(dst.storage().data_ptr().get(), self.storage().data_ptr().get(), self.storage().nbytes());
   return dst;
 }
 
 at::Tensor custom_empty_strided(c10::IntArrayRef size, c10::IntArrayRef stride, c10::optional<at::ScalarType> dtype_opt, c10::optional<at::Layout> layout_opt, c10::optional<at::Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  op_counter += 1;
+
   constexpr c10::DispatchKeySet private_use_ks(c10::DispatchKey::PrivateUse1);
   auto dtype = c10::dtype_or_default(dtype_opt);
   return  at::detail::empty_strided_generic(size, stride, &global_custom_alloc, private_use_ks, dtype);
-}
-
-// Some set operations for the basic use case
-at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
-  int64_t new_size = static_cast<int64_t>(src.nbytes() / result.dtype().itemsize());
-  c10::IntArrayRef stride = {};
-  result.unsafeGetTensorImpl()->set_storage_offset(0);
-  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
-  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), new_size, stride_opt, /*resize_storage=*/!result.is_meta());
-  return result;
-}
-
-// basic dummy functions related to pin_memory.
-std::vector<void*> custom_pinned_data_ptr;
-
-at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> device) {
-  TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
-
-  // record pinned data ptr
-  at::Tensor dump_pinned_tensor = self * 1.0;
-  custom_pinned_data_ptr.push_back(dump_pinned_tensor.storage().data_ptr().get());
-
-  return dump_pinned_tensor;
-}
-
-bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) {
-  // Only CPU tensors can be pinned
-  if (!self.is_cpu()) {
-    return false;
-  }
-
-  void* query_pinned_ptr = self.storage().data_ptr().get();
-  for (const auto& iter_ptr : custom_pinned_data_ptr) {
-    if (iter_ptr == query_pinned_ptr) {
-      return true;
-    }
-  }
-  return false;
-}
-
-const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
-                          c10::optional<at::MemoryFormat> optional_memory_format) {
-  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
-  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
-  const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
-  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
-  if (storage_size > storage.nbytes()) {
-    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
-  }
-
-  return self;
 }
 
 // This macro does the heavy lifting.
@@ -196,14 +137,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("mul.Tensor", &custom_mul_Tensor);
   m.impl("to.Device", &custom_to_device);
-  m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty_strided", &custom_empty_strided);
-  m.impl("set_.source_Storage", &custom_set_source_Storage);
-  m.impl("_pin_memory", &custom__pin_memory);
-  m.impl("is_pinned", &custom_is_pinned);
-  m.impl("resize_", &custom_resize_);
 }
 
 // This basic implementation doesn't bother dealing with different device indices

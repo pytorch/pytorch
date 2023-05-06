@@ -106,6 +106,7 @@ class ExtensionBackendTests(TestCase):
         self.assertFalse(self.module.custom_op_called())
         device = self.module.custom_device()
         x = torch.empty(2, 16).to(device=device).fill_(1)
+        self.assertTrue(self.module.custom_op_called())
         y = torch.empty(2, 16).to(device=device).fill_(2)
         z = torch.empty(2, 16).to(device=device).fill_(3)
         ref = torch.empty(2, 16).fill_(5)
