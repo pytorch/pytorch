@@ -2,6 +2,9 @@ import math
 
 import torch
 
+import torch._inductor.config as config
+from torch._prims_common import is_integer_dtype
+
 from ..virtualized import ops, V
 from .common import OpOverrides
 
