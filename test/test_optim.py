@@ -1787,7 +1787,6 @@ class TestOptim(TestCase):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
     def test_lars(self):
-        # ASK: What's the reason behind two identical calls? (See SGD tests)
         self._test_basic_cases(
             lambda weight, bias, maximize: optim.LARS([weight, bias], lr=1e-3, maximize=maximize),
             constructor_accepts_maximize=True, constructor_accepts_foreach=False,
