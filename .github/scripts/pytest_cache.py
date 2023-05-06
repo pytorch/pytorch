@@ -67,6 +67,7 @@ def main():
 
         upload_pytest_cache(
             pr_identifier=pr_identifier,
+            repo=repo,
             job_identifier=args.job_identifier,
             shard=args.shard,
             cache_dir=args.cache_dir,
@@ -78,6 +79,7 @@ def main():
         print(f"Downloading cache with args {args}")
         download_pytest_cache(
             pr_identifier=pr_identifier,
+            repo=repo,
             job_identifier=args.job_identifier,
             dest_cache_dir=args.cache_dir,
             bucket=args.bucket,
