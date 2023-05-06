@@ -347,27 +347,27 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def eq(x, y):
-        return f"to_float_mask({x} == {y})"
+        return f"to_float_mask({x}.eq({y}))"
 
     @staticmethod
     def ne(x, y):
-        return f"to_float_mask({x} != {y})"
+        return f"to_float_mask({x}.ne({y}))"
 
     @staticmethod
     def lt(x, y):
-        return f"to_float_mask({x} < {y})"
+        return f"to_float_mask({x}.lt({y}))"
 
     @staticmethod
     def gt(x, y):
-        return f"to_float_mask({x} > {y})"
+        return f"to_float_mask({x}.gt({y}))"
 
     @staticmethod
     def le(x, y):
-        return f"to_float_mask({x} <= {y})"
+        return f"to_float_mask({x}.le({y}))"
 
     @staticmethod
     def ge(x, y):
-        return f"to_float_mask({x} >= {y})"
+        return f"to_float_mask({x}.ge({y}))"
 
     @staticmethod
     def and_(x, y):
