@@ -35,6 +35,7 @@ runs:
         CACHE_DIR: ${{ inputs.cache_dir }}
         JOB_IDENTIFIER: ${{ inputs.job_identifier }}
         SHARD: ${{ inputs.shard }}
+        REPO: ${{ github.repository }}
       run: |
         set -eux
 
@@ -44,6 +45,7 @@ runs:
         echo "JOB_IDENTIFIER: $JOB_IDENTIFIER"
         echo "shard: $SHARD"
         echo "temp_dir: $RUNNER_TEMP"
+        echo "repo: $REPO"
 
 
         python3 .github/scripts/pytest_cache.py \
@@ -52,3 +54,4 @@ runs:
           --pr_identifier $GITHUB_REF \
           --job_identifier $JOB_IDENTIFIER \
           --temp_dir $RUNNER_TEMP \
+          --repo $REPO \

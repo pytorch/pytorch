@@ -117,10 +117,11 @@ jobs:
 
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build_environment }}_${{ github.job }}_${{ matrix.config }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set Test step time
         id: test-timeout
@@ -229,16 +230,15 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
-      - name: Upload pytest cache
+      - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
-        # continue-on-error: true
-        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           cache_dir: .pytest_cache
           shard: ${{ matrix.shard }}
-          build_environment: ${{ inputs.build-environment }}
           job_identifier: ${{ github.workflow }}_${{ inputs.build_environment }}_${{ github.job }}_${{ matrix.config }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Print remaining test logs
         shell: bash

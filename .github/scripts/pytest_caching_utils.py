@@ -2,16 +2,17 @@ import contextlib
 import hashlib
 import os
 import shutil
+from typing import NamedTuple
 
 from file_io_utils import (
-    ensure_dir_exists,
-    sanitize_for_s3,
-    zip_folder,
-    unzip_folder,
     download_s3_objects_with_prefix,
-    upload_file_to_s3,
+    ensure_dir_exists,
     load_json_file,
+    sanitize_for_s3,
+    unzip_folder,
+    upload_file_to_s3,
     write_json_file,
+    zip_folder,
 )
 
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
@@ -25,18 +26,43 @@ class PRIdentifier(str):
     def __new__(cls, value):
         # Since the pr identifier can be based on include user defined text (like a branch name)
         # we hash it to get a clean input and dodge corner cases
-        md5 = hashlib.md5(value.encode('utf-8')).hexdigest()
+        md5 = hashlib.md5(value.encode("utf-8")).hexdigest()
         return super().__new__(cls, md5)
 
 
+class GithubRepo(NamedTuple):
+    owner: str
+    name: str
+
+    # Create a Repo from a string like "owner/repo"
+    @classmethod
+    def from_string(cls, repo_string: str):
+        if "/" not in repo_string:
+            raise ValueError(
+                f"repo_string must be of the form 'owner/repo', not {repo_string}"
+            )
+
+        owner, name = repo_string.split("/")
+        return cls(owner, name)
+
+    # To string method
+    def __str__(self):
+        return f"{self.owner}/{self.name}"
+
+
 def get_s3_key_prefix(
-    pr_identifier: PRIdentifier, job_identifier: str, shard: str = None
+    pr_identifier: PRIdentifier,
+    repo: GithubRepo,
+    job_identifier: str,
+    shard: str = None,
 ):
     """
     The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
     For example, it won't include the file extension.
     """
-    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
+    prefix = (
+        f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
+    )
 
     if shard:
         prefix += f"/{shard}"
@@ -51,6 +77,7 @@ def get_s3_key_prefix(
 #       However, in the short term the extra donloads are okay since they aren't that big
 def upload_pytest_cache(
     pr_identifier: PRIdentifier,
+    repo: GithubRepo,
     job_identifier: str,
     shard: str,
     cache_dir: str,
@@ -74,7 +101,7 @@ def upload_pytest_cache(
     if not temp_dir:
         temp_dir = TEMP_DIR
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, job_identifier, shard)
+    obj_key_prefix = get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
     zip_file_path_base = (
         f"{temp_dir}/zip-upload/{obj_key_prefix}"  # doesn't include the extension
     )
@@ -94,6 +121,7 @@ def upload_pytest_cache(
 
 def download_pytest_cache(
     pr_identifier: PRIdentifier,
+    repo: GithubRepo,
     job_identifier: str,
     dest_cache_dir: str,
     bucket: str = BUCKET,
@@ -109,7 +137,7 @@ def download_pytest_cache(
             f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}"
         )
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, job_identifier)
+    obj_key_prefix = get_s3_key_prefix(pr_identifier, repo, job_identifier)
 
     zip_download_dir = f"{temp_dir}/cache-zip-downloads/{obj_key_prefix}"
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
@@ -124,7 +152,7 @@ def download_pytest_cache(
             shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
             cache_dir_for_shard = os.path.join(
                 f"{temp_dir}/unzipped-caches",
-                get_s3_key_prefix(pr_identifier, job_identifier, shard_id),
+                get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id),
                 PYTEST_CACHE_DIR_NAME,
             )
 

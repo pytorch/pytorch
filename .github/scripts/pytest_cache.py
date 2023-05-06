@@ -30,6 +30,9 @@ def main():
     )  # Only required for upload
 
     parser.add_argument(
+        "--repo", required=False, help="The github repository we're running in, in the format 'owner/repo-name'"
+    )
+    parser.add_argument(
         "--temp_dir", required=False, help="Directory to store temp files"
     )
     parser.add_argument(
@@ -40,6 +43,8 @@ def main():
 
     pr_identifier = PRIdentifier(args.pr_identifier)
     print(f"PR identifier for `{args.pr_identifier}` is `{pr_identifier}`")
+
+    repo = GithubRepo.from_string(args.repo)
 
     if args.upload:
         print(f"Uploading cache with args {args}")
