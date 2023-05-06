@@ -33,7 +33,7 @@ struct CollectiveFingerPrint {
   std::vector<std::vector<int64_t>> tensor_sizes_;
   int sequence_number_;
 
-  explicit CollectiveFingerPrint(
+  CollectiveFingerPrint(
       OpType op_type,
       const std::vector<at::Tensor>& input_tensors,
       int sequence_number)
@@ -53,11 +53,13 @@ struct CollectiveFingerPrint {
   // Constructor for the data received from deserialized fingerprint
   CollectiveFingerPrint(
       OpType op_type,
+      size_t num_tensors,
       std::vector<int8_t> tensor_dtypes,
       std::vector<int8_t> tensor_device_types,
       std::vector<std::vector<int64_t>> tensor_sizes,
       int sequence_number)
       : op_type_(op_type),
+        num_tensors_(num_tensors),
         tensor_dtypes_(std::move(tensor_dtypes)),
         tensor_device_types_(std::move(tensor_device_types)),
         tensor_sizes_(std::move(tensor_sizes)),
@@ -97,12 +99,12 @@ struct CollectiveFingerPrint {
     // 1. OpType
     optype = OpType(serialized_tensor[index].item<int>());
     index++;
-
+    int num_tensors = 0;
     if (index < serialized_tensor.size(0)) {
       seq = serialized_tensor[index].item<int64_t>();
       index++;
       // 2. Num tensors
-      int num_tensors = serialized_tensor[index].item<int>();
+      num_tensors = serialized_tensor[index].item<int>();
       index++;
       dtypes.reserve(num_tensors);
       device_types.reserve(num_tensors);
@@ -133,7 +135,8 @@ struct CollectiveFingerPrint {
         sizes.push_back(shapeVec);
       }
     }
-    return CollectiveFingerPrint(optype, dtypes, device_types, sizes, seq);
+    return CollectiveFingerPrint(
+        optype, num_tensors, dtypes, device_types, sizes, seq);
   }
 
  private:

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple, Type
@@ -7,13 +9,11 @@ from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, utils
 
 
-MessageFormatterType = Callable[[Callable, Tuple[Any, ...], Dict[str, Any]], str]
+MessageFormatterType = Callable[..., str]
 
 
 @_beartype.beartype
-def format_message_in_text(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> str:
+def format_message_in_text(fn: Callable, *args: Any, **kwargs: Any) -> str:
     return f"{formatter.display_name(fn)}"
 
 
@@ -70,8 +70,8 @@ def modify_diagnostic(
 
 @_beartype.beartype
 def diagnose_call(
-    get_context: Callable[[], Optional[infra.DiagnosticContext]],
     rule: infra.Rule,
+    *,
     level: infra.Level = infra.Level.NONE,
     exception_report_level: infra.Level = infra.Level.WARNING,
     diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
@@ -85,20 +85,40 @@ def diagnose_call(
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            # TODO(bowbao): add switch to disable diagnostics.
-            ctx = get_context()
-            if ctx is None:
-                return fn(*args, **kwargs)
+            common_error_message = "diagnose_call can only be applied to callables"
+            if not callable(fn):
+                raise AssertionError(
+                    f"{common_error_message}. Got {type(fn)} instead of callable."
+                )
+            arg0 = args[0] if len(args) > 0 else None
+            if isinstance(ctx := arg0, infra.DiagnosticContext):
+                pass
+            elif isinstance(
+                ctx := getattr(arg0, "diagnostic_context", None),
+                infra.DiagnosticContext,
+            ):
+                pass
+            else:
+                # NOTE: At decorate time, it can't tell if a callable is function or method.
+                # Technically both are regarded as function at that time.
+                raise AssertionError(
+                    f"{common_error_message}. For {fn}, "
+                    f"If it is a function, a DiagnosticContext instance must be present as "
+                    f"the first argument. "
+                    f"If it is a method, a DiagnosticContext instance must be present as "
+                    f"the attribute 'diagnostic_context' of the 'self' argument."
+                )
 
             diag = diagnostic_type(
                 rule,
                 level,
-                diagnostic_message_formatter(fn, args, kwargs),
+                diagnostic_message_formatter(fn, *args, **kwargs),
             )
 
             # pop the decorator frame
             # TODO(bowbao): by default diagnostic doesn't have stack.
             # So need to check before doing this. Make the code cleaner.
+            # Option: do not capture stack by default in diagnostic initialization.
             stack: Optional[infra.Stack] = None
             if len(diag.stacks) > 0:
                 stack = diag.stacks[0]
@@ -142,58 +162,6 @@ def diagnose_call(
                         )
                         diagnostic_modifier(diag, fn, args, kwargs, return_values)
                         ctx.add_diagnostic(diag)
-
-        return wrapper
-
-    return decorator
-
-
-@_beartype.beartype
-def diagnose_step(
-    get_context: Callable[[], Optional[infra.DiagnosticContext]],
-    rule: Optional[infra.Rule] = None,
-    message_formatter: MessageFormatterType = format_message_in_text,
-    format_argument: Callable[[Any], str] = formatter.format_argument,
-) -> Callable:
-    """Decorator to log a step in the inflight diagnostic.
-
-    Args:
-        get_context: A function that returns the diagnostic context where inflight
-            diagnostic is retrieved and modified by the decorator.
-        rule: The decorator logs this step to the top inflight diagnostic that matches
-            the rule. If None, the top inflight diagnostic in the stack will be picked,
-            regardless of its rule.
-
-    Returns:
-        A decorator that logs a step in the inflight diagnostic.
-    """
-
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            ctx = get_context()
-            if ctx is None:
-                return fn(*args, **kwargs)
-
-            try:
-                diag = ctx.inflight_diagnostic(rule=rule)
-            except infra.engine.DiagnosticError:
-                # TODO(bowbao): this should trigger a built-in diagnostic.
-                traceback.print_exc()
-                return fn(*args, **kwargs)
-
-            state = utils.function_state(fn, args, kwargs)
-            state = {k: format_argument(v) for k, v in state.items()}
-            diag.record_python_call(
-                fn,
-                state,
-                message=message_formatter(fn, args, kwargs),
-                frames_to_skip=1,
-            )
-
-            return_values = fn(*args, **kwargs)
-            state["return_values"] = format_argument(return_values)
-            return return_values
 
         return wrapper
 

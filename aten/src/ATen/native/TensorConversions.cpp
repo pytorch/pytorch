@@ -51,6 +51,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <algorithm>
 #include <numeric>
