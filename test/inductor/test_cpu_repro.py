@@ -1558,6 +1558,21 @@ class CPUReproTests(TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_comparison_ops(self):
+        # https://github.com/pytorch/pytorch/issues/100466
+
+        comparison_ops = (torch.ge, torch.le, torch.gt, torch.lt, torch.eq, torch.ne)
+        for op in comparison_ops:
+
+            def fn(x):
+                return op(x, 0) * 4.0
+
+            metrics.reset()
+            x = torch.randn(3, 3)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(x), opt_fn(x)))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
