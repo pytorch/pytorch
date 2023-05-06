@@ -502,10 +502,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    # TODO(justinchuby): A known limitation in aten::arange support.
-    @pytorch_test_common.xfail(
-        "arange overload does not support positional 'end' argument"
-    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):

@@ -12,11 +12,8 @@ pip_install \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4
-
-# TODO: use official onnx package once it's released
-# for now, use the commit from 1.13.1-protobuf4.21 branch
-pip_install "onnx@git+https://github.com/onnx/onnx@389b6bcb05b9479d149d29b2461fbffe8472ed14"
+  numpy==1.22.4 \
+  onnx==1.14.0
 
 pip_install \
   onnxruntime==1.14.0 \
@@ -27,7 +24,7 @@ pip_install \
   transformers==4.25.1
 
 # TODO: change this when onnx-script is on testPypi
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@99a665546d374af872cf136137b5d8334389b78d"
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@e0f2e8a701a9f052871a048703b11a089ca8fb0a"
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/

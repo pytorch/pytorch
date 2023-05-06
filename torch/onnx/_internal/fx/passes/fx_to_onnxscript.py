@@ -8,7 +8,7 @@ import re
 import types
 import warnings
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
@@ -27,14 +27,12 @@ from torch.utils import _pytree
 
 @_beartype.beartype
 def _fx_node_to_onnx_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    fn: Callable,
+    diagnostic_context: diagnostics.DiagnosticContext,
+    node: torch.fx.Node,
+    *args,
+    **kwargs,
 ) -> str:
-    # TODO(bowbao): refactor signature to avoid checking length.
-    # NOTE: First argument is always `diagnostic_context`.
-    #     Second argument is expected to be `node`.
-    assert len(args) > 1
-    node = args[1]
-    assert isinstance(node, torch.fx.Node)
     return f"FX Node: {node.op}:{node.target}[name={node.name}]"
 
 
@@ -133,7 +131,10 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with evaluator.default_as(tracer):
-            return opset18.Concat(*sequence_mixed_elements, axis=0)
+            output = opset18.Concat(*sequence_mixed_elements, axis=0)
+        # TODO(titaiwang): set shape?
+        output.dtype = torch.int64
+        return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
@@ -199,14 +200,17 @@ def _fill_tensor_meta(
     # NOTE(titaiwang): Type of expected_values is showing what we support right now.
     # Currently, we only expect FakeTensor and SymInt in the graph.
 
-    # aten::sym_size output is a int, not a tensor, which stands
-    # for the size of one dim. We treat it as 0-D tensor.
-    if isinstance(expected_values, (torch.SymInt, torch.SymFloat)):
-        return
-
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
+        # ex: aten::split - in onnx_dtype: seq(tensor)
+        # onnxscript_values is a single tensor, but expected_values is a list of tensors.
+        onnxscript_values.dtype = {
+            f"seq({type})"
+            for type in _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
+                expected_values[0].dtype
+            ]
+        }
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
@@ -214,12 +218,21 @@ def _fill_tensor_meta(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # We set node output sizes to be dynamic to continue the model conversion,
-        # and inputs are also set to be dynamic in add_input().
-        onnxscript_value.shape = tuple(
-            [dim if isinstance(dim, int) else None for dim in expected_value.size()]
-        )
-        onnxscript_value.dtype = expected_value.dtype
+        # aten::sym_size output is a int, not a tensor, which stands
+        # for the size of one dim. We treat it as 0-D tensor.
+        # TODO(titaiwang): set shape?
+        if isinstance(expected_value, torch.SymInt):
+            onnxscript_value.dtype = torch.int64
+        elif isinstance(expected_value, torch.SymFloat):
+            onnxscript_value.dtype = torch.float32
+        else:
+            # We set node output sizes to be dynamic to continue the model conversion,
+            # and inputs are also set to be dynamic in add_input().
+            onnxscript_value.shape = tuple(
+                [dim if isinstance(dim, int) else None for dim in expected_value.size()]
+            )
+            onnxscript_value.dtype = expected_value.dtype
+        # naming
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
