@@ -39,6 +39,10 @@ class SelectiveBuilder:
     # of the kernel function implementation itself.
     kernel_metadata: Dict[str, List[str]]
 
+    # ExecuTorch only. A dictionary of kernel tag -> list of (list of input
+    # dtypes for tensor-like input args).
+    et_kernel_metadata: Dict[str, List[List[str]]]
+
     # A set of all the custom torch bind classes used by the selected models
     # Stored as a set internally to remove duplicates proactively, but written
     # as a list to yamls
@@ -67,6 +71,7 @@ class SelectiveBuilder:
             "debug_info",
             "operators",
             "kernel_metadata",
+            "et_kernel_metadata",
             "custom_classes",
             "build_features",
         }
@@ -101,6 +106,9 @@ class SelectiveBuilder:
         for k, v in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = [str(dtype) for dtype in v]
 
+        # TODO(T149265497): Need to parse the et kernel metadata
+        et_kernel_metadata: Dict[str, List[List[str]]] = {}
+
         custom_classes = data.get("custom_classes", [])
         custom_classes = set(custom_classes)  # type: ignore[arg-type]
 
@@ -115,6 +123,7 @@ class SelectiveBuilder:
             debug_info,
             operators,
             kernel_metadata,
+            et_kernel_metadata,
             custom_classes,  # type: ignore[arg-type]
             build_features,  # type: ignore[arg-type]
             include_all_non_op_selectives,
@@ -263,6 +272,8 @@ def combine_selective_builders(
     debug_info = merge_debug_info(lhs._debug_info, rhs._debug_info)
     operators = merge_operator_dicts(lhs.operators, rhs.operators)
     kernel_metadata = merge_kernel_metadata(lhs.kernel_metadata, rhs.kernel_metadata)
+    # TODO(T149265497): Need to parse the et kernel metadata
+    et_kernel_metadata: Dict[str, List[List[str]]] = {}
     include_all_non_op_selectives = (
         lhs.include_all_non_op_selectives or rhs.include_all_non_op_selectives
     )
@@ -273,6 +284,7 @@ def combine_selective_builders(
         debug_info,
         operators,
         kernel_metadata,
+        et_kernel_metadata,
         custom_classes,
         build_features,
         include_all_non_op_selectives,
