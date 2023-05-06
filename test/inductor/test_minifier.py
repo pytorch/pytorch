@@ -146,6 +146,30 @@ class Repro(torch.nn.Module):
         return (relu,)""",
         )
 
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_offload_to_disk(self):
+        # Just a smoketest, this doesn't actually test that memory
+        # usage went down.  Test case is carefully constructed to hit
+        # delta debugging.
+        run_code = """\
+@torch.compile()
+def inner(x):
+    x = torch.sin(x)
+    x = torch.sin(x)
+    x = torch.cos(x)
+    x = torch.relu(x)
+    return x
+
+inner(torch.randn(20, 20))
+"""
+        self._run_full_test(
+            run_code,
+            "aot",
+            "AccuracyError",
+            isolate=False,
+            minifier_args=["--offload-to-disk"],
+        )
+
 
 if __name__ == "__main__":
     import sys

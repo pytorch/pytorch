@@ -2,7 +2,7 @@
 import copy
 import operator
 import unittest
-from typing import List
+from typing import Any, List, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -29,6 +29,7 @@ from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qat_qconfig,
     default_per_channel_symmetric_qnnpack_qconfig,
+    default_symmetric_qnnpack_qat_qconfig,
 )
 from torch.ao.quantization.quantize_fx import (
     convert_to_reference_fx,
@@ -534,30 +535,52 @@ class TestQuantizePT2E(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
-        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
-        quantizer = QNNPackQuantizer()
-        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
-        m = M()
-        m_fx = copy.deepcopy(m)
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
+    def _verify_symmetric_qnnpack_qat_numerics(
+        self,
+        model: torch.nn.Module,
+        example_inputs: Tuple[Any, ...],
+        is_per_channel: bool,
+    ):
+        """
+        Helper method to verify that the QAT numerics for PT2E quantization match those of
+        FX graph mode quantization for symmetric qnnpack.
+        """
         # PT2 export
-        m, guards = torchdynamo.export(
-            m,
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        model_pt2e = copy.deepcopy(model)
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=is_per_channel, is_qat=True))
+        model_pt2e, guards = torchdynamo.export(
+            model_pt2e,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
         )
-        m = prepare_qat_pt2e_quantizer(m, quantizer)
-        result = m(*example_inputs)
+        model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
+        result_pt2e = model_pt2e(*example_inputs)
 
         # FX
-        qconfig_mapping = QConfigMapping().set_global(default_per_channel_symmetric_qnnpack_qat_qconfig)
+        # Note: In order to match the PT2E numerics exactly, we need to feed the
+        # example inputs to the model once before calling prepare, since this is
+        # what torchdynamo.export does. Otherwise, the BN running mean and variance
+        # would diverge in the two flows and this test would fail. For more detail,
+        # see https://github.com/pytorch/pytorch/issues/95900.
+        model_fx = copy.deepcopy(model)
+        model_fx(*example_inputs)
+        if is_per_channel:
+            default_qconfig = default_per_channel_symmetric_qnnpack_qat_qconfig
+        else:
+            default_qconfig = default_symmetric_qnnpack_qat_qconfig
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         backend_config = get_qnnpack_backend_config()
-        m_fx = prepare_qat_fx(m_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
-        result_fx = m_fx(*example_inputs)
+        model_fx = prepare_qat_fx(model_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
+        result_fx = model_fx(*example_inputs)
 
         # Verify that numerics match
-        self.assertEqual(result, result_fx)
+        self.assertEqual(result_pt2e, result_fx)
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):
