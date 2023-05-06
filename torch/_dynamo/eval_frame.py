@@ -631,10 +631,9 @@ def explain(f, *args, **kwargs):
 
 
 @dataclasses.dataclass
-class Constraint:
+class ConstraintTarget:
     """
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.  Don't create this
+    This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`torch._export.dynamic_dim`.
     """
 
@@ -642,15 +641,30 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
+
+
+@dataclasses.dataclass
+class Constraint(ConstraintTarget):
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
+
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: StrictMinMaxConstraint
+    # Represent that `constraint_range` is shared with another ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
+    shared: Optional[ConstraintTarget] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
+        return Constraint(
+            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+        )
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
@@ -691,6 +705,19 @@ class Constraint:
             "max": self.constraint_range.vr.upper,
         }
 
+    def __eq__(self, other):
+        constraint_range = StrictMinMaxConstraint(
+            vr=self.constraint_range.vr & other.constraint_range.vr,
+            warn_only=False,
+        )
+        return Constraint(
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+        )
+
 
 def export(
     f: Callable[..., Any],
@@ -703,6 +730,7 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: List[Constraint] = None,
     assume_static_by_default: bool = False,
+    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -726,6 +754,9 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
+
+        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
+        set aten_graph=True to see the effect. By default, this flag will be false.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -751,6 +782,12 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
+
+    if functionalize and not aten_graph:
+        raise UserError(
+            UserErrorType.ANTI_PATTERN,
+            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
+        )
 
     graph = None
     out_guards = None
@@ -906,10 +943,40 @@ def export(
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
+        memo: Dict[torch.Tensor, torch.Tensor] = {}
+
+        def to_fun(t):
+            if isinstance(t, torch.Tensor):
+                if t in memo:
+                    return memo[t]
+                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
+                memo[t] = r
+                return r
+            else:
+                return t
+
+        def from_fun(t):
+            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
-                return torch.fx.Interpreter(graph).run(*args)
+                if functionalize:
+                    torch._enable_functionalization(reapply_views=True)
+                    try:
+                        return pytree.tree_map(
+                            from_fun,
+                            torch.fx.Interpreter(graph).run(
+                                *pytree.tree_map(to_fun, args)
+                            ),
+                        )
+                    finally:
+                        torch._disable_functionalization()
+                else:
+                    return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             try:
@@ -1033,9 +1100,7 @@ def export(
     )
 
     new_graph.recompile()
-
     # TODO remove this once Executorch uses proper functionalization
-    new_graph._example_fake_inputs = example_fake_inputs
     new_graph._matched_input_elements_positions = matched_input_elements_positions
 
     return (new_graph, out_guards)
