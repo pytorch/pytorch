@@ -7986,17 +7986,17 @@ class TestNNDeviceType(NNTestCase):
             atol = None
             rtol = None
             if dtype == torch.bfloat16:
-                atol=1e-2
-                rtol=1.2e-1
+                atol = 1e-2
+                rtol = 1.2e-1
             else:
-                atol=1e-4
-                rtol=1e-2
+                atol = 1e-4
+                rtol = 1e-2
             self.assertEqual(m_bf.weight.grad, m_f.weight.grad.to(dtype=dtype), atol=atol, rtol=rtol)
             self.assertEqual(m_bf.bias.grad, m_f.bias.grad.to(dtype=dtype), atol=atol, rtol=rtol)
             self.assertEqual(input_bf1.grad, input_bf2.grad, atol=atol, rtol=rtol)
 
         cl_formats = {4: torch.channels_last, 5: torch.channels_last_3d}
-        for shape, g in [((1, 8, 4, 3), 2), ((1, 8, 3, 4), 4), 
+        for shape, g in [((1, 8, 4, 3), 2), ((1, 8, 3, 4), 4),
                          ((4, 40, 40, 40), 2), ((4, 8, 40, 40), 4),
                          ((1, 8, 40, 40), 4), ((1, 8, 40, 40), 2),
                          ((1, 8, 50, 50), 2), ((1, 8, 50, 50), 4),
@@ -8491,11 +8491,8 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
             self.assertEqual(out, ref_out)
             # parameters in bfloat16 is not recommended
-            atol=5e-4
-            rtol=8e-4
-            if dtype == torch.bfloat16:
-                atol=5e-4
-                rtol=8e-3
+            atol = 5e-4
+            rtol = 8e-3
 
             self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=atol, rtol=rtol)
             self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=atol, rtol=rtol)
@@ -9674,7 +9671,10 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
-    def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
+    @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
+    def test_upsamplingBiLinear2d_consistency(
+        self, device, memory_format, antialias, align_corners, num_channels, output_size, check_as_unsqueezed_3d_tensor
+    ):
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
@@ -9682,6 +9682,11 @@ class TestNNDeviceType(NNTestCase):
         # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
         input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+
+        if check_as_unsqueezed_3d_tensor:
+            input_ui8 = input_ui8[0, ...]
+            input_ui8 = input_ui8[None, ...]
+
         input_f32 = input_ui8.float()
 
         output_f32 = F.interpolate(
@@ -9690,6 +9695,18 @@ class TestNNDeviceType(NNTestCase):
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
+
+        # FIXME if-clause shows the current behaviour which is definitely unexpected.
+        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
+        # See for more details: https://github.com/pytorch/pytorch/pull/100373
+        if check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(output_ui8.is_contiguous())
+            self.assertTrue(output_f32.is_contiguous())
+        else:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
         mae_tol = 0.5
         max_abs_err_tol = 1.0
