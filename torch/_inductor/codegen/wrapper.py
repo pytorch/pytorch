@@ -225,7 +225,7 @@ class WrapperCodeGen(CodeGen):
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
 
-        self.write_get_cuda_stream = functools.lru_cache(None)(
+        self.write_get_cuda_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_cuda_stream
         )
 
@@ -389,7 +389,8 @@ class WrapperCodeGen(CodeGen):
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
-                and self.lines[-1].node.name not in out_names
+                # TODO: this seems legit, NullLine has no node
+                and self.lines[-1].node.name not in out_names  # type: ignore[attr-defined]
             ):
                 # these lines will be pointless
                 self.lines.pop()
@@ -998,7 +999,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return "true" if s else "false"
         elif isinstance(s, str):
             return f'"{s}"'
-        elif isinstance(s, (List, Tuple)):
+        elif isinstance(s, (list, tuple)):
             vals = ", ".join(list(map(self.val_to_str, s)))
             return f"{{{vals}}}"
         else:
