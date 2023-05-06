@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
@@ -12,8 +13,6 @@
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
-#include <c10/core/GradMode.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

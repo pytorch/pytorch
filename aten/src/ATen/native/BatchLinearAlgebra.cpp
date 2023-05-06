@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
@@ -11,8 +12,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 
-#include <c10/core/GradMode.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 
 #include <utility>

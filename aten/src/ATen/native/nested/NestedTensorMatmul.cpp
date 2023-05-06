@@ -10,11 +10,10 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <c10/core/GradMode.h>
-#include <c10/macros/Macros.h>
 #include <tuple>
 
 namespace at {
