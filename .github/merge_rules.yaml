@@ -69,6 +69,7 @@
   patterns:
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
   mandatory_checks_name:
@@ -287,7 +288,7 @@
   - aten/src/ATen/native/quantized/cpu/**
   - aten/src/ATen/native/Convolution*.cpp
   - aten/src/ATen/native/mkldnn/**
-  - test/test_mkldnn.py
+  - test/test_mkl*.py
   approved_by:
   - mingfeima
   - XiaobingSuper
@@ -420,6 +421,7 @@
   - gchanan
   - ezyang
   - dzhulgakov
+  - malfet
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -22,45 +22,32 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + to_string(value.toDouble());
 
-    CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      auto isBool = self.scalar_type() == c10::ScalarType::Bool;
+      auto isUInt8 = self.scalar_type() == c10::ScalarType::Byte;
+      auto dataType = !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
+      // constantWithScalar does not work for boolTypes on MacOS-12.[34]
+      // workaround by filing it as int8 tensor and than casting to bool
+      // See https://github.com/pytorch/pytorch/issues/82427
+      // constantWithScalar does not work for UInt8 Types on MacOS-12.[34]/Ventura preview
+      // workaround by filing it as uint32 tensor and than casting to uint8
+      // See https://github.com/pytorch/pytorch/issues/83692
+      MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
+                                                           shape:getMPSShape(self)
+                                                        dataType:dataType];
+      MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
+      if (isBool) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeBool name:@"constWithBool-workaround"];
+      }
+      if (isUInt8) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeUInt8 name:@"constWithUInt8-workaround"];
+      }
 
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-          auto isBool = self.scalar_type() == c10::ScalarType::Bool;
-          auto isUInt8 = self.scalar_type() == c10::ScalarType::Byte;
-          auto dataType =
-              !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
-          // constantWithScalar does not work for boolTypes on MacOS-12.[34]
-          // workaround by filing it as int8 tensor and than casting to bool
-          // See https://github.com/pytorch/pytorch/issues/82427
-          // constantWithScalar does not work for UInt8 Types on MacOS-12.[34]/Ventura preview
-          // workaround by filing it as uint32 tensor and than casting to uint8
-          // See https://github.com/pytorch/pytorch/issues/83692
-          MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
-                                                               shape:getMPSShape(self)
-                                                            dataType:dataType];
-          MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
-          if (isBool) {
-            outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeBool name:@"constWithBool-workaround"];
-          }
-          if (isUInt8) {
-            outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeUInt8 name:@"constWithUInt8-workaround"];
-          }
-
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : self, nullptr, !needsCopyToOutput);

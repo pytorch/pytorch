@@ -185,11 +185,11 @@ function test_torch_deploy(){
 }
 
 function install_huggingface() {
-  local commit
-  commit=$(get_pinned_commit huggingface)
+  local version
+  version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install "git+https://github.com/huggingface/transformers.git@${commit}#egg=transformers"
+  pip_install "transformers==${version}"
 }
 
 function install_timm() {
