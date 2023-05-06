@@ -8,7 +8,7 @@ import difflib
 import io
 import sys
 
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable
 
 import torch
 import torch.fx
@@ -98,14 +98,11 @@ def _unified_diff(a: str, b: str) -> str:
 @_beartype.beartype
 def _transform_diagnose_call_message_formatter(
     run: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    self: Transform,
+    *args: Any,
+    **kwargs: Any,
 ) -> str:
-    # TODO(bowbao): Update signature to varargs and varkwargs to avoid manual unpacking.
-    assert len(args) >= 1 and isinstance(args[0], Transform)
-    transform = args[0]
-
-    return f"Running {transform.__class__.__name__} pass."
+    return f"Running {self.__class__.__name__} pass."
 
 
 def fx_graph_tabular(graph: torch.fx.Graph) -> str:
@@ -153,20 +150,26 @@ class Transform(abc.ABC):
     """The module to be transformed."""
     module: torch.fx.GraphModule
 
-    def __init__(self, module: torch.fx.GraphModule):
+    def __init__(
+        self,
+        diagnostic_context: diagnostics.DiagnosticContext,
+        module: torch.fx.GraphModule,
+    ):
         """Initialize the transform.
 
         Args:
+            diagnostic_context: The diagnostic context for recording diagnostics.
             module: The module to be transformed.
         """
         self.module = module
+        self.diagnostic_context = diagnostic_context
 
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         ...
 
     @diagnostics.diagnose_call(
-        rule=diagnostics.rules.fx_pass,
+        diagnostics.rules.fx_pass,
         exception_report_level=diagnostics.levels.ERROR,
         diagnostic_message_formatter=_transform_diagnose_call_message_formatter,
     )
@@ -180,7 +183,7 @@ class Transform(abc.ABC):
             *args: Positional arguments for `self.module` to run.
             **kwargs: Keyword arguments for `self.module` to run.
         """
-        diagnostic = diagnostics.export_context().inflight_diagnostic(
+        diagnostic = self.diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_pass
         )
         # Gather graph information before transform.

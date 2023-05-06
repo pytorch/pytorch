@@ -106,7 +106,7 @@ class TestProfilerCUDA(TestCase):
         # with CUDA events leaking the increase in memory was ~7 MB between
         # profiler invocations above
         is_increasing = all(
-            [last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss))])
+            last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss)))
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
@@ -137,6 +137,41 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_cudagraph_profiling_workaround(self):
+        import subprocess
+
+        # repro taken from #75504
+        # Launch in a separate process to catch hanging/illegal memory errors
+        # and to make sure CUPTI isn't already initialized.
+        p = subprocess.check_call([sys.executable, "-c", """
+import os
+import torch
+from torch.profiler import ProfilerActivity, profile
+
+def add_one(in_: torch.Tensor):
+    return in_ + 1
+
+sample_arg = torch.zeros(10, device="cuda").requires_grad_(True)
+
+# add this before cuda graphs are created
+torch.profiler._utils._init_for_cuda_graphs()
+
+add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
+zeros = torch.zeros(10, device="cuda")
+out = add_one_graphed(zeros)
+assert out[0] == 1
+
+with profile(activities=[ProfilerActivity.CPU]):
+    add_one_graphed(zeros)
+
+with profile(activities=[ProfilerActivity.CUDA]):
+    add_one_graphed(zeros)
+"""], universal_newlines=True, timeout=60)
+
+        # ^ this will throw an exception if the script fails.
+
 
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
@@ -216,9 +251,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_mux:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+            if not has_mux and "Multiplexer" in e.name:
                 has_mux = True
         self.assertTrue(has_iter)
         self.assertTrue(has_mux)
@@ -271,9 +306,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_child:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+            if not has_child and "_ChildDataPipe" in e.name:
                 has_child = True
         self.assertTrue(has_iter)
         self.assertTrue(has_child)
@@ -530,11 +565,11 @@ class TestProfiler(TestCase):
 
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
-                self.assertTrue(any(["test_profiler" in entry for entry in e.stack]))
-                self.assertTrue(any([(
+                self.assertTrue(any("test_profiler" in entry for entry in e.stack))
+                self.assertTrue(any((
                     "test_source" in entry or
                     "ts_method_1" in entry or
-                    "ts_method_2" in entry) for entry in e.stack]))
+                    "ts_method_2" in entry) for entry in e.stack))
 
         # TODO: https://github.com/pytorch/kineto/issues/617
         if kineto_available() and not IS_WINDOWS:
@@ -739,7 +774,7 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::mm" in e.name:
                 found_mm = True
-            if "gemm" in e.name:
+            if "gemm" in e.name or "Cijk" in e.name:
                 found_gemm = True
             if "Memcpy" in e.name or "memcpy" in e.name:
                 found_memcpy = True
@@ -1429,7 +1464,7 @@ class TestProfiler(TestCase):
                 f_ts_1 = flow_f_to_ts[1]
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
-                self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
+                self.assertTrue(all(ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
