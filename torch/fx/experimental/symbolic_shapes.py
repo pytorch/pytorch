@@ -1692,7 +1692,11 @@ class DimConstraints:
             try:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
-                self._dynamic_results.add(self._dcp.doprint(solution))
+                if isinstance(solution, sympy.And):
+                    for arg in solution.args:
+                        self._dynamic_results.add(self._dcp.doprint(arg))
+                else:
+                    self._dynamic_results.add(self._dcp.doprint(solution))
             except NotImplementedError as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
@@ -1719,20 +1723,22 @@ class DimConstraints:
         def unwrap_local_source(source_name):
             return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
 
+        signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+
         buf = ""
         indent = 4 * " "
         if self._static_results:
             sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
-            buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
-            buf += f"\n```\ndef specializations{str(original_signature)}:"
-            buf += f"\n{indent}return (" + f" and\n{indent}".join(sorted_static_results) + ")"
+            buf += f"\n```\ndef specializations{str(signature)}:"
+            for result in sorted_static_results:
+                buf += f"\n{indent}assert {result}"
             buf += "\n```\n"
         if self._dynamic_results:
             sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
-            buf += f"\n```\ndef specify_constraints{str(original_signature)}:"
+            buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             for result in sorted_dynamic_results:
                 buf += f"\n{indent*2}{unwrap_local_source(result)},"
@@ -2321,8 +2327,7 @@ class ShapeEnv:
                         if isinstance(c, StrictMinMaxConstraint):
                             msg = (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
-                                f"was allocated at:\n{tb}"
+                                f"we generated a guard on this size variable: {guard_expr}."
                             )
                             record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
