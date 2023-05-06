@@ -1,9 +1,18 @@
 import argparse
 import sys
-from pytest_caching_utils import *
+from pathlib import Path
+
+from pytest_caching_utils import (
+    download_pytest_cache,
+    GithubRepo,
+    PRIdentifier,
+    upload_pytest_cache,
+)
+
+TEMP_DIR = "./tmp"  # a backup location in case one isn't provided
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Upload this job's the pytest cache to S3"
     )
@@ -51,15 +60,18 @@ def main():
     print(f"PR identifier for `{args.pr_identifier}` is `{pr_identifier}`")
 
     repo = GithubRepo.from_string(args.repo)
+    cache_dir = Path(args.cache_dir)
+    if args.temp_dir:
+        temp_dir = Path(args.temp_dir)
+    else:
+        temp_dir = Path(TEMP_DIR)
 
     if args.upload:
         print(f"Uploading cache with args {args}")
 
         # verify the cache dir exists
-        if not os.path.exists(args.cache_dir):
-            print(
-                f"The pytest cache dir `{args.cache_dir}` does not exist. Skipping upload"
-            )
+        if not cache_dir.exists():
+            print(f"The pytest cache dir `{cache_dir}` does not exist. Skipping upload")
             return
 
         # TODO: First check if it's even worth uploading a new cache:
@@ -70,9 +82,9 @@ def main():
             repo=repo,
             job_identifier=args.job_identifier,
             shard=args.shard,
-            cache_dir=args.cache_dir,
+            cache_dir=cache_dir,
             bucket=args.bucket,
-            temp_dir=args.temp_dir,
+            temp_dir=temp_dir,
         )
 
     if args.download:
@@ -81,9 +93,9 @@ def main():
             pr_identifier=pr_identifier,
             repo=repo,
             job_identifier=args.job_identifier,
-            dest_cache_dir=args.cache_dir,
+            dest_cache_dir=cache_dir,
             bucket=args.bucket,
-            temp_dir=args.temp_dir,
+            temp_dir=temp_dir,
         )
 
 

@@ -1,12 +1,12 @@
 import contextlib
 import hashlib
 import os
-import shutil
-from typing import NamedTuple
+from pathlib import Path
+from typing import Dict, NamedTuple
 
 from file_io_utils import (
+    copy_file,
     download_s3_objects_with_prefix,
-    ensure_dir_exists,
     load_json_file,
     sanitize_for_s3,
     unzip_folder,
@@ -18,12 +18,12 @@ from file_io_utils import (
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "gha-artifacts"
-TEMP_DIR = "/tmp"  # a backup location in case one isn't provided
+LASTFAILED_FILE_PATH = Path("v/cache/lastfailed")
 
 
 # create a custom string type to be used as pr identifiers to know we've gotten the right one
 class PRIdentifier(str):
-    def __new__(cls, value):
+    def __new__(cls, value: str) -> "PRIdentifier":
         # Since the pr identifier can be based on include user defined text (like a branch name)
         # we hash it to get a clean input and dodge corner cases
         md5 = hashlib.md5(value.encode("utf-8")).hexdigest()
@@ -36,7 +36,7 @@ class GithubRepo(NamedTuple):
 
     # Create a Repo from a string like "owner/repo"
     @classmethod
-    def from_string(cls, repo_string: str):
+    def from_string(cls, repo_string: str) -> "GithubRepo":
         if "/" not in repo_string:
             raise ValueError(
                 f"repo_string must be of the form 'owner/repo', not {repo_string}"
@@ -46,26 +46,8 @@ class GithubRepo(NamedTuple):
         return cls(owner, name)
 
     # To string method
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.owner}/{self.name}"
-
-
-def get_s3_key_prefix(
-    pr_identifier: PRIdentifier,
-    repo: GithubRepo,
-    job_identifier: str,
-    shard: str = None,
-):
-    """
-    The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
-    For example, it won't include the file extension.
-    """
-    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
-
-    if shard:
-        prefix += f"/{shard}"
-
-    return prefix
 
 
 # TODO: After uploading the cache, delete the old S3 uploads so that we don't keep downloading unnecessary files.
@@ -78,10 +60,10 @@ def upload_pytest_cache(
     repo: GithubRepo,
     job_identifier: str,
     shard: str,
-    cache_dir: str,
+    cache_dir: Path,
+    temp_dir: Path,
     bucket: str = BUCKET,
-    temp_dir: str = TEMP_DIR,
-):
+) -> None:
     """
     Uploads the pytest cache to S3
     Args:
@@ -96,21 +78,17 @@ def upload_pytest_cache(
 
     if not bucket:
         bucket = BUCKET
-    if not temp_dir:
-        temp_dir = TEMP_DIR
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
-    zip_file_path_base = (
-        f"{temp_dir}/zip-upload/{obj_key_prefix}"  # doesn't include the extension
-    )
-    zip_file_path = ""
+    obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
+    # note this doesn't include the zip file extension. That'll get added later
+    zip_file_path = temp_dir / "zip-upload" / obj_key_prefix
 
     try:
-        zip_file_path = zip_folder(cache_dir, zip_file_path_base)
+        zip_file_path = zip_folder(cache_dir, zip_file_path)
         obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}"  # Keep the new file extension
         upload_file_to_s3(zip_file_path, bucket, obj_key)
     finally:
-        if zip_file_path:
+        if zip_file_path.is_file():  # if it's not a file, the zipping failed
             print(f"Deleting {zip_file_path}")
             with contextlib.suppress(FileNotFoundError):
                 pass
@@ -121,23 +99,21 @@ def download_pytest_cache(
     pr_identifier: PRIdentifier,
     repo: GithubRepo,
     job_identifier: str,
-    dest_cache_dir: str,
+    dest_cache_dir: Path,
+    temp_dir: Path,
     bucket: str = BUCKET,
-    temp_dir: str = TEMP_DIR,
-):
+) -> None:
     if not bucket:
         bucket = BUCKET
-    if not temp_dir:
-        temp_dir = TEMP_DIR
 
     if not isinstance(pr_identifier, PRIdentifier):
         raise ValueError(
             f"pr_identifier must be of type PRIdentifier, not {type(pr_identifier)}"
         )
 
-    obj_key_prefix = get_s3_key_prefix(pr_identifier, repo, job_identifier)
+    obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier)
 
-    zip_download_dir = f"{temp_dir}/cache-zip-downloads/{obj_key_prefix}"
+    zip_download_dir = temp_dir / "cache-zip-downloads" / obj_key_prefix
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
     try:
         # downloads the cache zips for all shards
@@ -148,75 +124,90 @@ def download_pytest_cache(
         for downloaded_zip in downloads:
             # the file name of the zip is the shard id
             shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
-            cache_dir_for_shard = os.path.join(
-                f"{temp_dir}/unzipped-caches",
-                get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id),
-                PYTEST_CACHE_DIR_NAME,
+            cache_dir_for_shard = (
+                temp_dir
+                / "unzipped-caches"
+                / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id)
+                / PYTEST_CACHE_DIR_NAME
             )
 
             unzip_folder(downloaded_zip, cache_dir_for_shard)
             print(
                 f"Merging cache for job_identifier `{job_identifier}`, shard `{shard_id}` into `{dest_cache_dir}`"
             )
-            merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
+            _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
     finally:
         # clean up the downloaded zip files
         # shutil.rmtree(zip_download_dir)  suppress deletes while testing
         pass
 
 
-def copy_file(source_file, dest_file):
-    ensure_dir_exists(os.path.dirname(dest_file))
-    shutil.copyfile(source_file, dest_file)
+def _get_s3_key_prefix(
+    pr_identifier: PRIdentifier,
+    repo: GithubRepo,
+    job_identifier: str,
+    shard: str = "",
+) -> str:
+    """
+    The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
+    For example, it won't include the file extension.
+    """
+    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
+
+    if shard:
+        prefix += f"/{shard}"
+
+    return prefix
 
 
-def merge_pytest_caches(pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into):
+def _merge_pytest_caches(
+    pytest_cache_dir_to_merge_from: Path, pytest_cache_dir_to_merge_into: Path
+) -> None:
     # Most files are identical across all caches, and we'll just use the first one we find in any of the caches
     # However, everthing in the "v/cache" folder is unique to each cache, so we'll merge those
 
     # Copy over all files except the 'lastfailed' file in the "v/cache" folder.
-    for root, dirs, files in os.walk(pytest_cache_dir_to_merge_from):
-        relative_path = os.path.relpath(root, pytest_cache_dir_to_merge_from)
+    for file in pytest_cache_dir_to_merge_from.glob("**/*"):
+        relative_path = file.relative_to(pytest_cache_dir_to_merge_from)
+        if relative_path == LASTFAILED_FILE_PATH:
+            continue  # We'll merge this later
 
-        for file in files:
-            if relative_path == "v/cache" and file == "lastfailed":
-                continue  # We'll merge this later
+        if file.is_dir():
+            continue
 
-            # Since these files are static, only copy them if they don't already exist in the new cache
-            to_file_path = os.path.join(
-                pytest_cache_dir_to_merge_into, relative_path, file
-            )
-            if not os.path.exists(to_file_path):
-                from_file_path = os.path.join(root, file)
-                copy_file(from_file_path, to_file_path)
+        # Since these files are static, only copy them if they don't already exist in the new cache
+        to_file_path = pytest_cache_dir_to_merge_into / relative_path / file
+        if not to_file_path.exists():
+            copy_file(file, to_file_path)
 
-    merge_lastfailed_files(
+    _merge_lastfailed_files(
         pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
     )
 
 
-def merge_lastfailed_files(source_pytest_cache, dest_pytest_cache):
+def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) -> None:
     # Simple cases where one of the files doesn't exist
-    lastfailed_file_rel_path = "v/cache/lastfailed"
-    source_lastfailed_file = os.path.join(source_pytest_cache, lastfailed_file_rel_path)
-    dest_lastfailed_file = os.path.join(dest_pytest_cache, lastfailed_file_rel_path)
+    source_lastfailed_file = source_pytest_cache / LASTFAILED_FILE_PATH
+    dest_lastfailed_file = dest_pytest_cache / LASTFAILED_FILE_PATH
 
-    if not os.path.exists(source_lastfailed_file):
+    if not source_lastfailed_file.exists():
         return
-    if not os.path.exists(dest_lastfailed_file):
+    if not dest_lastfailed_file.exists():
         copy_file(source_lastfailed_file, dest_lastfailed_file)
         return
 
     # Both files exist, so we need to merge them
     from_lastfailed = load_json_file(source_lastfailed_file)
     to_lastfailed = load_json_file(dest_lastfailed_file)
-    merged_content = merged_lastfailed_content(from_lastfailed, to_lastfailed)
+    merged_content = _merged_lastfailed_content(from_lastfailed, to_lastfailed)
 
     # Save the results
     write_json_file(dest_lastfailed_file, merged_content)
 
 
-def merged_lastfailed_content(from_lastfailed, to_lastfailed):
+def _merged_lastfailed_content(
+    from_lastfailed: Dict[str, bool], to_lastfailed: Dict[str, bool]
+) -> Dict[str, bool]:
     """
     The lastfailed files are dictionaries where the key is the test identifier.
     Each entry's value appears to always be `true`, but let's not count on that.
