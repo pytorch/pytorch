@@ -3,6 +3,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -148,6 +149,26 @@ class TestPaternMatcher(TestCase):
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
 
+    def test_pointless_cumsum(self):
+        def fn1():
+            ones = torch.full(
+                [1, 128], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1) * ones
+
+        def fn2():
+            ones = torch.full(
+                [55, 10], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1)
+
+        for fn in (fn1, fn2):
+            result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+            self.assertNotIn("aten.cumsum", code)
+            self.assertEqual(result, fn())
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            counters.clear()
+
     def test_splitwithsizes_cat(self):
         # Good case
         def fn(a):
@@ -196,6 +217,21 @@ class TestPaternMatcher(TestCase):
 
         args = [
             torch.randn(2, 32, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+
+        # https://github.com/pytorch/pytorch/issues/99686.
+        def fn(a):
+            x = torch.ops.aten.split_with_sizes.default(a, [3, 2, 3], dim=1)
+            cat = torch.ops.aten.cat.default([x[1], x[0], x[2]], dim=1)
+            return cat
+
+        args = [
+            torch.randn(1, 8, device="cuda"),
         ]
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
