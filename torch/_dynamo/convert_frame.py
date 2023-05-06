@@ -159,20 +159,20 @@ def has_tensor_in_frame(frame):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
         elif istype(obj, (list, tuple)):
-            seen_ids[obj_id] = any([has_tensor(v) for v in obj])
+            seen_ids[obj_id] = any(has_tensor(v) for v in obj)
             return seen_ids[obj_id]
         elif istype(obj, dict):
             # Some packages like pytest can be updated during runtime. So, make a
             # copy of values to avoid issues like "RuntimeError: dictionary
             # changed size during iteration"
             values = list(obj.values())
-            seen_ids[obj_id] = any([has_tensor(v) for v in values])
+            seen_ids[obj_id] = any(has_tensor(v) for v in values)
             return seen_ids[obj_id]
         elif istype(obj, (str, int, float, type(None), bool)):
             seen_ids[obj_id] = False
             return seen_ids[obj_id]
         elif is_namedtuple(obj):
-            seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
+            seen_ids[obj_id] = any(has_tensor(getattr(obj, v)) for v in obj._fields)
             return seen_ids[obj_id]
         else:
             # if config.debug:
@@ -237,10 +237,16 @@ def convert_frame_assert(
         if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
-            )
+            if config.report_guard_failures:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+            else:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message)
@@ -297,19 +303,31 @@ def convert_frame_assert(
             def format_guard_failures(code):
                 # For the common case, it's sufficient to see just the most recent failure.
                 # We could add a verbose mode if needed
-                return f"{str(guard_failures[code][-1])}"
+                return f"  reasons: {str(guard_failures[code][-1])}\n"
 
-            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
-                "   function: %s\n"
-                "   reasons:  %s\n"
-                "to diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
-                format_func_info(code),
-                format_guard_failures(code),
-                troubleshooting_url,
-            )
+            if config.report_guard_failures:
+                assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "   reasons:  %s\n"
+                    "to diagnose recompilation issues, see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    format_guard_failures(code),
+                    troubleshooting_url,
+                )
+            else:
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
+                    " and also see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    troubleshooting_url,
+                )
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
