@@ -2321,8 +2321,7 @@ class ShapeEnv:
                         if isinstance(c, StrictMinMaxConstraint):
                             msg = (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
-                                f"was allocated at:\n{tb}"
+                                f"we generated a guard on this size variable: {guard_expr}."
                             )
                             record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
