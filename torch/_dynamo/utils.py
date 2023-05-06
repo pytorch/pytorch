@@ -875,6 +875,7 @@ def same(
     equal_nan=False,
     exact_dtype=True,
     relax_numpy_equality=False,
+    ignore_non_fp=False,
     log_error=log.error,
 ):
     """Check correctness to see if ref and res match"""
@@ -892,6 +893,7 @@ def same(
                 equal_nan,
                 exact_dtype,
                 relax_numpy_equality,
+                ignore_non_fp,
                 log_error=log_error,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
@@ -912,6 +914,7 @@ def same(
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                     relax_numpy_equality=relax_numpy_equality,
+                    ignore_non_fp=ignore_non_fp,
                     log_error=log_error,
                 )
             ):
@@ -932,6 +935,8 @@ def same(
                 log_error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
+                if ignore_non_fp:
+                    return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
                     ref.to(dtype=torch.uint8),
@@ -990,9 +995,14 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            if ignore_non_fp:
+                return True
+
             log_error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
+        if ignore_non_fp:
+            return True
         r = ref == res
         if not r:
             log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
@@ -1039,6 +1049,7 @@ def same(
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
                 relax_numpy_equality=relax_numpy_equality,
+                ignore_non_fp=ignore_non_fp,
                 log_error=log_error,
             )
             for key in ref.__dict__.keys()
