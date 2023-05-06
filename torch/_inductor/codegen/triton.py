@@ -12,9 +12,7 @@ import sympy
 import torch
 
 import torch._logging
-from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
-from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
