@@ -682,25 +682,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     writes[dep.name] = dep
             return True
 
-        def dep_contiguous_score(dep):
-            if not dep.var_names or not hasattr(dep, "index"):
-                return 0
-            v = dep.var_names[-1]
-            if v in dep.index.free_symbols and v not in (dep.index - v).free_symbols:
-                return 0
-            else:
-                return -1
-
-        def dep_symbols_score(dep):
-            if not hasattr(dep, "index"):
-                return 0
-            score = 0
-            symbols = set(dep.index.free_symbols)
-            for v in dep.var_names:
-                if v in symbols:
-                    score -= 1
-            return score
-
         def score(ordering: Dict[SchedulerNode, LoopOrder]):
             reuse_score = 0
             combined = set()
@@ -729,14 +710,49 @@ class FusedSchedulerNode(BaseSchedulerNode):
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                # sum(map(dep_contiguous_score, external_deps)),
+                sum(map(dep_contiguous_score1, external_writes)),
+                # sum(map(dep_contiguous_score1, external_deps)),
+                # sum(map(dep_contiguous_score2, external_deps)),
                 sum(map(dep_symbols_score, external_deps)),
-                # sum(map(dep_contiguous_score, internal_deps)),
+                # sum(map(dep_contiguous_score1, internal_deps)),
+                # sum(map(dep_contiguous_score2, internal_deps)),
                 sum(map(dep_symbols_score, internal_deps)),
-                sum(int(x.permute_order is None) for x in ordering.values()),
-                # sum(-int(not dep.is_contiguous()) for dep in combined),
-                # sum(int(dep.is_contiguous()) for dep in external_writes),
+                # sum(int(x.permute_order is None) for x in ordering.values()),
             )
+
+        def dep_contiguous_score1(dep):
+            if dep.is_contiguous():
+                return 0
+            else:
+                return -1
+
+        def dep_contiguous_score2(dep):
+            """
+            This score is a weaker form of dep.is_contiguous() where we
+            only check the last dimension.
+            """
+            if not dep.var_names or not hasattr(dep, "index"):
+                return 0
+            v = dep.var_names[-1]
+            if v in dep.index.free_symbols and v not in (dep.index - v).free_symbols:
+                return 0
+            else:
+                return -1
+
+        def dep_symbols_score(dep):
+            """
+            This score is relying on normalization to merge contiguous
+            dims together, therefor fewer symbols mean more contiguous
+            dims.
+            """
+            if not hasattr(dep, "index"):
+                return 0
+            score = 0
+            symbols = set(dep.index.free_symbols)
+            for v in dep.var_names:
+                if v in symbols:
+                    score -= 1
+            return score
 
         all_node_names = functools.reduce(set.union, (n.get_names() for n in snodes))
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]
