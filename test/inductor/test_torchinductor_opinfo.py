@@ -216,7 +216,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.svdvals": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "pca_lowrank": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
@@ -335,7 +334,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
     "svd": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},

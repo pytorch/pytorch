@@ -144,7 +144,7 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     Computes mm(mat1, mat2) + mm(mat3, mat4)
     """
     m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
-    m2, n2, k2, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
+    m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
     # Optimization is optional, because we can always just not do the fusion
     if not V.graph.sizevars.statically_known_list_equals(
         mat1.get_size(), mat3.get_size()
@@ -154,11 +154,14 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
         if m1 == m2 and n1 == n2:
+            V.graph.sizevars.guard_equals(m1, m2)
+            V.graph.sizevars.guard_equals(n1, n2)
             return lowerings[aten.addmm](lowerings[aten.mm](mat3, mat4), mat1, mat2)
         return lowerings[aten.add](
             lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
         )
 
+    assert layout1 == layout2
     # options to tune from
     choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
     if use_triton_template(layout1):
