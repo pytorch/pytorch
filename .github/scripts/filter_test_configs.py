@@ -227,7 +227,10 @@ def remove_disabled_jobs(
         disabled_platform_no_suffix = re.sub(cleanup_regex, "", disabled_platform)
         current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
 
-        if disabled_platform != current_platform and disabled_platform_no_suffix != current_platform_no_suffix:
+        if (
+            disabled_platform != current_platform
+            and disabled_platform_no_suffix != current_platform_no_suffix
+        ):
             # The current platform is not disabled by this record
             continue
 
