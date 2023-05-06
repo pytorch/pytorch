@@ -180,7 +180,7 @@ jobs:
           # returned matrix is empty, it means that the job is disabled
           test-matrix: |
             { include: [
-              { config: "default", shard: 1, num_shards: 1 },
+              { config: "default" },
             ]}
 
       - name: Download Build Artifacts
