@@ -537,6 +537,7 @@ void TCPStoreMasterDaemon::multiSetHandler(int socket) {
   SizeType nargs = 0;
   tcputil::recvBytes<SizeType>(socket, &nargs, 1);
   for (auto _ : c10::irange(nargs)) {
+    (void)_; // Suppress unused variable warning
     auto key = tcputil::recvString(socket);
     auto value = tcputil::recvVector<uint8_t>(socket);
     doSet(key, value);
