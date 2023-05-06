@@ -21,6 +21,7 @@ def patched_aot_function(
     num_params_buffers: int = 0,
     keep_inference_input_mutations: bool = False,
     pre_compile_fn: Optional[Callable[..., object]] = None,
+    enable_log: bool = False,
 ) -> Callable[..., object]:
     """
     NOTE: rationale for patch.
