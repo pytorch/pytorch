@@ -60,9 +60,7 @@ def get_s3_key_prefix(
     The prefix to any S3 object key for a pytest cache. It's only a prefix though, not a full path to an object.
     For example, it won't include the file extension.
     """
-    prefix = (
-        f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
-    )
+    prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
 
     if shard:
         prefix += f"/{shard}"

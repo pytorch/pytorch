@@ -24,7 +24,8 @@ def unzip_folder(zip_file_path, unzip_to_folder):
     """
     Returns the path to the unzipped folder
     """
-    print(f"Unzipping {zip_file_path} to {unzip_to_folder}")
+    print(f"Unzipping {zip_file_path}")
+    print(f"       to {unzip_to_folder}")
     shutil.unpack_archive(zip_file_path, unzip_to_folder, "zip")
 
 
@@ -58,7 +59,8 @@ def sanitize_for_s3(text):
 
 
 def upload_file_to_s3(file_name, bucket, key):
-    print(f"Uploading {file_name}\n        to s3://{bucket}/{key}...", end="")
+    print(f"Uploading {file_name}")
+    print(f"       to s3://{bucket}/{key}...", end="")
 
     boto3.client("s3").upload_file(
         file_name,
@@ -78,13 +80,16 @@ def download_s3_objects_with_prefix(bucket, prefix, download_folder):
     for obj in bucket.objects.filter(Prefix=prefix):
         download_path = os.path.join(download_folder, obj.key)
         ensure_dir_exists(os.path.dirname(download_path))
-        print(f"Downloading s3://{bucket.name}/{obj.key}\n         to {download_path}...", end="")
+        print(f"Downloading s3://{bucket.name}/{obj.key}")
+        print(f"            to {download_path}...", end="")
 
         s3.Object(bucket.name, obj.key).download_file(download_path)
         downloads.append(download_path)
         print("done")
 
     if len(downloads) == 0:
-        print(f"There were no files matching the prefix `{prefix}` in bucket `{bucket.name}`")
+        print(
+            f"There were no files matching the prefix `{prefix}` in bucket `{bucket.name}`"
+        )
 
     return downloads

@@ -24,13 +24,19 @@ def main():
         help="Path to the folder pytest uses for its cache",
     )
     parser.add_argument("--pr_identifier", required=True, help="A unique PR identifier")
-    parser.add_argument("--job_identifier", required=True, help="A unique job identifier that should be the same for all runs of job")
+    parser.add_argument(
+        "--job_identifier",
+        required=True,
+        help="A unique job identifier that should be the same for all runs of job",
+    )
     parser.add_argument(
         "--shard", required="--upload" in sys.argv, help="The shard id"
     )  # Only required for upload
 
     parser.add_argument(
-        "--repo", required=False, help="The github repository we're running in, in the format 'owner/repo-name'"
+        "--repo",
+        required=False,
+        help="The github repository we're running in, in the format 'owner/repo-name'",
     )
     parser.add_argument(
         "--temp_dir", required=False, help="Directory to store temp files"
@@ -51,7 +57,9 @@ def main():
 
         # verify the cache dir exists
         if not os.path.exists(args.cache_dir):
-            print(f"The pytest cache dir `{args.cache_dir}` does not exist. Skipping upload")
+            print(
+                f"The pytest cache dir `{args.cache_dir}` does not exist. Skipping upload"
+            )
             return
 
         # TODO: First check if it's even worth uploading a new cache:

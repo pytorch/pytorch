@@ -286,7 +286,7 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() 
+        if: always()
 
       # NB: We are currently having an intermittent GPU-related issue on G5 runners with
       # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
