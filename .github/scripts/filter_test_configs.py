@@ -214,8 +214,21 @@ def remove_disabled_jobs(
             disabled_job_cfg,
         ) = record
 
-        if disabled_workflow != workflow or disabled_platform != current_platform:
-            # The current workflow or platform is not disabled by this record
+        if disabled_workflow != workflow:
+            # The current workflow is not disabled by this record
+            continue
+
+        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
+        # There is an exception here for binary build workflows in which the platform
+        # names have the build and test suffix. For example, we have a build job called
+        # manywheel-py3_8-cuda11_8-build / build and its subsequent test job called
+        # manywheel-py3_8-cuda11_8-test / test. So they are linked, but their suffixes
+        # are different.
+        disabled_platform_no_suffix = re.sub(cleanup_regex, "", disabled_platform)
+        current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
+
+        if disabled_platform != current_platform and disabled_platform_no_suffix != current_platform_no_suffix:
+            # The current platform is not disabled by this record
             continue
 
         # The logic after this is fairly complicated:
