@@ -1336,6 +1336,7 @@
 
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
+  result: renorm_jvp(self_t, self_p, p, dim, maxnorm)
 
 - name: repeat(Tensor self, SymInt[] repeats) -> Tensor
   self: repeat_backward(grad, repeats, self.sym_sizes())
