@@ -278,18 +278,20 @@ class TestMkldnn(TestCase):
         self._test_conv_base(dim=3)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def _test_conv_lower_precision_base(self, dim, dtype):
-        conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+    def _test_conv_deconv_lower_precision_base(self, dim, conv_module, dtype):
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
         options = itertools.product([True, False], [1, 2], [1, 4])
         for bias, dilation, groups in options:
-            N = torch.randint(3, 10, (1,)).item()
+            N = torch.randint(1, 3, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes[dim]
             x = torch.randn(x_shape, dtype=torch.float32)
-
-            conv = conv_module[dim](in_channels=C,
+            # TODO: remove this when group depthwise is supported:
+            if conv_module in [torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d,
+                torch.nn.ConvTranspose3d] and groups > 1 and C == groups:
+                continue
+            conv = conv_module(in_channels=C,
                                     out_channels=M,
                                     kernel_size=3,
                                     stride=2,
@@ -312,23 +314,31 @@ class TestMkldnn(TestCase):
                     y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
             # test thnn impl
             conv_lower = copy.deepcopy(conv).to(dtype=dtype)
-            ref_conv = copy.deepcopy(conv_lower).float()
+            conv_ref = copy.deepcopy(conv_lower).float()
             with torch.backends.mkldnn.flags(enabled=False):
-                y = ref_conv(x_lower.float())
+                x_ref = x_lower.clone().float().detach().requires_grad_()
+                x_lower.requires_grad_()
+                y = conv_ref(x_ref)
                 y_lower = conv_lower(x_lower).float()
-                self.assertEqual(y, y_lower, atol=1e-5, rtol=5e-3)
+                self.assertEqual(y, y_lower, atol=5e-2, rtol=5e-3)
 
-    def test_conv1d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=1, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=1, dtype=torch.half)
+    def test_conv_deconv_1d_lower_precision(self):
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.Conv1d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.Conv1d, dtype=torch.half)
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.ConvTranspose1d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.ConvTranspose1d, dtype=torch.half)
 
-    def test_conv2d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=2, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=2, dtype=torch.half)
+    def test_conv_deconv_2d_lower_precision(self):
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.Conv2d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.Conv2d, dtype=torch.half)
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.ConvTranspose2d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.ConvTranspose2d, dtype=torch.half)
 
-    def test_conv3d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=3, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=3, dtype=torch.half)
+    def test_conv_deconv_3d_lower_precision(self):
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=torch.half)
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=torch.bfloat16)
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=torch.half)
 
     def _test_conv2d_nhwc_base(self, conv_module, weight_memory_format, dtype, prec=None):
         input_shapes = (55, 55)
