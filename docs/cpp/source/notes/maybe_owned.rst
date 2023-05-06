@@ -55,5 +55,5 @@ So, general rules of thumb:
   reference count, but never in misbehavior - so it's always the safer bet, unless
   the lifetime of the Tensor you're looking to wrap is crystal clear.
 
-More details and implementation code can be found at <https://github.com/pytorch/pytorch/blob/master/c10/util/MaybeOwned.h> and
-<https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/templates/TensorBody.h>.
+More details and implementation code can be found at <https://github.com/pytorch/pytorch/blob/main/c10/util/MaybeOwned.h> and
+<https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/templates/TensorBody.h>.
