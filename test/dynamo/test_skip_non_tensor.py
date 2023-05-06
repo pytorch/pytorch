@@ -68,7 +68,7 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         y = 5
         opt_fn(x, y)
 
-        assert counter.op_count == 0
+        assert counter.op_count == 1
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):

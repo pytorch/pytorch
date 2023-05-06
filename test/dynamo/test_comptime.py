@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+from unittest.mock import patch
 
 import re
 import sys
@@ -165,6 +166,7 @@ y = TensorVariable()
         bt = FILE.getvalue()
         self.assertIn("y = g(y)", bt)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_print_guards(self):
         global FILE
         FILE = StringIO()

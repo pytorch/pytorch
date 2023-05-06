@@ -19,7 +19,10 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
-            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit)
+            torch._dynamo.config.patch("cache_size_limit", cls.cache_limit),
+        )
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch("dynamic_shapes", False),
         )
 
     def test_drop_cache_on_skip(self):

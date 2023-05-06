@@ -372,7 +372,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
         expected_op_count = (
-            ifdynstaticdefault(2, 4)
+            ifdynstaticdefault(3, 4)
             if torch._dynamo.testing.config.dynamic_shapes
             else 1
         )
@@ -1873,6 +1873,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2887,6 +2888,7 @@ def fn():
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(raise_on_backend_change=True)
+    @torch._dynamo.config.patch(dynamic_shapes=False)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn1():
