@@ -164,7 +164,7 @@ class ForeachKernel(Kernel):
             if block_count == 0:
                 cond = "if"
                 # initialize tile ptrs
-                code.splice("mask = tl.arange(0, BLOCK_SIZE) < BLOCK_SIZE\n")
+                code.splice("xmask = tl.arange(0, BLOCK_SIZE) < BLOCK_SIZE\n")
                 for list_tracker in self.lists.values():
                     code.splice(
                         f"{list_tracker.var}_tile_ptrs = {list_tracker.arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
@@ -182,7 +182,7 @@ class ForeachKernel(Kernel):
                 code.splice(f"if pid == {upper_bound_pid - 1}:")
                 with code.indent():
                     code.splice(
-                        f"mask = tl.arange(0, BLOCK_SIZE) < {last_block_elem_count}"
+                        f"xmask = tl.arange(0, BLOCK_SIZE) < {last_block_elem_count}"
                     )
 
             block_count += num_blocks
