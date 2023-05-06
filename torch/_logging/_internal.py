@@ -292,7 +292,7 @@ def get_loggers():
     """
     Returns: a list of all registered loggers
     """
-    return [logging.getLogger(qname) for qname in log_registry.log_qnames]
+    return [logging.getLogger(qname) for qname in log_registry.get_log_qnames()]
 
 
 def register_log(setting_name, log_name):
