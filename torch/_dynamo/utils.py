@@ -1281,7 +1281,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
@@ -1325,6 +1325,8 @@ def get_real_value(node, tracer):
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
+    from .exc import TorchRuntimeError
+
     cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
@@ -1350,7 +1352,7 @@ def get_real_value(node, tracer):
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
     return real_value
 
 
