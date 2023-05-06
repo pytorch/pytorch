@@ -13,9 +13,9 @@ from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     IS_FBCODE,
     TEST_WITH_ASAN,
-    DeterministicGuard,
 )
 
 try:
