@@ -2869,7 +2869,7 @@ Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
 
 Args:
-    real (Tensor): The real part of the complex tensor. Must be float or double.
+    real (Tensor): The real part of the complex tensor. Must be half, float or double.
     imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
         as :attr:`real`.
 
@@ -9357,7 +9357,7 @@ with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
-comparing against :attr:`end`; to avoid inconsistency, we advise adding a small epsilon to :attr:`end`
+comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
 
 .. math::
@@ -13218,12 +13218,26 @@ Example::
             [3, 4],
             [3, 4]])
 
-.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
-   :noindex:
-
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
+
+.. function:: repeat_interleave(repeats, *) -> Tensor
+   :noindex:
+
+Repeats 0 repeats[0] times, 1 repeats[1] times, 2 repeats[2] times, etc.
+
+Args:
+    repeats (Tensor): The number of repetitions for each element.
+
+Returns:
+    Tensor: Repeated tensor of size `sum(repeats)`.
+
+Example::
+
+    >>> torch.repeat_interleave(torch.tensor([1, 2, 3]))
+    tensor([0, 1, 1, 2, 2, 2])
+
 """.format(
         **common_args
     ),
