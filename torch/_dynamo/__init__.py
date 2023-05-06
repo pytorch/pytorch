@@ -15,7 +15,13 @@ from .eval_frame import (
 )
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
-from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
+from .utils import (
+    compilation_metrics,
+    graph_break_reasons,
+    guard_failures,
+    orig_code_map,
+    reset_frame_count,
+)
 
 __all__ = [
     "allow_in_graph",
@@ -50,6 +56,7 @@ def reset():
     convert_frame.output_codes.clear()
     orig_code_map.clear()
     guard_failures.clear()
+    graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
     if hasattr(eval_frame.most_recent_backend, "reset"):
         eval_frame.most_recent_backend.reset()
