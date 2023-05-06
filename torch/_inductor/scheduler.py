@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton, is_local
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -663,6 +663,10 @@ class Scheduler:
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
+        from .debug import draw_buffers
+
+        if is_local():
+            draw_buffers(self.nodes, print_graph=True, fname='pre_fusion.svg')
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.fuse_nodes()

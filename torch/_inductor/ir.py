@@ -4389,11 +4389,6 @@ class AllGatherIntoTensor(CollectiveKernel):
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
-        wrapper.writeline(
-            f"{output_name}_work = dist.all_gather_into_tensor("
-            f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
-        )
-
         # At this point, output_name points to a fresh buffer
         wrapper.writeline(
             f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"

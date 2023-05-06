@@ -47,6 +47,8 @@ from .utils import (
     gather_origins,
     get_dtype_size,
     sympy_product,
+    print2,
+    is_local,
 )
 from .virtualized import V
 
@@ -617,6 +619,77 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
+
+        from .debug import create_fx_from_snodes, draw_buffers
+        # draw_buffers(self.nodes, True)
+        fx_graph = create_fx_from_snodes(self.scheduler.nodes)
+        def get_greedy_topo_ordering(fx_graph):
+            new_nodes = [node for node in fx_graph.nodes if 'fusion_meta' in node.meta]
+            indeg = {k: 0 for k in new_nodes}
+            from collections import defaultdict
+            buf_uses = defaultdict(set)
+            for node in new_nodes:
+                snode = node.meta['fusion_meta'].snode
+                for buf in snode.used_buffer_names():
+                    buf_uses[buf].add(snode)
+                for user in node.users:
+                    if user in indeg:
+                        indeg[user] += 1
+            result = []
+            while len(indeg) > 0:
+                indeg_snodes = set([i.meta['fusion_meta'].snode for i in tuple(indeg.keys())])
+                removable_bufs = set()
+                for i in buf_uses.keys():
+                    if len(buf_uses[i] & indeg_snodes) == 1:
+                        removable_bufs.add(i)
+
+                def score_candidate(candidate):
+                    snode = candidate.meta['fusion_meta'].snode
+                    def any_is_comm(node, depth=1):
+                        for user in node.users:
+                            if isinstance(node.meta['fusion_meta'].snode, (ir.AllGatherIntoTensor, ir.ReduceScatterTensor, ir.AllReduce)):
+                                return True
+                        if depth <= 0:
+                            return False
+                        return any(any_is_comm(user, depth-1) for user in node.users)
+
+                    if isinstance(snode.node, ir.Wait):
+                        return 10
+                    elif isinstance(snode.node, (ir.AllGatherIntoTensor, ir.ReduceScatterTensor, ir.AllReduce)):
+                        return 0
+                    elif any_is_comm(node, 1):
+                        return 1
+                    elif any_is_comm(node, 2):
+                        return 2
+
+                    return 3
+
+                candidates = [k for k in indeg.keys() if indeg[k] == 0]
+                candidates = sorted(candidates, key=score_candidate)
+                k = candidates[0]
+                result.append(k)
+                for user in k.users:
+                    if user in indeg:
+                        indeg[user] -= 1
+                del indeg[k]
+            return [node.meta['fusion_meta'].snode for node in result]
+
+
+        if is_local():
+            for idx, node in enumerate(self.scheduler.nodes):
+                print2(idx, node.get_name(), type(node.node))
+        new_nodes = get_greedy_topo_ordering(fx_graph)
+        self.scheduler.nodes = new_nodes
+        if is_local():
+            for idx, node in enumerate(self.scheduler.nodes):
+                print2(idx, node.get_name(), type(node.node))
+        self.scheduler.compute_last_usage()
+        # import os
+        # if os.environ.get('LOCAL_RANK', -1) == '0':
+        #     breakpoint()
+        # from .debug import draw_buffers
+        # if os.environ.get('LOCAL_RANK', -1) == '0':
+        #     draw_buffers(self.nodes, fname="graph_diagram.svg")
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
