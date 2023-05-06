@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import os
 import pprint
 import textwrap
@@ -220,9 +221,7 @@ class BaseSchedulerNode:
         if not self.node.should_allocate():
             return
 
-        if isinstance(self, (SchedulerNode,)) and (
-            self.node.get_alias_names() or self.node.get_mutation_names()
-        ):
+        if self.has_aliasing_or_mutation():
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
@@ -244,6 +243,7 @@ class BaseSchedulerNode:
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+            writes = {dep.name: dep for dep in self.read_writes.writes}
 
             for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
@@ -270,6 +270,8 @@ class BaseSchedulerNode:
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
+                        and self.get_name() in writes
+                        and read.index == writes[self.get_name()].index
                     ):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
@@ -377,19 +379,23 @@ class LoopOrder:
     @classmethod
     def permute(cls, node, body, sizes, order):
         iter_size, reduce_size = sizes
+        iter_size = [iter_size[i] for i in order]
         assert len(order) == len(iter_size)
+        inverse_order = {b: a for a, b in enumerate(order)}
+        inverse_order = [inverse_order[i] for i in range(len(order))]
 
         def wrapped(*indices):
             index = list(itertools.chain(*indices))
             assert len(index) == len(iter_size) + len(reduce_size)
             iter_idx = index[: len(iter_size)]
             reduce_idx = index[len(iter_size) :]
-            return body([iter_idx[i] for i in order], reduce_idx)
+            iter_idx = [iter_idx[i] for i in inverse_order]
+            return body(iter_idx, reduce_idx)
 
         return cls(
             node,
             wrapped,
-            ([iter_size[i] for i in order], reduce_size),
+            (iter_size, reduce_size),
             permute_order=order,
         )
 
@@ -401,6 +407,18 @@ class LoopOrder:
             read_writes = dependencies.extract_read_writes(body, *sizes, normalize=True)
         self.read_writes = read_writes
         self.permute_order = permute_order
+
+    def __str__(self):
+        return textwrap.dedent(
+            f"""
+            LoopOrder(
+                node = {self.node}
+                sizes = {self.sizes}
+                permute_order = {self.permute_order}
+                read_writes = {self.read_writes}
+            )
+        """
+        ).strip()
 
     def __hash__(self):
         return id(self)
@@ -438,6 +456,18 @@ class LoopOrder:
 
     def is_reduction(self):
         return self.node.is_reduction()
+
+
+def _all_swaps(original_order):
+    """
+    Yield permuations of original_order with a single swap applied
+    """
+    n = len(original_order)
+    for i in range(n):
+        for j in range(i + 1, n):
+            order = list(original_order)
+            order[i], order[j] = order[j], order[i]
+            yield tuple(order)
 
 
 class SchedulerNode(BaseSchedulerNode):
@@ -495,16 +525,19 @@ class SchedulerNode(BaseSchedulerNode):
             order = (0, *range(2, n), 1)
             choices.append(permute(order))
             tried.add(order)
-        for order in itertools.permutations(tuple(range(n))):
+
+        if math.factorial(n) <= config.loop_ordering_search_limit:
+            # for small n use all n! permutations
+            find_choices = itertools.permutations
+        else:
+            # prune search space to n^2
+            find_choices = _all_swaps
+
+        for order in find_choices(tuple(range(n))):
             if order not in tried:
                 choices.append(permute(order))
-            if len(choices) >= config.loop_ordering_search_limit:
-                # would be exponential without a size cap
-                break
-
-        if False:
-            # TODO(jansel): explore is this can be removed
-            choices = [choices[0], *[c for c in choices[1:] if c.has_contiguous()]]
+                if len(choices) >= config.loop_ordering_search_limit:
+                    break
         return choices
 
     def active_loop_orders(self):
@@ -577,12 +610,7 @@ class SchedulerNode(BaseSchedulerNode):
         return dependencies.extract_read_writes(fn, sizes)
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
-        if self.get_aliases() or self.is_template():
-            return False
-        if len(self.read_writes.writes) == 1 and hasattr(read_dep, "index"):
-            write_dep = next(iter(self.read_writes.writes))
-            return read_dep.index == write_dep.index and read_dep.size == write_dep.size
-        return False
+        return not (self.has_aliasing_or_mutation() or self.is_template())
 
     def apply_loop_order(self, ordering: LoopOrder):
         if self.is_template():
@@ -654,27 +682,63 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     writes[dep.name] = dep
             return True
 
+        def dep_contiguous_score(dep):
+            if not dep.var_names or not hasattr(dep, "index"):
+                return 0
+            v = dep.var_names[-1]
+            if v in dep.index.free_symbols and v not in (dep.index - v).free_symbols:
+                return 0
+            else:
+                return -1
+
+        def dep_symbols_score(dep):
+            if not hasattr(dep, "index"):
+                return 0
+            score = 0
+            symbols = set(dep.index.free_symbols)
+            for v in dep.var_names:
+                if v in symbols:
+                    score -= 1
+            return score
+
         def score(ordering: Dict[SchedulerNode, LoopOrder]):
             reuse_score = 0
             combined = set()
-            reads = set()
-            writes = set()
-            for order in ordering.values():
-                union = order.read_writes.reads | order.read_writes.writes
+            internal_deps = set()
+            external_deps = set()
+            external_writes = set()
+            for node, order in ordering.items():
+                union = set(order.read_writes.reads_and_writes())
                 reuse_score += len(combined & union)
                 combined.update(union)
-                reads.update(order.read_writes.reads)
-                writes.update(order.read_writes.writes)
 
-            write_and_read = writes & reads
+                for dep in order.read_writes.reads:
+                    if dep.name in all_node_names:
+                        internal_deps.add(dep)
+                    else:
+                        external_deps.add(dep)
+                for dep in order.read_writes.writes:
+                    if all(u.get_name() in all_node_names for u in node.users):
+                        internal_deps.add(dep)
+                    else:
+                        external_deps.add(dep)
+                        external_writes.add(dep)
+                for dep in order.read_writes.index_exprs:
+                    internal_deps.add(dep)
+
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(int(dep.is_contiguous()) for dep in combined - write_and_read),
-                sum(int(dep.is_contiguous()) for dep in write_and_read),
+                # sum(map(dep_contiguous_score, external_deps)),
+                sum(map(dep_symbols_score, external_deps)),
+                # sum(map(dep_contiguous_score, internal_deps)),
+                sum(map(dep_symbols_score, internal_deps)),
                 sum(int(x.permute_order is None) for x in ordering.values()),
+                # sum(-int(not dep.is_contiguous()) for dep in combined),
+                # sum(int(dep.is_contiguous()) for dep in external_writes),
             )
 
+        all_node_names = functools.reduce(set.union, (n.get_names() for n in snodes))
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]
         backend = snodes[0].scheduler.get_backend(snodes[0].get_device())
         for node in snodes:
@@ -867,6 +931,7 @@ def pick_loop_order(stride_lengths, sizes, priority_idx=()):
 @dataclasses.dataclass
 class NodeUser:
     node: BaseSchedulerNode
+    # TODO(jansel): refactor can_inplace to be generated dynamically not stored
     can_inplace: bool = False
 
     def get_name(self):
@@ -1278,7 +1343,8 @@ class Scheduler:
 
         try:
             FusedSchedulerNode.select_loop_orders((node1, node2))
-        except FusionFailed:
+        except FusionFailed as e:
+            log.debug("FusionFailed: %s", e)
             return False
 
         return True

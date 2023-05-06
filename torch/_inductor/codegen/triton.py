@@ -1625,6 +1625,17 @@ class TritonScheduling:
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
+    @staticmethod
+    def deps_from_active_loop_order(node):
+        if isinstance(node, FusedSchedulerNode):
+            orders = node.active_loop_orders()[0]
+        else:
+            orders = FusedSchedulerNode.select_loop_orders((node,))[0]
+        deps = set()
+        for node in orders.values():
+            deps.update(node.read_writes.reads_and_writes())
+        return deps
+
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
@@ -1645,26 +1656,15 @@ class TritonScheduling:
             if numel1 != numel2:
                 return False
 
-            loop_order = list(
-                FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
-            )
-            loop_order1 = loop_order[: len(node1.get_nodes())]
-            loop_order2 = loop_order[len(node1.get_nodes()) :]
-
-            if not config.aggressive_fusion:
-                deps1 = set()
-                for n in loop_order1:
-                    deps1.update(n.read_writes.reads_and_writes())
-                deps2 = set()
-                for n in loop_order2:
-                    deps2.update(n.read_writes.reads_and_writes())
-                if len(deps1 & deps2) == 0:
-                    return False
-
             if (
                 config.triton.tiling_prevents_pointwise_fusion
                 and not node1.is_template()
             ):
+                loop_order = list(
+                    FusedSchedulerNode.select_loop_orders((node1, node2))[0].values()
+                )
+                loop_order1 = loop_order[: len(node1.get_nodes())]
+                loop_order2 = loop_order[len(node1.get_nodes()) :]
                 tiling1 = self.select_tiling(loop_order1, numel1)
                 tiling2 = self.select_tiling(loop_order2, numel1)
                 # TODO(jansel): this doesn't handle 3D tiling (disabled by config)
@@ -1694,10 +1694,23 @@ class TritonScheduling:
 
         assert node1.is_reduction() and not node2.is_reduction()
         # swap args to hit the case above
-        return self.can_fuse_horizontal(node2, node1)
+        return self.can_fuse(node2, node1)
 
     can_fuse_vertical = can_fuse
-    can_fuse_horizontal = can_fuse
+
+    def can_fuse_horizontal(self, node1, node2):
+        if (
+            not config.aggressive_fusion
+            and len(
+                self.deps_from_active_loop_order(node1)
+                & self.deps_from_active_loop_order(node2)
+            )
+            == 0
+        ):
+            # Fusion would require loop reordering
+            return False
+
+        return self.can_fuse(node1, node2)
 
     def is_loop_order_valid(self, nodes):
         for node in nodes:

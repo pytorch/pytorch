@@ -283,14 +283,12 @@ class _RecordLoadStoreInner(V.MockHandler):
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
-        if False:
-            # TODO(jansel): this is causing errors
-            free_symbols = index.free_symbols
-            while new_vars and new_vars[-1] not in free_symbols:
-                # Reduction has last (reduced) dim in its sizes, but
-                # downstream users won't.  Normalize this away.
-                new_vars.pop()
-                new_sizes.pop()
+        free_symbols = index.free_symbols
+        while new_vars and new_vars[-1] not in free_symbols:
+            # Reduction has last (reduced) dim in its sizes, but
+            # downstream users won't.  Normalize this away.
+            new_vars.pop()
+            new_sizes.pop()
         return index, tuple(new_vars), tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:

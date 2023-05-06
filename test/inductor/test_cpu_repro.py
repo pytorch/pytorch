@@ -1415,7 +1415,7 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
