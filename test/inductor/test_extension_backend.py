@@ -11,6 +11,7 @@ from extension_backends.extension_scheduling import (
     ExtensionScheduling,
     ExtensionWrapperCodegen,
 )
+from torch._C import FileCheck
 from torch._inductor import metrics
 from torch._inductor.utils import (
     get_scheduling_for_device,
@@ -30,11 +31,8 @@ except unittest.SkipTest:
     raise
 
 
-vec_dtypes = test_torchinductor.vec_dtypes
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
-aten = torch.ops.aten
-check_model = test_torchinductor.check_model
 
 
 def remove_build_path():
@@ -120,7 +118,11 @@ class ExtensionBackendTests(TestCase):
             return a * b + c
 
         metrics.reset()
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile()(fn)
+        code = run_and_get_cpp_code(opt_fn, x, y, z)
+        FileCheck().check("void kernel").check("loadu").check("extension_device").run(
+            code
+        )
         opt_fn(x, y, z)
         res = opt_fn(x, y, z)
         self.assertEqual(ref, res.to(device="cpu"))
