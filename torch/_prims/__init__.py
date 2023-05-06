@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -2731,6 +2732,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA and not HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and is_cuda and torch.version.cuda and Vh.is_complex():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
@@ -2988,3 +2993,4 @@ fft_c2r = _make_prim(
 
 register_nvprims()
 register_rng_prims()
+register_debug_prims()
