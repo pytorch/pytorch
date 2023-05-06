@@ -3094,6 +3094,34 @@ class DynamicScalar(IRNode):
         return ()
 
 
+def convert_arg_type(python_type):
+    from .codegen.cpp import PYTHON_TO_CPP
+
+    if python_type == "Tensor":
+        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
+        return f"at::{python_type} const&"
+
+    # Convert arg of type Optional[*]
+    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
+    if len(optional_match) == 1:
+        optional_type = optional_match[0]
+        assert (
+            optional_type in PYTHON_TO_CPP
+        ), f"unsupported optional type in convert_arg_type: {optional_type}"
+        cpp_optional_type = PYTHON_TO_CPP[optional_type]
+        return f"c10::optional<{cpp_optional_type}>"
+
+    raise AssertionError(f"unsupport python_type: {python_type}")
+
+
+def convert_return_type(python_type):
+    # TODO: only support Tensor as func return type
+    assert (
+        python_type == "Tensor"
+    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
+    return f"at::{python_type}"
+
+
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -3117,15 +3145,51 @@ class FallbackKernel(ExternKernelAlloc):
                 else f"aten.{kernel.__name__}"
             )
         else:
-            assert (
-                not V.graph.cpp_wrapper
-            ), f"{kernel.__name__} is not supported with cpp wrapper"
-            self.kernel = (
-                f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
-            )
+            if V.graph.cpp_wrapper:
+                self.set_cpp_kernel(kernel)
+            else:
+                self.kernel = (
+                    f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
+                )
         self.unflatten_args = unflatten_args
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.kernel)
+
+    def get_cpp_op_schema(self, kernel):
+        arg_types = [repr(x.type) for x in kernel._schema.arguments]
+        arg_names = [x.name for x in kernel._schema.arguments]
+        # TODO: only support len(returns) == 1 for now.
+        returns = [repr(x.type) for x in kernel._schema.returns]
+        assert (
+            len(returns) == 1
+        ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
+        return_value = returns[0]
+        cpp_return_value = convert_return_type(return_value)
+
+        cpp_arg_type = [
+            f"{convert_arg_type(arg_type)} {arg_name}"
+            for arg_type, arg_name in zip(arg_types, arg_names)
+        ]
+        return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+
+    def set_cpp_kernel(self, kernel):
+        assert (
+            not kernel.is_view
+        ), f"view kernel {kernel.__name__} is not supported with cpp_wrapper"
+        assert all(
+            x.alias_info is None for x in kernel._schema.arguments
+        ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
+
+        self.kernel = kernel._schema.name
+        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_key = (
+            f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+        )
+
+        self.cpp_op_schema = self.get_cpp_op_schema(kernel)
+
+        # TODO: what if both kwarg and positional arg is possible?
+        self.kwarg_only = [x.name for x in kernel._schema.arguments if x.kwarg_only]
 
     def codegen_args(self):
         from torch._inductor.codegen.wrapper import pexpr
@@ -3149,7 +3213,26 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+        if V.graph.cpp_wrapper:
+            assert all(v in kwargs for v in self.kwarg_only), "kwargs not found"
+            return list(map(repr, args)) + [
+                V.graph.wrapper_code.val_to_str(kwargs[v]) for v in self.kwarg_only
+            ]
+        else:
+            return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+
+    def codegen(self, wrapper):
+        if V.graph.cpp_wrapper:
+            wrapper.generate_fusion_ops_code(
+                self.get_name(),
+                self.kernel,
+                self.codegen_args(),
+                self.cpp_op_schema,
+                self.cpp_kernel_key,
+                self.cpp_kernel_overlad_name,
+            )
+        else:
+            super().codegen(wrapper)
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):

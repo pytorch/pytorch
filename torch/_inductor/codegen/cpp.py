@@ -84,6 +84,12 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+PYTHON_TO_CPP = {
+    "int": "long",
+    "float": "double",
+    "bool": "bool",
+}
+
 
 def reduction_init(reduction_type, dtype):
     if dtype in (torch.float16, torch.bfloat16):

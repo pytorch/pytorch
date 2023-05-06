@@ -232,6 +232,18 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave(self):
+        def fn(y):
+            return torch.repeat_interleave(y, 2, output_size=8)
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn(a)
+        real_out = fn(a)
+        compiled_out = opt_fn(a)
+        assert same(real_out, compiled_out)
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
