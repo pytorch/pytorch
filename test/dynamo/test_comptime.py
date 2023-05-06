@@ -1,9 +1,8 @@
 # Owner(s): ["module: dynamo"]
-from unittest.mock import patch
-
 import re
 import sys
 from io import StringIO
+from unittest.mock import patch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
