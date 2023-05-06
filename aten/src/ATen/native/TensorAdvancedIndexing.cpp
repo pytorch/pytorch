@@ -324,11 +324,6 @@ void index_func_meta_impl(
   c10::string_view func) {
   auto numel = index.numel();
 
-  auto self_sizes = self.sizes().vec();
-  auto source_sizes = source.sizes().vec();
-  self_sizes.erase(self_sizes.begin() + dim);
-  source_sizes.erase(source_sizes.begin() + dim);
-
   TORCH_CHECK_INDEX(index.dim() <= 1, func, "_(): Index is supposed to be a vector, but got dim: ",
                     index.dim(), " with type: ", index.scalar_type(), " and size: ", index.sizes());
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
@@ -342,7 +337,14 @@ void index_func_meta_impl(
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               func, "_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
               source.size(dim), "), for dim: ", dim);
-  TORCH_CHECK(!source_sizes.empty(), "source tensor shape must match self tensor shape (excluding the specified dimension)");
+
+  if (source.dim() != 0) {
+    auto self_sizes = self.sizes().vec();
+    auto source_sizes = source.sizes().vec();
+    self_sizes.erase(self_sizes.begin() + dim);
+    source_sizes.erase(source_sizes.begin() + dim);
+    TORCH_CHECK(!(!self_sizes.empty() && source_sizes.empty()), "source tensor shape must match self tensor shape (excluding the specified dimension)");
+  }
 
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
