@@ -219,7 +219,7 @@ class ForeachKernel(Kernel):
                 arg_names.append(self.args.input(buffer_name))
 
             self._list_tracker(list_name, var, arg_names, layouts)
-            self.loads.writeline(f"{var} = tl.load({var}_tile_ptrs, mask=mask)")
+            self.loads.writeline(f"{var} = tl.load({var}_tile_ptrs, mask=xmask)")
 
         return self.lists[list_name].var
 
@@ -232,7 +232,7 @@ class ForeachKernel(Kernel):
                 arg_names.append(self.args.output(buffer_name))
 
             self._list_tracker(list_name, var, arg_names, layouts)
-            self.stores.writeline(f"tl.store({var}_tile_ptrs, {value}, mask=mask)")
+            self.stores.writeline(f"tl.store({var}_tile_ptrs, {value}, mask=xmask)")
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
