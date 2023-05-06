@@ -1372,7 +1372,7 @@ class View(BaseView):
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
 
         # Skip pointless views
-        if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
+        if V.graph.sizevars.maybe_guard_list_equals(old_size, new_size):
             return x
 
         if 0 in new_size and is_storage_and_layout(x):
@@ -1932,7 +1932,7 @@ class AliasedLayout(Layout):
             return True
         from .compile_fx import ALIGNMENT
 
-        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+        return V.graph.sizevars.maybe_guard_multiple_of(offset, ALIGNMENT)
 
 
 class MutationLayout(Layout):
