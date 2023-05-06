@@ -2511,6 +2511,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_sanity_check(self):
         self._test_new_group_local_sync_sanity_check(backend="gloo")
 
+    @requires_gloo()
+    def test_new_group_local_sync_duplicate_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="gloo")
+
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
