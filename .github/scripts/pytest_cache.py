@@ -12,7 +12,7 @@ from pytest_caching_utils import (
 TEMP_DIR = "./tmp"  # a backup location in case one isn't provided
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Upload this job's the pytest cache to S3"
     )
@@ -55,6 +55,12 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    return args
+
+
+def main() -> None:
+    args = parse_args()
 
     pr_identifier = PRIdentifier(args.pr_identifier)
     print(f"PR identifier for `{args.pr_identifier}` is `{pr_identifier}`")
