@@ -29,7 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
 
 from . import config, dependencies
 from .cuda_properties import get_device_properties
@@ -743,15 +743,31 @@ class Reduction(Loops):
         elif reduction_type == "argmin":
 
             def combine_fn(a, b):
-                return ops.minimum(a[0], b[0]), ops.where(
-                    ops.lt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.lt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         elif reduction_type == "argmax":
 
             def combine_fn(a, b):
-                return ops.maximum(a[0], b[0]), ops.where(
-                    ops.gt(b[0], a[0]), b[1], a[1]
+                a_value, a_index = a
+                b_value, b_index = b
+                mask = ops.gt(b_value, a_value)
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
+
+                return (
+                    ops.where(mask, b_value, a_value),
+                    ops.where(mask, b_index, a_index),
                 )
 
         else:
@@ -3019,6 +3035,8 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
+        from torch._inductor.codegen.wrapper import pexpr
+
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3029,8 +3047,14 @@ class FallbackKernel(ExternKernelAlloc):
         def gen_kwarg(k, v):
             return f"{k}={repr(v)}"
 
+        def get_pexpr(x):
+            if isinstance(x, SymTypes):
+                return pexpr(sympy.expand(repr(x)))
+            else:
+                return repr(x)
+
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(repr(x)) for x in self.constant_args]
+        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
         return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
@@ -3776,7 +3800,11 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
+        if (
+            isinstance(self.data, (Pointwise, Reduction))
+            and self.num_reads() > 1
+            and self.is_pointwise_non_scalar_tensor_num_reads_larger_than_one()
+        ):
             self.realize()
 
     def has_exceeded_max_reads(self):
@@ -3829,6 +3857,15 @@ class StorageBox(MutableBox):
                 data=data,
             ).get_read_writes()
         return len(read_writes.reads)
+
+    @cache_on_self
+    def is_pointwise_non_scalar_tensor_num_reads_larger_than_one(self):
+        # Skip the check for non Pointwise instances
+        return (
+            (sum(read.index != 0 for read in self.data.get_reads()) > 1)
+            if isinstance(self.data, Pointwise)
+            else True
+        )
 
 
 class InterpreterShim(torch.fx.Interpreter):
@@ -4232,7 +4269,7 @@ class MultiOutputNoSizeAssert(MultiOutput):
         )
 
 
-class ForceInPlace(ExternKernel):
+class InPlaceHint(ExternKernel):
     """
     Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
     Wrap the input of your inplace op to enable this behavior.
@@ -4281,7 +4318,7 @@ class AllReduceCoalesced(ExternKernel):
 
         def wrap_input(var):
             nonlocal res
-            op = ForceInPlace(
+            op = InPlaceHint(
                 FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
             )
             res.append(op)
@@ -4338,7 +4375,7 @@ class AllReduceCoalesced(ExternKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
-        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):

@@ -75,6 +75,7 @@ class BaseSchedulerNode:
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
         ]
         try:
             lines += [
@@ -231,7 +232,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.ForceInPlace))
+                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
                 )
             )
             and config.inplace_buffers
@@ -358,7 +359,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return False
 
         if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.ForceInPlace)
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
         ):
             # TODO make this a property of the IR
             return False
@@ -1132,15 +1133,19 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        updated_nodes = []
-        for node in self.nodes:
-            if node.users:
-                updated_nodes.append(node)
-            else:
-                # dead code
-                log.debug("removed dead node: %s", node.get_name())
-                V.graph.removed_buffers.add(node.get_name())
-        self.nodes = updated_nodes
+        again = True  # repeat until a fixed point
+        while again:
+            updated_nodes = []
+            for node in self.nodes:
+                if any(n.get_name() not in V.graph.removed_buffers for n in node.users):
+                    updated_nodes.append(node)
+                else:
+                    # dead code
+                    log.debug("removed dead node: %s", node.get_name())
+                    V.graph.removed_buffers.add(node.get_name())
+
+            again = len(self.nodes) > len(updated_nodes)
+            self.nodes = updated_nodes
 
     def topological_sort_schedule(self):
         """

@@ -7,6 +7,7 @@
 #include <limits>
 #include <omp.h>
 
+#include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
@@ -21,6 +22,22 @@ typedef at::BFloat16 bfloat16;
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
+
+template <typename scalar_t>
+inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a > b ? a : b;
+}
+
+template <typename scalar_t>
+inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a < b ? a : b;
+}
 
 constexpr float uint32_to_uniform_float(uint32_t value) {
   // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
