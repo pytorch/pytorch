@@ -1,9 +1,7 @@
 import builtins
 import itertools
 import logging
-from contextlib import contextmanager
-from copy import copy
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -72,39 +70,6 @@ def _compile_train_step(
     )(train_step_fn)
 
 
-@contextmanager
-def _rematerialize_optimizer(
-    opt: torch.optim.Optimizer,
-    named_states: Dict[str, Any],
-    params: Dict[str, torch.nn.Parameter],
-):
-    if opt is None:
-        try:
-            yield
-        finally:
-            pass
-        return
-
-    # update opt.state with proxy tensors
-    orig_states: Dict[str, Any] = copy(opt.state)
-    if named_states:
-        for n in named_states:
-            # opt.state's key type is string, but optimizer uses Parameter as keys
-            opt.state[params[n]] = named_states[n]  # type: ignore[index]
-
-    # FIXME: support multiple parameter groups
-    param_group = opt.param_groups[0]
-    orig_params = param_group["params"]
-    # FIXME(@mrshenli): exclude buffers
-    param_group["params"] = params.values()
-
-    try:
-        yield
-    finally:
-        param_group["params"] = orig_params
-        opt.state.update(orig_states)
-
-
 def _train_step_compiler(backend_compile_fn):
     """Note [Train Step Compile]
 
@@ -123,7 +88,7 @@ def _train_step_compiler(backend_compile_fn):
 
     def _compile_fn(mod: fx.GraphModule, real_inputs: List[torch.Tensor]):
         """
-        Step 1: Assert inputs (from user) are already Fake, and user their FakeTensorMode
+        Step 0: Assert inputs (from user) are already Fake, and user their FakeTensorMode
                 (created by dynamo) to fakeify the module's parameters
         """
         assert (
@@ -174,12 +139,8 @@ def _train_step_compiler(backend_compile_fn):
             """
             _params = lifted_args[:params_len]
             _params_dict = pytree.tree_unflatten(_params, params_spec)
-            _named_states = lifted_args[params_len : params_len + named_states_len]
-            _named_states_dict = pytree.tree_unflatten(_named_states, named_states_spec)
             _user_args = lifted_args[params_len + named_states_len :]
-            with stateless._reparametrize_module(
-                mod, _params_dict
-            ), _rematerialize_optimizer(opt, _named_states_dict, _params_dict):
+            with stateless._reparametrize_module(mod, _params_dict):
                 out = mod(*_user_args, **kwargs)
 
             if not isinstance(out, (tuple, list)):
@@ -189,51 +150,51 @@ def _train_step_compiler(backend_compile_fn):
             return out
 
         opt = None
-        # for the optimizer warmup, we need empty named_states for reparametrize_optimizer,
-        # but we want to reuse the same 'functional_call' which looks for this
-        named_states = {}
-        named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
-        named_states_len = len(named_states_flat)
+        # initialize closure vars for functional_call, will update after optimizer warmup
+        named_states_len = 0
+        fake_named_states = {}
 
         """
         Step 1: Warm up the optimizer(s) (if present).
+
+        The optimizer has no state tensors yet, but it has references to real module params.
+
+        The state-tensors will be lazily initialized on the first step, for any params with .grad.
+
+        Right now, the params have no grad.
+
+        By running functional_call, backward fills in .grad on the right params and then causes
+        the optimizer to initialize its states (to fake tensors).
+
+        Before doing this, the optimizer must reference the fake module params used during tracing
+        instead of the real module params it came with.  This is what `reparametrize_optimizer` does.
         """
         if len(optimizers):
             # TODO iterate properly
             opt = optimizers["__optimizer_0"]
             dev = params_flat[0].device
 
-            # In practice, the adam optimizer sets its state_dict["step"] values to real tensors
-            # which i'm afraid means we aren't quite tracing the program correctly unless we can
-            # restore it, which we attempt below with .zero_()
+            # first, we modify the optimizer to swap real module param refs to corresponding fake ones
 
-            # Question: can we enforce that 'capturable' is true for the param_groups? this codepath
-            # looks like it would avoid this problem entirely but I'm not sure how to set it.
+            # the id's of the model params and the optimizer's refs to those params don't match- different pytensor,
+            # same underling storage, i assume.  (todo confirm).
+            # for now, just blow them all away, but need a better solution
+            opt.param_groups[0]["params"] = fake_params_flat
+
             with fake_mode:
                 # This adds fake state tensors to the previously empty optimizer state dicts.
                 _ = functional_call(*fake_params_flat + fake_inputs)
 
-            # Convert the fake optimizer states to real
-            for fake_param, state_dict in opt.state.items():
-                for name, state in state_dict.items():
-                    if isinstance(state, FakeTensor):
-                        # we assume always init with zeros, which is lame: can we trace init separately?
-                        state_dict[name] = torch.zeros(
-                            state.shape, dtype=state.dtype, device=dev
-                        )
-                    else:
-                        # some of the states are singleton cpu tensors, e.g. 'step'...
-                        state_dict[name].zero_()
-
-            # Build a mapping to use for reparametrizing the optimizer during tracing
-            named_states = {}
+            # build the flat fake-args for the optimizer states for use during tracing
+            fake_named_states = {}
             for n, p in pytree.tree_unflatten(fake_params_flat, params_spec).items():
                 if p in opt.state:
-                    named_states[n] = opt.state[p]  # type: ignore[index]
+                    fake_named_states[n] = opt.state[p]  # type: ignore[index]
 
-        named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
-        fake_named_states_flat = fakeify_inputs(named_states_flat)
-        named_states_len = len(named_states_flat)
+        fake_named_states_flat, named_states_spec = pytree.tree_flatten(
+            fake_named_states
+        )
+        named_states_len = len(fake_named_states_flat)
         full_fake_args = fake_params_flat + fake_named_states_flat + fake_inputs
 
         """
@@ -266,6 +227,35 @@ def _train_step_compiler(backend_compile_fn):
         Step 5: Reverse the calling-convention change we made above with _reparametrize_module,
                 and return a function that accepts the arguments as originally provided by dynamo.
         """
+        # We restore the optimizer's param refs to the real module param refs, and also make its states real
+        named_states = {}
+        if len(optimizers):
+            # TODO cleaner iteration and deal with multiple param groups
+            opt.param_groups[0]["params"] = params_flat
+            fake_to_real_param = dict(zip(fake_params_flat, params_flat))
+            
+            # TODO try clearing states, setting (or asserting) param grads exist, and then running
+            # opt._init_group instead of manual zeroing
+            for fake, real in zip(fake_params_flat, params_flat):
+                if fake in opt.state:
+                    opt.state[real] = opt.state[fake]
+                    del opt.state[fake]
+                    states = opt.state[real]
+                    for name, state in states.items():
+                        if isinstance(state, FakeTensor):
+                            # we assume always init with zeros, which is lame: can we trace init separately?
+                            states[name] = torch.zeros(
+                                state.shape, dtype=state.dtype, device=dev
+                            )
+                        else:
+                            # some of the states are singleton cpu tensors, e.g. 'step'...
+                            states[name].zero_()
+
+            for n, p in pytree.tree_unflatten(params_flat, params_spec).items():
+                if p in opt.state:
+                    named_states[n] = opt.state[p]  # type: ignore[index]
+
+        named_states_flat, named_states_spec = pytree.tree_flatten(named_states)
 
         def call_without_params(*runtime_args):
             with torch.inference_mode():
