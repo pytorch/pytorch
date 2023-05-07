@@ -10,7 +10,9 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
+import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -617,7 +619,10 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_str(self, s):
-        return repr(s)
+        if isinstance(s, SymTypes):
+            return pexpr(sympy.expand(repr(s)))
+        else:
+            return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
@@ -950,19 +955,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
         )
 
+    def codegen_device(self, device):
+        from .cpp import DEVICE_TO_ATEN
+
+        return (
+            f"at::device(c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index}))"
+            if device.index is not None
+            else f"at::device({DEVICE_TO_ATEN[device.type]})"
+        )
+
     def make_buffer_allocation(self, buffer):
-        from .cpp import DEVICE_TO_ATEN, DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN
 
         # TODO: map layout here
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
+        device_str = self.codegen_device
         return (
             f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"at::device({DEVICE_TO_ATEN[device.type]})"
+            f"{self.codegen_device(device)}"
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
@@ -992,18 +1007,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
-    def val_to_str(self, s):
-        if s is None:
+    def val_to_str(self, val):
+        from .cpp import DTYPE_TO_ATEN
+
+        if val is None:
             return self.none_str
-        elif isinstance(s, bool):
-            return "true" if s else "false"
-        elif isinstance(s, str):
-            return f'"{s}"'
-        elif isinstance(s, (list, tuple)):
-            vals = ", ".join(list(map(self.val_to_str, s)))
-            return f"{{{vals}}}"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
+        elif isinstance(val, str):
+            return f'"{val}"'
+        elif isinstance(val, torch.device):
+            return self.codegen_device(val)
+        elif isinstance(val, torch.dtype):
+            return DTYPE_TO_ATEN[val]
+        elif isinstance(val, (list, tuple)):
+            return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
         else:
-            return repr(s)
+            return repr(val)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):

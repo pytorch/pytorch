@@ -220,6 +220,8 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
                 continue
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
+                # Note: Unlike other tensor args like conv weights and biases, literal args are
+                # preserved in the original nodes after replacement, so we can access them here
                 # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
                 replacement_conv_node.args = replacement_conv_node.args[:3] + original_node.args[3:]
             if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
