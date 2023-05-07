@@ -1009,16 +1009,13 @@ class TestForeach(TestCase):
 
         num_tensors = 20
         num_devices = torch.cuda.device_count()
-        dtypes = (torch.float16, torch.float32, torch.bfloat16)
-        nested_tensorlists = []
-        for _ in range(2):
-            nested_tensorlists.append([
-                torch.tensor(
-                    i,
-                    device=torch.device("cuda", random.randint(0, num_devices - 1)),
-                    dtype=dtypes[random.randint(0, 2)],
-                ) for i in range(num_tensors)
-            ])
+        dtypes = (torch.float16, torch.float32, torch.float64)
+        nested_tensorlists = [[], []]
+        for i in range(num_tensors):
+            device = torch.device("cuda", random.randint(0, num_devices - 1))
+            dtype = dtypes[random.randint(0, 2)]
+            nested_tensorlists[0].append(torch.tensor(i, device=device, dtype=dtype))
+            nested_tensorlists[1].append(torch.tensor(i, device=device, dtype=dtype))
 
         ref_grouped = ref_group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
         grouped = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=False)
@@ -1050,6 +1047,12 @@ class TestForeach(TestCase):
             values, indices = grouped[(device, dtype)]
             self.assertEqual(ref_values[:-1], values)
             self.assertEqual(ref_values[-1], indices)
+
+        dev = nested_tensorlists[0][0].device
+        alt_dev = torch.device(dev.type, (dev.index + 1) % num_devices)
+        nested_tensorlists[1][0] = nested_tensorlists[1][0].to(alt_dev)
+        with self.assertRaisesRegex(RuntimeError, "Tensors of the same index"):
+            torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists)
 
 
 instantiate_device_type_tests(TestForeach, globals())

@@ -255,12 +255,12 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(const nested_optional_t
         std::all_of(
           nested_tensorlist.cbegin(), nested_tensorlist.cend(),
           [&](const auto& tensorlist) -> bool {
-            const auto& t = tensorlist[tensor_index];
-            if (t.has_value()) {
-              return key == DeviceDtypeKey{t->device(), t->scalar_type()};
+            const auto& tensor = tensorlist[tensor_index];
+            if (tensor.has_value()) {
+              return key == DeviceDtypeKey{tensor->device(), tensor->scalar_type()};
             } else {
               return true;
-              }
+            }
           }
         ),
         "Tensors of the same index must have the same dtype and be on the same device"
