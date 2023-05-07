@@ -6230,7 +6230,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(fn_opt(), fn())
 
         def test_computed_indirect_mask(self):
-
             def fn(x, n):
                 tmp = torch.arange(n, device=x.device)
                 return x[tmp] + 1
