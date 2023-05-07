@@ -251,6 +251,20 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(const nested_optional_t
           tensor_index, "th Tensor is not.");
         return {t->device(), t->scalar_type()};
     }();
+    TORCH_CHECK(
+        std::all_of(
+          nested_tensorlist.cbegin(), nested_tensorlist.cend(),
+          [&](const auto& tensorlist) -> bool {
+            const auto& t = tensorlist[tensor_index];
+            if (t.has_value()) {
+              return key == DeviceDtypeKey{t->device(), t->scalar_type()};
+            } else {
+              return true;
+              }
+          }
+        ),
+        "Tensors of the same index must have the same dtype and be on the same device"
+    );
     if (!grouped_tensors_with_indices.count(key)) {
       grouped_tensors_with_indices.insert(
         {
