@@ -278,12 +278,13 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(
-        compile_fx_wrapper, nopython=nopython, dynamic=dynamic
-    )(run)
+    with patch.object(torch._dynamo.config, "dynamic_shapes", dynamic):
+        run = torch._dynamo.optimize(
+            compile_fx_wrapper, nopython=nopython, dynamic=dynamic
+        )(run)
 
-    torch.manual_seed(0)
-    actual = run(*example_inputs, **kwargs)
+        torch.manual_seed(0)
+        actual = run(*example_inputs, **kwargs)
     # if not called:
     #     exp = torch._dynamo.explain(run, *example_inputs)
     #     print("Explain:", exp[0])
