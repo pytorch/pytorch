@@ -548,7 +548,9 @@ def _linalg_svd_meta(
     return U, S, V
 
 
-def _linalg_broadcast_batch_dims(arg1: Tensor, arg2: Tensor):
+def _linalg_broadcast_batch_dims(
+    arg1: Tensor, arg2: Tensor
+) -> Tuple[List[int], List[int]]:
     # broadcast the batch dimensions of arg1 and arg2.
     arg1_batch_sizes = arg1.shape[:-2]
     arg2_batch_sizes = arg2.shape[:-2]
@@ -562,7 +564,9 @@ def _linalg_broadcast_batch_dims(arg1: Tensor, arg2: Tensor):
     return arg1_expand_size, arg2_expand_size
 
 
-def _linalg_broadcast_batch_dims_name(arg1: Tensor, arg2: Tensor, name: Optional[str]):
+def _linalg_broadcast_batch_dims_name(
+    arg1: Tensor, arg2: Tensor, name: Optional[str]
+) -> Tuple[Tensor, Tensor]:
     # If there's no name we assume we don't want to check the errors
     if name:
         linearSolveCheckInputs(arg1, arg2, name)
