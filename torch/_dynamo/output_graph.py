@@ -642,7 +642,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
         root = FakeRootModule(self.nn_modules)
-
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
         val_to_names: OrderedDict[
@@ -731,7 +730,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.add_output_instructions(output + pass2.get_instructions())
             codegen = pass2
 
-        if config.numpy_ndarray_as_tensor:
+        if config.numpy_ndarray_as_tensor and (
+            reason is None or not reason.graph_break
+        ):
             from .variables.tensor import NumpyNdarrayVariable
 
             self.add_output_instructions(

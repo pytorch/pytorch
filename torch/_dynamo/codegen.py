@@ -6,6 +6,7 @@ import types
 from typing import List
 
 import torch.nn
+from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
@@ -110,7 +111,6 @@ class PyCodegen:
                 SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
-                NumpyNdarrayVariable,
             ),
         ):
             if isinstance(value, TensorWithTFOverrideVariable):
@@ -123,17 +123,36 @@ class PyCodegen:
                 )
             else:
                 graph_outputs[graph_outputs_key].merge(value)
-
             output.append(self.create_load(self.graph_output_var))
             output.append(
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
-
             if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
+        elif isinstance(value, NumpyNdarrayVariable):
+            graph_outputs_key = id(value.proxy)
+            if graph_outputs_key not in graph_outputs:
+                graph_outputs[graph_outputs_key] = GraphOutputEntry(
+                    len(graph_outputs), value
+                )
+            else:
+                graph_outputs[graph_outputs_key].merge(value)
+            output.extend(
+                [
+                    *AttrSource(
+                        self.tx.import_source(utils.__name__), "to_torch_np_ndarray"
+                    ).reconstruct(self)
+                ]
+            )
+            output.append(self.create_load(self.graph_output_var))
+            output.append(
+                self._create_load_const(graph_outputs[graph_outputs_key].index)
+            )
+            output.append(create_instruction("BINARY_SUBSCR"))
+            output.extend([*create_call_function(1, False)])
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")
             if parts[0] in self.code_options["co_varnames"]:

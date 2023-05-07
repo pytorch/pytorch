@@ -95,6 +95,7 @@ from .misc import (
 )
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -252,6 +253,8 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
+        if config.numpy_ndarray_as_tensor:
+            entries.append(((np.ndarray, torch_np.ndarray), cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -852,6 +855,36 @@ class VariableBuilder:
             )
 
         return tensor_variable
+
+    def wrap_numpy_ndarray(self, value: Union[np.ndarray, torch_np.ndarray]):
+        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
+        source = self.get_source()
+        tensor_value = (
+            torch.from_numpy(value) if isinstance(value, np.ndarray) else value.tensor
+        )
+        numpy_ndarray_variable = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=self.tx,
+            proxy=tensor_proxy,
+            example_value=tensor_value,
+            source=source,
+        )
+        self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
+        example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
+
+        grapharg = GraphArg(
+            source,
+            tensor_value,
+            False,
+            example_value,
+            is_tensor=True,
+            example_strong_ref=tensor_value,
+        )
+        numpy_ndarray_variable.proxy.node.meta["grapharg"] = grapharg
+
+        return numpy_ndarray_variable
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
