@@ -46,6 +46,7 @@ aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
 
+@patch("torch._dynamo.config.dynamic_shapes", False)
 class CPUReproTests(TestCase):
     common = check_model
 
