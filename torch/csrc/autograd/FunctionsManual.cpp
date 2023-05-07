@@ -3825,8 +3825,8 @@ Tensor linalg_qr_backward(
       "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
       "going to differentiate through linalg.qr.");
 
-  auto m = Q.size(-2);
-  auto n = R.size(-1);
+  auto m = Q.sym_size(-2);
+  auto n = R.sym_size(-1);
 
   TORCH_CHECK(
       reduced || m <= n,
@@ -3870,10 +3870,10 @@ Tensor linalg_qr_backward(
     };
     gA = Q.matmul(trilImInvAdjSkew(-gA));
     gA = at::linalg_solve_triangular(
-        R.narrow(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
-    auto shape = R.sizes().vec();
+        R.narrow_symint(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
+    auto shape = R.sym_sizes().vec();
     shape.end()[-1] = n - m;
-    gA = at::cat({gA, gA.new_zeros(shape)}, /*dim=*/-1);
+    gA = at::cat({gA, gA.new_zeros_symint(shape)}, /*dim=*/-1);
     if (gR.defined()) {
       gA = gA + Q.matmul(gR);
     }
