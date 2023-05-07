@@ -755,6 +755,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             )
             # ORT outputs.
             args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+
+            # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
+            args_not_none = args_not_none[: len(args) - len(kwargs)]
+
             ort_outputs = onnx_test_common.run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,
