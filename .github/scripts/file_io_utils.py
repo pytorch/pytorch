@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any, List
 
-import boto3
+import boto3  # type: ignore[import]
 
 
 def zip_folder(folder_to_zip: Path, dest_file_base_name: Path) -> Path:
