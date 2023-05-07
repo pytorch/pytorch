@@ -119,10 +119,6 @@ bool check_fast_path_restrictions(
           return false;
         }
       }
-      // TODO(crcrpar): Update `multi_tensor_apply_kernel` callers to correctly handle the case where the last Tensor of TensorList is 0-size.
-      if (i == tensorLists[0].size() - 1 && tensorLists[0][i].numel() == 0) {
-        return false;
-      }
     }
 
     return true;
