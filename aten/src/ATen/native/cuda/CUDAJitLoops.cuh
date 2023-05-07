@@ -156,6 +156,8 @@ void launch_jitted_vectorized_kernel(
     at::cuda::jit::launch_jitted_pwise_function(
         *fn_ptr, args.data(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
+#pragma nv_diagnostic push
+#pragma nv_diag_suppress 177
     auto ic = TrivialOffsetCalculator<arity>();
     auto oc = TrivialOffsetCalculator<1>();
     auto l = memory::LoadWithoutCast();
@@ -165,6 +167,7 @@ void launch_jitted_vectorized_kernel(
         {&N, &data, &ic, &oc, &l, &s, scalar_val}, extra_args);
     at::cuda::jit::launch_jitted_pwise_function(
         *fn_ptr, args.data(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
+#pragma nv_diagnostic pop
   }
 }
 
