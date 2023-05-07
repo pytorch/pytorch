@@ -19,6 +19,7 @@
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
+#include <ATen/ops/erfinv_native.h>
 #include <ATen/ops/exp2_native.h>
 #include <ATen/ops/exp_native.h>
 #include <ATen/ops/expm1_native.h>
@@ -247,6 +248,92 @@ TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
                                       falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
                                                       name:nil];
     return [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:truncTensor name:nil];
+  });
+}
+
+TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "erfinv_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* y) {
+    // The implementation copied from erfinv in ATen/native/Math.cpp
+    // https://github.com/pytorch/pytorch/blob/4154c8ea159fdaecc71ee9af820ac956193c875b/aten/src/ATen/native/Math.h#L151
+    auto dataType = y.dataType;
+    auto oneTensor = [mpsGraph constantWithScalar:1.0 dataType:dataType];
+    auto twoTensor = [mpsGraph constantWithScalar:2.0 dataType:dataType];
+
+    // Aprpoximation #1 for |y| <= .7
+    auto A0 = [mpsGraph constantWithScalar:0.886226899 dataType:dataType];
+    auto A1 = [mpsGraph constantWithScalar:-1.645349621 dataType:dataType];
+    auto A2 = [mpsGraph constantWithScalar:0.914624893 dataType:dataType];
+    auto A3 = [mpsGraph constantWithScalar:-0.140543331 dataType:dataType];
+    auto B0 = [mpsGraph constantWithScalar:-2.118377725 dataType:dataType];
+    auto B1 = [mpsGraph constantWithScalar:1.442710462 dataType:dataType];
+    auto B2 = [mpsGraph constantWithScalar:-0.329097515 dataType:dataType];
+    auto B3 = [mpsGraph constantWithScalar:0.012229801 dataType:dataType];
+    auto z = [mpsGraph multiplicationWithPrimaryTensor:y secondaryTensor:y name:nil];
+    auto num = [mpsGraph multiplicationWithPrimaryTensor:z secondaryTensor:A3 name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:A2 name:nil];
+    num = [mpsGraph multiplicationWithPrimaryTensor:num secondaryTensor:z name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:A1 name:nil];
+    num = [mpsGraph multiplicationWithPrimaryTensor:num secondaryTensor:z name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:A0 name:nil];
+    auto dem = [mpsGraph multiplicationWithPrimaryTensor:z secondaryTensor:B3 name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:B2 name:nil];
+    dem = [mpsGraph multiplicationWithPrimaryTensor:dem secondaryTensor:z name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:B1 name:nil];
+    dem = [mpsGraph multiplicationWithPrimaryTensor:dem secondaryTensor:z name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:B0 name:nil];
+    dem = [mpsGraph multiplicationWithPrimaryTensor:dem secondaryTensor:z name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:oneTensor name:nil];
+    auto x_1 = [mpsGraph multiplicationWithPrimaryTensor:y
+                                         secondaryTensor:[mpsGraph divisionWithPrimaryTensor:num
+                                                                             secondaryTensor:dem
+                                                                                        name:nil]
+                                                    name:nil];
+    // calculate 2nd approximation for |y| > 0.7
+    auto C0 = [mpsGraph constantWithScalar:-1.970840454 dataType:dataType];
+    auto C1 = [mpsGraph constantWithScalar:-1.624906493 dataType:dataType];
+    auto C2 = [mpsGraph constantWithScalar:3.429567803 dataType:dataType];
+    auto C3 = [mpsGraph constantWithScalar:1.641345311 dataType:dataType];
+    auto D0 = [mpsGraph constantWithScalar:3.543889200 dataType:dataType];
+    auto D1 = [mpsGraph constantWithScalar:1.637067800 dataType:dataType];
+    auto y_abs = [mpsGraph absoluteWithTensor:y name:nil];
+    z = [mpsGraph subtractionWithPrimaryTensor:oneTensor secondaryTensor:y_abs name:nil];
+    z = [mpsGraph divisionWithPrimaryTensor:z secondaryTensor:twoTensor name:nil];
+    z = [mpsGraph logarithmWithTensor:z name:nil];
+    z = [mpsGraph negativeWithTensor:z name:nil];
+    z = [mpsGraph squareRootWithTensor:z name:nil];
+    num = [mpsGraph multiplicationWithPrimaryTensor:z secondaryTensor:C3 name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:C2 name:nil];
+    num = [mpsGraph multiplicationWithPrimaryTensor:num secondaryTensor:z name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:C1 name:nil];
+    num = [mpsGraph multiplicationWithPrimaryTensor:num secondaryTensor:z name:nil];
+    num = [mpsGraph additionWithPrimaryTensor:num secondaryTensor:C0 name:nil];
+    dem = [mpsGraph multiplicationWithPrimaryTensor:z secondaryTensor:D1 name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:D0 name:nil];
+    dem = [mpsGraph multiplicationWithPrimaryTensor:dem secondaryTensor:z name:nil];
+    dem = [mpsGraph additionWithPrimaryTensor:dem secondaryTensor:oneTensor name:nil];
+    auto x_2 = [mpsGraph divisionWithPrimaryTensor:num secondaryTensor:dem name:nil];
+    auto lessthanPointSeven = [mpsGraph lessThanOrEqualToWithPrimaryTensor:y_abs
+                                                           secondaryTensor:[mpsGraph constantWithScalar:0.7
+                                                                                               dataType:dataType]
+                                                                      name:nil];
+    auto x = [mpsGraph selectWithPredicateTensor:lessthanPointSeven
+                             truePredicateTensor:x_1
+                            falsePredicateTensor:x_2
+                                            name:nil];
+
+    // fix infinity if input was 1
+    auto isOne = [mpsGraph equalWithPrimaryTensor:y_abs
+                                  secondaryTensor:[mpsGraph constantWithScalar:1.0 dataType:dataType]
+                                             name:nil];
+    x = [mpsGraph selectWithPredicateTensor:isOne
+                        truePredicateTensor:[mpsGraph constantWithScalar:INFINITY dataType:dataType]
+                       falsePredicateTensor:x
+                                       name:nil];
+    // Fix sign
+    x = [mpsGraph absoluteWithTensor:x name:nil];
+    auto y_sign = [mpsGraph signWithTensor:y name:nil];
+    x = [mpsGraph multiplicationWithPrimaryTensor:x secondaryTensor:y_sign name:nil];
+    return x;
   });
 }
 

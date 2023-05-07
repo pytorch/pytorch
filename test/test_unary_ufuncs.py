@@ -793,6 +793,7 @@ class TestUnaryUfuncs(TestCase):
             ("erfc", doubles, True, True, "cuda"),
             ("erfinv", doubles, True, True, "cpu"),
             ("erfinv", doubles, True, True, "cuda"),
+            ("erfinv", doubles, True, True, "mps"),
             ("exp", doubles, True, True, "cpu"),
             ("exp", doubles, True, True, "cuda"),
             ("exp2", doubles, True, True, "cpu"),
