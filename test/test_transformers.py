@@ -706,6 +706,34 @@ class TestTransformers(NNTestCase):
         out = transformer_encoder(src=x, src_key_padding_mask=mask)
         self.assertEqual(out.shape[1], 6)
 
+    # CPU unit test has_torch_functions in test environment,
+    #   preventing successful completion
+    @onlyCUDA
+    def test_with_nested_tensor_input(self, device):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=256,
+            nhead=4,
+            dim_feedforward=512,
+            activation='gelu',
+            norm_first=False,
+            batch_first=True,
+        )
+        transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3, enable_nested_tensor=True).to(device)
+
+        transformer_encoder.eval()
+        with torch.no_grad():
+            x = torch.randn(6, 10, 256).to(device)
+            mask = torch.ones(6, 10)
+            mask[0, 0:] = 0  # here I masked 5 columns instead of just one
+            mask[2, 2:] = 0  # here I masked 5 columns instead of just one
+            mask[4, 4:] = 0  # here I masked 5 columns instead of just one
+            mask[5, 8:] = 0  # here I masked 5 columns instead of just one
+            mask = mask.bool().to(device)
+            x = torch._nested_tensor_from_mask(x, mask.logical_not(), mask_check=False)
+            out = transformer_encoder(src=x, src_key_padding_mask=None)
+
+        self.assertEqual(out.is_nested, True)
+
 
     @onlyCUDA
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
