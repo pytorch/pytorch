@@ -156,6 +156,8 @@ void launch_jitted_vectorized_kernel(
     at::cuda::jit::launch_jitted_pwise_function(
         *fn_ptr, args.data(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
+// NVCC complains about unused variables l and s.
+// It should be false positive in most cases, so we suppress the warnings.
 #pragma nv_diagnostic push
 #pragma nv_diag_suppress 177
     auto ic = TrivialOffsetCalculator<arity>();
