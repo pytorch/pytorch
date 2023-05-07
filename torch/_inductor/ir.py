@@ -663,7 +663,7 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
+        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
@@ -2182,7 +2182,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
+            (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -2228,7 +2228,7 @@ class ComputedBuffer(Buffer):
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
         """
-        _, args, var_ranges = dependencies.index_vars_squeeze(
+        args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):

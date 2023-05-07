@@ -2,6 +2,7 @@ import collections
 import dataclasses
 import itertools
 import logging
+import re
 import typing
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -12,7 +13,7 @@ from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRange
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-
+is_indirect = re.compile(r"indirect|tmp").search
 Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
@@ -38,21 +39,28 @@ class MemoryDep(typing.NamedTuple):
         return self
 
     def numbytes_hint(self):
-        vars = set(self.index.free_symbols)
-        numel = sympy.Integer(1)
-        for var in vars:
-            if var in self.var_names:
-                numel = numel * self.size[self.var_names.index(var)]
-            else:
-                # indirect indexing, just assume entire buffer is read
-                numel = V.graph.get_numel(self.name)
-                break
+        if self.is_indirect():
+            numel = V.graph.get_numel(self.name)
+        else:
+            vars = set(self.index.free_symbols)
+            numel = sympy.Integer(1)
+            for var, size in zip(self.var_names, self.size):
+                if var in vars:
+                    numel = numel * size
         return V.graph.sizevars.size_hint(numel) * get_dtype_size(
             V.graph.get_dtype(self.name)
         )
 
     def is_contiguous(self) -> bool:
-        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def is_scalar(self) -> bool:
+        if isinstance(self.index, sympy.Symbol):
+            return self.index not in self.var_names and not self.is_indirect()
+        return isinstance(self.index, (int, sympy.Integer))
+
+    def is_indirect(self) -> bool:
+        return any(is_indirect(v.name) for v in self.index.free_symbols)
 
 
 class StarDep(typing.NamedTuple):
@@ -70,6 +78,12 @@ class StarDep(typing.NamedTuple):
         ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
+        return False
+
+    def is_scalar(self) -> bool:
+        return False
+
+    def is_indirect(self) -> bool:
         return False
 
 
@@ -252,7 +266,7 @@ class RecordLoadStore(V.KernelFormatterHandler):
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = collections.OrderedDict()
+    var_ranges: VarRanges = dict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_symbol(f"{prefix}{next(cnt)}")
@@ -280,7 +294,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
-    return new_sizes, args, var_ranges
+    return args, var_ranges
 
 
 def extract_read_writes(
@@ -289,7 +303,7 @@ def extract_read_writes(
     normalize: bool = False,
     prefix: str = "d",
 ):
-    _, args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
+    args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)
