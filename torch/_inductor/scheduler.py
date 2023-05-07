@@ -215,9 +215,6 @@ class BaseSchedulerNode:
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
 
-    def can_reorder(self):
-        return ir.is_triton(self.get_device()) and config.loop_ordering_search_limit > 1
-
     def allocate(self):
         if not self.node.should_allocate():
             return
@@ -479,10 +476,7 @@ class SchedulerNode(BaseSchedulerNode):
             self._body,
         ) = node.get_sizes_and_body()
 
-        if not self.can_reorder():  # on CPU do reordering before fusion
-            self.apply_loop_order(LoopOrder(self, self._body, self._sizes))
-            self.set_read_writes(self.read_writes)
-        elif self.is_template():
+        if self.is_template():
             self.set_read_writes(
                 node.normalized_read_writes().generalize_for_scheduling()
             )
@@ -496,6 +490,7 @@ class SchedulerNode(BaseSchedulerNode):
             )
 
         self.group = (node.get_device(), group_fn(self._sizes))
+        self._vars = None
 
     @cache_on_self
     def possible_loop_orders(self):
@@ -506,7 +501,7 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             ]
         choices = [LoopOrder(self, self._body, self._sizes)]
-        if not self.can_reorder():
+        if config.loop_ordering_search_limit <= 1:
             return choices
         permute = functools.partial(LoopOrder.permute, self, self._body, self._sizes)
         iter_sizes, reduce_sizes = self._sizes
@@ -611,12 +606,23 @@ class SchedulerNode(BaseSchedulerNode):
         if self.is_template():
             return
 
-        (iter_size, reduce_size) = ordering.sizes
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             *ordering.sizes, prefix="y"
         )
         body = ir.LoopBody(ordering.body, (iter_vars, reduce_vars), var_ranges)
-        index_formulas = [*body.indexing_exprs.values()]
+
+        self.read_writes = ordering.read_writes
+        self._vars = iter_vars, reduce_vars
+        self._sizes = ordering.sizes
+        self._body = body
+
+    def merge_loops(self):
+        if self.is_template():
+            return
+        assert self._vars, "must call apply_loop_order() first"
+        (iter_size, reduce_size) = self._sizes
+        index_formulas = [*self._body.indexing_exprs.values()]
+        iter_vars, reduce_vars = self._vars
 
         def merge_dims(x_vars, x_size):
             size, reindex, prune = V.graph.sizevars._simplify_loops(
@@ -634,18 +640,18 @@ class SchedulerNode(BaseSchedulerNode):
             iter_ranges, reduce_ranges, prefix="z"
         )
         body = ir.LoopBody(
-            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+            self._body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
         )
 
+        self._vars = None
         self._sizes = (iter_ranges, reduce_ranges)
         self._body = body
-        self.read_writes = ordering.read_writes
 
     def prepare_for_codegen(self):
-        if self.can_reorder():
-            self.apply_loop_order(
-                FusedSchedulerNode.select_loop_orders((self,))[0][self]
-            )
+        self.apply_loop_order(FusedSchedulerNode.select_loop_orders((self,))[0][self])
+        self.merge_loops()
 
 
 class FusionFailed(Exception):
@@ -815,9 +821,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return self.loop_orders
 
     def prepare_for_codegen(self):
-        if self.can_reorder():
-            for node, ordering in self.loop_orders[0].items():
-                node.apply_loop_order(ordering)
+        for node, ordering in self.loop_orders[0].items():
+            node.apply_loop_order(ordering)
+
+        # TODO(jansel): merging loops causes issues on CPU, which requires
+        # every node to have its loops merged in the exact same way.  To
+        # fix this we need to pool all the indexing from the entire fusion
+        # and run merge loops on that.
+        if ir.is_triton(self.get_device()):
+            for node in self.get_nodes():
+                node.merge_loops()
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1323,11 +1336,15 @@ class Scheduler:
 
         if node1.get_names() & node2.recursive_predecessors:
             # node2 depends on node1 outputs
-            if not self.can_fuse_vertical(node1, node2):
-                return False
-            return self.get_backend(device).can_fuse_vertical(node1, node2)
+            return (
+                self.can_fuse_vertical(node1, node2)
+                and self.get_backend(device).can_fuse_vertical(node1, node2)
+                and self.can_fuse_loop_orders(node1, node2)
+            )
         else:  # nodes don't depend on each other, but may have common reads
-            return self.get_backend(device).can_fuse_horizontal(node1, node2)
+            return self.get_backend(device).can_fuse_horizontal(
+                node1, node2
+            ) and self.can_fuse_loop_orders(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):
         """
@@ -1355,13 +1372,18 @@ class Scheduler:
         for name in remaining_deps:
             if node1_names & self.name_to_fused_node[name].recursive_predecessors:
                 return False
+        return True
 
+    def can_fuse_loop_orders(self, node1, node2):
+        """
+        Check if the loop ordering algorithm can find a loop order that
+        works for both node1 and node2.
+        """
         try:
             FusedSchedulerNode.select_loop_orders((node1, node2))
         except FusionFailed as e:
             log.debug("FusionFailed: %s", e)
             return False
-
         return True
 
     def score_fusion(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):

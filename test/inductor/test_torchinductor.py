@@ -687,10 +687,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count,
-            1 if self.device == "cuda" else 3,
-        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     def test_sum1(self):
         def fn(a, b):

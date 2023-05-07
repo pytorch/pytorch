@@ -70,6 +70,12 @@ class MemoryDep(typing.NamedTuple):
         return any(is_indirect(v.name) for v in self.index.free_symbols)
 
     def generalize_for_scheduling(self):
+        """
+        Replace this exact memory dep, with a generic placeholder that
+        only checks name, numel, and type.  Since we allow loop reordering
+        (which changes memory deps) during scheduling, we want to be
+        more permissive about dependency matches in the initial pass.
+        """
         if self.is_indirect():
             return StarDep(
                 self.name,
@@ -97,15 +103,12 @@ class MemoryDep(typing.NamedTuple):
 
     def can_read_from(self, other: Dep):
         """Check if self can read from other in a single fused kernel"""
-        if not isinstance(other, MemoryDep) or other.is_indirect():
-            return False
         if (
-            len(other.size) - 1 == len(self.size)
-            and other.size[: len(self.size)] == self.size
+            not isinstance(other, MemoryDep)
+            or other.is_indirect()
+            or self.is_indirect()
         ):
-            # reduction has last (reduced) dim in its sizes, and some
-            # downstream dependencies get confused by it
-            return other.name == self.name and other.index == self.index
+            return False
         return self == other
 
 

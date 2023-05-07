@@ -29,7 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .cuda_properties import get_device_properties
@@ -3035,8 +3035,6 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3044,19 +3042,12 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
-        def gen_kwarg(k, v):
-            return f"{k}={repr(v)}"
-
-        def get_pexpr(x):
-            if isinstance(x, SymTypes):
-                return pexpr(sympy.expand(repr(x)))
-            else:
-                return repr(x)
-
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
-        args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
+        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
+        # let self.codegen_kwargs handle kwargs
+        self.kwargs.update(kwargs)
+        return args
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
