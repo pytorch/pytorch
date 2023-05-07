@@ -216,7 +216,7 @@ class BaseSchedulerNode:
         return False
 
     def can_reorder(self):
-        return ir.is_triton(self.get_device())
+        return ir.is_triton(self.get_device()) and config.loop_ordering_search_limit > 1
 
     def allocate(self):
         if not self.node.should_allocate():
@@ -481,12 +481,6 @@ class SchedulerNode(BaseSchedulerNode):
 
         if not self.can_reorder():  # on CPU do reordering before fusion
             self.apply_loop_order(LoopOrder(self, self._body, self._sizes))
-
-            # TODO(jansel): I'd expect this to be faster, but it causes segfaults
-            # self.can_reorder = lambda: True
-            # self.apply_loop_order(FusedSchedulerNode.select_loop_orders([self])[0][self])
-            # self.can_reorder = lambda: False
-
             self.set_read_writes(self.read_writes)
         elif self.is_template():
             self.set_read_writes(
@@ -700,7 +694,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     else:
                         external_deps.add(dep)
                 for dep in order.read_writes.writes:
-                    if all(u.get_name() in all_node_names for u in node.users):
+                    if all(u.get_name() in all_node_names for u in (node.users or ())):
                         internal_deps.add(dep)
                     else:
                         external_deps.add(dep)
