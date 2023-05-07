@@ -357,10 +357,7 @@ def linearSolveCheckInputs(
         lambda: (
             f"Incompatible matrix sizes for {name}: each A "
             f"matrix is {A.size(-1)} by {A.size(-1)}"
-            f" but each b matrix is ",
-            self.size(-2),
-            " by ",
-            self.size(-1),
+            f" but each b matrix is {self.size(-2)} by {self.size(-1)}"
         ),
     )
 
@@ -551,7 +548,7 @@ def _linalg_svd_meta(
     return U, S, V
 
 
-def _linalg_broadcast_batch_dims(arg1, arg2):
+def _linalg_broadcast_batch_dims(arg1: Tensor, arg2: Tensor):
     # broadcast the batch dimensions of arg1 and arg2.
     arg1_batch_sizes = arg1.shape[:-2]
     arg2_batch_sizes = arg2.shape[:-2]
@@ -565,7 +562,7 @@ def _linalg_broadcast_batch_dims(arg1, arg2):
     return arg1_expand_size, arg2_expand_size
 
 
-def _linalg_broadcast_batch_dims_name(arg1, arg2, name):
+def _linalg_broadcast_batch_dims_name(arg1: Tensor, arg2: Tensor, name: Optional[str]):
     # If there's no name we assume we don't want to check the errors
     if name:
         linearSolveCheckInputs(arg1, arg2, name)
@@ -604,7 +601,7 @@ def linalg_solve_triangular_meta(
         if _resize_output_check(out, B_.shape):
             out.resize_(B_.transpose(-2, -1).shape)
             out.transpose_(-2, -1)
-    return out
+    return out  # type: ignore[return-value]
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp

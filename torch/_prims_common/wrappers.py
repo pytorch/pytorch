@@ -139,7 +139,7 @@ class elementwise_type_promotion_wrapper:
         return _fn
 
 
-# Returns true if resize is necessary
+# Returns True if resize is necessary
 def _resize_output_check(out: TensorLikeType, shape: ShapeType):
     # If the shapes are correct there's nothing to do
     if utils.same_shape(out.shape, shape):
