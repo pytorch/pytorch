@@ -5667,7 +5667,7 @@ class CommonTemplate:
             [x],
         )
 
-    @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
+    @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
             z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
@@ -6004,6 +6004,17 @@ class CommonTemplate:
                 x = torch.rand(48, 3, 512, 512)
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x, 2), opt_fn(x, 2))
+
+    def test_inplace_resize_as(self):
+        def fn(x, y):
+            x.resize_as_(y)
+            return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(200, 300)
+        x_clone = x.clone()
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        same(fn(x, y), opt_fn(x_clone, y))
 
 
 @dataclasses.dataclass

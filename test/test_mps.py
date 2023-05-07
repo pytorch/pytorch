@@ -4860,6 +4860,16 @@ class TestNLLLoss(TestCaseMPS):
         helper((7, 13))
         helper((2, 8, 4, 5))
 
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
+
     def test_all(self):
         def helper(shape):
             input_xs = []
