@@ -10,6 +10,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
 
+#include <type_traits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -461,7 +463,9 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
       const bwd_index_t index = static_cast<bwd_index_t>(i) * ndim + t;
-      CUDA_KERNEL_ASSERT(index >= 0);
+      if constexpr(!std::is_unsigned<bwd_index_t>::value) {
+        CUDA_KERNEL_ASSERT(index >= 0);
+      }
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }
   }
