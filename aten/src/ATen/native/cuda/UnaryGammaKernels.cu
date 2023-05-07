@@ -12,8 +12,10 @@
 
 namespace at::native {
 
-// See note [Jiterator]
+#if AT_USE_JITERATOR()
 CONSTEXPR_EXCEPT_WIN_CUDA char digamma_name[] = "digamma";
+#endif // AT_USE_JITERATOR()
+// See note [Jiterator]
 void digamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "digamma_cuda", [&]() {

@@ -11,7 +11,10 @@
 
 namespace at::native {
 
+#if AT_USE_JITERATOR
 CONSTEXPR_EXCEPT_WIN_CUDA char cos_name[] = "cos";
+#endif // AT_USE_JITERATOR()
+
 void cos_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
