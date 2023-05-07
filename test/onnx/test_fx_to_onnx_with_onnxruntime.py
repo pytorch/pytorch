@@ -297,15 +297,43 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
     @pytorch_test_common.xfail(
-        "RuntimeError: false INTERNAL ASSERT FAILED at "
-        "'/home/titaiwang/pytorch/build/aten/src/ATen/RegisterFunctionalization_0.cpp':3725,"
-        " please report a bug to PyTorch. mutating a non-functional tensor with a "
-        "functional tensor is not allowed. Please ensure that all of your inputs are "
-        "wrapped inside of a functionalize() call."
+        "RuntimeError: Unknown call_function target: aten.mean.dim"
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
+    )
+    @skip_if_no_torchvision
+    def test_resnet18(self):
+        # TODO(bowbao): Note [training vs eval in dynamo_export]
+        # So we are effectively exporting all models in traning mode by
+        # default. But for the sake of this export we are only interested in eval mode.
+        # The question is, should we call `model.eval()` in `dynamo_export`?
+        # This particular test fails 'functionalization' in training mode.
+        # So we are explicitly calling `model.eval()` for any model that contains
+        # batch norm.
+        # Ref: https://github.com/pytorch/pytorch/issues/99662#issuecomment-1528178221
+        model = torchvision.models.resnet18(pretrained=False).eval()
+        dummy_input = torch.randn(1, 3, 224, 224)
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            model,
+            (dummy_input,),
+        )
+
+    @pytorch_test_common.xfail(
+        "RuntimeError: Unknown call_function target: aten.mean.dim"
+    )
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=True,
     )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
-        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
+        # TODO(bowbao): see Note [training vs eval in dynamo_export]
+        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False).eval()
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
 
@@ -727,6 +755,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             )
             # ORT outputs.
             args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+
+            # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
+            args_not_none = args_not_none[: len(args) - len(kwargs)]
+
             ort_outputs = onnx_test_common.run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,

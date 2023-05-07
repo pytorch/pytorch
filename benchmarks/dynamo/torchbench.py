@@ -291,10 +291,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
             batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
 
-        # See https://github.com/pytorch/benchmark/issues/1560
-        if model_name == "speech_transformer":
-            batch_size = 10
-
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
         extra_args = []

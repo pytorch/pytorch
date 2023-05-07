@@ -1071,6 +1071,10 @@ def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # Custom fallback lowering
+    if node.target is aten.view_as_complex.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1412,6 +1416,8 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
+make_fallback(aten.view_as_complex.default, require_contiguous)
+
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
 make_fallback(aten.upsample_linear1d)
@@ -1559,6 +1565,13 @@ make_fallback(aten.zeros.names)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
+
+# ROCm specific fallback, perf issues are observed when registered
+make_fallback(aten.miopen_batch_norm, warn=False)
+
+if torch.version.hip is not None and torch.cuda.is_available():
+    # tl.reduce not available yet in ROCm's version of triton
+    make_fallback(aten.prod, warn=False)
 
 
 @register_lowering(aten.clone)
