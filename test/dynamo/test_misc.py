@@ -5008,45 +5008,45 @@ def fn():
                 return input + input
 
         model = Model()
-        prof = CompileProfiler()
-        compiled = torch.compile(model, backend=prof)
-        base_checker = (
-            lambda: FileCheck()
-            .check("Torchdynamo Profiler Report")
-            .check("Graph Breaks")
-            .check("No graph breaks detected.")
-            .check("Recompilation")
-        )
-        input = torch.rand((2, 3, 4))
-        _ = compiled(input)
-        base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((3, 3, 4))
-        _ = compiled(new_shape_input)
-
-        # Not an exhaustive test of dynamic shapes behavior, but some sanity
-        if (
-            not torch._dynamo.config.dynamic_shapes
-            or torch._dynamo.config.assume_static_by_default
-        ):
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
-        else:
+        with CompileProfiler() as prof:
+            compiled = torch.compile(model, backend=prof)
+            base_checker = (
+                lambda: FileCheck()
+                .check("Torchdynamo Profiler Report")
+                .check("Graph Breaks")
+                .check("No graph breaks detected.")
+                .check("Recompilation")
+            )
+            input = torch.rand((2, 3, 4))
+            _ = compiled(input)
             base_checker().check("No recompilation detected.").run(prof.report())
 
-        # Ensure correct guard fail message is selected to show to user
-        if not torch._dynamo.config.dynamic_shapes:
-            new_shape_input = torch.rand((4, 3, 4))
+            new_shape_input = torch.rand((3, 3, 4))
             _ = compiled(new_shape_input)
 
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-            ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-            ).run(
-                prof.report()
-            )
+            # Not an exhaustive test of dynamic shapes behavior, but some sanity
+            if (
+                not torch._dynamo.config.dynamic_shapes
+                or torch._dynamo.config.assume_static_by_default
+            ):
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "cache_size_limit to 1"
+                ).run(prof.report())
+            else:
+                base_checker().check("No recompilation detected.").run(prof.report())
+
+            # Ensure correct guard fail message is selected to show to user
+            if not torch._dynamo.config.dynamic_shapes:
+                new_shape_input = torch.rand((4, 3, 4))
+                _ = compiled(new_shape_input)
+
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+                ).check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+                ).run(
+                    prof.report()
+                )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
@@ -5101,6 +5101,26 @@ def fn():
         compile_out = torch._dynamo.optimize("eager")(func)(torch.ones(10, 10, 3))
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
+
+    def test_nested_function_resuming_with_correct_globals(self):
+        # https://github.com/pytorch/pytorch/issues/99665
+        try:
+            from .utils import outer_func
+        except ImportError:
+            from utils import outer_func
+
+        def gn(x, y):
+            return x + y
+
+        def fn(x, y):
+            return outer_func(gn)(x, y)
+
+        x = torch.rand([3])
+        y = torch.rand([3])
+        opt_fn = torch.compile(backend="eager")(fn)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
 
 
 class CustomFunc1(torch.autograd.Function):
