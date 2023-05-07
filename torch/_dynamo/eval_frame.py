@@ -27,6 +27,7 @@ from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -64,7 +65,10 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    StrictMinMaxConstraint,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -861,6 +865,7 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
+    constraint_violation_error = None
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
@@ -877,23 +882,34 @@ def export(
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = opt_f(*args, **kwargs)
+        try:
+            result_traced = opt_f(*args, **kwargs)
+        except ConstraintViolationError as e:
+            constraint_violation_error = e
     remove_from_cache(f)
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        msg = dim_constraints.prettify_results(inspect.signature(f))
+        if constraint_violation_error:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            log.warning(
+                "Summary of dimension constraints:%s",
+                msg,
+            )
+    if constraint_violation_error:
+        raise constraint_violation_error
 
     assert (
         graph is not None
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 

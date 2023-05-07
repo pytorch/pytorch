@@ -931,6 +931,41 @@ Tensor logcumsumexp_backward(
       });
 }
 
+Tensor logcumsumexp_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int64_t dim) {
+  // Mostly taken from logsumexp_jvp
+
+  // NB: for simplicity, we recompute some values that can be reused from
+  // forward
+  auto self_p_exp = [&self_p, dim]() {
+    if (!at::is_complex(self_p)) {
+      return (self_p - std::get<0>(at::max(self_p, dim, true)))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // at::max doesn't support complex128
+      return self_p.exp();
+    }
+  }();
+
+  auto cumsumexp_p = self_p_exp.cumsum(dim);
+
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+
+  constexpr double eps = 1e-13;
+
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).cumsum(dim);
+    result /= cumsumexp_p.add_(eps);
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto cumsumexp_t = self_p_exp.cumsum(dim);
+    return cumsumexp_t /= cumsumexp_p.add_(eps);
+  }
+}
+
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   c10::SymIntArrayRef sizes;
   at::TensorOptions o;
