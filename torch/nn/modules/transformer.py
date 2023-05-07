@@ -229,7 +229,6 @@ class TransformerEncoder(Module):
         )
 
         output = src
-        output_size = output.size()
         convert_to_nested = False
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
@@ -316,7 +315,7 @@ class TransformerEncoder(Module):
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = output.to_padded_tensor(0., output_size)
+            output = output.to_padded_tensor(0., src.size())
 
         if self.norm is not None:
             output = self.norm(output)
