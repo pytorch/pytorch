@@ -1174,8 +1174,9 @@ class TritonKernel(Kernel):
         # program. The workaround is to add a barrier before storing, which
         # enforces that all warps have already read the data.
         is_inplace = name in self.args.inplace_buffers
-        num_loops = len([numel for numel in self.numels if numel != 1])
-        is_broadcasted = len(set(original_index.free_symbols) & self.range_tree_nodes.keys()) < num_loops
+        is_broadcasted = not set.issubset(
+            set(self.range_tree_nodes.keys()), original_index.free_symbols
+        )
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
