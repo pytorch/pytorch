@@ -954,9 +954,9 @@ void initJitScriptBindings(PyObject* module) {
             auto method = self.find_method(mm_name);
             if (!method) {
               throw NotImplementedError(
-                "'%s' is not implemented for %s",
-                mm_name,
-                self.type()->str().c_str());
+                  "'%s' is not implemented for %s",
+                  mm_name,
+                  self.type()->str().c_str());
             }
             return invokeScriptMethodFromPython(
                 *method,
