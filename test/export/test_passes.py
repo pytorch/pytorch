@@ -2,11 +2,9 @@
 import unittest
 
 import torch
-import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export
-from torch._export import dynamic_dim
+from torch._export import export, dynamic_dim
 from torch._export.passes import (
     AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
@@ -31,7 +29,7 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        gm, _ = torchdynamo.export(f, x, aten_graph=True)
+        gm = export(f, (x,)).find_method("forward")
 
         new_gm = ReplaceBrokenOpsWithFunctionalOpsPass()(gm)
         self.assertIsNotNone(new_gm)
@@ -60,7 +58,7 @@ class TestPasses(TestCase):
                 (node.target == torch.ops.aten.add.Tensor) for node in gm.graph.nodes
             )
 
-        gm, _ = torchdynamo.export(M(), torch.zeros(2, 2, 3), aten_graph=True)
+        gm = export(M(), (torch.zeros(2, 2, 3),)).find_method("forward")
         self.assertEqual(count_additions(gm), 3)
 
         new_gm = ConstPropPass()(gm)
@@ -78,7 +76,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        gm = _export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
+        gm = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -112,7 +110,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -146,7 +144,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -187,7 +185,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)

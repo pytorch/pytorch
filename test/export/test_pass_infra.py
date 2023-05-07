@@ -3,18 +3,20 @@ from typing import List, Type
 import unittest
 
 import torch
-import torch._dynamo as torchdynamo
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx import subgraph_rewriter
 from torch.library import impl, Library
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import export
 from torch._export.pass_base import ExportPassBase, ExportPassBaseError
+from torch._export.constraints import constrain_as_value
+from functorch.experimental import control_flow
 
 
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassInfra(TestCase):
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_export_pass_base(self) -> None:
         def f(x: torch.Tensor) -> List[torch.Tensor]:
             y = torch.cat([x, x])
@@ -23,7 +25,7 @@ class TestPassInfra(TestCase):
         class NullPass(ExportPassBase):
             pass
 
-        gm, _ = torchdynamo.export(f, *(torch.ones(3, 2),), aten_graph=True)
+        gm = export(f, (torch.ones(3, 2),)).find_method("forward")
         new_gm = NullPass()(gm)
         self.assertIsNotNone(new_gm)
         new_nodes = new_gm.graph_module.graph.nodes
@@ -40,7 +42,6 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_dialects(self) -> None:
         """
         Test if the dialects are maintained
@@ -69,11 +70,9 @@ class TestPassInfra(TestCase):
             z = x + y
             return torch.ops.aten.relu.default(z)
 
-        gm, _ = torchdynamo.export(
-            f,
-            *(torch.randn(2, 2), torch.randn(2, 2)),
-            aten_graph=True,
-        )
+        gm = export(
+            f, (torch.randn(2, 2), torch.randn(2, 2)),
+        ).find_method("forward")
         FileCheck().check("torch.ops.aten.add.Tensor").check(
             "torch.ops.aten.relu.default"
         ).run(gm.code)
@@ -130,6 +129,31 @@ class TestPassInfra(TestCase):
         with self.assertRaisesRegex(ExportPassBaseError, "Expecting op of dialects:"):
             _ = BackendViolatePass()(gm)
 
+    def test_cond(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x, y):
+                def true_fn(x, y):
+                    b = x.item()
+                    constrain_as_value(b, min=2, max=5)
+                    return x
+
+                def false_fn(x, y):
+                    c = y.item()
+                    constrain_as_value(c, min=2, max=5)
+                    return y
+
+                ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
+                return ret
+
+        x = torch.tensor([2])
+        y = torch.tensor([5])
+        mod = M()
+        gm = export(mod, (torch.tensor(True), x, y)).find_method("forward")
+
+        ExportPassBase()(gm)
 
 if __name__ == '__main__':
     run_tests()

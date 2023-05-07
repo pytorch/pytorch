@@ -13,16 +13,14 @@ from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
 import torch.utils._pytree as pytree
+from torch._export.pass_base import PassType
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
-from torch.fx.passes.infra.pass_base import PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
 
 Value = Any
 
-# TODO(angelayi): Move this to PassBase
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 ExportGraphModule = torch.fx.GraphModule
 EXPORT_METADATA = "_export_metadata_key"
 
