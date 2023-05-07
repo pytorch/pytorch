@@ -170,7 +170,7 @@ class autocast:
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
-        device_type(str, required):  Whether to use 'cuda' or 'cpu' device.
+        device_type(str, required):  Device type to use. Possible values are: 'cuda', 'cpu', 'xpu' and 'hpu'.
                                      The type is the same as the `type` attribute of a :class:`torch.device`.
                                      Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
@@ -200,7 +200,7 @@ class autocast:
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
         else:
-            raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+            raise RuntimeError('User specified autocast device_type must be \'cuda\', \'cpu\', \'xpu\' or \'hpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
         if enabled and torch.cuda.amp.common.amp_definitely_not_available() and self.device == 'cuda':
             warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
