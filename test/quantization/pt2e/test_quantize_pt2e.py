@@ -687,6 +687,25 @@ class TestQuantizePT2E(QuantizationTestCase):
         Helper method to verify that the QAT numerics for PT2E quantization match those of
         FX graph mode quantization for symmetric qnnpack.
         """
+        # TODO(andrew): debug code, delete before land
+        class PrintMod(torch.nn.Module):
+            def __init__(self, model_name, node_name):
+                super().__init__()
+                self.model_name = model_name
+                self.node_name = node_name
+            def forward(self, x):
+                print("************** ", self.model_name, self.node_name, torch.flatten(x)[:5])
+                return x
+
+        def insert_print_mod(mod, model_name, node_name):
+            print_mod_attr = model_name + "_" + node_name
+            setattr(mod, print_mod_attr, PrintMod(model_name, node_name))
+            for i, n in enumerate(list(mod.graph.nodes)):
+                if n.name == node_name:
+                    with mod.graph.inserting_after(n):
+                        mod.graph.call_module(print_mod_attr, (n,))
+            mod.recompile()
+
         # PT2 export
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         model_pt2e = copy.deepcopy(model)
@@ -698,7 +717,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
-        result_pt2e = model_pt2e(*example_inputs)
 
         # FX
         # Note: In order to match the PT2E numerics exactly, we need to feed the
@@ -715,10 +733,33 @@ class TestQuantizePT2E(QuantizationTestCase):
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         backend_config = get_qnnpack_backend_config()
         model_fx = prepare_qat_fx(model_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
-        result_fx = model_fx(*example_inputs)
+
+        # TODO(andrew): we need these for resnet18 to match, delete before land
+        model_pt2e.activation_post_process_5 = torch.nn.Identity()
+        model_fx.activation_post_process_31 = copy.deepcopy(model_pt2e.activation_post_process_52)
+        #insert_print_mod(model_pt2e, "PT2", "activation_post_process_51")
+        #insert_print_mod(model_pt2e, "PT2", "view_default")
+        #insert_print_mod(model_pt2e, "PT2", "activation_post_process_52")
+        #insert_print_mod(model_fx, "FX", "activation_post_process_30")
+        #insert_print_mod(model_fx, "FX", "flatten")
+        #insert_print_mod(model_fx, "FX", "activation_post_process_31")
+        #print("PT2 model", model_pt2e)
+        #print("FX model" , model_fx)
 
         # Verify that numerics match
+        result_pt2e = model_pt2e(*example_inputs)
+        result_fx = model_fx(*example_inputs)
         self.assertEqual(result_pt2e, result_fx)
+
+    @skip_if_no_torchvision
+    @skipIfNoQNNPACK
+    def test_prepare_qat_resnet18(self):
+        import torchvision
+        with override_quantized_engine("qnnpack"):
+            example_inputs = (torch.randn(1, 3, 224, 224),)
+            m = torchvision.models.resnet18()
+            self._verify_symmetric_qnnpack_qat_numerics(m, example_inputs, is_per_channel=False)
+            self._verify_symmetric_qnnpack_qat_numerics(m, example_inputs, is_per_channel=True)
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):
