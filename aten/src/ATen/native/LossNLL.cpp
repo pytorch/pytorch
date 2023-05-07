@@ -479,7 +479,7 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cpu)
       total_weight);
 }
 
-Tensor cross_entropy_loss_prob_target(
+static Tensor cross_entropy_loss_prob_target(
     const Tensor& self,
     const Tensor& target_,
     const Tensor& weight,
@@ -547,7 +547,7 @@ Tensor cross_entropy_loss_prob_target(
   }
 }
 
-Tensor cross_entropy_loss_label_smoothing(
+static Tensor cross_entropy_loss_label_smoothing(
     const Tensor& self,
     const Tensor& target,
     const Tensor& weight,
@@ -558,7 +558,7 @@ Tensor cross_entropy_loss_label_smoothing(
     auto input = at::log_softmax(self, class_dim, self.scalar_type());
     auto nllloss = at::nll_loss_nd_symint(input, target, weight, reduction, ignore_index);
 
-    auto n_classes = input.size(class_dim);
+    auto n_classes = input.sym_size(class_dim);
 
     Tensor smooth_loss;
     if (weight.defined()) {
