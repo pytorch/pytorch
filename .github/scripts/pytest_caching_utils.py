@@ -57,7 +57,6 @@ class GithubRepo(NamedTuple):
         return f"{self.owner}/{self.name}"
 
 
-# TODO: When uploading the cache, we should merge the current cache with any pre-existing cache
 def upload_pytest_cache(
     pr_identifier: PRIdentifier,
     repo: GithubRepo,
@@ -81,6 +80,8 @@ def upload_pytest_cache(
 
     if not bucket:
         bucket = BUCKET
+
+    # TODO: Merge the current cache with any pre-existing cache before uploading
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
     # This doesn't include the zip file extension. That'll get added later
@@ -141,17 +142,6 @@ def download_pytest_cache(
         # clean up the downloaded zip files
         shutil.rmtree(zip_download_dir)
         pass
-
-
-def cleanup_temp_files(
-    pr_identifier: PRIdentifier, repo: GithubRepo, job_identifier: str, temp_dir: Path
-) -> None:
-    for folder in ALL_TEMP_FOLDERS:
-        path = (
-            temp_dir / folder / _get_s3_key_prefix(pr_identifier, repo, job_identifier)
-        )
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
 
 
 def _get_s3_key_prefix(
