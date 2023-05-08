@@ -1080,7 +1080,7 @@ class TritonKernel(Kernel):
             # It'd be less # error-prone to use and/or/not, which is suported by triton
             cond = f"((0 <= {var}) & ({var} < {size}))"
             cond_print = f"0 <= {var} < {size}"
-            if mask != "None":
+            if mask != "None" and not isinstance(original_index, sympy.Integer):
                 var_mask = f"({mask})" if "&" in mask else mask
                 var_mask = f" | ~{var_mask}"
             else:
