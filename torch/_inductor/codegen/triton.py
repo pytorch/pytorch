@@ -1057,10 +1057,12 @@ class TritonKernel(Kernel):
             cond = f"(0 <= {var}) & ({var} < {size})"
             cond_print = f"0 <= {var} < {size}"
 
-            mask_vars = list(var.mask_vars)
+            mask_vars = set(var.mask_vars)
+            if self._load_mask:
+                mask_vars.add(self._load_mask)
             if mask_vars:
                 mask = (
-                    f"{mask_vars[0]}"
+                    f"{list(mask_vars)[0]}"
                     if len(mask_vars) == 1
                     else f"({' & '.join(mask_vars)})"
                 )
