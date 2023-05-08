@@ -130,6 +130,7 @@ if _has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        acc_dtype: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
     ):
         batch_pid = tl.program_id(axis=2)
@@ -195,7 +196,7 @@ if _has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
 
@@ -234,11 +235,16 @@ if _has_triton():
             dense: (0, -3, None),
             output: (0, -3, -4)
         }
+        if values.dtype in (torch.half, torch.bfloat16):
+            acc_dtype = tl.float32
+        else:
+            acc_dtype = tl.float64
 
         def kernel(grid, *sliced_tensors):
             _bsr_strided_dense_rowspace_kernel[grid](
                 *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
+                acc_dtype=acc_dtype,
                 GROUP_SIZE_ROW=4,
                 num_stages=1,
                 num_warps=4
