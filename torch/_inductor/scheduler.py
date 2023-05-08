@@ -712,13 +712,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
                 sum(map(dep_contiguous_score1, external_writes)),
-                # sum(map(dep_contiguous_score1, external_deps)),
-                # sum(map(dep_contiguous_score2, external_deps)),
+                sum(map(dep_contiguous_score1, external_deps)),
                 sum(map(dep_symbols_score, external_deps)),
-                # sum(map(dep_contiguous_score1, internal_deps)),
-                # sum(map(dep_contiguous_score2, internal_deps)),
                 sum(map(dep_symbols_score, internal_deps)),
-                # sum(int(x.permute_order is None) for x in ordering.values()),
             )
 
         def dep_contiguous_score1(dep):
@@ -1338,13 +1334,13 @@ class Scheduler:
             # node2 depends on node1 outputs
             return (
                 self.can_fuse_vertical(node1, node2)
-                and self.get_backend(device).can_fuse_vertical(node1, node2)
                 and self.can_fuse_loop_orders(node1, node2)
+                and self.get_backend(device).can_fuse_vertical(node1, node2)
             )
         else:  # nodes don't depend on each other, but may have common reads
-            return self.get_backend(device).can_fuse_horizontal(
-                node1, node2
-            ) and self.can_fuse_loop_orders(node1, node2)
+            return self.can_fuse_loop_orders(node1, node2) and self.get_backend(
+                device
+            ).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):
         """

@@ -1727,20 +1727,7 @@ class TritonScheduling:
         return self.can_fuse(node2, node1)
 
     can_fuse_vertical = can_fuse
-
-    def can_fuse_horizontal(self, node1, node2):
-        if (
-            not config.aggressive_fusion
-            and len(
-                self.deps_from_active_loop_order(node1)
-                & self.deps_from_active_loop_order(node2)
-            )
-            == 0
-        ):
-            # Fusion would require loop reordering
-            return False
-
-        return self.can_fuse(node1, node2)
+    can_fuse_horizontal = can_fuse
 
     def is_loop_order_valid(self, nodes):
         for node in nodes:
