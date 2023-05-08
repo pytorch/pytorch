@@ -80,9 +80,6 @@ def main() -> None:
             print(f"The pytest cache dir `{cache_dir}` does not exist. Skipping upload")
             return
 
-        # TODO: First check if it's even worth uploading a new cache:
-        #    Does the cache even mark any failed tests?
-
         upload_pytest_cache(
             pr_identifier=pr_identifier,
             repo=repo,
