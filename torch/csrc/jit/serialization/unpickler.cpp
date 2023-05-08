@@ -597,10 +597,20 @@ PickleOpCode Unpickler::readInstruction() {
       // | Dict         | -> (stack_size - 3)
       // | Key          | -> (stack_size - 2)
       // | Value        | -> (stack_size - 1)
+      TORCH_CHECK(
+          stack_.size() >= 3,
+          "Parsing error: stack doesn't have enough elements");
+
       auto stack_size = stack_.size();
       auto dict_pos = stack_size - 3;
       auto key_pos = stack_size - 2;
       auto val_pos = stack_size - 1;
+
+      TORCH_CHECK(
+          (dict_pos < stack_size) && (key_pos < stack_size) &&
+              (val_pos < stack_size),
+          "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
+
       auto dict = stack_.at(dict_pos).toGenericDict();
       dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
       stack_.erase(stack_.begin() + (key_pos), stack_.end());

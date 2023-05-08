@@ -200,20 +200,8 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
 
     def _conv_transpose_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_transpose_pointwise(
-                F.pad(
-                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
-                ),
-                weight,
-                bias,
-                _pair(0),
-                self.output_padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                "none",
-                [],
-                "",
+            raise ValueError(
+                "Only `zeros` padding mode is supported for PackedConvTranspose2d"
             )
         return torch.ops.mkldnn._convolution_transpose_pointwise(
             input,
@@ -324,6 +312,8 @@ def pack_module(gm: torch.fx.GraphModule):
                 if type(cur_module) in [nn.ConvTranspose2d] and (
                     is_group_depthwise_conv_transpose(cur_module)
                     or dynamo_config.dynamic_shapes
+                    or len(node.args) > 1
+                    or len(node.kwargs) > 0
                 ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](

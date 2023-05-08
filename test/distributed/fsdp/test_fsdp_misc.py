@@ -5,7 +5,7 @@ import os
 import sys
 import warnings
 from collections import namedtuple
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Tuple
 
@@ -371,7 +371,7 @@ class TestFSDPMisc(FSDPTest):
         context = (
             self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
             NestedWrappedModule.init(
@@ -427,7 +427,7 @@ class TestFSDPMisc(FSDPTest):
                 )
             )
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
             module = FSDP(no_params, device_id=0)
