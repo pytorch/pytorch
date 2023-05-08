@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 
 namespace torch::jit::tensorexpr {
 
