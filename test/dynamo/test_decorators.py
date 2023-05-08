@@ -35,6 +35,37 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 4)
 
+    def test_disable_for_custom_op(self):
+        import torch.library
+        from torch.library import Library
+
+        foo = Library("foo", "DEF")
+        foo.define("custom(Tensor self) -> Tensor")
+
+        # Dynamic shape data dependent operator. For static shape compilation, Dynamo
+        # should graph break on it. But, the meta kernel is not implemented properly.
+        @torch.library.impl(foo, "custom", "CPU")
+        def foo_cpu(x):
+            return x.nonzero()
+
+        # Disallow does not work because of extra python frames with torch.library python API
+        torch.ops.foo.custom = torch._dynamo.disable(torch.ops.foo.custom)
+
+        def fn(x):
+            a = torch.nn.functional.relu(x)
+            b = torch.ops.foo.custom(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randint(2, (100,))
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(ref, res)
+
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

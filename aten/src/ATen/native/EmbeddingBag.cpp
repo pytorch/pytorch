@@ -179,16 +179,17 @@ void fbgemm_spmdm_report_error_(
           0 <= idx && idx < N,
           "Index ",
           i,
-          " is out of bounds: ",
+          " of input takes value ",
           idx,
-          ", range 0 to ",
-          N);
+          " which is not in the valid range [0, ",
+          N,
+          ")");
     }
   }
   TORCH_CHECK(
       offsets[output_size] == index_size,
-      "Yout input seems to be incorrect: the last offset value should be "
-      "the size of the indices tensor, but it appears not.");
+      "Your input appears to be incorrect: the last offset value should be "
+       "the size of the indices tensor, but it seems not to be the case.");
 }
 } // namespace
 
@@ -330,7 +331,7 @@ index_select_add(
     auto numel = add_indices.numel();
 
     Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
-    auto* src_data_fp32 = src_fp32.data_ptr<float>();
+    auto* src_data_fp32 = src_fp32.mutable_data_ptr<float>();
 
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -603,7 +604,7 @@ index_select_scale_add(
     }
 
     Tensor scale_fp32 = at::empty(scale.sizes(), scale.options().dtype(at::kFloat));
-    auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
+    auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
     bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;

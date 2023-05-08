@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import operator
 from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
 
 import torch
@@ -163,13 +164,14 @@ def _operator_dispatch(
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
-        # 1. if the return type is scalar, all gather the local result
-        # from participating devices, and reduce on the list of results
-        # with appropriate operators.
-        #   for bool type, we by default use AND to reduce;
-        #   we can extend for more ops if necessary.
-        # 2. if the return type is Tensor or List[Tensor], return empty
-        # tensor(s) with correct dtype.
+        #   1. if the return type is scalar, set the local result to None.
+        #   The local results from all devices will then be all-gathered
+        #   and a reduce op will be performed on the list of results
+        #   with appropriate operators:
+        #       for bool type, we by default use AND to reduce;
+        #       we can extend for more ops if necessary.
+        #   2. if the return type is Tensor or List[Tensor], return empty
+        #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
         ret_list = op_schema.func_schema.returns
         if len(ret_list) != 1:
@@ -180,21 +182,9 @@ def _operator_dispatch(
             )
 
         if spec is None:
-            # return a scalar value
-            # collect local results from participating ranks
-            obj_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(obj_list, None)
-            obj_list = list(filter(lambda x: x is not None, obj_list))
-            # perform reduce on the collection with AND op
-            ret_type = str(ret_list[0].type)
-            if ret_type == "bool":
-                import operator
-
-                local_results: object = functools.reduce(operator.and_, obj_list, True)
-            else:
-                raise NotImplementedError(
-                    f"return type {ret_type} in DTensor op is not supported"
-                )
+            # For a scalar return type, the non-participating device has None
+            # as its local result
+            local_results: object = None
         else:
 
             def default_tensor(spec: DTensorSpec) -> torch.Tensor:
@@ -255,19 +245,19 @@ def _operator_dispatch(
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-        if (
-            (mesh is not None)
-            and (mesh.mesh.numel() < dist.get_world_size())
-            and (output_sharding.output_spec is None)
-        ):
-            # communicate the result to non-participating ranks if
-            # op runs on a submesh and return type is scalar value
-            obj_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(obj_list, local_results)
 
         # if op is a random op, adjust Philox RNG state to maintain synchronization
         if op_call in random_ops and is_rng_supported_mesh(mesh):
             set_post_op_offset(dtensor_arg._spec, old_offset)
+
+    # communicate the result to all ranks for some operators that return scalar value
+    if output_sharding.output_spec is None:
+        if op_call == torch.ops.aten.equal.default:
+            obj_list = [None for _ in range(dist.get_world_size())]
+            dist.all_gather_object(obj_list, local_results)
+            obj_list = list(filter(lambda x: x is not None, obj_list))
+            # perform reduce on the collection with AND op
+            local_results = functools.reduce(operator.and_, obj_list, True)
 
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping

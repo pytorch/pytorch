@@ -8,7 +8,6 @@ import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
@@ -32,12 +31,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .utils import (
-    developer_warning,
-    get_dtype_size,
-    has_incompatible_cudagraph_ops,
-    is_cpu_device,
-)
+from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -517,6 +511,7 @@ def compile_fx_with_cpp_wrapper(
     example_inputs: List[torch.Tensor],
     inner_compile,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """
     Compile into cpp wrapper:
@@ -525,24 +520,25 @@ def compile_fx_with_cpp_wrapper(
     and run it to generate autotuned kernel binaries in the first pass; and then generate
     cpp wrapper code and compile it to a dynamic library in the second pass.
     """
-    from torch.ao.quantization.fx.utils import assert_and_get_unique_device
-
     # Turns off cpp_wrapper before calling back into compile_fx
     config_patches = {"cpp_wrapper": False}
-    device = assert_and_get_unique_device(module)
+    devices = (
+        {t.device.type for t in module.parameters()}
+        | {t.device.type for t in module.buffers()}
+        | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
+    )
 
-    if is_cpu_device(example_inputs):
-        assert device is None or device.type == "cpu"
+    if "cuda" not in devices:
         with config.patch(config_patches):
             return compile_fx(
                 module,
                 example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
+                ),
                 decompositions=decompositions,
             )
     else:
-        assert device is None or device.type == "cuda"
-
         config_patches.update(
             {
                 "triton.cudagraphs": False,
@@ -551,17 +547,15 @@ def compile_fx_with_cpp_wrapper(
         )
         with config.patch(config_patches):
             # first pass
-            module_copy = deepcopy(module)
-
-            fake_mode = detect_fake_mode(example_inputs)
-            inputs_copy = example_inputs if fake_mode else deepcopy(example_inputs)
             compiled = compile_fx(
-                module_copy,
-                inputs_copy,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=False),
+                module,
+                example_inputs,
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=False, aot_mode=False
+                ),
                 decompositions=decompositions,
             )
-            if fake_mode:
+            if detect_fake_mode(example_inputs):
                 with no_dispatch():
 
                     def to_real_tensor(e):
@@ -572,16 +566,18 @@ def compile_fx_with_cpp_wrapper(
 
                     inputs_real = [to_real_tensor(t) for t in example_inputs]
             else:
-                inputs_real = inputs_copy
+                inputs_real = deepcopy(example_inputs)
 
             compiled(*inputs_real)
-            del module_copy, inputs_real
+            del inputs_real
 
             # second pass
             return compile_fx(
                 module,
                 example_inputs,
-                inner_compile=functools.partial(inner_compile, cpp_wrapper=True),
+                inner_compile=functools.partial(
+                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
+                ),
                 decompositions=decompositions,
             )
 
@@ -593,12 +589,17 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
-    return compile_fx(
-        model_,
-        example_inputs_,
-        inner_compile=functools.partial(inner_compile, aot_mode=True),
-        config_patches=config_patches,
-        decompositions=decompositions,
+    if config_patches:
+        with config.patch(config_patches):
+            return compile_fx_aot(
+                model_,
+                example_inputs_,
+                # need extra layer of patching as backwards is compiled out of scope
+                inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
+            )
+    return compile_fx_with_cpp_wrapper(
+        model_, example_inputs_, inner_compile, decompositions, aot_mode=True
     )
 
 
@@ -665,8 +666,6 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
-    functorch.compile.config.use_functionalize = True
-    functorch.compile.config.use_fake_tensor = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes

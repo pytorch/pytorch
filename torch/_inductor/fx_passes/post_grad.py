@@ -15,11 +15,13 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    init_once_fakemode,
     KeywordArg,
     ListOf,
     Match,
     MULTIPLE,
     PatternMatcherPass,
+    stable_topological_sort,
 )
 from ..virtualized import V
 
@@ -56,10 +58,11 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
 
 
-@functools.lru_cache(None)
+@init_once_fakemode
 def lazy_init():
     if torch._C.has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
@@ -229,7 +232,7 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
+    if V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [
@@ -300,6 +303,15 @@ def is_valid_splitwithsizes_cat(match):
     # All parts of split should be included in the cat
     if get_item_args != set(range(len(split_sizes))):
         return False
+    # The order of get_item_args should same with cat_node used.
+    # For example, if the split_node like split_with_sizes(input, [2, 2, 3], 1),
+    # the cat node should be like cat([get_item(0), get_item(1), get_item(2)], 1).
+    cat_items_args_order = [
+        get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
+    ]
+    if cat_items_args_order != list(range(len(split_sizes))):
+        return False
+
     return True
 
 
