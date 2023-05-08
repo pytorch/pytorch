@@ -10,7 +10,7 @@ from torch._export import dynamic_dim
 from torch._export.passes import (
     AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
-    ReplaceBrokenOpsWithFunctionalOpsPass,
+    ReplaceViewOpsWithViewCopyOpsPass,
 )
 
 
@@ -33,7 +33,7 @@ class TestPasses(TestCase):
 
         gm, _ = torchdynamo.export(f, x, aten_graph=True)
 
-        new_gm = ReplaceBrokenOpsWithFunctionalOpsPass()(gm)
+        new_gm = ReplaceViewOpsWithViewCopyOpsPass()(gm)
         self.assertIsNotNone(new_gm)
         new_gm = new_gm.graph_module
 
@@ -211,6 +211,24 @@ class TestPasses(TestCase):
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
+
+    def test_view_to_view_copy(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                z = x.view(x.shape)
+                return z.cos().sum()
+
+        x = torch.zeros(4, 2, 3)
+
+        gm = _export(M(), (x,))
+        self.assertEqual(count_call_function(gm.graph, torch.ops.aten.view.default), 1)
+
+        pass_result = ReplaceViewOpsWithViewCopyOpsPass()(gm)
+        self.assertTrue(pass_result.modified)
+        self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
 
 
 if __name__ == '__main__':
