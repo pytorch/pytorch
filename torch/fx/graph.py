@@ -868,6 +868,10 @@ class Graph:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
 
+        if to_erase._erased:
+            warnings.warn(f"erase_node() on an already erased node: %s", to_erase)
+            return
+
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
