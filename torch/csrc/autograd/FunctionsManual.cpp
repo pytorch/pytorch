@@ -953,7 +953,7 @@ Tensor logcumsumexp_jvp(
 
   TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
 
-  constexpr double eps = 1e-12;
+  constexpr double eps = 1e-13;
 
   if (areAnyTensorSubclassLike({self_p, self_t})) {
     auto result = (self_p_exp * self_t).cumsum(dim);
