@@ -3138,6 +3138,8 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
+        self.use_cpp_op_schema = False
+
         if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
             self.kernel = (
                 f"at::{kernel.__name__}"
@@ -3146,6 +3148,7 @@ class FallbackKernel(ExternKernelAlloc):
             )
         else:
             if V.graph.cpp_wrapper:
+                self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
             else:
                 self.kernel = (
@@ -3213,7 +3216,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        if V.graph.cpp_wrapper:
+        if self.use_cpp_op_schema:
             assert all(v in kwargs for v in self.kwarg_only), "kwargs not found"
             return list(map(repr, args)) + [
                 V.graph.wrapper_code.val_to_str(kwargs[v]) for v in self.kwarg_only
@@ -3222,7 +3225,7 @@ class FallbackKernel(ExternKernelAlloc):
             return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     def codegen(self, wrapper):
-        if V.graph.cpp_wrapper:
+        if self.use_cpp_op_schema:
             wrapper.generate_fusion_ops_code(
                 self.get_name(),
                 self.kernel,
