@@ -368,7 +368,7 @@ make -f docker.Makefile
 # images are tagged as docker.io/${your_docker_username}/pytorch
 ```
 
-You can also pass the `CMAKE_VARS="..."` make variable to specify additional CMake variables to be passed to CMake during the build. 
+You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build. 
 See [setup.py](./setup.py) for the list of available variables.
 
 ```bash
