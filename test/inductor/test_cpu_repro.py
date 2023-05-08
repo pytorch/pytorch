@@ -131,6 +131,16 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_autocast(self):
+        v = torch.randn(1, 3, 28, 18, dtype=torch.float32)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        with torch.no_grad(), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (v,),
+            )
+
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
