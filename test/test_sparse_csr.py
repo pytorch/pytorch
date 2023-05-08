@@ -3389,12 +3389,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             # None means max possible grid size which is CUDA-dependent.
             grid_size = (None, 2, 4)
             grid_gen = itertools.product(grid_size, repeat=3)
-            for is_sparse_rowspace, grid in itertools.product((True, False), grid_gen):
+            for grid in grid_gen:
                 res_tri = torch.sparse._triton_ops.bsr_dense_mm(
                     bsr,
                     dense.transpose(-2, -1),
                     max_grid=grid,
-                    is_sparse_rowspace_mode=is_sparse_rowspace
                 )
                 self.assertEqual(res_tri, res_dense)
 
