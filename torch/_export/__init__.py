@@ -108,6 +108,7 @@ def _export(
             tracing_mode="symbolic",
             decomposition_table=DECOMP_TABLE,
             constraints=constraints,
+            assume_static_by_default=True,
         )
 
     flat_args, in_spec = pytree.tree_flatten(args)
