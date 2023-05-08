@@ -5,7 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from itertools import chain
 
 import sympy
@@ -803,6 +803,23 @@ class Kernel(CodeGen):
 
     def create_cse_var(self, *args, **kwargs):
         return CSEVariable(*args, **kwargs)
+
+    def is_indirect_indexing(self, index: sympy.Expr):
+        # tmpX  means indirect indexing
+        return free_symbol_startswith(index, "tmp")
+
+    def get_indirect_indexing_vars(self, index):
+        body = self.current_node._body
+        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
+        indirect_name = body.indirect_new
+        # Many indirect variables may be mapped to the same CSE'd variable
+        # For example when you do x[y, y] for x = randn(3, 8)
+        var_size = defaultdict(set)
+        for ind, size in indirect_size.items():
+            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
+
+        indirect_vars = [s for s in index.free_symbols if s.name.startswith("tmp")]
+        return indirect_vars, var_size
 
 
 @dataclasses.dataclass

@@ -36,7 +36,6 @@ from ..virtualized import ops, V
 from .common import (
     CSEVariable,
     DeferredLine,
-    free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
@@ -878,10 +877,6 @@ class TritonKernel(Kernel):
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
-    def is_indirect_indexing(self, index: sympy.Expr):
-        # tmpX  means indirect indexing
-        return free_symbol_startswith(index, "tmp")
-
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
@@ -1053,18 +1048,8 @@ class TritonKernel(Kernel):
     def gen_assert_indirect_indexing(self, buffer, original_index, mask):
         if mask == "None":
             return
-        body = self.current_node._body
-        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
-        indirect_name = body.indirect_new
-        # Many indirect variables may be mapped to the same CSE'd variable
-        # For example when you do x[y, y] for x = randn(3, 8)
-        var_size = collections.defaultdict(set)
-        for ind, size in indirect_size.items():
-            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
 
-        indirect_vars = [
-            s for s in original_index.free_symbols if s.name.startswith("tmp")
-        ]
+        indirect_vars, var_size = self.get_indirect_indexing_vars(original_index)
         for var in indirect_vars:
             sizes = list(var_size[var])
             if all(isinstance(s, sympy.Integer) for s in sizes):

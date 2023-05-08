@@ -992,9 +992,34 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
+    def gen_assert_indirect_indexing(self, buffer, original_index):
+        indirect_vars, var_size = self.get_indirect_indexing_vars(original_index)
+        for var in indirect_vars:
+            sizes = list(var_size[var])
+            if all(isinstance(s, sympy.Integer) for s in sizes):
+                size = min(sizes)
+            else:
+
+                def print_min(expr):
+                    if len(expr) == 1:
+                        return cexpr(expr[0])
+                    else:
+                        return f"std::min({cexpr(expr[0])}, {print_min(expr[1:])})"
+
+                size = print_min(sizes)
+            cond = f"(0 <= {var}) && ({var} < {size})"
+            cond_print = f"0 <= {var} < {size}"
+            line = f'TORCH_CHECK({cond}, "index out of bounds: {cond_print}")'
+            self.cse.generate(buffer, line, assignment=False)
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
+        indirect_indexing = self.is_indirect_indexing(index)
         index = self.rename_indexing(index)
+
+        if indirect_indexing:
+            self.gen_assert_indirect_indexing(self.loads, index)
+
         line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
@@ -1003,7 +1028,12 @@ class CppKernel(Kernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         var = self.args.output(name)
+        indirect_indexing = self.is_indirect_indexing(index)
         index = self.rename_indexing(index)
+
+        if indirect_indexing:
+            self.gen_assert_indirect_indexing(self.stores, index)
+
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":

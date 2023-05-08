@@ -24,20 +24,21 @@ def store(x, y, z):
 
 
 if __name__ == "__main__":
-    _, fn_name, dims, dyn_shape = sys.argv
+    _, fn_name, dims, dyn_shape, device = sys.argv
     assert fn_name in ("first_arg", "second_arg", "same_pm_one", "same_pp_one", "store")
     assert dims in ("2", "3")
+    assert device in ("cpu", "cuda")
     shape_x = (3, 2, 4) if dims == "3" else (3, 2)
     assert dyn_shape in ("True", "False")
     dynamic_shapes = dyn_shape == "True"
 
-    x = torch.randn(shape_x, device="cuda")
-    y = torch.arange(4, device="cuda")
+    x = torch.randn(shape_x, device=device)
+    y = torch.arange(4, device=device)
     fn = vars()[fn_name]
     fn = torch.compile(dynamic=dynamic_shapes)(fn)
     if fn_name == "store":
         shape = (y.numel(),) + x.shape[2:]
-        z = torch.randn(shape, device="cuda")
+        z = torch.randn(shape, device=device)
         fn(x, y, z)
     else:
         fn(x, y)
