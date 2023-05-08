@@ -325,7 +325,8 @@ static std::string getNncKernelFuncName(
 
 // Preprocess the graph and returns the processed graph and
 // symbolic values if dynamic input shapes are specified
-static std::pair<std::shared_ptr<Graph>, std::vector<int64_t>> preprocessGraphPasses(
+static std::pair<std::shared_ptr<Graph>, std::vector<int64_t>>
+preprocessGraphPasses(
     std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs,
     const std::vector<int64_t>& dynamic_sizes) {

@@ -328,7 +328,10 @@ static at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   return op.call(x, s);
 }
 
-static at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
+static at::Tensor quantized_sigmoid(
+    const at::Tensor& x,
+    double scale,
+    int64_t zero) {
   const auto op = c10::Dispatcher::singleton()
                       .findSchemaOrThrow("quantized::sigmoid", "")
                       .typed<at::Tensor(at::Tensor, double, int64_t)>();

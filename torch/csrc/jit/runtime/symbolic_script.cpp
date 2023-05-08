@@ -1497,7 +1497,8 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
-static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
+static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
+    Value* closure) {
   TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
