@@ -3031,11 +3031,11 @@ def forward(self, x):
     def test_byte_tensor_does_not_crash(self):
         # See https://github.com/pytorch/pytorch/issues/100455
         def func(text):
-            tensor = torch.ByteTensor(list(bytes(text, 'utf8')))
+            tensor = torch.ByteTensor(list(bytes(text, "utf8")))
             return tensor + tensor
 
-        text = "".join(chr(a%90+40) for a in range(111))
-        opt_func = torch._dynamo.optimize("eager",dynamic=True)(func)
+        text = "".join(chr(a % 90 + 40) for a in range(111))
+        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
         for i in [99, 100]:
             input = text[:i]
             opt_func(input)
