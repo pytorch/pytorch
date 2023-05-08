@@ -461,7 +461,7 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
 };"""
         )
         static_init_dispatch_registrations = static_template.substitute(
-            dispatch_key=dispatch_key,
+            dispatch_key=dispatch_key.get_dispatch_name(),
             dispatch_registrations_body=dispatch_registrations_body,
         )
     else:
@@ -474,7 +474,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
         )
         deferred_dispatch_registrations = deferred_template.substitute(
             backend_name=backend_name,
-            dispatch_key=dispatch_key,
+            dispatch_key=dispatch_key.get_dispatch_name(),
             dispatch_registrations_body=dispatch_registrations_body,
         )
 

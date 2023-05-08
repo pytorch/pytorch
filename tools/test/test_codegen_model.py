@@ -13,10 +13,9 @@ from torchgen.gen import LineLoader, parse_native_yaml_struct
 from torchgen.model import (
     Annotation,
     CustomClassType,
-    dispatch_keys,
     DispatchKey,
     NativeFunctionsGroup,
-    rename_dispatch_key_privateuse1,
+    PrivateUse1Name,
     Type,
 )
 
@@ -161,26 +160,29 @@ cannot use CUDAFunctorOnSelf on non-binary function""",
         self.assertEqual(custom_class_name_with_prefix, str(custom_class_type))
 
     def test_rename_dispatch_key_privateuse1(self) -> None:
-        # save the original function ptr
-        dispatch_key_str_func = DispatchKey.__str__
-        dispatch_key_parse_func = DispatchKey.parse
         custom_device_name = "FOO"
-        rename_dispatch_key_privateuse1(custom_device_name)
+        private_use_one_name = "PrivateUse1"
         try:
+            PrivateUse1Name.set_custom_name(custom_device_name)
             self.assertEqual(str(DispatchKey.PrivateUse1), custom_device_name)
             self.assertEqual(
                 DispatchKey.parse(custom_device_name), DispatchKey.PrivateUse1
             )
+            self.assertEqual(
+                DispatchKey.PrivateUse1.get_dispatch_name(), private_use_one_name
+            )
         finally:
-            # restores the original function ptr
-            DispatchKey.__str__ = dispatch_key_str_func  # type: ignore[assignment]
-            DispatchKey.parse = dispatch_key_parse_func  # type: ignore[assignment]
-            private_use_one_name = "PrivateUse1"
+            PrivateUse1Name.reset()
             self.assertEqual(str(DispatchKey.PrivateUse1), private_use_one_name)
             self.assertEqual(
                 DispatchKey.parse(private_use_one_name), DispatchKey.PrivateUse1
             )
-            dispatch_keys.pop()
+
+        # PrivateUse1 cannot be renamed to an existing DispatchKey's name
+        with self.assertRaisesRegex(
+            AssertionError, r"already existed dispatch key CUDA in DispatchKey"
+        ):
+            PrivateUse1Name.set_custom_name("CUDA")
 
 
 class TestAnnotation(expecttest.TestCase):
