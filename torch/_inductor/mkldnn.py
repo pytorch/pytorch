@@ -20,6 +20,7 @@ def is_group_depthwise_conv_transpose(m):
     )
 
 
+# Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
 def is_output_padding_big(m):
     is_big = False
     for i in range(len(m.output_padding)):
