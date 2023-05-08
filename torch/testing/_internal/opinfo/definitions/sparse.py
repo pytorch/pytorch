@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch.testing import make_tensor  # noqa: F401
 from torch.testing._internal.opinfo.core import (  # noqa: F401
@@ -54,7 +56,9 @@ def _sample_inputs_sparse(
     *args,
     **kwargs,
 ):
-    check_validate = False
+    check_validate = (
+        os.environ.get("PYTORCH_TEST_CHECK_VALIDATE_SPARSE_SAMPLES", "0") == "1"
+    )
     for sample in sample_inputs(op_info, *args, **kwargs):
         sample = validate_sample_input(op_info, sample, check_validate=check_validate)
         if isinstance(sample, SampleInput):
@@ -70,7 +74,9 @@ def _sample_inputs_sparse(
 def _error_inputs_sparse(
     maybe_failing_sample_inputs, validate_sample_input, op_info, *args, **kwargs
 ):
-    check_validate = False
+    check_validate = (
+        os.environ.get("PYTORCH_TEST_CHECK_VALIDATE_SPARSE_SAMPLES", "0") == "1"
+    )
     for sample in maybe_failing_sample_inputs(op_info, *args, **kwargs):
         sample = validate_sample_input(op_info, sample, check_validate=check_validate)
         if isinstance(sample, ErrorInput):
@@ -655,6 +661,7 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         )
     elif (
         layout is torch.sparse_csr
+        and t_inp.dense_dim() > 0
         and t_inp.is_cpu
         and dtype is torch.float16
         and t_args[0].ndim > 0
@@ -662,6 +669,7 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         return ErrorInput(
             sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Half'"
         )
+
     return sample
 
 
