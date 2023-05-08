@@ -1051,8 +1051,6 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def gen_assert_indirect_indexing(self, buffer, original_index, mask):
-        if mask == "None":
-            return
         body = self.current_node._body
         indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
         indirect_name = body.indirect_new
@@ -1082,10 +1080,12 @@ class TritonKernel(Kernel):
             # It'd be less # error-prone to use and/or/not, which is suported by triton
             cond = f"((0 <= {var}) & ({var} < {size}))"
             cond_print = f"0 <= {var} < {size}"
-            if not isinstance(original_index, sympy.Integer):
+            if mask != "None":
                 var_mask = f"({mask})" if "&" in mask else mask
                 var_mask = f" | ~{var_mask}"
             else:
+                # mask may be None if, for example, xnumel == 1 or xnumel % 2048 == 0
+                # see filter_masks
                 var_mask = ""
             line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
             self.cse.generate(buffer, line, assignment=False)
