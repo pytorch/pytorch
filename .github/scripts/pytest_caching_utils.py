@@ -24,8 +24,6 @@ ZIP_UPLOAD = "zip-upload"
 CACHE_ZIP_DOWNLOADS = "cache-zip-downloads"
 UNZIPPED_CACHES = "unzipped-caches"
 
-ALL_TEMP_FOLDERS = [ZIP_UPLOAD, CACHE_ZIP_DOWNLOADS, UNZIPPED_CACHES]
-
 
 # create a custom string type to be used as pr identifiers to know we've gotten the right one
 class PRIdentifier(str):
@@ -86,17 +84,16 @@ def upload_pytest_cache(
     # Merge the current cache with any caches from previous runs before uploading
     # We only need to merge it with the cache for the same shard (which will have already been downloaded if it exists)
     # since the other shards will handle themselves
-    shard_cache_path = (
-        temp_dir
-        / UNZIPPED_CACHES
-        / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
-        / PYTEST_CACHE_DIR_NAME
+    shard_cache_path = _get_temp_cache_dir_path(
+        temp_dir, pr_identifier, repo, job_identifier, shard
     )
 
     if shard_cache_path.is_dir():
         _merge_pytest_caches(shard_cache_path, cache_dir)
 
+    #
     # Upload the cache
+    #
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
     # This doesn't include the zip file extension. That'll get added later
@@ -142,19 +139,31 @@ def download_pytest_cache(
 
     for downloaded_zip in downloads:
         # the file name of the zip is the shard id
-        shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
-        cache_dir_for_shard = (
-            temp_dir
-            / UNZIPPED_CACHES
-            / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id)
-            / PYTEST_CACHE_DIR_NAME
+        shard = os.path.splitext(os.path.basename(downloaded_zip))[0]
+        cache_dir_for_shard = _get_temp_cache_dir_path(
+            temp_dir, pr_identifier, repo, job_identifier, shard
         )
 
         unzip_folder(downloaded_zip, cache_dir_for_shard)
         print(
-            f"Merging cache for job_identifier `{job_identifier}`, shard `{shard_id}` into `{dest_cache_dir}`"
+            f"Merging cache for job_identifier `{job_identifier}`, shard `{shard}` into `{dest_cache_dir}`"
         )
         _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
+
+
+def _get_temp_cache_dir_path(
+    temp_dir: Path,
+    pr_identifier: PRIdentifier,
+    repo: GithubRepo,
+    job_identifier: str,
+    shard: str,
+) -> Path:
+    return (
+        temp_dir
+        / UNZIPPED_CACHES
+        / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
+        / PYTEST_CACHE_DIR_NAME
+    )
 
 
 def _get_s3_key_prefix(
