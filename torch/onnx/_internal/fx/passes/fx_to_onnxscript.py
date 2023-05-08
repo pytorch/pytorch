@@ -8,7 +8,7 @@ import re
 import types
 import warnings
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
@@ -27,14 +27,12 @@ from torch.utils import _pytree
 
 @_beartype.beartype
 def _fx_node_to_onnx_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    fn: Callable,
+    diagnostic_context: diagnostics.DiagnosticContext,
+    node: torch.fx.Node,
+    *args,
+    **kwargs,
 ) -> str:
-    # TODO(bowbao): refactor signature to avoid checking length.
-    # NOTE: First argument is always `diagnostic_context`.
-    #     Second argument is expected to be `node`.
-    assert len(args) > 1
-    node = args[1]
-    assert isinstance(node, torch.fx.Node)
     return f"FX Node: {node.op}:{node.target}[name={node.name}]"
 
 

@@ -41,10 +41,10 @@ add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
 remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
 pr_size=0
 if [ "$add" ]; then
-  pr_size=$(("$pr_size" + "$add"))
+  pr_size=$((pr_size + add))
 fi
 if [ "$remove" ]; then
-  pr_size=$(("$pr_size" + "$remove"))
+  pr_size=$((pr_size + remove))
 fi
 echo "INFO: PR SIZE is ${pr_size}"
 
