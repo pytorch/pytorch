@@ -62,15 +62,15 @@ class TestControlFlow(TestCase):
             return x[0] + x[1] + y
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"mapped xs can only consist of tensors\. Got xs \[3, tensor\(\[1\., 1\.\]\)\]\."):
+                                    r"Mapped xs can only consist of tensors\. Got xs \[3, tensor\(\[1\., 1\.\]\)\]\."):
             _ = control_flow.map(f, (3, torch.ones(2)), torch.ones(2))
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"leading dimensions of mapped xs cannot be 0\."):
+                                    r"Leading dimensions of mapped xs cannot be 0\."):
             _ = control_flow.map(f, (torch.ones(0, 1, 2), torch.ones(0, 1, 2)), torch.ones(2))
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"leading dimensions of mapped xs must be consistent\. "
+                                    r"Leading dimensions of mapped xs must be consistent\. "
                                     r"Got shapes \[torch\.Size\(\[3, 4, 5\]\), torch\.Size\(\[4, 4, 5\]\)\]\."):
             _ = control_flow.map(f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5))
 

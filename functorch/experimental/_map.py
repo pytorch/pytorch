@@ -33,18 +33,18 @@ map_impl = HigherOrderOperator("map_impl")
 def map_wrapper(f, xs, *args):
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
-        raise RuntimeError(f"mapped xs can only consist of tensors. Got xs {flat_xs}.")
+        raise RuntimeError(f"Mapped xs can only consist of tensors. Got xs {flat_xs}.")
 
     num_mapped_args = len(flat_xs)
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
     if leading_dim_size == 0:
         raise RuntimeError(
-            "leading dimensions of mapped xs cannot be 0.")
+            "Leading dimensions of mapped xs cannot be 0.")
 
     if any(cur_shape[0] != leading_dim_size for cur_shape in shapes):
         raise RuntimeError(
-            f"leading dimensions of mapped xs must be consistent. Got shapes {shapes}.")
+            f"Leading dimensions of mapped xs must be consistent. Got shapes {shapes}.")
 
     out_spec = None
 
@@ -118,10 +118,10 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
     if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
-        raise RuntimeError(f"leaves of xs must be Tensor {flat_xs}")
+        raise RuntimeError(f"Leaves of xs must be Tensor {flat_xs}")
 
     if not all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs):
-        raise RuntimeError(f"leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}")
+        raise RuntimeError(f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}")
 
     a = zip(*flat_xs)
     pytrees = []
@@ -144,15 +144,13 @@ def _stack_pytree(pytrees):
             # Leaves can be None e.g. when one of the input doesn't require grad
             stacked_out.append(None)
         else:
-            raise RuntimeError(f"cannot stack {leaves}.")
+            raise RuntimeError(f"Cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
 
 @map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, num_mapped_args, *args):
-    mode = _get_current_dispatch_mode()
     xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
-    assert (mode is None), "Mode should never be enabled for CPU/CUDA keyOne of the differentiated Tensors"
     pytrees = []
     for inp in _unstack_pytree(xs):
         pytrees.append(f(*inp, *pos_args))
@@ -165,10 +163,8 @@ def map_autograd(f, num_mapped_args, *args):
     pos_args = args[num_mapped_args:]
 
     with disable_proxy_modes_tracing():
-        xs_slice = _unstack_pytree(mapped_xs)[0]
-        example_args = (*xs_slice, *pos_args)
-        example_xs = example_args[:num_mapped_args]
-        example_pos_args = example_args[num_mapped_args:]
+        example_xs = _unstack_pytree(mapped_xs)[0]
+        example_pos_args = pos_args
         example_flat_out, _ = pytree.tree_flatten(f(*example_xs, *example_pos_args))
         example_grad = [torch.ones_like(out) for out in example_flat_out if out is not None and out.requires_grad]
 
@@ -208,12 +204,7 @@ def map_proxy_torch_dispatch_mode(f, num_mapped, *args):
 
 @map_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(f, num_mapped, *args):
-    xs = args[:num_mapped]
-    pos_args = args[num_mapped:]
-    leading_dims = pytree.tree_map(lambda t: t.shape[0], xs)
-    xs_pytree = _unstack_pytree(xs)
-    example_out = f(*xs_pytree[0], *pos_args)
-    return pytree.tree_map(lambda t: t.expand(leading_dims[0], *t.shape), example_out)
+    return map_dense(f, num_mapped, *args)
 
 
 @map_impl.py_impl(DispatchKey.Functionalize)
