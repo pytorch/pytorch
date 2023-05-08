@@ -1233,7 +1233,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options):
+def get_selected_tests(options) -> List[ShardedTest]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
