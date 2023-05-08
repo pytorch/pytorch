@@ -89,7 +89,6 @@ void unary_op(const Tensor& self,
       }
       newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
     });
-    }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, /*mpsShape=*/nullptr, true);
     Placeholder outputPlaceholder =
