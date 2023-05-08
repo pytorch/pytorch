@@ -1,6 +1,6 @@
-import contextlib
 import hashlib
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, NamedTuple
 
@@ -19,6 +19,13 @@ PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "gha-artifacts"
 LASTFAILED_FILE_PATH = Path("v/cache/lastfailed")
+
+# Temp folders
+ZIP_UPLOAD = "zip-upload"
+CACHE_ZIP_DOWNLOADS = "cache-zip-downloads"
+UNZIPPED_CACHES = "unzipped-caches"
+
+ALL_TEMP_FOLDERS = [ZIP_UPLOAD, CACHE_ZIP_DOWNLOADS, UNZIPPED_CACHES]
 
 
 # create a custom string type to be used as pr identifiers to know we've gotten the right one
@@ -50,11 +57,7 @@ class GithubRepo(NamedTuple):
         return f"{self.owner}/{self.name}"
 
 
-# TODO: After uploading the cache, delete the old S3 uploads so that we don't keep downloading unnecessary files.
-#       Since we want the cache to contain a union of all jobs that failed in this PR, before
-#       uploading the cache we should first combine the resulting pytest cache after tests
-#       with the downloaded/merged cache from before the tests.
-#       However, in the short term the extra donloads are okay since they aren't that big
+# TODO: When uploading the cache, we should merge the current cache with any pre-existing cache
 def upload_pytest_cache(
     pr_identifier: PRIdentifier,
     repo: GithubRepo,
@@ -80,8 +83,8 @@ def upload_pytest_cache(
         bucket = BUCKET
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
-    # note this doesn't include the zip file extension. That'll get added later
-    zip_file_path = temp_dir / "zip-upload" / obj_key_prefix
+    # This doesn't include the zip file extension. That'll get added later
+    zip_file_path = temp_dir / ZIP_UPLOAD / obj_key_prefix
 
     try:
         zip_file_path = zip_folder(cache_dir, zip_file_path)
@@ -90,9 +93,7 @@ def upload_pytest_cache(
     finally:
         if zip_file_path.is_file():  # if it's not a file, the zipping failed
             print(f"Deleting {zip_file_path}")
-            with contextlib.suppress(FileNotFoundError):
-                pass
-                # os.remove(zip_file_path) # suppress deletes while testing
+            zip_file_path.unlink(missing_ok=True)
 
 
 def download_pytest_cache(
@@ -113,7 +114,7 @@ def download_pytest_cache(
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier)
 
-    zip_download_dir = temp_dir / "cache-zip-downloads" / obj_key_prefix
+    zip_download_dir = temp_dir / CACHE_ZIP_DOWNLOADS / obj_key_prefix
     # do the following in a try/finally block so we can clean up the temp files if something goes wrong
     try:
         # downloads the cache zips for all shards
@@ -126,7 +127,7 @@ def download_pytest_cache(
             shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
             cache_dir_for_shard = (
                 temp_dir
-                / "unzipped-caches"
+                / UNZIPPED_CACHES
                 / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id)
                 / PYTEST_CACHE_DIR_NAME
             )
@@ -138,8 +139,19 @@ def download_pytest_cache(
             _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
     finally:
         # clean up the downloaded zip files
-        # shutil.rmtree(zip_download_dir)  suppress deletes while testing
+        shutil.rmtree(zip_download_dir)
         pass
+
+
+def cleanup_temp_files(
+    pr_identifier: PRIdentifier, repo: GithubRepo, job_identifier: str, temp_dir: Path
+) -> None:
+    for folder in ALL_TEMP_FOLDERS:
+        path = (
+            temp_dir / folder / _get_s3_key_prefix(pr_identifier, repo, job_identifier)
+        )
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def _get_s3_key_prefix(
