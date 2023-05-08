@@ -304,6 +304,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasXPU()) {
       activities.insert(ActivityType::XPU);
     }
+    if (at::hasMTIA()) {
+      activities.insert(ActivityType::MTIA);
+    }
 #endif
     return activities;
   });

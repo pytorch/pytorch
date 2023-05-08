@@ -12,7 +12,7 @@ __all__ = [
     "WeightedRandomSampler",
 ]
 
-T_co = TypeVar('T_co', int, List[int], covariant=True)
+T_co = TypeVar('T_co', covariant=True)
 
 
 class Sampler(Generic[T_co]):

@@ -1,17 +1,131 @@
 from __future__ import annotations
 
-import abc
 import inspect
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Type
 
-import torch._ops
-import torch.fx
+from typing import (
+    Any,
+    Callable,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    Sequence,
+    Tuple,
+    Union,
+)
 
-import torch.onnx
-import torch.onnx._internal.fx.function_dispatcher as function_dispatcher
-import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter
+import torch
+
+from torch.onnx._internal import _beartype
 from torch.utils import _pytree as pytree
+
+# TODO(bowbao): Add diagnostics for IO adapters.
+
+
+@runtime_checkable
+class InputAdaptStep(Protocol):
+    """A protocol that defines a step in the input adapting process.
+
+    The input adapting process is a sequence of steps that are applied to the
+    PyTorch model inputs to transform them into the inputs format expected by the
+    exported ONNX model. Each step takes the PyTorch model inputs as arguments and
+    returns the transformed inputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    input signature by any individual component in the exporter.
+    """
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        ...
+
+
+class InputAdapter:
+    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
+
+    def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
+        self._steps = steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: InputAdaptStep) -> None:
+        """Appends a step to the input adapt steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._steps.append(step)
+
+    @_beartype.beartype
+    def apply(
+        self, *model_args, **model_kwargs
+    ) -> Sequence[Union[int, float, bool, "torch.Tensor", None]]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+        """
+        args: Sequence[Any] = model_args
+        kwargs: Mapping[str, Any] = model_kwargs
+        for step in self._steps:
+            args, kwargs = step.apply(args, kwargs)
+        assert not kwargs
+        return args
+
+
+@runtime_checkable
+class OutputAdaptStep(Protocol):
+    """A protocol that defines a step in the output adapting process.
+
+    The output adapting process is a sequence of steps that are applied to the
+    PyTorch model outputs to transform them into the outputs format produced by the
+    exported ONNX model. Each step takes the PyTorch model outputs as arguments and
+    returns the transformed outputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    output signature by any individual component in the exporter.
+    """
+
+    def apply(self, model_outputs: Any) -> Any:
+        ...
+
+
+class OutputAdapter:
+    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
+
+    def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
+        self._steps = steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: OutputAdaptStep) -> None:
+        """Appends a step to the output format steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._steps.append(step)
+
+    @_beartype.beartype
+    def apply(
+        self, model_outputs: Any
+    ) -> Sequence[Union["torch.Tensor", int, float, bool]]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+        """
+        for step in self._steps:
+            model_outputs = step.apply(model_outputs)
+        return model_outputs
+
 
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
@@ -111,6 +225,27 @@ class MergeKwargsIntoArgsStep:
         return tuple(model_args) + tuple(model_kwargs.values()), {}
 
 
+class LiftParametersAndBuffersIntoArgsStep:
+    """Append parameters and buffers to model's positional argument list."""
+
+    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
+        self.inputs = inputs
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        """Append model's parameters and buffers into its input.
+
+        Args:
+            model_args: The model args.
+            model_kwargs: The model kwargs.
+
+        Returns:
+            A tuple of the model args + appended inputs and kwargs.
+        """
+        return (*model_args, *self.inputs), model_kwargs
+
+
 class RemoveNoneInputStep:
     """Remove `None` from arguments.
 
@@ -135,6 +270,64 @@ class RemoveNoneInputStep:
         """
         assert not model_kwargs
         return tuple(arg for arg in model_args if arg is not None), {}
+
+
+class RemoveNonTensorInputStep:
+    """Remove the non-tensor input arguments.
+
+    Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
+
+    Specifically, it does put the input into graph with an empty node, but consumed by no ones.
+    The concrete value is embedded into the graph as a constant arg of a target node. Meta
+    suggests in this case that one should rewrite the model code to make it tensor if the
+    input value is supposed to change at runtime. We might need to further investigate
+    the feasibility of that suggestion.
+
+    For example,
+
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        x = torch.randn(1, 1, 2, dtype=torch.float32)
+        gm_fun, _ = dynamo.export(func, x, b=8.0, aten_graph=True, tracing_mode="real")
+
+        # class GraphModule(torch.nn.Module):
+        #     def forward(self, x, b):
+        #         arg0: f32[1, 1, 2], arg1, = fx_pytree.tree_flatten_spec(([x, b], {}), self._in_spec)
+        #         # File: path/to/pytorch/test_constant_input.py:5, code: y = x + b
+        #         add_tensor: f32[1, 1, 2] = torch.ops.aten.add.Tensor(arg0, 8.0);  arg0 = None
+
+        #         # File: path/to/pytorch/test_constant_input.py:6, code: z = y.relu()
+        #         relu_default: f32[1, 1, 2] = torch.ops.aten.relu.default(add_tensor)
+        #         return pytree.tree_unflatten([add_tensor, relu_default], self._out_spec)
+
+    Empty torch.fx.Node input leading to a mismatched number of input with PyTorch, as
+    it's ignored in ONNX graph. Thus, we delete the useless input here.
+
+    """
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        """Remove Constant from arguments.
+
+        Args:
+            model_args: The model args.
+            model_kwargs: The model kwargs.
+
+        Returns:
+            A tuple of the model args and kwargs.
+
+        Raises:
+            ValueError: If `model_kwargs` is not empty.
+        """
+        assert not model_kwargs
+        return (
+            tuple(arg for arg in model_args if not isinstance(arg, (int, float, bool))),
+            {},
+        )
 
 
 class FlattenInputWithTreeSpecValidationStep:
@@ -232,110 +425,3 @@ class FlattenOutputWithTreeSpecValidationStep:
                 error_message="Model outputs incompatible with the format that was exported. ",
             )
         return flattened_outputs
-
-
-class FXGraphModuleExporter(exporter.Exporter, abc.ABC):
-    _input_adapter: exporter.InputAdapter
-    _output_adapter: exporter.OutputAdapter
-
-    @property
-    def decomposition_table(self) -> Mapping[torch._ops.OpOverload, Callable]:
-        return function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE
-
-    def _apply_input_adapt_step(
-        self,
-        adapt_step_cls: Type[exporter.InputAdaptStep],
-        model_args: Sequence[Any],
-        model_kwargs: Mapping[str, Any],
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Apply an input adapt step to the model args and kwargs.
-
-        An input adapt step object is initialized, applied and recorded as part of
-        ``self._input_adapter`.
-
-        Args:
-            adapt_step_cls: The input adapt step class.
-            model_args: The model args.
-            model_kwargs: The model kwargs.
-            step_init_args: The input adapt step initialization arguments.
-
-        Returns:
-            The adapted model args and kwargs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self._input_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_args, model_kwargs)
-
-    def _apply_output_adapt_step(
-        self,
-        adapt_step_cls: Type[exporter.OutputAdaptStep],
-        model_outputs: Any,
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Any:
-        """Apply an output adapt step to the model outputs.
-
-        An output adapt step object is initialized, applied and recorded as part of
-        ``self._output_adapter`.
-
-        Args:
-            adapt_step_cls: The output adapt step class.
-            model_outputs: The model outputs.
-            step_init_args: The input adapt step initialization arguments.
-
-        Returns:
-            The adapted model outputs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self._output_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_outputs)
-
-    @_beartype.beartype
-    def export_fx_to_onnx(
-        self,
-        fx_module: torch.fx.GraphModule,
-        fx_module_args: Sequence[Any],
-    ) -> torch.onnx.ExportOutput:
-        # Apply decomposition table to the input graph.
-        module = passes.Decompose(
-            fx_module,
-            self.decomposition_table,
-            enable_dynamic_axes=self.options.dynamic_shapes,
-        ).run(*fx_module_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        module = passes.Functionalize(
-            module, enable_dynamic_axes=self.options.dynamic_shapes
-        ).run(*fx_module_args)
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(module).run(*fx_module_args)
-
-        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
-        # The pass added nodes with static shape into original node metadata:
-        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
-        if self.options.op_level_debug:
-            module = passes.ShapeInferenceWithFakeTensor(module).run(*fx_module_args)
-
-        # We want to pass list of ints and floats to TorchScript graph correctly
-        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
-        # receive FakeTensor and results runtime error. In addition, TorchScript-based
-        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
-        # with FakeTensorMode.
-        with torch.utils._mode_utils.no_dispatch():
-            onnxscript_graph = passes.export_fx_to_onnxscript(module, self.options)
-            # ONNX does not support None inputs. During graph building, all None inputs
-            # are removed. Here we register this step to input adapter.
-            self._apply_input_adapt_step(RemoveNoneInputStep, fx_module_args, {})
-            # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
-            # tensor, etc), we flatten the collection and register each element as output.
-            self._output_adapter.append_step(FlattenOutputStep())
-
-        # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
-        return torch.onnx.ExportOutput(
-            onnx_model, self._input_adapter, self._output_adapter
-        )

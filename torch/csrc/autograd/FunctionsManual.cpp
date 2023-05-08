@@ -181,7 +181,7 @@ Tensor restore_reduced_dims(
     return output;
   }
   int64_t total_dims = output.dim() + dims.size();
-  std::vector<int64_t> target_shape(total_dims, 0);
+  std::vector<c10::SymInt> target_shape(total_dims, 0);
   for (int64_t i : dims) {
     if (i < 0) {
       i = total_dims + i;
@@ -189,12 +189,12 @@ Tensor restore_reduced_dims(
     target_shape[i] = 1;
   }
   int64_t j = 0;
-  for (int64_t i : output.sizes()) {
+  for (c10::SymInt i : output.sym_sizes()) {
     while (target_shape[j] > 0)
       j++;
     target_shape[j++] = i;
   }
-  return output.reshape(target_shape);
+  return output.reshape_symint(target_shape);
 }
 
 Tensor scale_grad_by_count(
@@ -929,6 +929,41 @@ Tensor logcumsumexp_backward(
           return output.conj();
         }
       });
+}
+
+Tensor logcumsumexp_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int64_t dim) {
+  // Mostly taken from logsumexp_jvp
+
+  // NB: for simplicity, we recompute some values that can be reused from
+  // forward
+  auto self_p_exp = [&self_p, dim]() {
+    if (!at::is_complex(self_p)) {
+      return (self_p - std::get<0>(at::max(self_p, dim, true)))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // at::max doesn't support complex128
+      return self_p.exp();
+    }
+  }();
+
+  auto cumsumexp_p = self_p_exp.cumsum(dim);
+
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+
+  constexpr double eps = 1e-13;
+
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).cumsum(dim);
+    result /= cumsumexp_p.add_(eps);
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto cumsumexp_t = self_p_exp.cumsum(dim);
+    return cumsumexp_t /= cumsumexp_p.add_(eps);
+  }
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
@@ -3369,8 +3404,8 @@ Tensor svd_backward(
     return {};
   }
 
-  const auto m = U.size(-2);
-  const auto n = Vh.size(-1);
+  const auto m = U.sym_size(-2);
+  const auto n = Vh.sym_size(-1);
 
   // Optimisation for svdvals: gA = U @ diag(gS) @ Vh
   if (!gU.defined() && !gVh.defined()) {
@@ -3790,8 +3825,8 @@ Tensor linalg_qr_backward(
       "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
       "going to differentiate through linalg.qr.");
 
-  auto m = Q.size(-2);
-  auto n = R.size(-1);
+  auto m = Q.sym_size(-2);
+  auto n = R.sym_size(-1);
 
   TORCH_CHECK(
       reduced || m <= n,
@@ -3835,10 +3870,10 @@ Tensor linalg_qr_backward(
     };
     gA = Q.matmul(trilImInvAdjSkew(-gA));
     gA = at::linalg_solve_triangular(
-        R.narrow(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
-    auto shape = R.sizes().vec();
+        R.narrow_symint(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
+    auto shape = R.sym_sizes().vec();
     shape.end()[-1] = n - m;
-    gA = at::cat({gA, gA.new_zeros(shape)}, /*dim=*/-1);
+    gA = at::cat({gA, gA.new_zeros_symint(shape)}, /*dim=*/-1);
     if (gR.defined()) {
       gA = gA + Q.matmul(gR);
     }
@@ -5787,7 +5822,7 @@ Tensor block_diag_jvp(at::TensorList tensors) {
 
 Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
   // Basically copy of cat_jvp above
-  // TOD0: consolidate with the logic of cat_jvp
+  // TODO: consolidate with the logic of cat_jvp
   Tensor out_fw_grad;
 
   auto any_defined = false;

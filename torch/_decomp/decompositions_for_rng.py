@@ -1,8 +1,10 @@
+import functools
 from collections import defaultdict
 from typing import Callable, Dict
 
 import torch
 import torch._decomp as decomp
+from torch._decomp import get_decompositions
 from torch._ops import OpOverload
 
 aten = torch.ops.aten
@@ -201,3 +203,51 @@ class PhiloxStateTracker:
         return cls.multiple_of_4(
             cls.bwd_state.base_offset + cls.bwd_state.relative_offset
         )
+
+
+# Adding more decompositions which eventually use rand_like inside decomps.
+# Adding these in rng_decompositins ensures the functionalization of rand_like
+# ops used in these decomps. The list is copied from inductor codebase, which
+# uses it for similar purpose.
+#
+# Caution - These decomps do not have same accuracy as that of eager. However,
+# we can't just disable them with a config flag like fallback_random, because
+# for fuctionalization of rng ops, we have to decompose these ops.
+extra_random_decomps = get_decompositions(
+    [
+        aten.cauchy,
+        aten.cauchy_,
+        aten.exponential,
+        aten.exponential_,
+        aten.geometric,
+        aten.geometric_,
+        aten.native_dropout,
+        aten.normal,
+        aten.normal_,
+        aten.normal_functional,
+        aten.log_normal,
+        aten.log_normal_,
+        aten.uniform_,
+    ]
+)
+register_extra_random_decomp = functools.partial(
+    decomp.register_decomposition, registry=extra_random_decomps
+)
+
+
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
+
+
+rng_decompositions.update(extra_random_decomps)  # type: ignore[arg-type]
