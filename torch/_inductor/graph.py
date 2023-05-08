@@ -638,16 +638,19 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        device_types_copy = self.device_types.copy()
-        device_types_copy.discard("cpu")
-        # Only support mixing cpu and other device now.
-        assert len(device_types_copy) <= 1, "Does not support mixing {}".format(
-            "+".join(device_types_copy)
-        )
-        only_cpu = "cpu" in self.device_types and len(self.device_types) == 1
-        device_type = "cpu" if only_cpu else device_types_copy.pop()
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
-        self.wrapper_code = wrapper_code_gen_cls()
+        if len(self.device_types) == 0:
+            self.wrapper_code = WrapperCodeGen()
+        else:
+            device_types_copy = self.device_types.copy()
+            device_types_copy.discard("cpu")
+            # Only support mixing cpu and other device now.
+            assert len(device_types_copy) <= 1, "Does not support mixing {}".format(
+                "+".join(device_types_copy)
+            )
+            only_cpu = "cpu" in self.device_types and len(self.device_types) == 1
+            device_type = "cpu" if only_cpu else device_types_copy.pop()
+            wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+            self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
         from .scheduler import Scheduler

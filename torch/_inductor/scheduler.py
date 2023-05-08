@@ -6,7 +6,7 @@ import logging
 import os
 import pprint
 import textwrap
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Set
 
 import sympy
 
@@ -1265,7 +1265,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def group_fn(self, sizes: tuple[List[Union[int, sympy.Expr]]]):
+    def group_fn(self, sizes):
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
