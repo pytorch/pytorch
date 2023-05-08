@@ -1,4 +1,6 @@
 #include <ATen/core/Tensor.h>
+#include <ATen/ops/_add_batch_dim_native.h>
+#include <ATen/ops/_remove_batch_dim_native.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/LegacyVmapTransforms.h>
