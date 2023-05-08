@@ -1,6 +1,5 @@
 import hashlib
 import os
-import shutil
 from pathlib import Path
 from typing import Dict, NamedTuple
 
@@ -81,20 +80,28 @@ def upload_pytest_cache(
     if not bucket:
         bucket = BUCKET
 
-    # TODO: Merge the current cache with any caches from previous runs before uploading
+    # Merge the current cache with any caches from previous runs before uploading
+    # We only need to merge it with the cache for the same shard (which will have already been downloaded if it exists)
+    # since the other shards will handle themselves
+    shard_cache_path = (
+        temp_dir
+        / UNZIPPED_CACHES
+        / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
+        / PYTEST_CACHE_DIR_NAME
+    )
+
+    if shard_cache_path.is_dir():
+        _merge_pytest_caches(shard_cache_path, cache_dir)
+
+    # Upload the cache
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
     # This doesn't include the zip file extension. That'll get added later
     zip_file_path = temp_dir / ZIP_UPLOAD / obj_key_prefix
 
-    try:
-        zip_file_path = zip_folder(cache_dir, zip_file_path)
-        obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}"  # Keep the new file extension
-        upload_file_to_s3(zip_file_path, bucket, obj_key)
-    finally:
-        if zip_file_path.is_file():  # if it's not a file, the zipping failed
-            print(f"Deleting {zip_file_path}")
-            zip_file_path.unlink(missing_ok=True)
+    zip_file_path = zip_folder(cache_dir, zip_file_path)
+    obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}"  # Keep the new file extension
+    upload_file_to_s3(zip_file_path, bucket, obj_key)
 
 
 def download_pytest_cache(
@@ -116,32 +123,27 @@ def download_pytest_cache(
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier)
 
     zip_download_dir = temp_dir / CACHE_ZIP_DOWNLOADS / obj_key_prefix
-    # do the following in a try/finally block so we can clean up the temp files if something goes wrong
-    try:
-        # downloads the cache zips for all shards
-        downloads = download_s3_objects_with_prefix(
-            bucket, obj_key_prefix, zip_download_dir
+
+    # downloads the cache zips for all shards
+    downloads = download_s3_objects_with_prefix(
+        bucket, obj_key_prefix, zip_download_dir
+    )
+
+    for downloaded_zip in downloads:
+        # the file name of the zip is the shard id
+        shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
+        cache_dir_for_shard = (
+            temp_dir
+            / UNZIPPED_CACHES
+            / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id)
+            / PYTEST_CACHE_DIR_NAME
         )
 
-        for downloaded_zip in downloads:
-            # the file name of the zip is the shard id
-            shard_id = os.path.splitext(os.path.basename(downloaded_zip))[0]
-            cache_dir_for_shard = (
-                temp_dir
-                / UNZIPPED_CACHES
-                / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard_id)
-                / PYTEST_CACHE_DIR_NAME
-            )
-
-            unzip_folder(downloaded_zip, cache_dir_for_shard)
-            print(
-                f"Merging cache for job_identifier `{job_identifier}`, shard `{shard_id}` into `{dest_cache_dir}`"
-            )
-            _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
-    finally:
-        # clean up the downloaded zip files
-        shutil.rmtree(zip_download_dir)
-        pass
+        unzip_folder(downloaded_zip, cache_dir_for_shard)
+        print(
+            f"Merging cache for job_identifier `{job_identifier}`, shard `{shard_id}` into `{dest_cache_dir}`"
+        )
+        _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
 
 
 def _get_s3_key_prefix(

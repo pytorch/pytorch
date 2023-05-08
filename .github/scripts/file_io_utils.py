@@ -66,15 +66,13 @@ def sanitize_for_s3(text: str) -> str:
 
 def upload_file_to_s3(file_name: Path, bucket: str, key: str) -> None:
     print(f"Uploading {file_name}")
-    print(f"       to s3://{bucket}/{key}...", end="")
+    print(f"       to s3://{bucket}/{key}")
 
     boto3.client("s3").upload_file(
         str(file_name),
         bucket,
         key,
     )
-
-    print("done")
 
 
 def download_s3_objects_with_prefix(
@@ -90,11 +88,10 @@ def download_s3_objects_with_prefix(
 
         ensure_dir_exists(download_path.parent)
         print(f"Downloading s3://{bucket.name}/{obj.key}")
-        print(f"            to {download_path}...", end="")
+        print(f"         to {download_path}")
 
         s3.Object(bucket.name, obj.key).download_file(str(download_path))
         downloads.append(download_path)
-        print("done")
 
     if len(downloads) == 0:
         print(
