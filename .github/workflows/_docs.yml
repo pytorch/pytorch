@@ -1,4 +1,4 @@
-name: build docs
+name: build dummy docs
 
 on:
   workflow_call:
