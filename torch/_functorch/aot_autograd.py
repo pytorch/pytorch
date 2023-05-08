@@ -1954,13 +1954,15 @@ def aot_wrapper_dedupe(
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
-    for i, t in enumerate(flat_args):
-        if t in seen_args:
-            keep_arg_mask.append(False)
-            add_dupe_map.append(seen_args[t])
-            continue
+    for t in flat_args:
+        if isinstance(t, torch.Tensor):
+            if t in seen_args:
+                keep_arg_mask.append(False)
+                add_dupe_map.append(seen_args[t])
+                continue
+            seen_args[t] = j
+
         keep_arg_mask.append(True)
-        seen_args[t] = j
         add_dupe_map.append(j)
         j += 1
     assert len(add_dupe_map) == duped_arg_len, (

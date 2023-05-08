@@ -899,7 +899,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         context = (
             self._deregister_orig_params_ctx()
             if self._use_orig_params
-            else contextlib.suppress()
+            else contextlib.nullcontext()
         )
         with context:
             return super()._apply(*args, **kwargs)

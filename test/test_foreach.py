@@ -765,7 +765,11 @@ class TestForeach(TestCase):
         ord, N = 2, 10
         max_value = torch.finfo(dtype).max
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
-        inputs = ([t * scaler for t in list(op.sample_inputs(device, dtype, [N], low=1))[0].input],)
+        inputs = ([
+            t * scaler for t in list(
+                op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1)
+            )[0].input
+        ],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
@@ -877,6 +881,24 @@ class TestForeach(TestCase):
         inplace_op(tensors, *sample.args)
         self.assertIsNotNone(tensors[0].grad_fn)
         self.assertIsNone(tensors[1].grad_fn)
+
+    @onlyCUDA
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        dtypes=(torch.float,),
+    )
+    def test_outplace_with_invalid_grads(self, device, dtype, op):
+        func, *_ = self._get_funcs(op)
+        sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
+        self.assertTrue(all(t.requires_grad for t in sample.input))
+        sample.kwargs.pop("disable_fastpath")
+        if func.func in (torch._foreach_addcmul, torch._foreach_addcdiv):
+            if sample.kwargs.get("values") is None:
+                sample.kwargs.pop("values")
+        (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
+        out1.backward(torch.ones_like(out1))
+        self.assertIsNotNone(sample.input[0].grad)
+        self.assertIsNone(sample.input[1].grad)
 
 
 instantiate_device_type_tests(TestForeach, globals())
