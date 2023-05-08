@@ -7,15 +7,15 @@ import unittest
 import torch
 import torch._dynamo
 import torch.utils.cpp_extension
-from extension_backends.extension_scheduling import (
+from extension_backends.extension_codegen_backend import (
     ExtensionScheduling,
     ExtensionWrapperCodegen,
 )
 from torch._C import FileCheck
 from torch._inductor import metrics
-from torch._inductor.utils import (
+from torch._inductor.codegen.common import (
     get_scheduling_for_device,
-    get_wrapper_for_device,
+    get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_MACOS
@@ -100,7 +100,8 @@ class ExtensionBackendTests(TestCase):
             get_scheduling_for_device("extension_device") == ExtensionScheduling
         )
         self.assertTrue(
-            get_wrapper_for_device("extension_device") == ExtensionWrapperCodegen
+            get_wrapper_codegen_for_device("extension_device")
+            == ExtensionWrapperCodegen
         )
 
         self.assertFalse(self.module.custom_op_called())

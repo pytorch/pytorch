@@ -24,7 +24,8 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
+from .codegen.common import get_wrapper_codegen_for_device
+from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -46,7 +47,6 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_dtype_size,
-    get_wrapper_for_device,
     sympy_product,
 )
 from .virtualized import V
@@ -166,7 +166,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
-        self.wrapper_code = None
+        self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
@@ -634,18 +634,16 @@ class GraphLowering(torch.fx.Interpreter):
                 )
                 return
 
-        if not all(device_type in ["cuda", "cpu"] for device_type in self.device_types):
-            device_types_copy = self.device_types
-            device_types_copy.discard("cuda")
-            device_types_copy.discard("cpu")
-            assert len(device_types_copy) == 1, "Does not support mixing {}".format(
-                "+".join(device_types_copy)
-            )
-            wrapper_code_gen_cls = get_wrapper_for_device(device_types_copy.pop())
-            assert wrapper_code_gen_cls
-            self.wrapper_code = wrapper_code_gen_cls()
-        else:
-            self.wrapper_code = WrapperCodeGen()
+        device_types_copy = self.device_types.copy()
+        device_types_copy.discard("cpu")
+        # Only support mixing cpu and other device now.
+        assert len(device_types_copy) <= 1, "Does not support mixing {}".format(
+            "+".join(device_types_copy)
+        )
+        only_cpu = "cpu" in self.device_types and len(self.device_types) == 1
+        device_type = "cpu" if only_cpu else device_types_copy.pop()
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
         from .scheduler import Scheduler

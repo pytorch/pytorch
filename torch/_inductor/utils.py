@@ -31,9 +31,6 @@ log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-extension_scheduling: Dict[str, type] = {}
-extension_wrapper: Dict[str, type] = {}
-
 
 def do_bench(*args, **kwargs):
     @functools.lru_cache(None)
@@ -370,14 +367,14 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
@@ -1078,18 +1075,3 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
-
-
-def register_backend_for_device(
-    device: str, _extension_scheduling: type, _extension_wrapper: type
-):
-    extension_scheduling[device] = _extension_scheduling
-    extension_wrapper[device] = _extension_wrapper
-
-
-def get_scheduling_for_device(device: str):
-    return extension_scheduling[device] if device in extension_scheduling else None
-
-
-def get_wrapper_for_device(device: str):
-    return extension_wrapper[device] if device in extension_wrapper else None

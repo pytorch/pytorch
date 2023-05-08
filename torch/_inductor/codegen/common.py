@@ -36,6 +36,25 @@ def data_type_logger(msg):
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
 
+DeviceCodegen = namedtuple("DeviceCodegen", ["scheduling", "wrapper_codegen"])
+device_codegens: typing.Dict[str, DeviceCodegen] = {}
+
+
+def register_backend_for_device(
+    device: str, device_scheduling: type, device_wrapper_codegen: type
+):
+    device_codegens[device] = DeviceCodegen(device_scheduling, device_wrapper_codegen)
+
+
+def get_scheduling_for_device(device: str):
+    return device_codegens[device].scheduling if device in device_codegens else None
+
+
+def get_wrapper_codegen_for_device(device: str):
+    return (
+        device_codegens[device].wrapper_codegen if device in device_codegens else None
+    )
+
 
 def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     from ..ir import FlexibleLayout

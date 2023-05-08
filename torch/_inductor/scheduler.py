@@ -6,7 +6,7 @@ import logging
 import os
 import pprint
 import textwrap
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
 import sympy
 
@@ -14,15 +14,10 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
+from .codegen.common import get_scheduling_for_device
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import (
-    cache_on_self,
-    cmp,
-    free_symbol_has,
-    get_scheduling_for_device,
-    has_triton,
-)
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -79,6 +74,7 @@ class BaseSchedulerNode:
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
         ]
         try:
             lines += [
@@ -130,6 +126,9 @@ class BaseSchedulerNode:
         self.read_writes: dependencies.ReadWrites = rw
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
+
+    def op_counts(self):
+        return self.read_writes.op_counts
 
     def used_buffer_names(self) -> Set[str]:
         return {
@@ -231,7 +230,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.ForceInPlace))
+                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
                 )
             )
             and config.inplace_buffers
@@ -352,7 +351,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return False
 
         if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.ForceInPlace)
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
         ):
             # TODO make this a property of the IR
             return False
@@ -386,23 +385,6 @@ class SchedulerNode(BaseSchedulerNode):
                     self._body, *self._sizes, normalize=True
                 )
             )
-
-        if self.is_reduction():
-            # reduction has last (reduced) dim in its sizes, and some
-            # downstream dependencies get confused by it
-            self.read_writes.writes = self.read_writes.writes | {
-                w.strip_last_size() for w in self.read_writes.writes
-            }
-            # reduction not on the last dim swaps the sizes, and downstream
-            # dependencies expect unswapped
-            # TODO swapping sizes doesn't work, leads to
-            # File "/scratch/ngimel/work/repos/torchdynamo/torchinductor/sizevars.py", line 130, in guard_equals
-            # if len(right.free_symbols) < len(left.free_symbols):
-            # AttributeError: 'int' object has no attribute 'free_symbols'
-            # even though memory dep looks correct
-            # self.read_writes.writes = self.read_writes.writes | {
-            #     w.maybe_swap_sizes() for w in self.read_writes.writes
-            # }
 
     def debug_str_extra(self):
         name = self.get_name()
@@ -563,6 +545,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self):
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
+
+    @cache_on_self
+    def op_counts(self):
+        op_counts = collections.Counter()
+        for node in self.snodes:
+            op_counts.update(node.op_counts())
+        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -818,15 +807,19 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        updated_nodes = []
-        for node in self.nodes:
-            if node.users:
-                updated_nodes.append(node)
-            else:
-                # dead code
-                log.debug("removed dead node: %s", node.get_name())
-                V.graph.removed_buffers.add(node.get_name())
-        self.nodes = updated_nodes
+        again = True  # repeat until a fixed point
+        while again:
+            updated_nodes = []
+            for node in self.nodes:
+                if any(n.get_name() not in V.graph.removed_buffers for n in node.users):
+                    updated_nodes.append(node)
+                else:
+                    # dead code
+                    log.debug("removed dead node: %s", node.get_name())
+                    V.graph.removed_buffers.add(node.get_name())
+
+            again = len(self.nodes) > len(updated_nodes)
+            self.nodes = updated_nodes
 
     def topological_sort_schedule(self):
         """
@@ -1172,28 +1165,22 @@ class Scheduler:
         V.graph.device_types.add(device.type)
         V.graph.add_device_idx(device.index)
 
-        if device.type == "cpu":
-            from .codegen.cpp import CppScheduling
-
-            return CppScheduling(self)
-        elif device.type == "cuda":
-            if not has_triton():
-                device_props = torch.cuda.get_device_properties(device)
-                if device_props.major < 7:
-                    raise RuntimeError(
-                        f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
-                    )
-                else:
-                    raise RuntimeError(
-                        "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
-                    )
-            from .codegen.triton import TritonScheduling
-
-            return TritonScheduling(self)
-        elif get_scheduling_for_device(device.type):
-            return get_scheduling_for_device(device.type)(self)
-        else:
+        device_scheduling = get_scheduling_for_device(device.type)
+        if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
+
+        if device.type == "cuda" and not has_triton():
+            device_props = torch.cuda.get_device_properties(device)
+            if device_props.major < 7:
+                raise RuntimeError(
+                    f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                )
+            else:
+                raise RuntimeError(
+                    "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
+                )
+
+        return device_scheduling(self)
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:
@@ -1245,7 +1232,14 @@ class Scheduler:
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes())
+                with config.patch(
+                    inplace_buffers=(
+                        config.inplace_buffers
+                        # workaround https://github.com/openai/triton/issues/1615
+                        and not (ir.is_triton(device) and node.is_reduction())
+                    )
+                ):
+                    self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -1256,3 +1250,54 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
+
+
+class BaseScheduling:
+    def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+        """
+        Check whether the node1 and node2 can be fused or not, while node1 and node2 have
+        internal data dependencies.
+        """
+        raise NotImplementedError()
+
+    def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+        """
+        Check whether the node1 and node2 can be fused or not, while node1 and node2 do NOT have
+        internal data dependencies.
+        """
+        raise NotImplementedError()
+
+    def group_fn(self, sizes: tuple[List[Union[int, sympy.Expr]]]):
+        """
+        Process the iteration sizes in case needing to apply transformation for the sizes
+        """
+        raise NotImplementedError()
+
+    def codegen_template(
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+    ):
+        """
+        Given a template node, generate a kernel.
+
+        This function is only available for triton now. If the third-party backend behaves as a sub-class
+        of TritonScheduling, it can override it or reuse it.
+        """
+        raise NotImplementedError()
+
+    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
+        """
+        Given a set of pre-fused nodes, generate a kernel.
+        """
+        raise NotImplementedError()
+
+    def codegen_sync(self):
+        """
+        Generate the kernel synchronization code. It depends on the hardware characteristic.
+        """
+        raise NotImplementedError()
+
+    def flush(self):
+        """
+        Flush the generated code for both kernel and python wrapper to the source code file.
+        """
+        raise NotImplementedError()

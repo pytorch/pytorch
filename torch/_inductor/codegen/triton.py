@@ -20,6 +20,7 @@ from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..scheduler import BaseScheduling
 from ..utils import (
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
@@ -32,7 +33,6 @@ from ..utils import (
     unique,
 )
 from ..virtualized import ops, V
-
 from .common import (
     CSEVariable,
     DeferredLine,
@@ -42,9 +42,11 @@ from .common import (
     Kernel,
     OpOverrides,
     PythonPrinter,
+    register_backend_for_device,
     SizeArg,
     TensorArg,
 )
+from .wrapper import WrapperCodeGen
 
 log = logging.getLogger(__name__)
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -144,6 +146,11 @@ class TritonCSEVariable(CSEVariable):
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
 class TritonOverrides(OpOverrides):
@@ -1649,7 +1656,7 @@ class TritonKernel(Kernel):
         return TritonCSEVariable(*args, **kwargs)
 
 
-class TritonScheduling:
+class TritonScheduling(BaseScheduling):
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
@@ -2169,3 +2176,6 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
+
+
+register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
