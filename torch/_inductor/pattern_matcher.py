@@ -795,7 +795,8 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
 
         def run_node(self, n):
             rv = super().run_node(n)
-            rv.users = len(n.users)
+            if not isinstance(rv, tuple):
+                rv.users = len(n.users)
             return rv
 
     pattern = Converter(gm).run()

@@ -1133,7 +1133,7 @@
     {
       "workflow_name": "pull",
       "id": 10836206561,
-      "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-24T01:11:42Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3991169410/jobs/6846294540",
@@ -1407,7 +1407,7 @@
     {
       "workflow_name": "pull",
       "id": 10793106674,
-      "name": "win-vs2019-cpu-py3 / test (functorch, 1, 1, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (functorch, 1, 1, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:06:35Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873201/jobs/6811541260",
@@ -1549,7 +1549,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229653,
-      "name": "win-vs2019-cuda11.6-py3 / test (force_on_cpu, 1, 1, windows.4xlarge)",
+      "name": "win-vs2019-cuda11.6-py3 / test (force_on_cpu, 1, 1, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:16:16Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642435",
@@ -1705,7 +1705,7 @@
     {
       "workflow_name": "pull",
       "id": 10836206839,
-      "name": "win-vs2019-cpu-py3 / test (functorch, 1, 1, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (functorch, 1, 1, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-24T00:50:32Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3991169410/jobs/6846294751",
@@ -1786,7 +1786,7 @@
     {
       "workflow_name": "pull",
       "id": 10836206711,
-      "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-24T01:24:31Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3991169410/jobs/6846294653",
@@ -2012,7 +2012,7 @@
     {
       "workflow_name": "pull",
       "id": 10793106598,
-      "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (default, 1, 2, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:35:26Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873201/jobs/6811541202",
@@ -3052,7 +3052,7 @@
     {
       "workflow_name": "pull",
       "id": 10793106643,
-      "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge)",
+      "name": "win-vs2019-cpu-py3 / test (default, 2, 2, windows.4xlarge.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:33:42Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873201/jobs/6811541238",
