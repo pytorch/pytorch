@@ -547,13 +547,7 @@ def run_test(
 
     command = (launcher_cmd or []) + executable + argv
     should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
-    timeout = (
-        THRESHOLD * 3
-        if should_file_rerun
-        and isinstance(test_module, ShardedTest)
-        and test_module.time is not None
-        else None
-    )
+    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -1233,7 +1227,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[ShardedTest]:
+def get_selected_tests(options):
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1443,13 +1437,6 @@ def main():
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
-
-    # Disable most tests for now
-    selected_tests_parallel = [
-        x for x in selected_tests_parallel if x.name == "test_failing_test"
-    ]
-    selected_tests_serial = []
-
     print_to_stderr(
         "parallel (file granularity) tests:\n {}".format(
             "\n ".join(str(x) for x in selected_tests_parallel)

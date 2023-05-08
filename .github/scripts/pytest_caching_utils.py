@@ -81,7 +81,7 @@ def upload_pytest_cache(
     if not bucket:
         bucket = BUCKET
 
-    # TODO: Merge the current cache with any pre-existing cache before uploading
+    # TODO: Merge the current cache with any caches from previous runs before uploading
 
     obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
     # This doesn't include the zip file extension. That'll get added later

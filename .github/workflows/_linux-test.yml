@@ -33,14 +33,6 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
-    secrets:
-      aws-access-key-id:
-        required: false
-        description: AWS access key id
-      aws-pytorch-uploader-secret-access-key:
-        required: false
-        description: |
-          Secret access key for uploading to S3.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

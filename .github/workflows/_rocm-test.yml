@@ -96,6 +96,14 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
 
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set Test step time
         id: test-timeout
         shell: bash
@@ -194,12 +202,15 @@ jobs:
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 
-      # - name: Upload pytest cache
-      #   uses: ./.github/actions/pytest-cache-upload
-      #   if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
-      #   with:
-      #     cache_dir: ${GITHUB_WORKSPACE}/.pytest_cache
-      #     shard: ${{ matrix.shard }}
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Save test results
         if: always()
