@@ -7,10 +7,10 @@ import json
 import logging
 import multiprocessing
 import os
+import pathlib
 import re
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import sysconfig
@@ -229,25 +229,16 @@ def write(source_code, ext, extra=""):
     return basename, path
 
 
-def get_umask():
-    # os.umask sets-and-gets, so we need to restore the previous value
-    mask = os.umask(0o666)
-    os.umask(mask)
-    return mask
+def write_atomic(path: str, source_code: str):
+    # Write into tempdir first to avoid conflicts between threads
+    # Avoid using a named temporary file, as those have restricted permissions
+    path = pathlib.Path(path)
+    with tempfile.TemporaryDirectory(dir=path.parent) as tempdir:
+        tmp_path = pathlib.Path(tempdir) / path.name
+        with tmp_path.open("w") as f:
+            f.write(source_code)
 
-
-def write_atomic(path: str, source_code: str, mode=0o666):
-    # use a temp file for thread safety
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w") as f:
-        f.write(source_code)
-
-    # set file permissions
-    masked_mode = mode & ~get_umask()
-    os.chmod(tmp_path, masked_mode)
-
-    # rename atomically
-    os.rename(tmp_path, path)
+        tmp_path.rename(path)
 
 
 def cpp_compiler():
