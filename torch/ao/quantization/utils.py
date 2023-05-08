@@ -154,7 +154,7 @@ def to_underlying_dtype(qdtype):
 def get_qparam_dict(observer_or_fake_quant):
     from torch.ao.quantization.observer import PlaceholderObserver
 
-    qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
+    qscheme = getattr(observer_or_fake_quant, "qscheme", None)
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
@@ -276,7 +276,7 @@ def get_qconfig_dtypes(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    act_is_dynamic = activation.is_dynamic if hasattr(activation, 'is_dynamic') else False
+    act_is_dynamic = getattr(activation, "is_dynamic", False)
     return (activation.dtype, weight.dtype, act_is_dynamic)
 
 def get_quant_type(qconfig):
