@@ -308,13 +308,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        print(code)
         FileCheck() \
             .check("buf0 = empty_strided(") \
             .check("buf2 = empty_strided") \
             .check("triton_poi__0.run(arg0_1, buf0, buf2") \
             .check_not("copy_(") \
-            .check("buf1 = buf0; del buf0  # reuse") \
+            .check("= buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("_register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf1)") \

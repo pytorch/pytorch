@@ -663,6 +663,19 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertEqual(code.count("@triton.jit"), 1)
 
+    def test_cat_avg_pool(self):
+        def forward(relu_40, relu_43):
+            cat_5 = aten.cat.default([relu_40, relu_43], 1)
+            return aten.avg_pool2d.default(cat_5, [3, 3], [1, 1], [1, 1])
+
+        self.common(
+            forward,
+            [
+                torch.randn(8, 192, 17, 17),
+                torch.randn(8, 192, 17, 17),
+            ],
+        )
+
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -6194,7 +6207,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            inps = [torch.randn(2, 4, 16, 16, device="cuda")]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
@@ -6268,6 +6281,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")

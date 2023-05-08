@@ -242,6 +242,7 @@ class BaseSchedulerNode:
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
             writes = {dep.name: dep for dep in self.read_writes.writes}
+            read_counts = collections.Counter(dep.name for dep in ordered_reads)
 
             for read in ordered_reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
@@ -268,6 +269,7 @@ class BaseSchedulerNode:
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
+                        and read_counts[read.name] == 1
                         and self.get_name() in writes
                         and read.index == writes[self.get_name()].index
                     ):
