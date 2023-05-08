@@ -291,6 +291,9 @@ if torch._C.has_mkldnn:
             for n in binary_nodes
         ):
             return False
+        # check args[0] and args[1] is not same
+        if any(n.args[0] == n.args[1] for n in binary_nodes):
+            return False
         return True
 
     def _is_valid_computation_binary(computation_op, binary_op, other_index=None):
@@ -314,9 +317,6 @@ if torch._C.has_mkldnn:
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):
-                return False
-            # check args[0] and args[1] is not same
-            if any(n.args[0] == n.args[1] for n in binary_nodes):
                 return False
             return True
 

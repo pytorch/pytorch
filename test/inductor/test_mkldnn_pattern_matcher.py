@@ -415,20 +415,38 @@ class TestPaternMatcher(TestCase):
                 conv_out = self.conv(x)
                 return torch.add(conv_out, other, alpha=alpha)
 
+        # https://github.com/pytorch/pytorch/issues/100802.
+        # we can't do the fusion when add's inputs are same tensor.
+        class Model2(torch.nn.Module):
+            def __init__(self):
+                super(Model2, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                out = self.conv(x)
+                out = torch.add(out, out)
+                return out
+
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
             torch.randn(32, 28, 28),
         ]
-        mod = Model().to(memory_format=torch.channels_last).eval()
         include_ops = ["mkldnn._convolution_pointwise"]
         exclude_ops = [
             "mkldnn._convolution_pointwise.binary",
             "mkldnn._convolution_pointwise_.binary",
         ]
 
+        # case1
+        mod = Model().to(memory_format=torch.channels_last).eval()
         for other, alpha in zip(others, [0.1, 1.0]):
             self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
+        # case2:
+        mod = Model2().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
