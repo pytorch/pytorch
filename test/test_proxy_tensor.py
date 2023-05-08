@@ -1455,7 +1455,6 @@ symbolic_tensor_failures = {
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
     xfail('linalg.pinv', 'singular'),  # aten.linalg_cholesky_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.pinv', 'hermitian'),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decompo...
-    xfail('linalg.qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
@@ -1503,7 +1502,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.smooth_l1_loss', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_1'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
@@ -1511,7 +1509,6 @@ symbolic_tensor_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -1535,7 +1532,6 @@ symbolic_tensor_failures = {
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
-    xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
