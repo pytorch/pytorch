@@ -48,13 +48,8 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import (
-    _ext_chunk_tensor,
-    _ext_pre_load_state_dict_transform,
-    _extensions as _user_extensions,
-)
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
-from .flat_param import FlatParamHandle
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
