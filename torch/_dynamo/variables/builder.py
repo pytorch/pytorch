@@ -856,7 +856,7 @@ class VariableBuilder:
 
         return tensor_variable
 
-    def wrap_numpy_ndarray(self, value: Union[np.ndarray, torch_np.ndarray]):
+    def wrap_numpy_ndarray(self, value):
         tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
