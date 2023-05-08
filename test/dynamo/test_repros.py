@@ -3112,6 +3112,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
+    def test_list_self_reference(self):
+        # Issue - https://github.com/pytorch/pytorch/issues/100150
+        root = []
+        root[:] = [root, root, None, None]
+
+        @torch._dynamo.optimize("eager")
+        def test_bug():
+            return root
+
+        test_bug()
+
     def test_hf_bigbird_unsqueeze(self):
         def torch_bmm_nd(inp_1, inp_2, ndim=None):
             torch._dynamo.graph_break()
