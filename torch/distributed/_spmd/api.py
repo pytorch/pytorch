@@ -10,7 +10,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Type,
@@ -31,13 +30,12 @@ from torch import fx
 
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
-from torch.distributed._spmd.distribute import Schema
 from torch.distributed._spmd.parallel_mode import (
     DataParallel,
     DTensorExpandMode,
     ParallelMode,
 )
-from torch.distributed._tensor import Placement, Replicate
+from torch.distributed._tensor import Placement
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor

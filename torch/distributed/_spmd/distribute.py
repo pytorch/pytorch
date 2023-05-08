@@ -11,7 +11,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
 )
@@ -19,19 +18,13 @@ from typing import (
 import torch
 import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
-import torch.nn as nn
-from torch._functorch.aot_autograd import aot_module, make_boxed_func
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensorMode
+
 from torch.distributed._spmd.comm_tensor import _get_tracer
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
 
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.dispatch import (
-    _CURRENT_DECOMPOSITION_TABLE,
-    _operator_dispatch,
-)
+from torch.distributed._tensor.dispatch import _operator_dispatch
 from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -40,11 +33,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
-from torch.fx.experimental.proxy_tensor import (
-    make_fx,
-    maybe_disable_fake_tensor_mode,
-    proxy_slot,
-)
+from torch.fx.experimental.proxy_tensor import  make_fx, proxy_slot
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
