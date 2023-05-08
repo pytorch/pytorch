@@ -217,18 +217,19 @@ void recursive_store(
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
+      const auto int_val = val.guard_int(__FILE__, __LINE__);
       switch (elementSize) {
         case 8:
-          *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+          *reinterpret_cast<int64_t*>(data) = int_val;
           break;
         case 4:
-          *(int32_t*)data = val.guard_int(__FILE__, __LINE__);
+          *reinterpret_cast<int32_t*>(data) = static_cast<int32_t>(int_val);
           break;
         case 2:
-          *(int16_t*)data = val.guard_int(__FILE__, __LINE__);
+          *reinterpret_cast<int16_t*>(data) = static_cast<int16_t>(int_val);
           break;
         case 1:
-          *(int8_t*)data = val.guard_int(__FILE__, __LINE__);
+          *reinterpret_cast<int8_t*>(data) = static_cast<int8_t>(int_val);
           break;
         default:
           TORCH_CHECK(false, "Unexpected elementSize ", elementSize);
