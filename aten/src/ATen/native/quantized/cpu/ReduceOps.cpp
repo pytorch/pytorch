@@ -171,7 +171,7 @@ Tensor mean_quantized_cpu(
   return result;
 }
 
-Tensor mean_quantized_cpu(
+static Tensor mean_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
