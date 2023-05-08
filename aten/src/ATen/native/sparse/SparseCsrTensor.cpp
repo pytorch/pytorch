@@ -716,12 +716,6 @@ int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->dense_dim();
 }
 
-static bool _is_same_size_as_sparse_compressed(
-    const SparseCsrTensor& self,
-    const SparseCsrTensor& src) {
-  return self.sizes().equals(src.sizes());
-}
-
 const SparseCsrTensor& resize_as_sparse_compressed_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
