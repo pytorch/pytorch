@@ -355,10 +355,12 @@ if _has_triton():
 
         n_nnz_block_rows = row_idx.size(-1)
         n_block_cols = dense.size(-3)
-        max_n_nnz_block_rows, max_n_block_cols = max_grid[:2]
 
         full_grid = (n_block_cols, n_nnz_block_rows)
-        grid_blocks = (max_n_block_cols, max_n_nnz_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2]))
+        else:
+            grid_blocks = None
         tensor_dims_map = {
             batch_idx: (None, 0),
             row_idx: (None, 0),
@@ -390,10 +392,12 @@ if _has_triton():
         n_batches = dense.size(0)
         n_block_rows = crow_indices.size(-1) - 1
         n_block_cols = dense.size(-3)
-        max_n_block_rows, max_n_block_cols, max_n_batches = max_grid
 
         full_grid = (n_batches, n_block_cols, n_block_rows)
-        grid_blocks = (max_n_batches, max_n_block_cols, max_n_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+        else:
+            grid_blocks = None
         tensor_dims_map = {
             values: (0, None, None),
             crow_indices: (0, None, -1),
@@ -602,23 +606,6 @@ if _has_triton():
             kernel = _run_sparse_rowspace_kernel
         else:
             kernel = _run_dense_rowspace_kernel
-
-        # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
-        cuda_max_grid = (2147483647, 65535, 65535)
-        if max_grid is None:
-            max_grid = cuda_max_grid
-        else:
-
-            def valid_grid_dim(g, mg):
-                if g is None:
-                    return mg
-                else:
-                    # grid must be at least 1 and no greater than mg
-                    return max(1, min(g, mg))
-
-            max_grid = tuple(
-                valid_grid_dim(g, mg) for g, mg in zip(max_grid, cuda_max_grid)
-            )  # type: ignore[assignment]
 
         kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
