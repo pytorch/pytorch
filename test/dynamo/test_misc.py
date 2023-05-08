@@ -9,8 +9,8 @@ import logging
 import math
 import operator
 import os
-import subprocess
 import sys
+import traceback
 import typing
 import unittest
 import unittest.mock as mock
@@ -4722,64 +4722,47 @@ def fn():
         self.assertEquals(tab[0].end, 4)
         self.assertEquals(tab[0].target, 6)
 
-    @unittest.skipIf(os.name != "posix", "return code check is POSIX only")
     def test_unhandled_exception_in_dynamo(self):
-        # need to run in a separate process to properly test an unhandled
-        # exception raised in dynamo optimized code
-        code = """\
-import torch
-import torch._dynamo
-def f(a):
-    a += 1
-    raise RuntimeError("smoge")
-    return a
+        # traceback.format_exc() approximates an unhandled exception
+        def f(a):
+            a += 1
+            raise RuntimeError("smoge")
+            return a
 
-opt_fn = torch._dynamo.optimize("eager")(f)
-opt_fn(torch.ones(2))
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-        )
-        # process did not segfault, C assert fail (abort), etc.
-        self.assertGreater(proc.returncode, 0)
-        self.assertIn("smoge", proc.stderr.decode("utf-8"))
+        opt_fn = torch._dynamo.optimize("eager")(f)
+        try:
+            opt_fn(torch.ones(2))
+        except RuntimeError as e:
+            self.assertIn("smoge", traceback.format_exc())
 
-    @unittest.skipIf(os.name != "posix", "return code check is POSIX only")
     def test_unhandled_exception_in_dynamo2(self):
         # segfaults in python 3.11 if shadow frame is freed improperly
-        code = """\
-import torch
-import torch._dynamo
-from torch.testing import make_tensor
-def fn():
-    # test that the errors are the same for dense and sparse versions
-    def test1(*, is_sparse):
-        # shapes must be compatible for matrix multiplication
-        a = make_tensor((2, 3), dtype=torch.float32, device="cpu")
-        if is_sparse:
-            a_sparse = a.to_sparse_csr()
-            return torch.addmm(a, a_sparse, a)
-        else:
-            return torch.addmm(a, a, a)
-    try:
-        test1(is_sparse=False)
-    except RuntimeError as msg:
-        try:
-            test1(is_sparse=True)
-        except RuntimeError as msg2:
-            raise RuntimeError("smoge")
+        from torch.testing import make_tensor
 
-opt_fn = torch._dynamo.optimize("eager")(fn)
-opt_fn()
-"""
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-        )
-        # process did not segfault, C assert fail (abort), etc.
-        self.assertGreater(proc.returncode, 0)
-        self.assertIn("smoge", proc.stderr.decode("utf-8"))
+        def fn():
+            # test that the errors are the same for dense and sparse versions
+            def test1(*, is_sparse):
+                # shapes must be compatible for matrix multiplication
+                a = make_tensor((2, 3), dtype=torch.float32, device="cpu")
+                if is_sparse:
+                    a_sparse = a.to_sparse_csr()
+                    return torch.addmm(a, a_sparse, a)
+                else:
+                    return torch.addmm(a, a, a)
+
+            try:
+                test1(is_sparse=False)
+            except RuntimeError as msg:
+                try:
+                    test1(is_sparse=True)
+                except RuntimeError as msg2:
+                    raise RuntimeError("smoge")
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn()
+        except RuntimeError:
+            self.assertIn("smoge", traceback.format_exc())
 
     def test_variable_access_in_exception(self):
         def fn():
