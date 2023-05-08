@@ -7616,7 +7616,7 @@ PROD_SCALAR_AARCH32_MICROKERNEL_SRCS = [
 ]
 
 PROD_SCALAR_MICROKERNEL_SRCS = [
-    "XNNPACK/src/amalgam/scalar.c",
+    "XNNPACK/src/amalgam/gen/scalar.c",
 ]
 
 PROD_SCALAR_PORTABLE_MICROKERNEL_SRCS = [
