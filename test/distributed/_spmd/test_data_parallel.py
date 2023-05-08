@@ -188,6 +188,18 @@ class TestDataParallel(DTensorTestBase):
                 squeezed_out = new_output.squeeze()
                 unsqueezed_out = squeezed_out.unsqueeze(0)
                 output = output + 0.1 * unsqueezed_out.view(output.shape[0], -1)
+
+                # test factory ops with data parallel expansion
+                arange = torch.arange(output.shape[1], device=output.device)
+                ones = torch.ones(output.shape, device=output.device)
+                added_arange = arange.unsqueeze(0) + ones
+
+                # test repeat logic
+                zeros = torch.zeros(output.shape[1], device=output.device)
+                repeated_zeros = zeros.unsqueeze(0).repeat(output.shape[0], 1)
+
+                output = output + added_arange + repeated_zeros
+
                 return output
 
         for parallel_mode in ["replicate", "fully_shard"]:
