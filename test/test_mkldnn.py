@@ -32,6 +32,8 @@ types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+# Dynamic shapes does not work with Mkldnn
+@patch.object(torch._dynamo.config, "dynamic_shapes", False)
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),

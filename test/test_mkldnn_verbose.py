@@ -5,6 +5,8 @@ import os
 import subprocess
 import sys
 
+# Dynamic shapes does not work with Mlkdnn
+@patch.object(torch._dynamo.config, "dynamic_shapes", False)
 class TestMKLDNNVerbose(TestCase):
     def test_verbose_on(self):
         num = 0

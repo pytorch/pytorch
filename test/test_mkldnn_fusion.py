@@ -23,6 +23,8 @@ CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+# Dynamic shapes does not work with Mlkdnn
+@patch.object(torch._dynamo.config, "dynamic_shapes", False)
 class TestMkldnnFusion(JitTestCase):
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:

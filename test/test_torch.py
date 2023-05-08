@@ -7301,6 +7301,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.tensor([])
         self.assertEqual(list(x), [])
 
+    @skipIfTorchDynamo("Fails on comparison")
     def test_new(self) -> None:
         x = torch.autograd.Variable(torch.tensor([]))
         y = torch.autograd.Variable(torch.randn(4, 4))
