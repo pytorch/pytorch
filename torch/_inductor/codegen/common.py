@@ -20,7 +20,6 @@ from ..utils import (
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, V

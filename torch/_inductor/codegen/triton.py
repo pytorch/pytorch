@@ -1051,7 +1051,7 @@ class TritonKernel(Kernel):
             self._load_mask = prior
 
     def indirect_indexing(self, var, size):
-        if (config.triton.assert_indirect_indexing and torch.version.hip is None):
+        if config.triton.assert_indirect_indexing and torch.version.hip is None:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less # error-prone to use and/or/not, which is suported by triton
             cond = f"((0 <= {var}) & ({var} < {size}))"
@@ -1059,13 +1059,16 @@ class TritonKernel(Kernel):
 
             mask_vars = list(var.mask_vars)
             if mask_vars:
-                mask = "{mask_vars[0]}" if len(mask_vars) == 1 else f"({' & '.join(mask_vars)})"
+                mask = (
+                    "{mask_vars[0]}"
+                    if len(mask_vars) == 1
+                    else f"({' & '.join(mask_vars)})"
+                )
                 cond = f"({cond}) | ~{mask}"
             line = f'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
             self.cse.generate(self.compute, line, assignment=False)
 
         return var
-
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
