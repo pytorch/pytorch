@@ -216,6 +216,9 @@ def _has_potential_branch_input_alias(branch, inputs):
     def _detect_input_alias(gm):
         input_storages = set()
         for node in gm.graph.nodes:
+            # We need to check existence of "val" because we reuse the logic here
+            # for map operator, where num_mapped_args is a scalar
+            # and doesn't have a "val" meta.
             if node.op == "placeholder" and "val" in node.meta:
                 input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
             if node.op == "output":
