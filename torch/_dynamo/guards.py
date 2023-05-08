@@ -732,10 +732,7 @@ class PyExprCSEPass:
 
         def visit(self, node: ast.AST) -> Any:
             if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
-                expr = _ast_unparse(node)
-                self._config.expr_count[expr] = (
-                    self._config.expr_count.setdefault(expr, 0) + 1
-                )
+                self._config.expr_count[_ast_unparse(node)] += 1
             super().visit(node)
 
     class Replacer(ast.NodeTransformer):
@@ -777,7 +774,9 @@ class PyExprCSEPass:
 
     def __init__(self) -> None:
         self._counter = 0
-        self._config = self.Config(expr_count={}, expr_to_name={})
+        self._config = self.Config(
+            expr_count=collections.defaultdict(lambda: 0), expr_to_name={}
+        )
 
     def _new_var(self, prefix: str = "_var") -> str:
         name = f"{prefix}{self._counter}"
@@ -979,10 +978,10 @@ class CheckFunctionManager:
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
+        guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", " and ".join(unique_code_parts))
+            print("GUARDS", guard_body)
 
         if config.report_guard_failures or guard_fail_fn is not None:
             # Guard fail hook is called everytime guard eval fails. For a cache
@@ -1019,33 +1018,45 @@ class CheckFunctionManager:
         return id(obj)
 
 
-def build_guard_function(code_parts, closure_args) -> str:
+def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
-
-    codebuf = IndentedBuffer()
-    codebuf.writeline(f"def ___make_guard_fn({closure_args}):")
 
     if HAS_UNPARSE_FUNCTIONS:
         csepass = PyExprCSEPass()
         csepass.count(code_parts)
 
-    guardbuf = IndentedBuffer()
-    guardbuf.writeline("def guard(L):")
-    with guardbuf.indent():
-        for expr in code_parts:
-            if HAS_UNPARSE_FUNCTIONS:
-                preface, expr = csepass.replace(expr)
-                guardbuf.writelines(preface)
-            guardbuf.writeline(f"if not ({expr}):")
-            with guardbuf.indent():
-                guardbuf.writeline("return False")
-        guardbuf.writeline("return True")
+        def replace(expr: str) -> Tuple[List[str], str]:
+            return csepass.replace(expr)
+    else:
+        def replace(expr: str) -> Tuple[List[str], str]:
+            return [], expr
 
-    with codebuf.indent():
-        codebuf.splice(guardbuf)
-        codebuf.writeline("return guard")
+    # Generate the inner body of the guard function.
+    # i.e. if-chain of the guard expressions.
+    guard_body = IndentedBuffer()
+    for expr in code_parts:
+        preface, expr = replace(expr)
+        guard_body.writelines(preface)
+        guard_body.writeline(f"if not ({expr}):")
+        with guard_body.indent():
+            guard_body.writeline("return False")
 
-    return codebuf.getvalue()
+    # Wrap the inner body into the actual guard function.
+    guard = IndentedBuffer()
+    guard.writeline("def guard(L):")
+    with guard.indent():
+        guard.splice(guard_body)
+        guard.writeline("return True")
+
+    # Wrap the whole guard function into another function
+    # with the closure variables.
+    make_guard_fn = IndentedBuffer()
+    make_guard_fn.writeline(f"def ___make_guard_fn({closure_args}):")
+    with make_guard_fn.indent():
+        make_guard_fn.splice(guard)
+        make_guard_fn.writeline("return guard")
+
+    return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
 stashed_first_fail_reason = None
