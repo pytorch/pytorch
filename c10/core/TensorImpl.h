@@ -1627,7 +1627,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (data == nullptr) {
+    if (is_empty()) {
       return nullptr;
     }
     return data + data_type_.itemsize() * storage_offset_;
