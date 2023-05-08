@@ -103,14 +103,14 @@ jobs:
       - name: Check if the job is disabled
         if: ${{ github.event.workflow_run.head_branch != 'nightly' }}
         id: filter
-        uses: ./pytorch/.github/actions/filter-test-configs
+        uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # NB: Use a mock test matrix with a default value here. After filtering, if the
           # returned matrix is empty, it means that the job is disabled
           test-matrix: |
             { include: [
-              { config: "default", shard: 1, num_shards: 1 },
+              { config: "default" },
             ]}
 
       - name: Download Build Artifacts
