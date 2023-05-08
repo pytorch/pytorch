@@ -181,6 +181,53 @@ class TestDataParallel(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
+    def test_data_parallel_batch_dim_analysis(self):
+        # test batch dim analysis by adding a few ops that changes
+        # the batch dim in non-trival ways
+
+        class WrapperModule(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.mlp = SimpleMLP()
+
+            def forward(self, x):
+                output = self.mlp(x)
+                new_output = output.clone().view(-1)
+                squeezed_out = new_output.squeeze()
+                unsqueezed_out = squeezed_out.unsqueeze(0)
+                output = output + 0.1 * unsqueezed_out.view(output.shape[0], -1)
+
+                # test factory ops with data parallel expansion
+                arange = torch.arange(output.shape[1], device=output.device)
+                ones = torch.ones(output.shape, device=output.device)
+                added_arange = arange.unsqueeze(0) + ones
+
+                # test repeat logic
+                zeros = torch.zeros(output.shape[1], device=output.device)
+                repeated_zeros = zeros.unsqueeze(0).repeat(output.shape[0], 1)
+
+                output = output + added_arange + repeated_zeros
+
+                return output
+
+        for parallel_mode in ["replicate", "fully_shard"]:
+            mod = WrapperModule().cuda(self.rank)
+            opt = torch.optim.SGD(mod.parameters(), lr=0.1)
+
+            train_batch = (
+                torch.randn((128, 50), device=torch.device(self.rank)),
+                torch.randn((128, 8), device=torch.device(self.rank)),
+            )
+
+            ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+            ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1)
+            self._test_data_parallel(
+                mod, ddp_mod, opt, ddp_opt, train_batch, train_step, parallel_mode
+            )
+
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
     def test_fully_shard_non_0_batch_dim(self):
         class WrapperModule(nn.Module):
             def __init__(self):
