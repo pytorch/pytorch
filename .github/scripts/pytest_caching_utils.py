@@ -199,7 +199,7 @@ def _merge_pytest_caches(
         if file.is_dir():
             continue
 
-        # Since these files are static, only copy them if they don't already exist in the new cache
+        # We don't care much about the other files, so only copy them if they don't already exist in the new cache
         to_file_path = pytest_cache_dir_to_merge_into / relative_path
         if not to_file_path.exists():
             copy_file(file, to_file_path)
