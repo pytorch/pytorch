@@ -1611,6 +1611,18 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=Fals
         else:
             yield SampleInput(t, output_shape, **kwargs)
 
+def sample_inputs_empty_strided(op, device, dtype, requires_grad=False, **kwargs):
+
+    inputs = [
+        ((), (), {}),
+        ((S,), (4,), {'dtype': dtype, 'device': device}),
+        ((S, S), (2, 1), {'dtype': dtype, 'device': device}),
+        ((S, S, S), (2, 0, 1), {'dtype': dtype, 'device': device}),
+    ]
+
+    for shape, strides, kwargs in inputs:
+        yield SampleInput(shape, strides, requires_grad=requires_grad, **kwargs)
+
 def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
     # shape
     cases = (
@@ -15778,6 +15790,29 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+           )),
+    OpInfo('empty_strided',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.empty_strided, inp, *args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.half),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_empty_strided,
+           skips=(
+               # AssertionError: Tensor-likes are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
+               # AssertionError: Scalars are not close!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                            dtypes=(torch.float32, torch.int64, torch.complex64),),
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               # IndexError: tuple index out of range 
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               # AssertionError: Tensor-likes are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
