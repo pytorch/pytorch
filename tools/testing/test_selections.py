@@ -127,7 +127,9 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def get_reordered_tests(tests: List[ShardedTest]) -> Tuple[List[ShardedTest], List[ShardedTest]]:
+def get_reordered_tests(
+    tests: List[ShardedTest],
+) -> Tuple[List[ShardedTest], List[ShardedTest]]:
     """
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
