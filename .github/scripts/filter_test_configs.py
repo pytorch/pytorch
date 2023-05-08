@@ -52,7 +52,6 @@ DISABLED_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/disabled-jobs.json"
 JOB_NAME_SEP = "/"
 BUILD_JOB_NAME = "build"
 TEST_JOB_NAME = "test"
-UPLOAD_JOB_NAME = "upload"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
 
@@ -219,12 +218,12 @@ def remove_disabled_jobs(
             # The current workflow is not disabled by this record
             continue
 
-        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME}|-{UPLOAD_JOB_NAME})$"
+        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
         # There is an exception here for binary build workflows in which the platform
         # names have the build and test suffix. For example, we have a build job called
         # manywheel-py3-cuda11_8-build / build and its subsequent test job called
-        # manywheel-py3-cuda11_8-test / test and manywheel-py3-cuda11_8-upload / build
-        # So they are linked, but their suffixes are different
+        # manywheel-py3-cuda11_8-test / test. So they are linked, but their suffixes
+        # are different
         disabled_platform_no_suffix = re.sub(cleanup_regex, "", disabled_platform)
         current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
 
