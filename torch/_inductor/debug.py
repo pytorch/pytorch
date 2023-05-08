@@ -7,6 +7,7 @@ import logging
 import os.path
 import pstats
 import shutil
+import stat
 import subprocess
 from typing import Any, List
 from unittest.mock import patch
@@ -380,4 +381,6 @@ class DebugFormatter:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
     def output_code(self, filename):
-        shutil.copy(filename, self.filename("output_code.py"))
+        path = self.filename("output_code.py")
+        shutil.copy(filename, path)
+        os.chmod(path, os.stat(path).st_mode | stat.S_IRGRP | stat.S_IROTH)
