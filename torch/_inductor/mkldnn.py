@@ -20,14 +20,6 @@ def is_group_depthwise_conv_transpose(m):
     )
 
 
-# Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
-def is_output_padding_big(m):
-    is_big = False
-    for i in range(len(m.output_padding)):
-        is_big |= m.output_padding[i] >= m.stride[i]
-    return is_big
-
-
 class PackedConv2d(nn.Conv2d):
     def __init__(
         self,
@@ -322,7 +314,12 @@ def pack_module(gm: torch.fx.GraphModule):
                     or dynamo_config.dynamic_shapes
                     or len(node.args) > 1
                     or len(node.kwargs) > 0
-                    or is_output_padding_big(cur_module)
+                    or any(
+                        output_padding >= stride
+                        for output_padding, stride in zip(
+                            cur_module.output_padding, cur_module.stride
+                        )
+                    )  # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
                 ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](
