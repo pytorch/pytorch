@@ -1932,6 +1932,139 @@ class TestSDPA(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @parametrize("batch_size", [1, 8])
+    @parametrize("seq_len_q", [512, 1024, 2048])
+    @parametrize("seq_len_k", [512, 1024, 2048])
+    @parametrize("head_dim", [32, 64])
+    @parametrize("is_causal", [True, False])
+    @parametrize("dropout_p", [0.0, 0.22])
+    @parametrize("dtype", [torch.float16,])
+    @parametrize("scale", [None, "l1"])
+    def test_flash_attention_graph_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
+                                                     head_dim: int,
+                                                     is_causal: bool,
+                                                     dropout_p: float,
+                                                     dtype: torch.dtype,
+                                                     scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
+        n_heads = 4
+        query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
+                           device="cuda", dtype=dtype, requires_grad=True)
+        key = torch.rand(batch_size, n_heads, seq_len_k, head_dim, device="cuda",
+                         dtype=dtype, requires_grad=True)
+        value = torch.rand(batch_size, n_heads, seq_len_k, head_dim,
+                           device="cuda", dtype=dtype, requires_grad=True)
+
+        # Run the math kernel on low precision references
+        query_ref_lp = query.clone().detach().requires_grad_(True)
+        key_ref_lp = key.clone().detach().requires_grad_(True)
+        value_ref_lp = value.clone().detach().requires_grad_(True)
+
+        query_ref = query.clone().detach().to(torch.float32).requires_grad_(True)
+        key_ref = key.clone().detach().to(torch.float32).requires_grad_(True)
+        value_ref = value.clone().detach().to(torch.float32).requires_grad_(True)
+
+        is_dropout = dropout_p > 0.0
+        # warmup
+        s = torch.cuda.Stream()
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
+        torch.cuda.current_stream().wait_stream(s)
+        out = output_tuple[0]
+        dbug_mask = output_tuple[-1]
+        upstream_grad = torch.rand_like(out, requires_grad=False)
+        s.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(s):
+            out.backward(upstream_grad)
+        for x in (query, key, value):
+            x.grad = None
+
+        g = torch.cuda.CUDAGraph()
+        # Create real output
+        with torch.cuda.graph(g):
+            tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
+        g.replay()
+        out_first = output_tuple[0].clone()
+        dbug_mask_first = output_tuple[-1].clone()
+        g.replay()
+        out = output_tuple[0]
+        dbug_mask = output_tuple[-1]
+        if not is_dropout:
+            self.assertEqual(out_first, out, atol=0, rtol=0)
+        else:
+            # replays produce different results
+            self.assertNotEqual(out_first, out)
+
+
+        query_padding_mask = torch.ones(
+            1, seq_len_q, device="cuda", dtype=torch.bool)
+        key_padding_mask = torch.ones(
+            1, seq_len_k, device="cuda", dtype=torch.bool)
+
+        softmax_mask = self.convert_flash_attn_S_to_softmax(
+            dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
+        dropout_mask = softmax_mask >= 0
+
+        if not is_dropout:
+            with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
+                # High Precision Math Reference
+                out_ref = F.scaled_dot_product_attention(
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
+                # Low Precision Math Reference
+                out_lp_ref = F.scaled_dot_product_attention(
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
+        else:
+            # High Precision Math Reference
+            out_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
+            # Low Precision Math Reference
+            out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                dropout_mask=dropout_mask)[0]
+
+        upstream_grad = torch.rand_like(out, requires_grad=False)
+
+        g1 = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g1):
+            out.backward(upstream_grad)
+        g1.replay()
+        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
+
+        # # See [Note] Fused Tolerances above
+        out_deviation = out_ref - out_lp_ref
+        output_ref_atol = max(torch.abs(out_deviation).max().item(), default_atol[out.dtype])
+        output_ref_rtol = max(get_rtol(out_ref, out_lp_ref), default_rtol[out.dtype])
+
+        # # TODO: Investigate why grad_q needs larger tolerances
+        grad_q_deviation = query_ref.grad - query_ref_lp.grad
+        grad_q_ref_atol = max(4 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
+
+        grad_k_deviation = key_ref.grad - key_ref_lp.grad
+        grad_k_ref_atol = max(torch.abs(grad_k_deviation).max().item(), default_atol[out.dtype])
+        grad_k_ref_rtol = max(get_rtol(key_ref.grad, key_ref_lp.grad), default_rtol[out.dtype])
+
+        grad_v_deviation = value_ref.grad - value_ref_lp.grad
+        grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])
+        grad_v_ref_rtol = max(get_rtol(value_ref.grad, value_ref_lp.grad), default_rtol[out.dtype])
+
+        self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
+        self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
+                         atol=grad_q_ref_atol, rtol=grad_q_ref_rtol)
+        self.assertEqual(key.grad, key_ref.grad.to(key.grad.dtype),
+                         atol=grad_k_ref_atol, rtol=grad_k_ref_rtol)
+        self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
+                         atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
+
+
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])

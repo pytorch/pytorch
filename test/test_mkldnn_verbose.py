@@ -4,6 +4,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import os
 import subprocess
 import sys
+from unittest.mock import patch
 
 # Dynamic shapes does not work with Mlkdnn
 @patch.object(torch._dynamo.config, "dynamic_shapes", False)

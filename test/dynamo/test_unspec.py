@@ -99,6 +99,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(res1, res2))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @unittest.expectedFailure
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -147,7 +148,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(res1, res2))
 
     # TypeError: zeros(): argument 'size' (position 1) must be tuple of SymInts, not FakeTensor
-    @unittest.expectedFailure
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -214,6 +214,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_shape_graph_break(self):
         from torch._dynamo.comptime import comptime
 

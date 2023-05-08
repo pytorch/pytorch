@@ -5,7 +5,7 @@ import torch
 
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, ifdyn, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 
 
@@ -397,7 +397,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         # Under this specific config, uncommon ints are lifted to graph inputs.
-        self._test_wrap_simple(f, (x,), 3)
+        self._test_wrap_simple(f, (x,), ifdyn(ifdynstaticdefault(2, 3), 3))
 
     def test_freevars_as_inputs_to_wrap(self):
         y = torch.randn(3)

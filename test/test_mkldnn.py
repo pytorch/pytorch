@@ -5,6 +5,7 @@ import itertools
 import functools
 import unittest
 from contextlib import nullcontext
+from unittest.mock import patch
 
 try:
     import torchvision

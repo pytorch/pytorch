@@ -1,6 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
+from unittest.mock import patch
 from typing import NamedTuple, List
 
 import torch

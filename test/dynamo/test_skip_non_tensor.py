@@ -58,6 +58,7 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         assert counter.op_count == 1
 
+    @patch.object(torch._dynamo.config, "assume_static_by_default", False)
     def test_add_skip(self):
         def fn(a, b):
             return a + b
