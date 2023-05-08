@@ -2782,17 +2782,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = disable_autocast_manager if disable_amp else nullcontext
-                    # XXX: Temporaries revert this change from https://github.com/pytorch/pytorch/pull/99619
-                    # since it cause channels last activation output from fwd graph
-                    # because contiguous in bwd graph inputs.
-                    # I'll debug more and figure out the correct way.
-                    # Credits to Horace for pointing this out.
+                    def tracing_context():
+                        return tracing(saved_context)
 
-                    # with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
-                    with context(), track_graph_compiling(aot_config, "backward"):
+                    bw_args = fx_placeholder_vals(bw_module)
+
+                    # We can not reuse tracing context and fake tensors from
+                    # backward pass if any real tensor have a different stride.
+                    # This can happen if the compiler compiles the fwd module
+                    # with layout optimization.
+                    if any(ph_arg.stride() != real_arg.stride() for ph_arg, real_arg in zip(bw_args, all_args)):
+                        tracing_context = nullcontext
+                        bw_args = all_args
+
+                    with tracing_context(), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            # bw_module, fx_placeholder_vals(bw_module)
-                            bw_module, all_args
+                            bw_module, bw_args
                         )
 
                 ctx.maybe_clear_saved_tensors()
