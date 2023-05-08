@@ -21,7 +21,7 @@ from torch.utils._python_dispatch import (
 from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
-# TODO: We add this to prevent dymamo tracing into map_wrapper,
+# TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
     def __call__(self, *args, **kwargs):
@@ -32,24 +32,30 @@ map_impl = HigherOrderOperator("map_impl")
 
 def map_wrapper(f, xs, *args):
     flat_xs, xs_spec = pytree.tree_flatten(xs)
-    assert all(isinstance(t, torch.Tensor) for t in flat_xs), f"mapped xs can only contain tensors got {flat_xs}"
+    if not all(isinstance(t, torch.Tensor) for t in flat_xs):
+        raise RuntimeError(f"mapped xs can only consist of tensors. Got {flat_xs}.")
 
     num_mapped_args = len(flat_xs)
-    assert num_mapped_args > 0, "map must have at least one mapped argument."
+    if num_mapped_args == 0:
+        raise RuntimeError(f"map must have at least one mapped argument.")
 
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
-    assert len(shapes) > 0 and all(cur_shape[0] == leading_dim_size for cur_shape in shapes)
+    if any(cur_shape[0] != leading_dim_size for cur_shape in shapes):
+        raise RuntimeError(
+            f"leading dimensions of mapped xs must be consistent. Got shapes {shapes}.")
 
-    out_spec = [None]
+    out_spec = None
 
-    def flat_fn(num_mapped_args, *flat_args):
+    def flat_fn(*flat_args):
         xs = pytree.tree_unflatten(flat_args[:num_mapped_args], xs_spec)
         unflattened_out = f(xs, *flat_args[num_mapped_args:])
         flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
-        out_spec[0] = tmp_out_spec
+
+        nonlocal out_spec
+        out_spec = tmp_out_spec
         return flat_out
-    return pytree.tree_unflatten(map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec[0])
+    return pytree.tree_unflatten(map_impl(flat_fn, num_mapped_args, *flat_xs, *args), out_spec)
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
@@ -69,7 +75,7 @@ class MapAutogradOp(torch.autograd.Function):
 
         _ = torch._C._AutoDispatchBelowAutograd()
         grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(mapped_grads), *fw_mapped_args, *mapped_grads, *pos_args)
-        return None, None, *grads
+        return None, None, None, *grads
 
 def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
     xs = list(args[:num_mapped])
@@ -79,10 +85,10 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
     if not isinstance(body_graph, torch.fx.GraphModule):
-        body_graph = make_fx(body_graph)(num_mapped, *example_input, *pos_args)
+        body_graph = make_fx(body_graph)(*example_input, *pos_args)
 
     with disable_proxy_modes_tracing():
-        example_outs = body_graph(num_mapped, *example_input, *pos_args)
+        example_outs = body_graph(*example_input, *pos_args)
 
         def expand_tensor(t):
             if isinstance(t, torch.Tensor):
@@ -141,7 +147,7 @@ def map_dense(f, num_mapped_args, *args):
     assert (mode is None), "Mode should never be enabled for CPU/CUDA keyOne of the differentiated Tensors"
     pytrees = []
     for inp in _unstack_pytree(xs):
-        pytrees.append(f(num_mapped_args, *inp, *pos_args))
+        pytrees.append(f(*inp, *pos_args))
     return _stack_pytree(pytrees)
 
 
@@ -155,28 +161,28 @@ def map_autograd(f, num_mapped_args, *args):
         example_args = (*xs_slice, *pos_args)
         example_xs = example_args[:num_mapped_args]
         example_pos_args = example_args[num_mapped_args:]
-        example_flat_out, _ = pytree.tree_flatten(f(num_mapped_args, *example_xs, *example_pos_args))
+        example_flat_out, _ = pytree.tree_flatten(f(*example_xs, *example_pos_args))
         example_grad = [torch.ones_like(out) for out in example_flat_out if out is not None and out.requires_grad]
 
-    fw_graph = make_fx(f)(num_mapped_args, *example_xs, *example_pos_args)
+    fw_graph = make_fx(f)(*example_xs, *example_pos_args)
 
-    def joint_f(num_mapped, *example_args):
-        joint_mapped_args = example_args[:num_mapped]
-        args = example_args[num_mapped:]
+    def joint_f(*example_args):
+        joint_mapped_args = example_args[:joint_num_mapped]
+        args = example_args[joint_num_mapped:]
 
         mapped_input = joint_mapped_args[:num_mapped_args]
         mapped_grads = joint_mapped_args[num_mapped_args:]
 
-        def fw_with_masks(num_mapped_args, *args):
-            fw_out = f(num_mapped_args, *args)
+        def fw_with_masks(*args):
+            fw_out = f(*args)
             return fw_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in fw_out]
 
         joint = create_joint(fw_with_masks)
-        _, grads = joint([num_mapped_args] + list(mapped_input) + list(args), list(mapped_grads))
+        _, grads = joint(list(mapped_input) + list(args), list(mapped_grads))
         return grads
 
     joint_num_mapped = len(example_grad) + len(example_xs)
-    joint_graph = make_fx(joint_f)(joint_num_mapped, *example_xs, *example_grad, *example_pos_args)
+    joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
     flat_out = MapAutogradOp.apply(fw_graph, joint_graph, num_mapped_args, *args)
     return flat_out
 
