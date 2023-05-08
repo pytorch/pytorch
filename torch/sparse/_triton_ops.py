@@ -44,6 +44,10 @@ def make_triton_contiguous(t):
         return t
 
 
+def broadcast_batch_dims(*tensors):
+    return torch.broadcast_shapes(*(t.shape[:-2] for t in tensors))
+
+
 def slicer(dim, slice_range, *tensors):
     for t in tensors:
         slices = [slice(None)] * t.dim()
@@ -492,10 +496,7 @@ if _has_triton():
             m, kl = bsr.shape[-2:]
             kr, n = dense.shape[-2:]
 
-        # Required to undo the fake batch dimension insertion.
-        original_batch_dims_broadcasted = torch.broadcast_shapes(
-            bsr.shape[:-2], dense.shape[:-2]
-        )
+        original_batch_dims_broadcasted = broadcast_batch_dims(bsr, dense)
 
         if out is not None and not skip_checks:
             expected_out_shape = original_batch_dims_broadcasted + (m, n)
@@ -526,16 +527,10 @@ if _has_triton():
             is_sparse_rowspace_mode = False
 
         # Introduce fake batch dimension if not present for convenience.
-        def unsqueeze_batch_dim(t, n_non_batch_dims):
-            if t.dim() > n_non_batch_dims:
-                return t
-            else:
-                return t.unsqueeze(0)
-
-        crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
-        col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
-        values = make_triton_contiguous(unsqueeze_batch_dim(bsr.values(), 3))
-        dense = make_triton_contiguous(unsqueeze_batch_dim(dense, 2))
+        crow_indices = bsr.crow_indices().unsqueeze(0)
+        col_indices = bsr.col_indices().unsqueeze(0)
+        values = make_triton_contiguous(bsr.values().unsqueeze(0))
+        dense = make_triton_contiguous(dense.unsqueeze(0))
         nnz = values.shape[-3]
         blocksize = values.shape[-2:]
 
