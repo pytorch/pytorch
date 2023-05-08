@@ -569,8 +569,11 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {a}"
 
     @staticmethod
-    def where(a, b, c):
-        return f"decltype({b})::blendv({c}, {b}, {a})"
+    def where(condition, x, y):
+        # blendv copies from first vector if MSB of condition is
+        # 0 otherwise from second vector.
+        # `condition != 0` is required to set-up mask as per above for blendv
+        return f"decltype({x})::blendv({y}, {x}, {condition} != 0)"
 
     @staticmethod
     def sign(x):
