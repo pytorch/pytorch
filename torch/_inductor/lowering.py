@@ -2633,14 +2633,12 @@ def reflection_pad2d(x, padding):
 def reflection_pad2d_backward(grad_output, x, padding):
     assert len(padding) == 4
     left, right, top, bot = padding
-    print("padding", left, right, top, bot)
 
     *_, h, w = x.get_size()
     h = V.graph.sizevars.guard_static_shape(h) - 1
     w = V.graph.sizevars.guard_static_shape(w) - 1
     grad_loader = grad_output.make_loader()
     *_, h_grad, w_grad = grad_output.get_size()
-    print("HW", h, w)
 
     def fn(idx):
         *b, x, y = idx
