@@ -716,7 +716,7 @@ class GuardBuilder(GuardBuilderBase):
 class PyExprCSEPass:
     # Maximum number of times a given expression can be used without being
     # replaced by a fresh variable.
-    USE_THRESHOLD = 2
+    USE_THRESHOLD = 1
 
     # Ad-Hoc: AST nodes this pass focuses on.
     ALLOWED_NODE_TYPES = (ast.Attribute, ast.Call, ast.Subscript)

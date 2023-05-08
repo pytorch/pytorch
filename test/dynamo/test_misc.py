@@ -5278,10 +5278,10 @@ def fn():
                 expected_py38="(((f(_var3, '0').x.y.z * f(_var3, '1').x.y.z) * f(_var3, '2').x.y.z) < 512)",
             ),
             testcase(
-                expr="self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+                expr="self.g(a, b).k + (1 - self.g(a, b).k) <= m[0].a + self.g(a, b).k",
                 preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
-                expected="_var6 + (1 - _var6) <= x[0].a + _var6",
-                expected_py38="((_var6 + (1 - _var6)) <= (x[0].a + _var6))",
+                expected="_var6 + (1 - _var6) <= m[0].a + _var6",
+                expected_py38="((_var6 + (1 - _var6)) <= (m[0].a + _var6))",
             ),
         ]
 
@@ -5302,7 +5302,7 @@ def fn():
             "x[0].a < x[1].a * (3 - x[2].a)",
             "a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
             "f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
-            "self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
+            "self.g(a, b).k + (1 - self.g(a, b).k) <= m[0].a + self.g(a, b).k",
         ]
 
         _, pycode = build_guard_function(exprs, "")
@@ -5322,7 +5322,7 @@ def ___make_guard_fn():
         _var4 = self.g
         _var5 = _var4(a, b)
         _var6 = _var5.k
-        if not (_var6 + (1 - _var6) <= x[0].a + _var6):
+        if not (_var6 + (1 - _var6) <= m[0].a + _var6):
             return False
         return True
     return guard
@@ -5343,7 +5343,7 @@ def ___make_guard_fn():
         _var4 = self.g
         _var5 = _var4(a, b)
         _var6 = _var5.k
-        if not (((_var6 + (1 - _var6)) <= (x[0].a + _var6))):
+        if not (((_var6 + (1 - _var6)) <= (m[0].a + _var6))):
             return False
         return True
     return guard
