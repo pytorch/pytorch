@@ -20,7 +20,7 @@ struct TORCH_API MPSHooksInterface {
   // this fails the implementation if MPSHooks functions are called, but
   // MPS backend is not present.
   #define FAIL_MPSHOOKS_FUNC(func) \
-    AT_ERROR("Cannot execute ", func ,"() without MPS backend.");
+    TORCH_CHECK(false, "Cannot execute ", func ,"() without MPS backend.");
 
   virtual ~MPSHooksInterface() = default;
 
