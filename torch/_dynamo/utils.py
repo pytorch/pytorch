@@ -1589,3 +1589,33 @@ def to_numpy_helper(___tmp_0):
     if isinstance(___tmp_0, tuple):
         return tuple([convert(obj) for obj in ___tmp_0])
     return convert(___tmp_0)
+
+
+def defake(x):
+    if not isinstance(x, FakeTensor):
+        return x
+    if x._has_symbolic_sizes_strides:
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
+    else:
+        size = x.size()
+        stride = x.stride()
+    y = torch.empty_strided(
+        size,
+        stride,
+        dtype=x.dtype,
+        device=x.device,
+        requires_grad=x.requires_grad,
+    )
+    y.zero_()
+    return y
