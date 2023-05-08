@@ -110,7 +110,7 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
-Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+static Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
   return getValueTrace(IValue(var));
 }
 Value* TracingState::getValue(const IValue& var) {
@@ -783,7 +783,7 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
-void addInputs(
+static void addInputs(
     Node* n,
     const char* name,
     c10::optional<caffe2::TypeMeta> opt_dtype) {
@@ -1062,7 +1062,7 @@ void ArgumentStash::stashValue(
 // Stack trace recording
 ////////////////////////////////////////////////////////////////////////////////
 // no python present so we just do not record source information
-void defaultRecordSourceLocation(Node* n) {}
+static void defaultRecordSourceLocation(Node* n) {}
 std::atomic<decltype(&defaultRecordSourceLocation)> record_source_location(
     defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
@@ -1072,7 +1072,7 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-std::vector<StackEntry> defaultPythonCallstack() {
+static std::vector<StackEntry> defaultPythonCallstack() {
   return std::vector<StackEntry>();
 }
 std::atomic<decltype(&defaultPythonCallstack)> python_callstack_fn(
@@ -1084,7 +1084,7 @@ void setPythonCallstack(std::vector<StackEntry> (*v)()) {
   python_callstack_fn.store(v);
 }
 
-void defaultWarn(const std::string& str) {
+static void defaultWarn(const std::string& str) {
   TORCH_WARN(str);
 }
 std::atomic<warn_fn_type> warn_callback{defaultWarn};
