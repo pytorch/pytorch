@@ -36,6 +36,7 @@ from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
+    IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -753,6 +754,9 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    @unittest.skipIf(
+        IS_FBCODE, "AttributeError: module 'triton.language' has no attribute 'reduce'"
+    )
     def test_prod(self):
         def fn(a):
             return a.prod(0), a.prod(1), a.prod()
@@ -832,6 +836,10 @@ class CommonTemplate:
         t1[16] = float("nan")
         self.common(fn, (t1,))
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Pointer argument (at 2) cannot be accessed from Triton (cpu tensor?)",
+    )
     def test_fmin_fmax(self):
         def fn(a, b):
             return (
@@ -2043,6 +2051,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @unittest.skipIf(IS_FBCODE, "'failed_guard' is None")
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -2817,6 +2826,9 @@ class CommonTemplate:
             ),
         )
 
+    @unittest.skipIf(
+        IS_FBCODE, "Pointer argument (at 1) cannot be accessed from Triton"
+    )
     def test_masked_fill_promotion(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, torch.tensor(3.5))
@@ -4676,6 +4688,7 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    @unittest.skipIf(IS_FBCODE, "Scalars are not equal")
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_philox_rand(self):
         if self.device == "cpu":
@@ -4749,6 +4762,10 @@ class CommonTemplate:
         a1 = fn(x).clone()
         self.assertFalse(torch.allclose(a0, a1))
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "Pointer argument (at 0) cannot be accessed from Triton (cpu tensor?)",
+    )
     @requires_cuda()
     def test_like_rands3(self):
         # rand_like with `device` which is different from `x.device`
@@ -5959,6 +5976,7 @@ class CommonTemplate:
         self.assertEqual(get_data_type(bitwise_or), torch.bool)
         self.assertEqual(get_data_type(bitwise_left_shift), torch.int64)
 
+    @unittest.skipIf(IS_FBCODE, "name 'inf' is not defined")
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -6336,6 +6354,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
 
+        @unittest.skipIf(IS_FBCODE, "first_arg, 2, True")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
