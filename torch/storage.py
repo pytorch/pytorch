@@ -65,7 +65,7 @@ class _StorageBase:
     def _write_file(self, *args, **kwargs): ...  # noqa: E704
     def resize_(self, size: int): ...  # noqa: E704
     def _weak_ref(self, *args, **kwargs) -> T: ...  # noqa: E704
-    def is_pinned(self) -> bool: ...  # noqa: E704
+    def is_pinned(self, device="cuda") -> bool: ...  # noqa: E704
     def _set_from_file(self, *args, **kwargs): ...  # noqa: E704
     def _set_cdata(self, *args, **kwargs): ...  # noqa: E704
     def _share_cuda_(self, *args, **kwargs): ...  # noqa: E704
@@ -1011,15 +1011,8 @@ class TypedStorage:
 
     def is_pinned(self, device="cuda"):
         """For other backends, device need to set. If not set, the default behaviour is CUDA device."""
-        if device == "cuda":
-            _warn_typed_storage_removal()
-            return self._untyped_storage.is_pinned()
-        elif torch._C._get_privateuse1_backend_name() == device:
-            return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
-                cast(Storage, self._untyped_storage)).is_pinned(device)
-        else:
-            # Currently, cannot pin CPU storage memory to other device, except for cuda and privateuse1.
-            return False
+        _warn_typed_storage_removal()
+        return self._untyped_storage.is_pinned(device)
 
     def _write_file(self, *args, **kwargs):
         return self._untyped_storage._write_file(*args, **kwargs)

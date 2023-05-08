@@ -272,6 +272,20 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_storage.is_pinned("hpu"))
             self.assertFalse(cpu_storage.is_pinned())
 
+            # Test untyped storage pin_memory and is_pin
+            cpu_tensor = torch.randn([3, 2, 1, 4])
+            cpu_untyped_storage = cpu_tensor.untyped_storage()
+            self.assertFalse(cpu_untyped_storage.is_pinned())
+            self.assertFalse(cpu_untyped_storage.is_pinned("hpu"))
+            self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
+            cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+            with self.assertRaisesRegex(RuntimeError, "expects an string as input"):
+                cpu_untyped_storage_pinned.is_pinned("foo", "foo2")
+            with self.assertRaisesRegex(RuntimeError, "expects an string as input"):
+                cpu_untyped_storage_pinned.is_pinned(111)
+
         def test_open_device_serialization():
             self.module.set_custom_device_index(-1)
             storage = torch.UntypedStorage(4, device=torch.device('foo'))
@@ -285,7 +299,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
 
-        def test_open_device_storage_resize(self):
+        def test_open_device_storage_resize():
             torch.utils.rename_privateuse1_backend('foo')
             cpu_tensor = torch.randn([8])
             foo_tensor = cpu_tensor.foo()
@@ -293,7 +307,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(foo_storage.size() == 8)
             foo_storage.resize_(8)
             self.assertTrue(foo_storage.size() == 8)
-            with self.assertRaisesRegex(RuntimeError, 'overflow'):
+            with self.assertRaisesRegex(RuntimeError, 'Overflow'):
                 foo_storage.resize_(8**29)
 
         test_base_device_registration()

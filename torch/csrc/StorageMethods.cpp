@@ -80,14 +80,42 @@ static PyObject* THPStorage_copy_(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_isPinned(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
+  // set default value of device to CUDA
+  const char* str = "cuda";
+  bool parse_result = PyArg_ParseTuple(args, "|s", &str);
+  THPUtils_assert(
+      parse_result,
+      "Storage isPinned() expects an string as input, ",
+      "but failed to parse the args from ",
+      THPUtils_typename(args));
+
+  const std::string device_str = str;
+  if (device_str == "cuda") {
 #if defined(USE_CUDA)
-  return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data()));
+    return PyBool_FromLong(
+        at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data()));
 #else
-  Py_RETURN_FALSE;
+    Py_RETURN_FALSE;
 #endif
+  } else if (device_str == c10::get_privateuse1_backend()) {
+    const auto& storage = THPStorage_Unpack(self);
+    auto src_option =
+        c10::TensorOptions().device(storage.device()).dtype(at::kByte);
+    auto src_tensor = at::empty({0}, {}, src_option).set_(storage);
+    bool is_pinned = src_tensor.is_pinned(device_str);
+    if (is_pinned) {
+      Py_RETURN_TRUE;
+    } else {
+      Py_RETURN_FALSE;
+    }
+  } else {
+    // Currently, cannot pin CPU storage memory to other device,
+    // except for cuda and privateuse1.
+    Py_RETURN_FALSE;
+  }
+
   END_HANDLE_TH_ERRORS
 }
 
@@ -561,7 +589,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
-    {"is_pinned", THPStorage_isPinned, METH_NOARGS, nullptr},
+    {"is_pinned", THPStorage_isPinned, METH_VARARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,
