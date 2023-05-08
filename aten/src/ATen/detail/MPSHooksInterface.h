@@ -64,6 +64,8 @@ struct TORCH_API MPSHooksInterface {
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  
+  #undef FAIL_MPSHOOKS_FUNC
 };
 
 struct TORCH_API MPSHooksArgs {};
