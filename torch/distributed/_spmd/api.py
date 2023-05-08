@@ -3,18 +3,7 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
 
 from functorch import make_fx
 

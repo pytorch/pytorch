@@ -3,17 +3,7 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed._spmd.experimental_ops
@@ -33,7 +23,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
-from torch.fx.experimental.proxy_tensor import  make_fx, proxy_slot
+from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 

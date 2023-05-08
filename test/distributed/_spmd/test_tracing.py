@@ -4,18 +4,13 @@ from copy import deepcopy
 from functools import wraps
 from typing import Any, List, Type
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
-from torch.distributed._spmd.api import (
-    compile,
-    COMPILED_OBJECT_KEY,
-    Override,
-)
+from torch.distributed._spmd.api import compile, COMPILED_OBJECT_KEY, Override
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
