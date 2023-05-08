@@ -125,7 +125,7 @@ Existing Backends
 ~~~~~~~~~~~~~~~~~
 
 TorchDynamo has a growing list of backends, which can be found in the
-`backends <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/backends/>`__ folder
+`backends <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/backends/>`__ folder
 or ``torch._dynamo.list_backends()`` each of which with its optional dependencies.
 
 Some of the most commonly used backends include:
