@@ -3401,7 +3401,6 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half)
-    @dtypesIfCUDA(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm_error_messages(self, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_mm
