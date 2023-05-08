@@ -1,6 +1,6 @@
 #include <ittnotify.h>
-#include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/itt_wrapper.h>
+#include <torch/csrc/profiler/stubs/base.h>
 
 namespace torch {
 namespace profiler {

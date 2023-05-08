@@ -357,7 +357,9 @@ std::vector<Shape> compute_shape_min(const at::Tensor& self) {
   return {Shape(self.scalar_type(), {})};
 }
 
-static std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+static std::vector<Shape> compute_shape_nonzero(
+    const at::Tensor& t,
+    bool as_tuple) {
   if (as_tuple) {
     auto res = std::vector<Shape>();
     for (auto dim_size : t.sizes()) {

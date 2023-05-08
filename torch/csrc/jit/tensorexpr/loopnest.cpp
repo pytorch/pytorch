@@ -1117,7 +1117,9 @@ class ContainedStmtsFinder : public IRVisitor {
   std::unordered_set<StmtPtr> contained_;
 };
 
-static bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, BlockPtr b) {
+static bool containsAll(
+    const std::vector<BufLoadOrStoreUse>& uses,
+    BlockPtr b) {
   std::unordered_set<StmtPtr> not_found;
   for (const auto& use : uses) {
     not_found.insert(use.s);
@@ -1141,7 +1143,8 @@ static BlockPtr findParentBlock(StmtPtr s) {
   return nullptr;
 }
 
-static BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
+static BlockPtr findLowestContainingBlock(
+    const std::vector<BufLoadOrStoreUse>& uses) {
   // TODO: we're not using the most efficient algorithm here for simplicity.
   // Replace with something more performant in case it becomes a bottleneck.
   BlockPtr b = findParentBlock(uses[0].s);

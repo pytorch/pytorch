@@ -9,7 +9,10 @@
 namespace torch::jit::tensorexpr {
 
 // Move the given user of `aten::cat` op to its inputs.
-static Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
+static Node* moveCatAfterUse(
+    Node* cat,
+    Node* user,
+    std::shared_ptr<Graph> subgraph) {
   // Example IR:
   //   %1 = ...
   //   %2 = ...
@@ -451,7 +454,8 @@ static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-static std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
+static std::shared_ptr<Graph> dequantizeResults(
+    const std::shared_ptr<Graph>& graph) {
   for (auto v : graph->outputs()) {
     auto& t = v->type();
     if (t->kind() == TypeKind::TensorType) {

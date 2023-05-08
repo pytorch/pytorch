@@ -101,7 +101,9 @@ static std::vector<at::Tensor> transpose_inputs(at::TensorList inputs) {
   return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
 }
 
-static bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
+static bool shape_is_fast_for_reduce(
+    const at::Tensor& lhs,
+    const at::Tensor& rhs) {
   size_t l = lhs.size(0);
   size_t m = lhs.size(1);
   size_t r = rhs.size(1);

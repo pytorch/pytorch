@@ -397,8 +397,8 @@ template class RNNImplBase<RNNImpl>;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-static detail::RNNOptionsBase::rnn_options_base_mode_t compute_rnn_options_base_mode(
-    RNNOptions::nonlinearity_t nonlinearity) {
+static detail::RNNOptionsBase::rnn_options_base_mode_t
+compute_rnn_options_base_mode(RNNOptions::nonlinearity_t nonlinearity) {
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return torch::kRNN_TANH;
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {

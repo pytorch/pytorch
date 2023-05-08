@@ -1105,7 +1105,8 @@ graph(%packed_params, %a):
   };
 }
 
-static std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
+static std::vector<QuantFusionInfo>
+dynamic_quant_fusion_pattern_and_replacements() {
   std::string linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):
         %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)

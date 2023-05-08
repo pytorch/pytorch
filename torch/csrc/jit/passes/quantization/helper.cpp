@@ -395,7 +395,8 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-static std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
+static std::vector<NodeKind> toAtenSymbol(
+    const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),

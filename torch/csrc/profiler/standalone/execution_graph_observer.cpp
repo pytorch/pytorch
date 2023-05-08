@@ -503,7 +503,8 @@ static void recordOperatorStart(
   }
 }
 
-static std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
+static std::unique_ptr<ObserverContext> onFunctionEnter(
+    const RecordFunction& fn) {
   using RunState = ExecutionGraphObserver::RunState;
   auto ob = ObserverManager::get();
   if (ob != nullptr && ob->getState() == RunState::enabled) {

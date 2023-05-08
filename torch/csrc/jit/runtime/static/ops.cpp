@@ -51,7 +51,10 @@ C10_DEFINE_bool(
 namespace at {
 namespace native {
 
-static void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
+static void repeat_out(
+    at::Tensor& result,
+    const Tensor& self,
+    IntArrayRef repeats) {
   TORCH_CHECK(
       repeats.size() >= static_cast<size_t>(self.dim()),
       "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
