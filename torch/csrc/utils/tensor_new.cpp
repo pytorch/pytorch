@@ -217,7 +217,13 @@ void recursive_store(
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
-      *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+      switch (elementSize) {
+        case 8: *(int64_t*)data = val.guard_int(__FILE__, __LINE__); break;
+        case 4: *(int32_t*)data = val.guard_int(__FILE__, __LINE__); break;
+        case 2: *(int16_t*)data = val.guard_int(__FILE__, __LINE__); break;
+        case 1: *(int8_t*)data = val.guard_int(__FILE__, __LINE__); break;
+        default: TORCH_CHECK(false, "Unexpected elementSize ", elementSize);
+      }
       return;
     }
     torch::utils::store_scalar(data, scalarType, obj);
