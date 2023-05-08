@@ -743,7 +743,8 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(index_var, size):
-                return sympy_symbol(str(index_var))
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
