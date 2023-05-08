@@ -819,6 +819,14 @@ class OptimizationContext:
     # for mem copy only node bf16 load -> bf16 store,
     is_bf16_mem_copy: bool = False
 
+    # Load float16 value as float32
+    is_load_fp16_as_fp32: bool = False
+    # Store float32 value as float16
+    is_store_fp32_as_fp16: bool = False
+    # do not  need type cast for
+    # for mem copy only node fp16 load -> fp16 store,
+    is_fp16_mem_copy: bool = False
+
     dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False

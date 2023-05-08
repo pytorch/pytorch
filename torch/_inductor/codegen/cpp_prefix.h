@@ -127,6 +127,19 @@ inline void store_float_as_bf16(
   res.store(bf16_buf, at::vec::Vectorized<float>::size());
 }
 
+inline at::vec::Vectorized<float> load_fp16_as_float(const half* fp16_buf) {
+  at::vec::Vectorized<float> res_vec(0);
+  at::vec::load_fp32_from_fp16(fp16_buf, res_vec);
+  return res_vec;
+}
+
+inline void store_float_as_fp16(
+    half* fp16_buf,
+    at::vec::Vectorized<float> src_buf) {
+  auto res = at::vec::convert_float_half(src_buf, src_buf);
+  res.store(fp16_buf, at::vec::Vectorized<float>::size());
+}
+
 template <typename SRC>
 inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
   assert(
