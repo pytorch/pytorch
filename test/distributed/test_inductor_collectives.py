@@ -434,7 +434,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("triton_poi__0.run(arg0_1, buf0, buf3") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
-            .check("buf2_work = dist.all_reduce(buf1") \
+            .check("buf2_work = dist.all_gather_coalesced(buf1") \
             .check("_register_tensor_work(buf1, buf2_work, 1)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \

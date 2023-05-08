@@ -4258,6 +4258,11 @@ class CollectiveKernel(ExternKernel):
 
 
 class InPlaceCollectiveKernel(CollectiveKernel):
+    """
+    InPlaceCollectiveKernel are those with in-out arguments such as all_reduce.
+    Extend this kernel if your collective needs to modify its inputs in-place.
+    """
+
     def __init__(self, layout, inputs, constant_args):
         super().__init__(layout, inputs, constant_args)
 
@@ -4275,6 +4280,11 @@ class InPlaceCollectiveKernel(CollectiveKernel):
 
 
 class OutOfPlaceCollectiveKernel(CollectiveKernel):
+    """
+    OutOfPlaceCollectiveKernel are those that allocate their
+    outputs and leave their inputs inplace, such as all_gather.
+    """
+
     def __init__(self, layout, inputs, constant_args):
         super().__init__(layout, self.unwrap_storage(inputs), constant_args)
 
