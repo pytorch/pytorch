@@ -1,6 +1,7 @@
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
+
 def _has_triton():
     if not torch.cuda.is_available():
         return False
@@ -10,6 +11,7 @@ def _has_triton():
         return triton is not None and get_device_capability() >= (7, 0)
     except ImportError:
         return False
+
 
 def compressed_indices_to_plain_indices(cidx, pidx):
     nnz = pidx.shape[-1]
@@ -33,11 +35,80 @@ def compressed_indices_to_plain_indices(cidx, pidx):
     return idx_linear.reshape(batch_numel, -1).sub_(cdim * batch_offset)
 
 
+def make_triton_contiguous(t):
+    # Triton does not distinguish between row- and col-majorness
+    # and will be fast as long as there is a contiguous dimension.
+    if not (t.is_contiguous() or t.transpose(-2, -1).is_contiguous()):
+        return t.contiguous()
+    else:
+        return t
+
+
+def broadcast_batch_dims(*tensors):
+    return torch.broadcast_shapes(*(t.shape[:-2] for t in tensors))
+
+
 def slicer(dim, slice_range, *tensors):
     for t in tensors:
         slices = [slice(None)] * t.dim()
         slices[dim] = slice_range
         yield t[slices]
+
+def multidim_slicer(dims, slices, *tensors):
+    for t in tensors:
+        s = [slice(None)] * t.dim()
+        for d, d_slice in zip(dims, slices):
+            if d is not None:
+                s[d] = d_slice
+        yield t[s]
+
+def ptr_stride_extractor(*tensors):
+    for t in tensors:
+        yield t
+        yield from t.stride()
+
+def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
+    assert 0 <= len(full_grid) <= 3
+    assert 0 <= len(grid_blocks) <= 3
+
+    import itertools
+
+    def generate_grid_points():
+        for fg, mg in zip(full_grid, grid_blocks):
+            yield range(0, fg, mg)
+
+    def generate_sliced_tensors(slices):
+        for t, t_dims in tensor_dims_map.items():
+            yield next(multidim_slicer(t_dims, slices, t))
+
+    for grid_point in itertools.product(*generate_grid_points()):
+        grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)]
+        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
+        # grid_points are iterated in a "contiguous" order, i.e.
+        # left dimensions traversed slower than right dimensions.
+        # This order is reversed for CUDA grids.
+        yield grid[::-1], *generate_sliced_tensors(slices)
+
+def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
+    # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
+    cuda_max_grid = (2147483647, 65535, 65535)[::-1]
+    if grid_blocks is None:
+        grid_blocks = cuda_max_grid
+    else:
+
+        def valid_grid_dim(g, mg):
+            if g is None:
+                return mg
+            else:
+                # grid must be at least 1 and no greater than mg
+                return max(1, min(g, mg))
+
+        grid_blocks = tuple(
+            valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
+        )  # type: ignore[assignment]
+
+    for grid, *sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
+        kernel(grid, *sliced_tensors)
 
 if _has_triton():
     import triton
@@ -288,94 +359,67 @@ if _has_triton():
 
         n_nnz_block_rows = row_idx.size(-1)
         n_block_cols = dense.size(-3)
-        max_n_nnz_block_rows, max_n_block_cols = max_grid[:2]
 
-        for c_start in range(0, n_block_cols, max_n_block_cols):
-            c_dense, c_output = slicer(
-                -3, slice(c_start, c_start + max_n_block_cols), dense, output
+        full_grid = (n_block_cols, n_nnz_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2]))
+        else:
+            grid_blocks = None
+        tensor_dims_map = {
+            batch_idx: (None, 0),
+            row_idx: (None, 0),
+            nnz_per_row: (None, 0),
+            nnz_per_row_cumsum: (None, 0),
+            col_indices: (None, None),
+            values: (None, None),
+            dense: (-3, None),
+            output: (-3, None),
+        }
+
+        def kernel(grid, *sliced_tensors):
+            _bsr_strided_sparse_rowspace_kernel[grid](
+                *blocksize,
+                # First 4 tensors are contiguous, skip strides.
+                *sliced_tensors[:4],
+                *ptr_stride_extractor(*sliced_tensors[4:]),
+                GROUP_SIZE_ROW=4,
+                num_stages=1,
+                num_warps=4
             )
-            c_grid = min(n_block_cols - c_start, max_n_block_cols)
 
-            for r_start in range(0, n_nnz_block_rows, max_n_nnz_block_rows):
-                r_batch_idx, r_row_idx, r_nnz_per_row, r_nnz_per_row_cumsum = slicer(
-                    0,
-                    slice(r_start, r_start + max_n_nnz_block_rows),
-                    batch_idx,
-                    row_idx,
-                    nnz_per_row,
-                    nnz_per_row_cumsum,
-                )
-                r_grid = min(n_nnz_block_rows - r_start, max_n_nnz_block_rows)
-
-                _bsr_strided_sparse_rowspace_kernel[(r_grid, c_grid)](
-                    *blocksize,
-                    r_batch_idx,
-                    r_row_idx,
-                    r_nnz_per_row,
-                    r_nnz_per_row_cumsum,
-                    col_indices,
-                    *col_indices.stride(),
-                    values,
-                    *values.stride(),
-                    c_dense,
-                    *c_dense.stride(),
-                    c_output,
-                    *c_output.stride(),
-                    GROUP_SIZE_ROW=4,
-                    num_stages=1,
-                    num_warps=4,
-                )
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
     def _run_dense_rowspace_kernel(
         blocksize, values, crow_indices, col_indices, dense, output, max_grid
     ):
-        # Launch kernel
         n_batches = dense.size(0)
         n_block_rows = crow_indices.size(-1) - 1
         n_block_cols = dense.size(-3)
-        max_n_block_rows, max_n_block_cols, max_n_batches = max_grid
 
-        for b_start in range(0, n_batches, max_n_batches):
-            b_v, b_crow, b_col, b_d, b_o = slicer(
-                0,
-                slice(b_start, b_start + max_n_batches),
-                values,
-                crow_indices,
-                col_indices,
-                dense,
-                output,
+        full_grid = (n_batches, n_block_cols, n_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+        else:
+            grid_blocks = None
+        tensor_dims_map = {
+            values: (0, None, None),
+            crow_indices: (0, None, -1),
+            col_indices: (0, None, None),
+            dense: (0, -3, None),
+            output: (0, -3, -4)
+        }
+
+        def kernel(grid, *sliced_tensors):
+            _bsr_strided_dense_rowspace_kernel[grid](
+                *blocksize,
+                *ptr_stride_extractor(*sliced_tensors),
+                GROUP_SIZE_ROW=4,
+                num_stages=1,
+                num_warps=4
             )
-            b_grid = min(n_batches - b_start, max_n_batches)
 
-            for c_start in range(0, n_block_cols, max_n_block_cols):
-                bc_d, bc_o = slicer(
-                    -3, slice(c_start, c_start + max_n_block_cols), b_d, b_o
-                )
-                c_grid = min(n_block_cols - c_start, max_n_block_cols)
-
-                for r_start in range(0, n_block_rows, max_n_block_rows):
-                    r_slice = slice(r_start, r_start + max_n_block_rows)
-                    br_crow = next(slicer(-1, r_slice, b_crow))
-                    brc_o = next(slicer(-4, r_slice, bc_o))
-                    r_grid = min(n_block_rows - r_start, max_n_block_rows)
-
-                    _bsr_strided_dense_rowspace_kernel[(r_grid, c_grid, b_grid)](
-                        *blocksize,
-                        b_v,
-                        *b_v.stride(),
-                        br_crow,
-                        *br_crow.stride(),
-                        b_col,
-                        *b_col.stride(),
-                        bc_d,
-                        *bc_d.stride(),
-                        brc_o,
-                        *brc_o.stride(),
-                        GROUP_SIZE_ROW=4,
-                        num_stages=1,
-                        num_warps=4,
-                    )
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
     def bsr_dense_mm(
@@ -432,10 +476,7 @@ if _has_triton():
                 f"blocksize[0] == {row_block}.",
             )
 
-        # Required to undo the fake batch dimension insertion.
-        original_batch_dims_broadcasted = torch.broadcast_shapes(
-            bsr.shape[:-2], dense.shape[:-2]
-        )
+        original_batch_dims_broadcasted = broadcast_batch_dims(bsr, dense)
 
         if out is not None and not skip_checks:
             expected_out_shape = original_batch_dims_broadcasted + (m, n)
@@ -466,24 +507,10 @@ if _has_triton():
             is_sparse_rowspace_mode = False
 
         # Introduce fake batch dimension if not present for convenience.
-        def unsqueeze_batch_dim(t, n_non_batch_dims):
-            if t.dim() > n_non_batch_dims:
-                return t
-            else:
-                return t.unsqueeze(0)
-
-        def make_triton_contiguous(t):
-            # Triton does not distinguish between row- and col-majorness
-            # and will be fast as long as there is a contiguous dimension.
-            if not (t.is_contiguous() or t.transpose(-2, -1).is_contiguous()):
-                return t.contiguous()
-            else:
-                return t
-
-        crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
-        col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
-        values = make_triton_contiguous(unsqueeze_batch_dim(bsr.values(), 3))
-        dense = make_triton_contiguous(unsqueeze_batch_dim(dense, 2))
+        crow_indices = bsr.crow_indices().unsqueeze(0)
+        col_indices = bsr.col_indices().unsqueeze(0)
+        values = make_triton_contiguous(bsr.values().unsqueeze(0))
+        dense = make_triton_contiguous(dense.unsqueeze(0))
         nnz = values.shape[-3]
         blocksize = values.shape[-2:]
 
@@ -554,23 +581,6 @@ if _has_triton():
             kernel = _run_sparse_rowspace_kernel
         else:
             kernel = _run_dense_rowspace_kernel
-
-        # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
-        cuda_max_grid = (2147483647, 65535, 65535)
-        if max_grid is None:
-            max_grid = cuda_max_grid
-        else:
-
-            def valid_grid_dim(g, mg):
-                if g is None:
-                    return mg
-                else:
-                    # grid must be at least 1 and no greater than mg
-                    return max(1, min(g, mg))
-
-            max_grid = tuple(
-                valid_grid_dim(g, mg) for g, mg in zip(max_grid, cuda_max_grid)
-            )  # type: ignore[assignment]
 
         kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
