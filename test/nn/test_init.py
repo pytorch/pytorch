@@ -126,7 +126,7 @@ class TestNNInit(TestCase):
         gen.manual_seed(42)
         input_tensor = torch.empty(5)
         init.trunc_normal_(input_tensor, generator=gen)
-        expected = torch.tensor([ 1.1025,  1.2598, -0.2840,  1.5415, -0.2652])
+        expected = torch.tensor([1.1025,  1.2598, -0.2840,  1.5415, -0.2652])
 
         self.assertEqual(input_tensor, expected)
 
