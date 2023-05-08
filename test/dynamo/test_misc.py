@@ -5305,7 +5305,7 @@ def fn():
             "self.g(a, b).k + (1 - self.g(a, b).k) <= x[0].a + self.g(a, b).k",
         ]
 
-        pycode = build_guard_function(exprs, "")
+        _, pycode = build_guard_function(exprs, "")
         expected = """\
 def ___make_guard_fn():
     def guard(L):
