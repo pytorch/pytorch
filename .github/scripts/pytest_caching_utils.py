@@ -66,7 +66,10 @@ def upload_pytest_cache(
     bucket: str = BUCKET,
 ) -> None:
     """
-    Uploads the pytest cache to S3
+    Uploads the pytest cache to S3, merging it with any previous caches from previous runs of the same job.
+    In particular, this keeps all the failed tests across all runs of this job in the cache, so that
+    future jobs that download this cache will prioritize running tests that have failed in the past.
+
     Args:
         pr_identifier: A unique, human readable identifier for the PR
         job: The name of the job that is uploading the cache
@@ -112,6 +115,14 @@ def download_pytest_cache(
     temp_dir: Path,
     bucket: str = BUCKET,
 ) -> None:
+    """
+    Downloads the pytest cache from S3. The goal is to detect any tests that have failed in the past
+    and run them first, so that the dev can get faster feedback on them.
+
+    We merge the cache from all shards since tests can get shuffled around from one shard to another
+    (based on when we last updated our stats on how long each test takes to run). This ensures that
+    even if a test moves to a different shard, that shard will know to run it first if had failed previously.
+    """
     if not bucket:
         bucket = BUCKET
 
