@@ -2762,6 +2762,12 @@ def sample_inputs_histogramdd(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_tensor, bins_tensor,
                           weight=weight_tensor, density=density)
 
+def error_inputs_histogramdd(opinfo, device, **kwargs):
+    invalid_bins = [1, 1, 1, 1, 1]
+    make_arg = partial(make_tensor, dtype=torch.float, device=device, requires_grad=False)
+    msg = "histogramdd: The size of bins must be equal to the innermost dimension of the input."
+    yield ErrorInput(SampleInput(make_arg(5, 6), invalid_bins), error_regex=msg)
+
 def sample_inputs_histc(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -16045,8 +16051,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=_dispatch_dtypes(),  # histogramdd is only implemented on CPU
            sample_inputs_func=sample_inputs_histogramdd,
+           error_inputs_func=error_inputs_histogramdd,
            supports_autograd=False,
            skips=(
+               # Not implemented on CUDA
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='cuda'),
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507

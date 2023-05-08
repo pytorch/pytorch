@@ -138,6 +138,41 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_cudagraph_profiling_workaround(self):
+        import subprocess
+
+        # repro taken from #75504
+        # Launch in a separate process to catch hanging/illegal memory errors
+        # and to make sure CUPTI isn't already initialized.
+        p = subprocess.check_call([sys.executable, "-c", """
+import os
+import torch
+from torch.profiler import ProfilerActivity, profile
+
+def add_one(in_: torch.Tensor):
+    return in_ + 1
+
+sample_arg = torch.zeros(10, device="cuda").requires_grad_(True)
+
+# add this before cuda graphs are created
+torch.profiler._utils._init_for_cuda_graphs()
+
+add_one_graphed = torch.cuda.graphs.make_graphed_callables(add_one, sample_args=(sample_arg,))
+zeros = torch.zeros(10, device="cuda")
+out = add_one_graphed(zeros)
+assert out[0] == 1
+
+with profile(activities=[ProfilerActivity.CPU]):
+    add_one_graphed(zeros)
+
+with profile(activities=[ProfilerActivity.CUDA]):
+    add_one_graphed(zeros)
+"""], universal_newlines=True, timeout=60)
+
+        # ^ this will throw an exception if the script fails.
+
+
 @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
 
