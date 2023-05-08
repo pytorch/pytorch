@@ -192,7 +192,7 @@ struct AddGenericMetadata : public MetadataBase {
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
       auto& event_names = config_->experimental_config.performance_events;
-      for (auto i = 0; i < op_event.perf_event_counters_->size(); ++i) {
+      for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
         addMetadata(
             event_names[i],
             std::to_string((*op_event.perf_event_counters_)[i]));
@@ -567,7 +567,7 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU()),
+      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
       activities,
       config.experimental_config);
 

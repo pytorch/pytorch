@@ -146,7 +146,7 @@ ExprHandle abs(const ExprHandle& v) {
 // The default tanh is quite slow, use the Eigen version from here:
 // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
 ExprHandle fast_tanh(const ExprHandle& v) {
-  // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
+  // TODO: use a dedicated bind-var to make sure v is not evaluated multiple
   // times. Clamp the input expression to [-9, 9]
   ExprHandle plus_9 = FloatImm::make(9.0f);
   ExprHandle minus_9 = FloatImm::make(-9.0f);
@@ -162,7 +162,7 @@ ExprHandle fast_tanh(const ExprHandle& v) {
   ExprHandle alpha_11 = FloatImm::make(2.00018790482477e-13f);
   ExprHandle alpha_13 = FloatImm::make(-2.76076847742355e-16f);
 
-  // The coeffecients for the denominator
+  // The coefficients for the denominator
   ExprHandle beta_0 = FloatImm::make(4.89352518554385e-03f);
   ExprHandle beta_2 = FloatImm::make(2.26843463243900e-03f);
   ExprHandle beta_4 = FloatImm::make(1.18534705686654e-04f);

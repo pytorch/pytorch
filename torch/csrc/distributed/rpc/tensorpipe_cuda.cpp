@@ -83,7 +83,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
     c10::cuda::CUDACachingAllocator::recordStream(storage.data_ptr(), stream);
 
     tensorpipe::CudaBuffer buffer;
-    buffer.ptr = storage.data<char>();
+    buffer.ptr = static_cast<char*>(storage.mutable_data());
     buffer.stream = stream.stream();
 
     tensorpipe::Message::Tensor tensor;

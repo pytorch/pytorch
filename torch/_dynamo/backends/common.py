@@ -1,5 +1,7 @@
+import contextlib
 import functools
 import logging
+from unittest.mock import patch
 
 import torch
 from torch._dynamo import eval_frame
@@ -13,15 +15,9 @@ log = logging.getLogger(__name__)
 
 def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
-        import functorch.compile
-
         # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
-
-        # TODO: stop monkeypatching here (without even cleaning up, UGH!)
-        functorch.compile.config.use_functionalize = True
-        functorch.compile.config.use_fake_tensor = True
 
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
@@ -39,12 +35,24 @@ def aot_autograd(**kwargs):
 
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
+        kwargs["inference_compiler"] = (
+            kwargs.get("inference_compiler") or kwargs["fw_compiler"]
+        )
+
+        from functorch.compile import nop
 
         from torch._inductor.debug import enable_aot_logging
 
+        # debug asserts slow down compile time noticeably,
+        # So only default them on when the aot_eager backend is used.
+        if kwargs.get("fw_compiler", None) == nop:
+            patch_config = patch("functorch.compile.config.debug_assert", True)
+        else:
+            patch_config = contextlib.nullcontext()
+
         try:
             # NB: NOT cloned!
-            with enable_aot_logging():
+            with enable_aot_logging(), patch_config:
                 cg = aot_module_simplified(gm, example_inputs, **kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return eval_frame.disable(cg)
@@ -85,8 +93,18 @@ def fake_tensor_unsupported(fn):
         if not isinstance(x, FakeTensor):
             return x
         if x._has_symbolic_sizes_strides:
-            size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
-            stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+            size = [
+                s.node.shape_env.size_hint(s.node.expr)
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in x.size()
+            ]
+            stride = [
+                s.node.shape_env.size_hint(s.node.expr)
+                if isinstance(s, torch.SymInt)
+                else s
+                for s in x.stride()
+            ]
         else:
             size = x.size()
             stride = x.stride()

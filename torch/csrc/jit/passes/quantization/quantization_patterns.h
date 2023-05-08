@@ -789,7 +789,7 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
          %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
          return (%r_quant) )";
 
-  // ============= General Ops that inherit quantization paramters from input
+  // ============= General Ops that inherit quantization parameters from input
   // tensor =============
   auto avg_pool1d = getInputTensorQParamOpFusionInfo(
       "aten::avg_pool1d",

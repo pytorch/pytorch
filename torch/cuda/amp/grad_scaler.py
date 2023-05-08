@@ -145,8 +145,8 @@ class GradScaler:
 
     def _lazy_init_scale_growth_tracker(self, dev):
         assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
-        self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=dev)
-        self._growth_tracker = torch.full((1,), self._init_growth_tracker, dtype=torch.int32, device=dev)
+        self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
+        self._growth_tracker = torch.full((), self._init_growth_tracker, dtype=torch.int32, device=dev)
 
     def scale(self, outputs):
         """
@@ -279,7 +279,7 @@ class GradScaler:
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         assert self._scale is not None
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads_(optimizer, inv_scale, found_inf, False)
         optimizer_state["stage"] = OptState.UNSCALED
@@ -336,6 +336,8 @@ class GradScaler:
             # and `found_inf` to the passed optimizer so that the optimizer can utilize those
             # to skip the parameter updates or unscale gradients before updating parameters in
             # the fused kernel, e.g. `FusedAdamMathFunctor`.
+            # In this behavior, `GradScaler._check_inf_per_device` is called if `OptState.READY`,
+            # while the method is expected to be called by users side, i.e. their optimizers.
             kwargs_ = kwargs
             has_grad_scaler_kwarg = "grad_scaler" in inspect.signature(optimizer.step).parameters
             if has_grad_scaler_kwarg:
@@ -346,11 +348,13 @@ class GradScaler:
                     FutureWarning)
                 kwargs_.update({"grad_scaler": self})
             else:
+                if optimizer_state["stage"] is OptState.READY:
+                    self._check_inf_per_device(optimizer)
                 scaler = self._get_scale_async()
                 found_inf = cast(
                     torch.Tensor,
                     sum([
-                        t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
+                        t.to(scaler.device, non_blocking=True) for t in optimizer_state["found_inf_per_device"].values()
                     ])
                 )
                 optimizer.grad_scale = None if optimizer_state["stage"] == OptState.UNSCALED else scaler
@@ -564,8 +568,8 @@ class GradScaler:
     def _check_inf_per_device(self, optimizer):
         _scale, _ = self._check_scale_growth_tracker("_check_inf_per_device")
 
-        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=_scale.device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=_scale.device)
+        dummy_inv_scale = torch.full((), 1.0, dtype=torch.float32, device=_scale.device)
+        found_inf = torch.full((), 0.0, dtype=torch.float32, device=_scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
             self._unscale_grads_(optimizer, dummy_inv_scale, found_inf, True)

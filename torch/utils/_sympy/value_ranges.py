@@ -12,6 +12,9 @@ log = logging.getLogger(__name__)
 
 __all__ = ["ValueRanges", "ValueRangeAnalysis"]
 
+class ValueRangeError(RuntimeError):
+    pass
+
 
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
@@ -67,7 +70,8 @@ class ValueRanges:
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
-        assert sympy_generic_le(lower, upper)
+        if not sympy_generic_le(lower, upper):
+            raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -76,6 +80,10 @@ class ValueRanges:
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+
+    # Intersection
+    def __and__(self, other):
+        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
@@ -265,7 +273,7 @@ class ValueRangeAnalysis:
                 return ValueRanges(0.0, 1.0)
             else:
                 return ValueRanges(0, 1)
-        return ValueRanges.wrap(x)
+        return x
 
     @staticmethod
     def constant(value, dtype):
@@ -299,17 +307,42 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def truediv(a, b):
+        a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if 0 in b:
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
             return ValueRanges.unknown()
         else:
-            return ValueRangeAnalysis.mul(a, ValueRanges(1 / b.upper, 1 / b.lower))
+            return ValueRanges.coordinatewise_monotone_map(a, b, operator.truediv)
+
+    @staticmethod
+    def floordiv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
+            return ValueRanges.unknown()
+        else:
+            return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
+
+    @staticmethod
+    def truncdiv(a, b):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+        if 0 in b or ((-sympy.oo in a or sympy.oo in a) and (-sympy.oo in b or sympy.oo in b)):
+            return ValueRanges.unknown()
+        else:
+            # Casting to integer does truncation
+            def f(a, b):
+                result = a / b
+                # This won't work for sympy.Expr, so it'll need a workaround when
+                # dealing with dynamic shapes
+                if result.is_finite:
+                    result = sympy.Integer(result)
+                return result
+            return ValueRanges.coordinatewise_monotone_map(a, b, f)
 
     @staticmethod
     def div(a, b):
-        # We think of this as floor(a / b)
-        out = ValueRangeAnalysis.truediv(a, b)
-        return ValueRangeAnalysis.floor(out)
+        return ValueRangeAnalysis.truediv(a, b)
 
     @staticmethod
     def add(a, b):
@@ -337,12 +370,15 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def log(x):
+        x = ValueRanges.wrap(x)
         if x.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.log)
 
     @staticmethod
     def mod(x, y):
+        x = ValueRanges.wrap(x)
+        y = ValueRanges.wrap(y)
         if x.is_singleton() and y.is_singleton() and y.lower != 0:
             return ValueRanges.wrap(x.lower % y.lower)
         if y.lower <= 0:
@@ -351,6 +387,7 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def sqrt(x):
+        x = ValueRanges.wrap(x)
         if x.lower < 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.sqrt)
@@ -381,11 +418,31 @@ class ValueRangeAnalysis:
 
     @staticmethod
     def minimum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, min)
+        return ValueRangeAnalysis.min_or_max(a, b, sympy.Min)
 
     @staticmethod
     def maximum(a, b):
-        return ValueRanges.coordinatewise_increasing_map(a, b, max)
+        return ValueRangeAnalysis.min_or_max(a, b, sympy.Max)
+
+    @staticmethod
+    def min_or_max(a, b, fn):
+        a = ValueRanges.wrap(a)
+        b = ValueRanges.wrap(b)
+
+        # Performs upcasting first
+        def fn_(x, y):
+            # Poorman's version of upcasting in Sympy
+            # This won't do for sympy.Expr as the casting does nothing for those
+            # Inf is not a float...
+            if x.is_Float or not x.is_finite or y.is_Float or not y.is_finite:
+                result_type = sympy.Float
+            else:
+                assert x.is_Integer
+                assert y.is_Integer
+                result_type = sympy.Integer
+            return fn(result_type(x), result_type(y))
+
+        return ValueRanges.coordinatewise_increasing_map(a, b, fn_)
 
     @staticmethod
     def where(a, b, c):
@@ -406,21 +463,9 @@ class ValueRangeAnalysis:
         )
 
     @staticmethod
-    def floor_ceil(x, fn_int):
-        def is_integer(val):
-            return isinstance(val, int) or (
-                hasattr(val, "is_integer") and val.is_integer
-            )
-
-        if is_integer(x):
-            fn = fn_int
-        else:
-
-            def fn(x):
-                return sympy.Float(fn_int(x))
-
+    def floor_ceil(x, fn):
         return ValueRanges.increasing_map(x, fn)
 
     def __getattr__(self, name):
-        log.warning(f"unhandled ValueRange op {name}")
+        log.warning("unhandled ValueRange op %s", name)
         return self.default_handler

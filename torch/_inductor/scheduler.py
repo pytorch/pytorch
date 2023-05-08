@@ -131,6 +131,18 @@ class BaseSchedulerNode:
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
 
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        used_names = set()
+        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
+            used_names.add(dep.name)
+            if V.graph.name_to_buffer.get(dep.name):
+                layout = V.graph.name_to_buffer[dep.name].get_layout()
+                # needed to avoid deallocating aliased buffer
+                # if there are still uses of aliases ahead
+                if isinstance(layout, ir.AliasedLayout):
+                    used_names.add(layout.view.data.get_name())
+        return used_names
+
     def prune_deps(self):
         self.unmet_dependencies = {
             dep
@@ -213,7 +225,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, ir.AllReduce)
+                    and isinstance(self.node, (ir.AllReduce, ir.ForceInPlace))
                 )
             )
             and config.inplace_buffers
@@ -333,7 +345,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # (would this have been fixed if I tracked mutations properly above?)
             return False
 
-        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+        if not isinstance(
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.ForceInPlace)
+        ):
             # TODO make this a property of the IR
             return False
 
@@ -517,6 +531,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
+    @cache_on_self
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        return functools.reduce(
+            set.union, (x.used_or_aliased_buffer_names() for x in self.snodes)
+        )
+
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes
 
@@ -673,6 +693,10 @@ class Scheduler:
         self.current_device = None
         self.buffer_names_to_free = set()
         self.buffer_names_no_longer_needed = set()
+
+        # fx graph node to the position it appears in the graph
+        # for debug attribution
+        self.origin_to_index = {}
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1073,7 +1097,7 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            used_buffers = node.used_buffer_names()
+            used_buffers = node.used_or_aliased_buffer_names()
             used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
             node.last_usage = used_buffers - future_used_buffers
             future_used_buffers.update(used_buffers)
@@ -1140,11 +1164,13 @@ class Scheduler:
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
+        V.graph.add_device_idx(device.index)
+
         if device.type == "cpu":
             from .codegen.cpp import CppScheduling
 
             return CppScheduling(self)
-        else:
+        elif device.type == "cuda":
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
                 if device_props.major < 7:
@@ -1158,15 +1184,29 @@ class Scheduler:
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
+        else:
+            raise RuntimeError(f"Unsupported device type: {device.type}")
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    def enter_context(self, node):
+        def get_order(n):
+            if n not in self.origin_to_index:
+                self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
+            return self.origin_to_index[n]
+
+        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        if origins:
+            _, last = max(origins)
+            V.graph.wrapper_code.enter_context(last)
+
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):

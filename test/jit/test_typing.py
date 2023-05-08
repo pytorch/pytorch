@@ -7,7 +7,7 @@ import torch
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import IS_WINDOWS
 from collections import namedtuple
-from typing import List, Tuple, Optional, Dict, NamedTuple
+from typing import List, Tuple, Dict, NamedTuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -89,7 +89,7 @@ class TestTyping(JitTestCase):
         def fn():
             l1 = [1, 2, "foo", 3]
             l2 = ["foo", "bar", "baz", "qux"]
-            d: Dict[int, str] = {k : v for k, v in zip(l1, l2)}
+            d: Dict[int, str] = dict(zip(l1, l2))
             return d
 
         with self.assertRaisesRegex(RuntimeError, "Dicts may only "
@@ -102,7 +102,7 @@ class TestTyping(JitTestCase):
         def fn():
             l1 = ["foo", "bar", "baz", "qux"]
             l2 = [1, 2, "foo", 3]
-            d: Dict[str, int] = {k : v for k, v in zip(l1, l2)}
+            d: Dict[str, int] = dict(zip(l1, l2))
             return d
 
         with self.assertRaisesRegex(RuntimeError, "Dict type annotation"

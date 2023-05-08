@@ -80,11 +80,7 @@ def check_labels(
                 )
             )
 
-        if (
-            label.startswith("module:")
-            or label.startswith("oncall:")
-            or label in ACCEPTABLE_OWNER_LABELS
-        ):
+        if label.startswith(("module:", "oncall:")) or label in ACCEPTABLE_OWNER_LABELS:
             continue
 
         lint_messages.append(

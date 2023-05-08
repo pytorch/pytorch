@@ -347,14 +347,7 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-
-#if defined(USE_CUDA)
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
-  }
-#else
-  set_device(device);
-#endif
+  worker_device = device;
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -525,6 +518,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // execution.
         continue;
       }
+
+      set_device(worker_device);
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         // Set the ThreadLocalState before calling the function.
@@ -779,7 +774,7 @@ void set_device(int device) {
   // as in some settings we compile with cuda, but
   // have lazy stubs for CUDA functionality (so actually
   // attempting to setup a guard(CPU_DEVICE) will cause an
-  // error, because it will still query cudaGetDevice).
+  // error, because it will still query GetDevice).
   //
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.

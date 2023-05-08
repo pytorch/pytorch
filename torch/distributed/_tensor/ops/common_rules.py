@@ -2,11 +2,11 @@
 from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.fx.passes.shape_prop import TensorMetadata
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -121,7 +121,7 @@ def einop_rule(
             if sum_dim not in pending_sums_counter:
                 seen_shardings[sum_dim] = "+"
             # update pending sum counter for pending sum mesh
-            # dimension with the occurance from each input
+            # dimension with the occurrence from each input
             pending_sums_counter[sum_dim] = pending_sums_counter.get(sum_dim, 0) + 1
 
         for idx, (dim, mesh_dim) in enumerate(zip(input_dim, input_spec.dim_map)):
@@ -185,9 +185,7 @@ def einop_rule(
                         assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
                         local_shape = compute_local_shape(
-                            global_shape,
-                            input_spec.mesh,
-                            input_spec.placements
+                            global_shape, input_spec.mesh, input_spec.placements
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 costs.append(cost)

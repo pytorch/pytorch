@@ -395,7 +395,7 @@ FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(
     }
   }
   // should never get here
-  TORCH_WARN("Stratgy changed mid-invocation, NYI");
+  TORCH_WARN("Strategy changed mid-invocation, NYI");
   return FusionBehavior::STATIC;
 }
 

@@ -1,8 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <ATen/mkl/Sparse.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
+
+// Required for checking whether Triton kernels are available
+#include <ATen/core/dispatch/Dispatcher.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,10 +18,12 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
+#if !AT_USE_MKL_SPARSE()
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
+#endif
+
+namespace at::native::sparse::impl {
 
 Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result) {
   const auto compressed_layout = compressed.layout();
@@ -69,6 +75,39 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   if (compressed_layout == kSparseBsr) {
     blocksize = {values.size(-2), values.size(-1)};
   }
+
+// No stable support for ROCM in Triton yet.
+#ifndef USE_ROCM
+  // Triton works only with blocksizes which are powers of 2.
+  const auto is_power_of_2 = [](int64_t v) -> bool {
+    return !(v & (v - 1));
+  };
+
+  // Dtype and blocksize checks for potential Triton usage.
+  if ((strided.scalar_type() == ScalarType::Half
+    || strided.scalar_type() == ScalarType::BFloat16)
+   && is_power_of_2(blocksize[0]) && is_power_of_2(blocksize[1])
+   && (blocksize[0] >= 16) && (blocksize[1] >= 16)
+   // lhs is retiled to (b0, b1) while rhs is to (b1, b0),
+   // so the result is tiled to (b0, b0) and we need to make
+   // sure that dense.size(-1) is divisible by b0.
+   && n % blocksize[0] == 0) {
+    try {
+      const auto triton_kernel = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("triton::_triton_bsr_dense_mm_out", "")
+        .typed<Tensor&(const Tensor&, const Tensor&, Tensor&)>();
+      // Call Triton only if dispatch key was overwritten.
+      // This is not strictly necessary since the definition is done in Python,
+      // but we leave it here for extra safety.
+      if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+        return triton_kernel.call(compressed, strided, result);
+      }
+    } catch (const std::exception& e) {
+      // The schema is not defined and/or the key is not overwritten,
+      // so skip and execute the code below.
+    }
+  }
+#endif
 
   // (..., r, c) -> (..., r / b0, c / b1, b0, b1)
   // NOTE: this function ALWAYS creates a view upon successful execution.
@@ -212,6 +251,98 @@ Tensor& _compressed_row_strided_addmm_out(
 }
 
 namespace cpu {
+#if !AT_USE_MKL_SPARSE()
+namespace {
+template<typename scalar_t, typename idx_t>
+void addmv_sparse_csr(
+    const scalar_t* mat_values,
+    const idx_t* crow_index,
+    const idx_t* col_index,
+    const int64_t mat_rows,
+    const scalar_t* vec,
+    const size_t vec_stride,
+    const scalar_t alpha,
+    const scalar_t beta,
+    scalar_t* result,
+    const size_t result_stride) {
+  at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+    for(const auto row: c10::irange(rstart, rend)) {
+      scalar_t acc(0);
+      for(const auto idx: c10::irange(crow_index[row], crow_index[row + 1])) {
+        acc += mat_values[idx] * vec[col_index[idx] * vec_stride];
+      }
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
+    }
+  });
+}
+
+template<typename scalar_t, typename idx_t>
+void addmv_sparse_bsr(
+    const scalar_t* mat_values,
+    const idx_t* crow_index,
+    const idx_t* col_index,
+    const int64_t mat_rows,
+    const int64_t blocksize_rows,
+    const int64_t blocksize_cols,
+    const scalar_t* vec,
+    const size_t vec_stride,
+    const scalar_t alpha,
+    const scalar_t beta,
+    scalar_t* result,
+    const size_t result_stride) {
+  at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+    for(const auto row: c10::irange(rstart, rend)) {
+      const auto block_row = row / blocksize_rows;
+      const auto block_row_offset = row % blocksize_rows;
+      scalar_t acc(0);
+      for(const auto block_idx: c10::irange(crow_index[block_row], crow_index[block_row + 1])) {
+        const auto block_offs = (block_idx * blocksize_rows + block_row_offset) * blocksize_cols;
+        const auto vec_offs = col_index[block_idx]* blocksize_cols;
+        for(const auto idx: c10::irange(blocksize_cols)) {
+          acc += mat_values[block_offs + idx] * vec[(vec_offs + idx) * vec_stride];
+        }
+      }
+      result[row * result_stride] = acc * alpha + result[row * result_stride] * beta;
+    }
+  });
+}
+
+template<typename scalar_t, typename idx_t>
+void addmv_out_sparse_csr(
+    const Tensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  auto cont_values = mat.values().contiguous();
+  if (mat.layout() == kSparseBsr) {
+    addmv_sparse_bsr(cont_values.data_ptr<scalar_t>(),
+        mat.crow_indices().data_ptr<idx_t>(),
+        mat.col_indices().data_ptr<idx_t>(),
+        mat.size(0),
+        mat.values().size(1),
+        mat.values().size(2),
+        vec.data_ptr<scalar_t>(),
+        vec.stride(0),
+        alpha.to<scalar_t>(),
+        beta.to<scalar_t>(),
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
+  } else {
+    addmv_sparse_csr(cont_values.data_ptr<scalar_t>(),
+        mat.crow_indices().data_ptr<idx_t>(),
+        mat.col_indices().data_ptr<idx_t>(),
+        mat.size(0),
+        vec.data_ptr<scalar_t>(),
+        vec.stride(0),
+        alpha.to<scalar_t>(),
+        beta.to<scalar_t>(),
+        result.data_ptr<scalar_t>(),
+        result.stride(0));
+  }
+}
+} // anonymous namespace
+#endif // !AT_USE_MKL_SPARSE()
 
 /*
   Computes a sparse matrix-dense vector product defined as
@@ -229,11 +360,16 @@ void addmv_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_MKL_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling addmv on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(mat.layout() == kSparseBsr || mat.layout() == kSparseCsr, "Unexpected layout", mat.layout());
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
+        if (mat.crow_indices().scalar_type() == kLong) {
+          addmv_out_sparse_csr<scalar_t, int64_t>(mat, vec, beta, alpha, result);
+        } else {
+          addmv_out_sparse_csr<scalar_t, int32_t>(mat, vec, beta, alpha, result);
+        }
+      });
 #else
   sparse::impl::mkl::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
 #endif
@@ -283,7 +419,4 @@ void triangular_solve_out_sparse_csr(
 }
 
 } // namespace cpu
-} // namespace impl
-} // namespace sparse
-} // namespace native
-} // namespace at
+} // namespace at::native::sparse::impl
