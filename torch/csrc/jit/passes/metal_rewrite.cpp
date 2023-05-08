@@ -240,7 +240,7 @@ void metalFusePrePackedConvWithClamp(script::Module& module) {
   fuseHardtanhWithPackedOps(graph);
 }
 
-void metalInsertCopyOps(script::Module& module) {
+static void metalInsertCopyOps(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   auto&& outputs = graph->outputs();
   for (const auto i : c10::irange(outputs.size())) {
@@ -259,12 +259,12 @@ void metalInsertCopyOps(script::Module& module) {
   rewriter.runOnGraph(graph);
 }
 
-void metalRemoveMutation(script::Module& module) {
+static void metalRemoveMutation(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   RemoveTensorMutation(graph);
 }
 
-void metalRunCanonicalOptimizations(script::Module& module) {
+static void metalRunCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   runOptimization(graph, false /* no loop unrolling */);
 }

@@ -16,14 +16,14 @@
 namespace torch {
 namespace lazy {
 
-TSOpVector LowerBuiltin(
+static TSOpVector LowerBuiltin(
     const torch::lazy::Node* node,
     std::shared_ptr<torch::jit::GraphFunction> function,
     const std::vector<torch::jit::NamedValue>& arguments,
     const std::vector<torch::jit::NamedValue>& kwarguments = {}) {
   return LowerTSBuiltin(function, node->op().op, arguments, kwarguments);
 }
-TSOpVector LowerBuiltin(
+static TSOpVector LowerBuiltin(
     c10::Symbol sym,
     std::shared_ptr<torch::jit::GraphFunction> function,
     const std::vector<torch::jit::NamedValue>& arguments,
@@ -54,7 +54,7 @@ TSOpVector LowerTSBuiltin(
   return {sv.getValue()};
 }
 
-torch::jit::Value* GenerateClone(
+static torch::jit::Value* GenerateClone(
     torch::jit::Value* val,
     std::shared_ptr<torch::jit::GraphFunction> function) {
   std::vector<torch::jit::NamedValue> clone_arguments;
@@ -64,7 +64,7 @@ torch::jit::Value* GenerateClone(
   return cloned.front();
 }
 
-void GenerateCopy(
+static void GenerateCopy(
     torch::jit::Value* destination,
     torch::jit::Value* source,
     std::shared_ptr<torch::jit::GraphFunction> function) {
@@ -74,7 +74,7 @@ void GenerateCopy(
   LowerBuiltin(at::aten::copy_, function, arguments);
 }
 
-torch::jit::Value* GenerateSlice(
+static torch::jit::Value* GenerateSlice(
     torch::jit::Value* base,
     int64_t dim,
     int64_t start,

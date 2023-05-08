@@ -548,7 +548,7 @@ MatchedSchema matchSchema(
   throw ErrorReport(loc) << failure_messages.str();
 }
 
-MatchedSchema matchSchema(
+static MatchedSchema matchSchema(
     const ::c10::FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,

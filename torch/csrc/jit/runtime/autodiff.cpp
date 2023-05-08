@@ -22,7 +22,7 @@ namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
+static void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
   if (dim < 0) {
     dim += sizes.size();
   }
@@ -34,7 +34,7 @@ void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
 // kthvalue returns (kthvalue, index of kthvalue), currently autodiff only
 // supports at most one output that requires grad. Thus we need to remove
 // the grad for index that doesn't require grad.
-bool needTrimGrad(Node* n) {
+static bool needTrimGrad(Node* n) {
   static OperatorSet need_trim_grad_ops = {
       "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
       "aten::topk(Tensor self, int k, int dim, bool largest, bool sorted) -> (Tensor, Tensor)",
@@ -835,7 +835,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
+static void packReturnValuesIntoTuple(const std::shared_ptr<Graph>& graph) {
   auto returnNode = graph->block()->return_node();
   WithInsertPoint wip(returnNode);
   auto tuple = graph->insertNode(graph->createTuple(returnNode->inputs()));
