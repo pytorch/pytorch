@@ -55,11 +55,13 @@ from unittest.mock import patch
 load_tests = load_tests
 
 
+# Assumes an input of a tensor with exactly 2 numerical scalars
 def rosenbrock(tensor):
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
+# Assumes an input of a tensor with exactly 2 numerical scalars
 def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
@@ -1787,36 +1789,34 @@ class TestOptim(TestCase):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
 
-class SchedulerTestNet(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = torch.nn.Conv2d(1, 1, 1)
-        self.conv2 = torch.nn.Conv2d(1, 1, 1)
-
-    def forward(self, x):
-        return self.conv2(F.relu(self.conv1(x)))
-
-
-class LambdaLRTestObject:
-    def __init__(self, value):
-        self.value = value
-
-    def __call__(self, epoch):
-        return self.value * epoch
-
-    def __eq__(self, other):
-        if isinstance(other, self.__class__):
-            return self.__dict__ == other.__dict__
-        else:
-            return False
-
-
 class TestLRScheduler(TestCase):
+    class SchedulerTestNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = torch.nn.Conv2d(1, 1, 1)
+            self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+        def forward(self, x):
+            return self.conv2(F.relu(self.conv1(x)))
+
+
+    class LambdaLRTestObject:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, epoch):
+            return self.value * epoch
+
+        def __eq__(self, other):
+            if isinstance(other, self.__class__):
+                return self.__dict__ == other.__dict__
+            else:
+                return False
     exact_dtype = True
 
     def setUp(self):
         super().setUp()
-        self.net = SchedulerTestNet()
+        self.net = self.SchedulerTestNet()
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
@@ -3687,11 +3687,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_obj(self):
-        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
+        scheduler = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(10))
         state = scheduler.state_dict()
         self.assertIsNotNone(state["lr_lambdas"][0])
 
-        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {"optimizer"}:
@@ -3962,41 +3962,39 @@ class TestLRScheduler(TestCase):
         self.assertLessEqual(last_lr, max_lr)
 
 
-class SWATestDNN(torch.nn.Module):
-    def __init__(self, input_features):
-        super().__init__()
-        self.n_features = 100
-        self.fc1 = torch.nn.Linear(input_features, self.n_features)
-        self.bn = torch.nn.BatchNorm1d(self.n_features)
-
-    def compute_preactivation(self, x):
-        return self.fc1(x)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.bn(x)
-        return x
-
-
-class SWATestCNN(torch.nn.Module):
-    def __init__(self, input_channels):
-        super().__init__()
-        self.n_features = 10
-        self.conv1 = torch.nn.Conv2d(
-            input_channels, self.n_features, kernel_size=3, padding=1
-        )
-        self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)
-
-    def compute_preactivation(self, x):
-        return self.conv1(x)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn(x)
-        return x
-
-
 class TestSWAUtils(TestCase):
+    class SWATestDNN(torch.nn.Module):
+        def __init__(self, input_features):
+            super().__init__()
+            self.n_features = 100
+            self.fc1 = torch.nn.Linear(input_features, self.n_features)
+            self.bn = torch.nn.BatchNorm1d(self.n_features)
+
+        def compute_preactivation(self, x):
+            return self.fc1(x)
+
+        def forward(self, x):
+            x = self.fc1(x)
+            x = self.bn(x)
+            return x
+
+    class SWATestCNN(torch.nn.Module):
+        def __init__(self, input_channels):
+            super().__init__()
+            self.n_features = 10
+            self.conv1 = torch.nn.Conv2d(
+                input_channels, self.n_features, kernel_size=3, padding=1
+            )
+            self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)
+
+        def compute_preactivation(self, x):
+            return self.conv1(x)
+
+        def forward(self, x):
+            x = self.conv1(x)
+            x = self.bn(x)
+            return x
+
     def _test_averaged_model(self, net_device, swa_device, ema):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
@@ -4208,11 +4206,11 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        dnn = SWATestDNN(input_features=input_features)
+        dnn = self.SWATestDNN(input_features=input_features)
         dnn.train()
         self._test_update_bn(dnn, dl_x, dl_xy, False)
         if torch.cuda.is_available():
-            dnn = SWATestDNN(input_features=input_features)
+            dnn = self.SWATestDNN(input_features=input_features)
             dnn.train()
             self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
         self.assertTrue(dnn.training)
@@ -4228,14 +4226,14 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        dnn = SWATestCNN(input_channels=input_channels)
-        dnn.train()
-        self._test_update_bn(dnn, dl_x, dl_xy, False)
+        cnn = self.SWATestCNN(input_channels=input_channels)
+        cnn.train()
+        self._test_update_bn(cnn, dl_x, dl_xy, False)
         if torch.cuda.is_available():
-            dnn = SWATestCNN(input_channels=input_channels)
-            dnn.train()
-            self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
-        self.assertTrue(dnn.training)
+            cnn = self.SWATestCNN(input_channels=input_channels)
+            cnn.train()
+            self._test_update_bn(cnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(cnn.training)
 
     def test_bn_update_eval_momentum(self):
         # check that update_bn preserves eval mode
@@ -4245,13 +4243,13 @@ class TestSWAUtils(TestCase):
         x = torch.rand(objects, input_channels, height, width)
         ds_x = torch.utils.data.TensorDataset(x)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
-        dnn = SWATestCNN(input_channels=input_channels)
-        dnn.eval()
-        update_bn(dl_x, dnn)
-        self.assertFalse(dnn.training)
+        cnn = self.SWATestCNN(input_channels=input_channels)
+        cnn.eval()
+        update_bn(dl_x, cnn)
+        self.assertFalse(cnn.training)
 
         # check that momentum is preserved
-        self.assertEqual(dnn.bn.momentum, 0.3)
+        self.assertEqual(cnn.bn.momentum, 0.3)
 
 
 instantiate_parametrized_tests(TestLRScheduler)
