@@ -24,8 +24,8 @@ from ._cond import _has_potential_branch_input_alias, _has_potential_branch_inpu
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
-    def __call__(self, *args, **kwargs):
-        return map_wrapper(*args, **kwargs)
+    def __call__(self, xs, *args):
+        return map_wrapper(xs, *args)
 
 map = MapWrapper("map")
 map_impl = HigherOrderOperator("map_impl")
@@ -33,14 +33,15 @@ map_impl = HigherOrderOperator("map_impl")
 def map_wrapper(f, xs, *args):
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
-        raise RuntimeError(f"mapped xs can only consist of tensors. Got {flat_xs}.")
+        raise RuntimeError(f"mapped xs can only consist of tensors. Got xs {flat_xs}.")
 
     num_mapped_args = len(flat_xs)
-    if num_mapped_args == 0:
-        raise RuntimeError(f"map must have at least one mapped argument.")
-
     shapes = [xs.shape for xs in flat_xs]
     leading_dim_size = shapes[0][0]
+    if leading_dim_size == 0:
+        raise RuntimeError(
+            "leading dimensions of mapped xs cannot be 0.")
+
     if any(cur_shape[0] != leading_dim_size for cur_shape in shapes):
         raise RuntimeError(
             f"leading dimensions of mapped xs must be consistent. Got shapes {shapes}.")
@@ -63,8 +64,11 @@ class MapAutogradOp(torch.autograd.Function):
         ctx.save_for_backward(*flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
-        _ = torch._C._AutoDispatchBelowAutograd()
-        return (*map_impl(fw_graph, num_mapped_args, *flat_args), )
+        try:
+            guard = torch._C._AutoDispatchBelowAutograd()
+            return (*map_impl(fw_graph, num_mapped_args, *flat_args), )
+        finally:
+            del guard
 
     @staticmethod
     def backward(ctx, *flat_grads):
@@ -73,7 +77,6 @@ class MapAutogradOp(torch.autograd.Function):
         pos_args = fw_args[ctx._num_mapped_args:]
         mapped_grads = [grad for grad in flat_grads if grad is not None]
 
-        _ = torch._C._AutoDispatchBelowAutograd()
         grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(mapped_grads), *fw_mapped_args, *mapped_grads, *pos_args)
         return None, None, None, *grads
 
@@ -114,10 +117,13 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
 
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
-    assert all(isinstance(xs, torch.Tensor) for xs in flat_xs), f"Leaves of xs must be Tensor {flat_xs}"
-    assert all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs), \
-        f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
-    a = list(zip(*flat_xs))
+    if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
+        raise RuntimeError(f"leaves of xs must be Tensor {flat_xs}")
+
+    if not all(xs.shape[0] == flat_xs[0].shape[0] for xs in flat_xs):
+        raise RuntimeError(f"leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}")
+
+    a = zip(*flat_xs)
     pytrees = []
     for tuple in a:
         pytrees.append(pytree.tree_unflatten(tuple, inspec))
@@ -129,17 +135,19 @@ def _stack_pytree(pytrees):
     for pt in pytrees:
         flat_pt, out_spec = pytree.tree_flatten(pt)
         flat_out.append(flat_pt)
-    b = list(zip(*flat_out))
+    b = zip(*flat_out)
     stacked_out = []
     for leaves in b:
-        if all(leave is not None for leave in leaves):
+        if all(isinstance(leaf, torch.Tensor) for leaf in leaves):
             stacked_out.append(torch.stack(leaves))
-        else:
+        elif all(leaf is None for leaf in leaves):
+            # Leaves can be None e.g. when one of the input doesn't require grad
             stacked_out.append(None)
+        else:
+            raise RuntimeError(f"cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
 
-@map_impl.py_impl(DispatchKey.CUDA)
-@map_impl.py_impl(DispatchKey.CPU)
+@map_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_dense(f, num_mapped_args, *args):
     mode = _get_current_dispatch_mode()
     xs = args[:num_mapped_args]
@@ -204,7 +212,7 @@ def map_fake_tensor_mode(f, num_mapped, *args):
     pos_args = args[num_mapped:]
     leading_dims = pytree.tree_map(lambda t: t.shape[0], xs)
     xs_pytree = _unstack_pytree(xs)
-    example_out = f(num_mapped, *xs_pytree[0], *pos_args)
+    example_out = f(*xs_pytree[0], *pos_args)
     return pytree.tree_map(lambda t: t.expand(leading_dims[0], *t.shape), example_out)
 
 
@@ -220,7 +228,7 @@ def map_func(f, num_mapped, *args):
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
     try:
         functional_map_fn = functionalize(f, remove=mode)
-        inputs = (num_mapped, *unwrapped_xs, *unwrapped_args)
+        inputs = (*unwrapped_xs, *unwrapped_args)
 
         if _has_potential_branch_input_mutation(f, inputs):
             raise UnsupportedAliasMutationException(
@@ -232,7 +240,7 @@ def map_func(f, num_mapped, *args):
                 "torch.map is aliasing the input!"
             )
 
-        map_return = map_impl(functional_map_fn, *inputs)
+        map_return = map_impl(functional_map_fn, num_mapped, *inputs)
         return _wrap_all_tensors_to_functional(map_return, level=0)
     finally:
         del guard
@@ -255,7 +263,7 @@ def map_functionalize(interpreter, f, num_mapped, *args):
     functional_map_fn = functionalize(f, remove=mode)
 
     with interpreter.lower():
-        inputs = (num_mapped, *unwrapped_xs, *unwrapped_args)
+        inputs = (*unwrapped_xs, *unwrapped_args)
         if _has_potential_branch_input_mutation(functional_map_fn, inputs):
             raise UnsupportedAliasMutationException(
                 "torch.map is mutating the input!"
@@ -266,7 +274,7 @@ def map_functionalize(interpreter, f, num_mapped, *args):
                 "torch.map is aliasing the input!"
             )
 
-        map_return = map_impl(functional_map_fn, *inputs)
+        map_return = map_impl(functional_map_fn, num_mapped, *inputs)
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm

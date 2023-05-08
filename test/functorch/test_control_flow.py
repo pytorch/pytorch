@@ -43,7 +43,7 @@ class TestControlFlow(TestCase):
 
         x = torch.randn(4, device="cuda")
         pred = torch.tensor(False, device="cuda")
-        result = cond(False, true_fn, false_fn, [x])
+        result = cond(pred, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
@@ -56,6 +56,24 @@ class TestControlFlow(TestCase):
         res = control_flow.map(f, xs, y)
         expected = _fake_map(f, xs, y)
         self.assertEqual(expected, res)
+
+    def test_map_illegal_inputs(self):
+        def f(x, y):
+            return x[0] + x[1] + y
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"mapped xs can only consist of tensors\. Got xs \[3, tensor\(\[1\., 1\.\]\)\]\."):
+            _ = control_flow.map(f, (3, torch.ones(2)), torch.ones(2))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"leading dimensions of mapped xs cannot be 0\."):
+            _ = control_flow.map(f, (torch.ones(0, 1, 2), torch.ones(0, 1, 2)), torch.ones(2))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"leading dimensions of mapped xs must be consistent\. "
+                                    r"Got shapes \[torch\.Size\(\[3, 4, 5\]\), torch\.Size\(\[4, 4, 5\]\)\]\."):
+            _ = control_flow.map(f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5))
+
 
     def test_map_list_in_out(self):
         def f(x, y):
@@ -891,6 +909,7 @@ class TestControlFlowTraced(TestCase):
         x = [torch.randn(4, 5, 6), torch.ones(4, 5, 6, requires_grad=True)]
         y = torch.randn(6, requires_grad=True)
         res = gm(x, y)
+        gm.print_readable()
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
