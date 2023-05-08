@@ -4,6 +4,9 @@ import torch
 import torch._dynamo
 
 
+tensor_for_import_testing = torch.ones(10, 10)
+
+
 def inner_func():
     return torch.is_grad_enabled()
 
