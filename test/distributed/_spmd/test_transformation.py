@@ -3,6 +3,7 @@
 import unittest
 from copy import deepcopy
 from functools import wraps
+from unittest.mock import MagicMock
 
 import torch
 import torch.nn as nn
@@ -10,8 +11,13 @@ from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.distributed._spmd.graph_optimization import (
+    _optimized_func,
+    comm_fusion_with_concat,
     get_all_fused_optimizer_blocks,
+    graph_optimization_pass,
+    iter_move_grads_and_optimizers,
     remove_copy_from_optimizer,
+    schedule_comm_wait,
     split_fused_optimizer,
 )
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
@@ -47,6 +53,56 @@ class DummyModel(nn.Module):
 
     def forward(self, x):
         return self.mod(x)
+
+
+class GraphPassWrapperTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 1
+
+    def test_order(self):
+        @graph_optimization_pass(
+            prerequisites=[],
+            apply_after=[],
+        )
+        def my_pass1(gm) -> None:
+            return
+
+        @graph_optimization_pass(
+            prerequisites=[my_pass1],
+            apply_after=[],
+        )
+        def my_pass2(gm) -> None:
+            return
+
+        @graph_optimization_pass(
+            prerequisites=[],
+            apply_after=[my_pass1],
+        )
+        def my_pass3(gm) -> None:
+            return
+
+        gm = MagicMock(spec=IterGraphModule)
+        # No errors happen.
+        my_pass1(gm)
+        my_pass3(gm)
+        my_pass2(gm)
+        _optimized_func.clear()
+
+        # Only my_pass3 is okay as it has no prerequisites.
+        my_pass3(gm)
+        _optimized_func.clear()
+
+        # Prerequisite condition does not match.
+        with self.assertRaisesRegex(AssertionError, "are the prerequisites of"):
+            my_pass2(gm)
+        _optimized_func.clear()
+
+        # my_pass3 must be applied after my_pass1
+        with self.assertRaisesRegex(AssertionError, "must be applied after"):
+            my_pass3(gm)
+            my_pass1(gm)
+        _optimized_func.clear()
 
 
 class TransformationTest(DTensorTestBase):
@@ -103,9 +159,10 @@ class TransformationTest(DTensorTestBase):
             foreach=(not use_fused_optimizer),
             fused=use_fused_optimizer,
         )
-        for _ in range(num_iters):
+        for i in range(num_iters):
             batch = torch.randn(batch_size, dim).cuda()
-            out = train_step(model, optim, batch)
+            kwargs = {} if i < num_iters - 1 else {"last_train_step": True}
+            out = train_step(model, optim, batch, **kwargs)
             ddp_out = _ddp_train_step(ddp_model, ddp_optim, batch)
         self.assertEqual(list(ddp_model.parameters()), list(model.parameters()))
 
@@ -117,7 +174,7 @@ class TransformationTest(DTensorTestBase):
         dim = 100
         num_iters = 5
 
-        @compile(gm_transformation=GraphModuleTransformation(num_iters=num_iters))
+        @compile(gm_transformation=GraphModuleTransformation())
         def train_step(model, optim, batch):
             model(batch).sum().backward()
             optim.step()
@@ -137,7 +194,7 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters, enable_inductor=True, dump_graphs=True
+                enable_inductor=True, dump_graphs=True
             )
         )
         def train_step(model, optim, batch):
@@ -159,7 +216,6 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters,
                 enable_graph_optimization=True,
                 dump_graphs=False,
             )
@@ -181,7 +237,6 @@ class TransformationTest(DTensorTestBase):
 
         @compile(
             gm_transformation=GraphModuleTransformation(
-                num_iters=num_iters,
                 enable_graph_optimization=True,
                 dump_graphs=False,
             )
@@ -215,6 +270,34 @@ class TransformationTest(DTensorTestBase):
             gm.graph.eliminate_dead_code()
             gm.recompile()
             self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            gm.finalize_setup()
+            return gm
+
+        @compile(gm_transformation=my_transformation)
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_iter_move_blocks_and_optimizers(self):
+        batch_size = 100
+        layers = 5
+        dim = 4096
+        num_iters = 5
+
+        def my_transformation(gm):
+            gm = IterGraphModule(gm)
+            comm_fusion_with_concat(gm, 100)
+            schedule_comm_wait(gm)
+            remove_copy_from_optimizer(gm)
+            iter_move_grads_and_optimizers(gm, "all_reduce_default_1", "relu")
+            gm.finalize_setup()
             return gm
 
         @compile(gm_transformation=my_transformation)

@@ -8,7 +8,7 @@ serve as a guide to help trade off different concerns and to resolve
 disagreements that may come up while developing PyTorch. For more
 information on contributing, module maintainership, and how to escalate a
 disagreement to the Core Maintainers, please see `PyTorch
-Governance <https://pytorch.org/docs/master/community/governance.html>`__.
+Governance <https://pytorch.org/docs/main/community/governance.html>`__.
 
 Design Principles
 -----------------
@@ -64,7 +64,7 @@ Python <https://peps.python.org/pep-0020/>`__:
 A more concise way of describing these two goals is `Simple Over
 Easy <https://www.infoq.com/presentations/Simple-Made-Easy/>`_. Let’s start with an example because *simple* and *easy* are
 often used interchangeably in everyday English. Consider how one may
-model `devices <https://pytorch.org/docs/master/tensor_attributes.html#torch.device>`__
+model `devices <https://pytorch.org/docs/main/tensor_attributes.html#torch.device>`__
 in PyTorch:
 
 -  **Simple / Explicit (to understand, debug):** every tensor is associated
@@ -141,7 +141,7 @@ Python usability end of the curve:
 -  `TorchDynamo <https://dev-discuss.pytorch.org/t/torchdynamo-an-experiment-in-dynamic-python-bytecode-transformation/361>`__,
    a Python frame evaluation tool capable of speeding up existing
    eager-mode PyTorch programs with minimal user intervention.
--  `torch_function <https://pytorch.org/docs/master/notes/extending.html#extending-torch>`__
+-  `torch_function <https://pytorch.org/docs/main/notes/extending.html#extending-torch>`__
    and `torch_dispatch <https://dev-discuss.pytorch.org/t/what-and-why-is-torch-dispatch/557>`__
    extension points, which have enabled Python-first functionality to be
    built on-top of C++ internals, such as the `torch.fx

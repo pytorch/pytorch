@@ -51,6 +51,8 @@ def reset():
     orig_code_map.clear()
     guard_failures.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
+    if hasattr(eval_frame.most_recent_backend, "reset"):
+        eval_frame.most_recent_backend.reset()
     eval_frame.most_recent_backend = None
     compilation_metrics.clear()
     reset_frame_count()
@@ -203,3 +205,37 @@ def mark_static(t, index=None):
         assert isinstance(index, (list, tuple))
         for i in index:
             mark_static(t, i)
+
+
+# Note: it's preferable to not make `import torch` eagerly import other libs.
+# However, we want to provide a grace period to make borderline versions of einops
+# compatible with torch.compile.
+# TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
+def _allow_in_graph_einops():
+    try:
+        import einops
+
+        try:
+            from einops._torch_specific import (  # requires einops > 0.6.1, torch >= 2.0
+                _ops_were_registered_in_torchdynamo,
+            )
+
+            # einops > 0.6.1 will call the op registration logic as it is imported.
+            pass
+        except ImportError:
+            # einops <= 0.6.1
+            allow_in_graph(einops.rearrange)
+            allow_in_graph(einops.reduce)
+            if hasattr(einops, "repeat"):
+                allow_in_graph(einops.repeat)  # available since einops 0.2.0
+            if hasattr(einops, "einsum"):
+                allow_in_graph(einops.einsum)  # available since einops 0.5.0
+            if hasattr(einops, "pack"):
+                allow_in_graph(einops.pack)  # available since einops 0.6.0
+            if hasattr(einops, "unpack"):
+                allow_in_graph(einops.unpack)  # available since einops 0.6.0
+    except ImportError:
+        pass
+
+
+_allow_in_graph_einops()

@@ -8,7 +8,19 @@ import unittest.mock
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    TypeVar,
+)
+
+import torch
 
 log = logging.getLogger(__name__)
 
@@ -297,6 +309,41 @@ class GuardsCheckpointState:
         return self.diff(other) is None
 
 
+class ModuleContextCheckpointState:
+    nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def __init__(self, nn_modules):
+        self.nn_modules = nn_modules
+
+    """
+    Produces a delta against another ModuleContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    module key names.
+    """
+
+    def diff(self, other):
+        r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
+    def __init__(self):
+        self.nn_modules: Dict[str, torch.nn.Module] = {}
+
+    def copy_graphstate(self):
+        return ModuleContextCheckpointState(dict(self.nn_modules))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, ModuleContextCheckpointState)
+        self.nn_modules = state.nn_modules
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -353,6 +400,7 @@ class TracingContext:
 
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
+        self.module_context = ModuleContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
@@ -456,24 +504,31 @@ def detect_fake_mode(inputs: Any = None):
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from torch.utils._pytree import tree_flatten
 
+    fake_modes = []
+
     context = TracingContext.get()
     if context is not None:
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            return fake_mode
+            fake_modes.append((fake_mode, "tracing context", 0))
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
-    for m in reversed(_get_current_dispatch_mode_stack()):
+    for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            return m
+            fake_modes.append((m, "active fake mode", i))
 
-    fake_mode = None
     flat_inputs, _ = tree_flatten(inputs)
-    for flat_input in flat_inputs:
+    for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            if fake_mode is None:
-                fake_mode = flat_input.fake_mode
-            else:
-                assert fake_mode is flat_input.fake_mode
-    return fake_mode
+            fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
+
+    if fake_modes:
+        fake_mode, desc1, i1 = fake_modes[0]
+        for m, desc2, i2 in fake_modes[1:]:
+            assert (
+                fake_mode is m
+            ), f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}"
+        return fake_mode
+    else:
+        return None

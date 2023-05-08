@@ -634,6 +634,8 @@ py::object toPyObject(IValue ivalue) {
     }
   } else if (ivalue.isDevice()) {
     return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+  } else if (ivalue.isStream()) {
+    return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {
     auto dict = std::move(ivalue).toGenericDict();
     py::dict py_dict;
