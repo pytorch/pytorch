@@ -23,7 +23,7 @@ def is_group_depthwise_conv_transpose(m):
 def is_output_padding_big(m):
     is_big = False
     for i in range(len(m.output_padding)):
-        is_big |= (m.output_padding[i] >= m.stride[i])
+        is_big |= m.output_padding[i] >= m.stride[i]
     return is_big
 
 
