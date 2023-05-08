@@ -237,10 +237,16 @@ def convert_frame_assert(
         if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
-            )
+            if config.report_guard_failures:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+            else:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message)
@@ -297,19 +303,31 @@ def convert_frame_assert(
             def format_guard_failures(code):
                 # For the common case, it's sufficient to see just the most recent failure.
                 # We could add a verbose mode if needed
-                return f"{str(guard_failures[code][-1])}"
+                return f"  reasons: {str(guard_failures[code][-1])}\n"
 
-            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
-                "   function: %s\n"
-                "   reasons:  %s\n"
-                "to diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
-                format_func_info(code),
-                format_guard_failures(code),
-                troubleshooting_url,
-            )
+            if config.report_guard_failures:
+                assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "   reasons:  %s\n"
+                    "to diagnose recompilation issues, see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    format_guard_failures(code),
+                    troubleshooting_url,
+                )
+            else:
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
+                    " and also see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    troubleshooting_url,
+                )
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):

@@ -1393,6 +1393,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
+import torch.backends.cpu
 import torch.backends.cuda
 import torch.backends.mps
 import torch.backends.cudnn

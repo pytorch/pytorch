@@ -247,7 +247,9 @@ public:
   {
     init_allocator();
   }
-
+  ~MPSHeapAllocatorImpl() {
+    emptyCache();
+  }
   // interface exposed to at::Allocator
   id<MTLBuffer> malloc(size_t size, uint32_t usage);
   // frees a buffer and returns it into buffer pool
@@ -262,6 +264,8 @@ public:
   void setBufferShape(const void* ptr, const IntArrayRef& shape);
   // retrieve the shape of a base tensor from a view tensor
   IntArrayRef getBufferShape(const void* ptr);
+  // get the unique ID of the buffer
+  id_t getBufferId(const void* ptr);
   // allocate a buffer from a specialized pool to import CPU scalars into GPU
   id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
   // this indicates how far (in Megabytes) the current total allocations are from the
