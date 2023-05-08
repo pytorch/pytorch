@@ -10,7 +10,6 @@
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
@@ -20,6 +19,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -59,7 +59,7 @@ Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
   return unreduced;
 }
 
-bool isDefined(const c10::optional<Tensor>& t) {
+static bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
 }
 
@@ -121,9 +121,9 @@ std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
 Tensor maybe_multiply(const Tensor& t, const Scalar& s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {
-    is_one = s.toDouble() == 1;
+    is_one = s.toSymFloat() == 1;
   } else if (s.isIntegral(true)) {
-    is_one = s.toLong() == 1;
+    is_one = s.toSymInt() == 1;
   }
 
   if (is_one) {
@@ -145,7 +145,7 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
-c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
+static c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
   c10::SymInt size = 1;
   if (sizes.empty()) {
     return 1;
@@ -165,7 +165,7 @@ Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   return gradient_result;
 }
 
-Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
+static Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
   if (!self.is_complex() && gradient_result.is_complex()) {
     // R -> C
     return at::real(gradient_result);
@@ -181,7 +181,7 @@ Tensor restore_reduced_dims(
     return output;
   }
   int64_t total_dims = output.dim() + dims.size();
-  std::vector<int64_t> target_shape(total_dims, 0);
+  std::vector<c10::SymInt> target_shape(total_dims, 0);
   for (int64_t i : dims) {
     if (i < 0) {
       i = total_dims + i;
@@ -189,12 +189,12 @@ Tensor restore_reduced_dims(
     target_shape[i] = 1;
   }
   int64_t j = 0;
-  for (int64_t i : output.sizes()) {
+  for (c10::SymInt i : output.sym_sizes()) {
     while (target_shape[j] > 0)
       j++;
     target_shape[j++] = i;
   }
-  return output.reshape(target_shape);
+  return output.reshape_symint(target_shape);
 }
 
 Tensor scale_grad_by_count(
@@ -378,6 +378,60 @@ Tensor _nested_from_padded_backward(
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
   return grad.to_padded_tensor(0, input.sizes());
+}
+
+std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
+    const variable_list& grads,
+    const Tensor& self,
+    const Tensor& grad_output,
+    const Tensor& weight) {
+  if (!grad_output.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+
+  Tensor grad_self, grad_grad_output, grad_weight;
+
+  if (grads[1].defined()) {
+    grad_self =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(0) : grad_output)
+            .matmul(grads[1]);
+    if (grad_output.dim() == 1) {
+      grad_self = grad_self.squeeze(0);
+    }
+  }
+  if (grads[0].defined()) {
+    grad_weight =
+        (grad_output.dim() == 1 ? grad_output.unsqueeze(1) : grad_output.mT())
+            .matmul(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
+  }
+
+  if (grads[0].defined() || grads[1].defined() || grads[2].defined()) {
+    grad_grad_output = at::zeros_like(grad_output);
+    if (grad_output.dim() == 1) {
+      grad_grad_output = grad_grad_output.unsqueeze(0);
+    }
+  }
+
+  if (grads[0].defined()) {
+    grad_grad_output = grad_grad_output +
+        (grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0])
+            .matmul(weight.mT());
+  }
+  if (grads[1].defined()) {
+    grad_grad_output = grad_grad_output +
+        (self.dim() == 1 ? self.unsqueeze(0) : self).matmul(grads[1].mT());
+  }
+  if (grads[2].defined()) {
+    grad_grad_output = grad_grad_output + grads[2];
+  }
+  if (grad_grad_output.defined() && grad_output.dim() == 1) {
+    grad_grad_output = grad_grad_output.squeeze(0);
+  }
+
+  return std::make_tuple(
+      std::move(grad_self),
+      std::move(grad_grad_output),
+      std::move(grad_weight));
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -682,6 +736,15 @@ Tensor mean_backward(
   return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
 }
 
+std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list) {
+  auto result = std::vector<c10::SymInt>();
+  result.reserve(list.size());
+  for (auto iter = list.rbegin(); iter != list.rend(); iter++) {
+    result.push_back(*iter);
+  }
+  return result;
+}
+
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
   auto result = std::vector<int64_t>();
   result.reserve(list.size());
@@ -866,6 +929,41 @@ Tensor logcumsumexp_backward(
           return output.conj();
         }
       });
+}
+
+Tensor logcumsumexp_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int64_t dim) {
+  // Mostly taken from logsumexp_jvp
+
+  // NB: for simplicity, we recompute some values that can be reused from
+  // forward
+  auto self_p_exp = [&self_p, dim]() {
+    if (!at::is_complex(self_p)) {
+      return (self_p - std::get<0>(at::max(self_p, dim, true)))
+          .exp(); // Use the exp-normalize trick
+    } else {
+      // at::max doesn't support complex128
+      return self_p.exp();
+    }
+  }();
+
+  auto cumsumexp_p = self_p_exp.cumsum(dim);
+
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+
+  constexpr double eps = 1e-13;
+
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).cumsum(dim);
+    result /= cumsumexp_p.add_(eps);
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto cumsumexp_t = self_p_exp.cumsum(dim);
+    return cumsumexp_t /= cumsumexp_p.add_(eps);
+  }
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
@@ -1873,6 +1971,14 @@ Tensor split_with_sizes_backward(
   return ret;
 }
 
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
+}
+
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymInt split_size,
@@ -1908,6 +2014,15 @@ Tensor max_pool_double_backward(
   else {
     return at::empty_like(indices, grad.options());
   }
+}
+
+Tensor error_for_max_pool2d_double_backward() { // This is mps-only.
+  TORCH_CHECK(
+      false,
+      "max_pool2d with `return_indices=False` is not infinitely differentiable.",
+      " If you want to calculate higher order derivatives, e.g. second order,",
+      " set `return_indices=True`.");
+  return Tensor();
 }
 
 Tensor glu_double_backward(
@@ -3289,8 +3404,8 @@ Tensor svd_backward(
     return {};
   }
 
-  const auto m = U.size(-2);
-  const auto n = Vh.size(-1);
+  const auto m = U.sym_size(-2);
+  const auto n = Vh.sym_size(-1);
 
   // Optimisation for svdvals: gA = U @ diag(gS) @ Vh
   if (!gU.defined() && !gVh.defined()) {
@@ -4241,9 +4356,9 @@ Tensor fft_c2r_backward(
   //               = 1, 2, ..., N - onesided_length
   auto gI = at::_fft_r2c(grad, dim, normalization, /*onesided=*/true);
 
-  auto double_length = grad.size(dim.back()) - gI.size(dim.back());
+  auto double_length = grad.sym_size(dim.back()) - gI.sym_size(dim.back());
   if (double_length > 0) { // also covers case when signal size is zero
-    gI.narrow(dim.back(), 1, double_length).mul_(2);
+    gI.narrow_symint(dim.back(), 1, double_length).mul_(2);
   }
   return gI;
 }
@@ -4285,7 +4400,7 @@ Tensor fft_r2c_backward(
 }
 
 // Helper for batchnorm_double_backward
-Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
+static Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
   auto r = to_sum.sum(0, keepdim);
   int64_t start_point_exclusive = keepdim ? 1 : 0;
   for (int64_t dim = r.dim() - 1; dim > start_point_exclusive; dim--) {
@@ -4297,7 +4412,7 @@ Tensor sum_exclude_dim1(const Tensor& to_sum, bool keepdim = true) {
 // Helper for batchnorm_double_backward
 // similar to expand_as below, but doesn't do the expand_as; operates as if
 // reductions were done with keepdim=True
-Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
+static Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
   while (src_expanded.sizes().size() < target.sizes().size() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
@@ -4311,7 +4426,7 @@ Tensor unsqueeze_dim1(const Tensor& src, const Tensor& target) {
 // Helper for batchnorm_double_backward
 // because gamma/ggG/ggB are 1-dimensional and represent dim==1, we can't
 // do a straight expansion because it won't follow the broadcasting rules.
-Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
+static Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   auto src_expanded = src;
   while (src_expanded.sizes().size() < target.sizes().size() - 1) {
     src_expanded = src_expanded.unsqueeze(1);
@@ -4867,7 +4982,7 @@ bool any_variable_defined(const variable_list& variables) {
 // from the right.
 // Additionally, when the computation is done in-place, we exploit that the
 // first `k` coordinates of `u_full/v_full` are zeros.
-Tensor apply_simple_transformation(
+static Tensor apply_simple_transformation(
     int64_t m,
     int64_t k,
     const Tensor& u_full,
@@ -5707,7 +5822,7 @@ Tensor block_diag_jvp(at::TensorList tensors) {
 
 Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
   // Basically copy of cat_jvp above
-  // TOD0: consolidate with the logic of cat_jvp
+  // TODO: consolidate with the logic of cat_jvp
   Tensor out_fw_grad;
 
   auto any_defined = false;
@@ -6640,9 +6755,9 @@ Tensor take_backward(
     const Tensor& indices) {
   Tensor grad_self = at::zeros_like(self);
   // For Composite Compliance,
-  // if `grad` and `indices` are CCT but `self` is not
+  // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(self) &&
+  if (!isTensorSubclassLike(grad_self) &&
       areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }

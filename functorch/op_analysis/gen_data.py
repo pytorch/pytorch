@@ -103,7 +103,7 @@ def gen_data(special_op_lists, analysis_name):
     with open(f"{analysis_name}", 'w') as f:
         for op in ops:
             info = [
-                op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)
+                op['full_name'], op['meta'], op['full_name'] not in noncomposite_ops
             ] + [check(op) for check in special_op_lists]
             f.write(','.join([str(i) for i in info]) + '\n')
 
@@ -136,7 +136,7 @@ if True:
         opinfo_ops = [remove_suffix(i.strip(), '.default') for i in f.readlines()]
     with open('count_ops.txt', 'r') as f:
         opinfo_counts = [i.strip() for i in f.readlines()]
-        opinfo_counts = defaultdict(int, {k: v for k, v in zip(opinfo_ops, opinfo_counts)})
+        opinfo_counts = defaultdict(int, dict(zip(opinfo_ops, opinfo_counts)))
 
     def count_fn(x):
         return opinfo_counts[x['full_name']]

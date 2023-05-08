@@ -1,11 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
+import traceback
 import types
+import unittest
 from copy import deepcopy
+from functools import partial
 from typing import Tuple
 from unittest.mock import patch
 
-import pytest
 import torch
 
 import torch._dynamo.test_case
@@ -297,6 +300,31 @@ class ModuleList(torch.nn.Module):
         return x
 
 
+class CustomGetItemModuleList(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+                torch.nn.Linear(10, 10),
+                torch.nn.ReLU(),
+            ]
+        )
+
+    def __getitem__(self, idx: int):
+        return self.layers[idx]
+
+    def __len__(self) -> int:
+        return len(self.layers)
+
+    def forward(self, x):
+        for i in range(len(self)):
+            x = self[i](x)
+
+        return x
+
+
 class ModuleDict(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -309,6 +337,23 @@ class ModuleDict(torch.nn.Module):
     def forward(self, x):
         # TODO(future PR): handle more logic
         x = self.layers["0"](x)
+        return x
+
+
+class CustomGetItemModuleDict(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = torch.nn.ModuleDict(
+            {
+                "0": torch.nn.Linear(10, 10),
+            }
+        )
+
+    def __getitem__(self, key: str) -> torch.nn.Module:
+        return self.layers[key]
+
+    def forward(self, x):
+        x = self["0"](x)
         return x
 
 
@@ -338,6 +383,20 @@ class Children(torch.nn.Module):
 
     def forward(self, x):
         for block in self.children():
+            x = block(x)
+        return x
+
+
+class NamedChildren(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(10, 10)
+        self.l2 = torch.nn.ReLU()
+        self.l3 = torch.nn.Linear(10, 10)
+        self.l4 = torch.nn.ReLU()
+
+    def forward(self, x):
+        for _, block in self.named_children():
             x = block(x)
         return x
 
@@ -451,11 +510,82 @@ class LazyModule(LazyModuleMixin, MaterializedModule):
         self.param = UninitializedParameter()
 
     def initialize_parameters(self, x):
+        # force graph break to ensure this was not inlined
+        torch._dynamo.graph_break()
         self.param.materialize(x.shape)
 
 
+class LazyMLP(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.LazyLinear(10)
+        self.relu1 = torch.nn.ReLU()
+        self.fc2 = torch.nn.LazyLinear(1)
+        self.relu2 = torch.nn.ReLU()
+
+    def forward(self, input):
+        x = self.relu1(self.fc1(input))
+        y = self.relu2(self.fc2(x))
+        return y
+
+
+class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(torch.empty(input[0].shape).fill_(0.5))
+
+    def forward(self, input):
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithListInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithListInput()
+
+    def forward(self, input):
+        return self.layer(input[:-1])
+
+
+class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self.layer = LazyLayerWithListInput()
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class LazyParentModule(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def impl(self, x):
+        return x.cos() + self._val
+
+
+class LazyChildModuleNoClsToBecome(LazyParentModule):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return super().impl(x.sin())
+
+    def initialize_parameters(self, input):
+        self._val = torch.nn.Parameter(torch.ones(2, 2))
+
+
 def requires_grad1(module: torch.nn.Module, recurse: bool = False) -> bool:
-    requires_grad = any([p.requires_grad for p in module.parameters(recurse)])
+    requires_grad = any(p.requires_grad for p in module.parameters(recurse))
     return requires_grad
 
 
@@ -580,6 +710,24 @@ class CallForwardDirectly(torch.nn.Module):
         return x
 
 
+class ConvCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
+class ConvTransposeCallForwardDirectly(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.ConvTranspose2d(4, 4, 4)
+
+    def forward(self, x):
+        return self.layer.forward(x)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -699,6 +847,45 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
         return x
 
 
+class SequentialWithDuplicatedModule(torch.nn.Module):
+    # Sequential module(self.layer) contains three duplicated ReLU module.
+    def __init__(self):
+        super(SequentialWithDuplicatedModule, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            torch.nn.Linear(10, 20),
+            self.relu,
+            torch.nn.Linear(20, 20),
+            self.relu,
+            torch.nn.Linear(20, 10),
+            self.relu,
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+class SequentialWithDuplicatedModule2(torch.nn.Module):
+    def __init__(self):
+        super(SequentialWithDuplicatedModule2, self).__init__()
+        self.relu = torch.nn.ReLU()
+        self.layer = torch.nn.Sequential(
+            collections.OrderedDict(
+                [
+                    ("linear1", torch.nn.Linear(10, 20)),
+                    ("relu1", self.relu),
+                    ("linear2", torch.nn.Linear(20, 20)),
+                    ("relu2", self.relu),
+                    ("linear3", torch.nn.Linear(20, 10)),
+                    ("relu3", self.relu),
+                ]
+            )
+        )
+
+    def forward(self, x):
+        return self.layer(x)
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -746,11 +933,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
+    test_modulelist = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
+    test_moduledict = make_test(CustomGetItemModuleDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
+    test_named_children = make_test(NamedChildren())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
@@ -764,6 +954,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
     test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
+    test_sequential_with_duplicated_module = make_test(SequentialWithDuplicatedModule())
+    test_sequential_with_duplicated_module2 = make_test(
+        SequentialWithDuplicatedModule2()
+    )
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -848,7 +1042,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
         try:
-
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -863,7 +1056,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_with_closure(self):
         def run():
-
             counter = 0
 
             def foo(x):
@@ -952,7 +1144,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    def test_lazy_module(self):
+    def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -962,7 +1154,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
+        # test no graph break
+        opt_test_static_module = torch._dynamo.optimize(cnt, nopython=True)(
+            test_static_module
+        )
         opt_test_static_module()
 
         self.assertTrue(
@@ -1002,7 +1197,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
+        # test no graph break
+        opt_test_torch_static = torch._dynamo.optimize(cnt, nopython=True)(
+            test_torch_static
+        )
         opt_test_torch_static()
         out = opt_test_torch_static()
 
@@ -1013,6 +1211,78 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             "Module should be transformed to an instance of BatchNorm3d.",
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
+
+    def test_lazy_module2(self):
+        # Test FX graph 'call_module' works well if argument is lazy module
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        # We should run compile mode firstly, otherwise the module
+        # would be initialized when running eager mode.
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_lazy_module3(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to cuda and second iteration
+        m = m.to("cuda")
+        x = x.to("cuda")
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_lazy_module4(self):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # input shape changed and second iteration
+        x = torch.rand([20, 20])
+        try:
+            opt_m(x)
+        except RuntimeError:
+            self.assertIn("must have same reduction dim", traceback.format_exc())
+
+    def test_lazy_module5(self):
+        # Test lazy module works well with list/tuple input
+        m = LazyModuleWithListInput()
+        x = [torch.rand([5, 5])] * 3 + [None]
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module6(self):
+        # Test new lazy submodule in lazy module's initialize_parameters
+        m = LazyModuleWithLazySubmodule()
+        x = [torch.rand([5, 5])] * 3
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module_no_cls_to_become(self):
+        # make sure super() works in the case where cls_to_become is None
+        m = LazyChildModuleNoClsToBecome()
+        x = torch.rand(2, 2)
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1033,6 +1303,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
         graph, _ = torch._dynamo.export(mod, rx)
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
+
+    def test_conv_call_forward_directly(self):
+        m = ConvCallForwardDirectly()
+        x = torch.rand([4, 3, 9, 9])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_forward_directly(self):
+        m = ConvTransposeCallForwardDirectly()
+        x = torch.rand([4, 4, 4, 4])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
 
 
 class MockModule(torch.nn.Module):
@@ -1098,7 +1384,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
         # Check parameteres and buffers
-        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+        for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
 
     def test_recursion(self):
@@ -1169,20 +1455,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_torchscript_failure(self):
-        model = BasicModule()
-        compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10, 10)
-        with pytest.raises(AttributeError):
-            c_model_scripted = torch.jit.script(compile_model, example_forward_input)
-
-    def test_torchtrace_failure(self):
-        model = BasicModule()
-        compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10, 10)
-        with pytest.raises(AttributeError):
-            c_model_traced = torch.jit.trace(compile_model, example_forward_input)
-
     def test_module_patch(self):
         mod = ModulePatch1()
         mod.forward = types.MethodType(ModulePatch2.forward, mod)
@@ -1197,6 +1469,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1243,6 +1516,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             the eval_frame entrypoint to Module.__call__?
         """
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1287,7 +1561,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("hooks" in failure_reason)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -1307,7 +1581,242 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
+
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
+    def test_hooks_skip_guards(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # if we remove the hook, dynamo shouldn't notice
+        handle.remove()
+        self.assertNotEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+
+    def _forward_hook_test_helper(self, model):
+        forward_handles = {}
+        activations = dict()
+
+        def save_activations(name, mod, inp, out):
+            activations[name] = inp
+
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(
+                partial(save_activations, name)
+            )
+
+        model = torch.compile(model, backend="aot_eager")
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        print(f"Recorded Layers: {activations.keys()}\n\n")
+        print(f"Expected Layers: {forward_handles.keys()}")
+        self.assertTrue(activations.keys() == forward_handles.keys())
+
+    def test_hooks_allowed_modules(self):
+        # this test shouldn't care whether hook guards are enabled or not
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        self._forward_hook_test_helper(model)
+
+    def test_dunder_call_explicitly(self):
+        # hooks should be triggered if explicit calling `__call__`
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10000)
+
+            def forward(self, x):
+                return self.linear.__call__(x)
+
+        model = ToyModel()
+        self._forward_hook_test_helper(model)
+
+    def test_backward_hooks(self):
+        # this test shouldn't care whether hook guards are enabled or not
+
+        class CustomLinear(torch.nn.Module):
+            # not an 'allowed module', so should not graph-break
+            def __init__(self, a, b):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(a, b))
+
+            def forward(self, x):
+                return torch.mm(x, self.weight)
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[CustomLinear(10, 10)]
+                    + [CustomLinear(10, 10000)]
+                    + [CustomLinear(10000, 5)]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        backward_hook_handles = {}
+        pre_backward_hook_handles = {}
+
+        grad_sizes = {}
+
+        def backward_hook(name, mod, grad_inp, grad_out):
+            grad_sizes[name] = (
+                (gi.shape for gi in grad_inp),
+                (go.shape for go in grad_out),
+            )
+            return None
+
+        pre_grad_sizes = {}
+
+        def backward_pre_hook(name, mod, grad_out):
+            pre_grad_sizes[name] = (go.shape for go in grad_out)
+            return None
+
+        for name, module in model.named_modules():
+            backward_hook_handles[name] = module.register_full_backward_hook(
+                partial(backward_hook, name)
+            )
+
+            pre_backward_hook_handles[name] = module.register_full_backward_pre_hook(
+                partial(backward_pre_hook, name)
+            )
+
+        model = torch.compile(model, backend="aot_eager")
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        self.assertTrue(grad_sizes.keys() == backward_hook_handles.keys())
+        self.assertTrue(pre_grad_sizes.keys() == pre_backward_hook_handles.keys())
+
+    def test_module_dict_iter_name(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation_name in self.activations:
+                    x = self.activations[activation_name](x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_dict_iter_keys(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation_name in self.activations.keys():
+                    x = self.activations[activation_name](x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_module_dict_iter_values(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.activations = torch.nn.ModuleDict(
+                    [["lrelu", torch.nn.LeakyReLU()], ["prelu", torch.nn.PReLU()]]
+                )
+
+            def forward(self, x):
+                for activation in self.activations.values():
+                    x = activation(x)
+                return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        # Eager
+        eager_res = MyModule()(torch.ones(10, 10))
+
+        # Compile
+        optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
+        self.assertEqual(eager_res, optim_res)
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

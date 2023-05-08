@@ -23,7 +23,7 @@ namespace jit {
 
 namespace {
 
-// A helper structure to mantain the mappings
+// A helper structure to maintain the mappings
 // between values from a scripted graph and
 // a traced graph
 struct TracingData {

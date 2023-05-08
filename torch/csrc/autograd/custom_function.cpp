@@ -46,7 +46,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 //  sure that its
 //    forward grad was also modified inplace and already present on the
 //    corresponding output.
-void _process_forward_mode_AD(
+static void _process_forward_mode_AD(
     const variable_list& inputs,
     std::unordered_map<at::TensorImpl*, size_t> inputs_mapping,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
@@ -247,7 +247,7 @@ void _process_forward_mode_AD(
   }
 }
 
-at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
+static at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
   // This is called below in _process_backward_mode_ad in two places:
   //
   // (1) An input has been returned, but it wasn't modified. Return it as a view
@@ -268,23 +268,33 @@ at::Tensor _view_as_self_with_no_grad(at::Tensor self) {
   return self.view_as(self);
 }
 
-optional_variable_list _process_backward_mode_ad(
+static optional_variable_list _process_backward_mode_ad(
     const std::unordered_map<at::TensorImpl*, size_t>& inputs_mapping,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata) {
+    const std::shared_ptr<Node>& cdata,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   int num_outputs = raw_outputs.size();
+
+  const char* error_msg_input_returned_as_is =
+      "A input that has been returned as-is as output is being saved for backward. "
+      "This is not supported if you override setup_context. You should return and "
+      "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
+      "the forward function itself.";
 
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var,
                          uint32_t output_nr,
                          bool is_input,
                          bool is_modified,
-                         bool is_differentiable) {
+                         bool is_differentiable,
+                         bool is_saved_and_setup_context) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
         if (is_input && !is_modified) {
+          TORCH_CHECK(
+              !is_saved_and_setup_context, error_msg_input_returned_as_is)
           var = _view_as_self_with_no_grad(var);
         }
         return;
@@ -339,6 +349,7 @@ optional_variable_list _process_backward_mode_ad(
         impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
+      TORCH_CHECK(!is_saved_and_setup_context, error_msg_input_returned_as_is)
       var = _view_as_self_with_no_grad(var);
       impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
@@ -370,12 +381,20 @@ optional_variable_list _process_backward_mode_ad(
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
         isDifferentiableType(var.scalar_type());
+    bool is_saved_and_setup_context =
+        to_save_if_setup_context.count(out_tensor_impl) > 0;
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
       AT_ASSERT(i == (int)output_nr);
     }
-    set_history(var, i, is_input, is_modified, is_differentiable);
+    set_history(
+        var,
+        i,
+        is_input,
+        is_modified,
+        is_differentiable,
+        is_saved_and_setup_context);
 
     // For deprecation cycle. Can be removed after 1.6. In the case where we
     // detected a view in no grad mode during the forward, only warn the user
@@ -427,7 +446,8 @@ optional_variable_list _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function) {
+    _jvp_fn_t jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
@@ -435,7 +455,12 @@ optional_variable_list _wrap_outputs(
   }
 
   auto outputs = _process_backward_mode_ad(
-      inputs_mapping, non_differentiable, dirty_inputs, raw_outputs, cdata);
+      inputs_mapping,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      to_save_if_setup_context);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
@@ -474,7 +499,7 @@ void check_variable_result(
     throw std::runtime_error(ss.str());
   }
 
-  if (original.sizes().vec() != result.sizes().vec()) {
+  if (original.sym_sizes().vec() != result.sym_sizes().vec()) {
     std::stringstream ss;
     ss << "hook '" << hook_name << "' has changed the size of value";
     throw std::runtime_error(ss.str());

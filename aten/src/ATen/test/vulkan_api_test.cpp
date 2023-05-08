@@ -2841,6 +2841,54 @@ TEST_F(VulkanAPITest, select_3d_width_large) {
   test_select({100, 3, 144}, 2, 50);
 }
 
+TEST_F(VulkanAPITest, select_4d_batch_small) {
+  test_select({1, 1, 1, 1}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_batch_medium) {
+  test_select({3, 2, 5, 4}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, select_4d_batch_large) {
+  test_select({30, 8, 12, 17}, 0, 27);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_small) {
+  test_select({1, 1, 1, 1}, 1, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_medium) {
+  test_select({7, 5, 2, 4}, 1, 4);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_large) {
+  test_select({5, 30, 12, 30}, 1, 23);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_small) {
+  test_select({1, 1, 1, 1}, 2, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_medium) {
+  test_select({3, 5, 4, 2}, 2, 3);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_large) {
+  test_select({5, 8, 50, 50}, 2, 41);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_small) {
+  test_select({1, 1, 1, 1}, 3, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_medium) {
+  test_select({3, 5, 4, 2}, 3, 1);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_large) {
+  test_select({5, 8, 50, 50}, 3, 33);
+}
+
 TEST_F(VulkanAPITest, sigmoid) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -3253,6 +3301,66 @@ TEST_F(VulkanAPITest, upsample_nearest2d) {
 
   const auto in_vulkan = in_cpu.vulkan();
   const auto out_vulkan = at::upsample_nearest2d(in_vulkan, {4, 6});
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, upsample_bilinear2d_align_false_small) {
+  const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {4, 6}, false);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {4, 6}, false);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, upsample_bilinear2d_align_false_large) {
+  const auto in_cpu = at::rand({1, 7, 25, 25}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {45, 45}, false);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {45, 45}, false);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, upsample_bilinear2d_align_true_small) {
+  const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {4, 6}, true);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {4, 6}, true);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, upsample_bilinear2d_align_true_large) {
+  const auto in_cpu = at::rand({1, 7, 25, 25}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::upsample_bilinear2d(in_cpu, {45, 45}, true);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::upsample_bilinear2d(in_vulkan, {45, 45}, true);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {

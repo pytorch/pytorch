@@ -14,21 +14,14 @@ class RemovableHandle:
         hooks_dict (dict): A dictionary of hooks, indexed by hook ``id``.
         extra_dict (dict): An additional dictionary whose keys will be deleted
             when the same keys are removed from ``hooks_dict``.
-        module (nn.Module): If passed, the hook dict corresponds to that module,
-            otherwise it is a global hook dict.
     """
 
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None, module=None) -> None:
+    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
-
-        # TODO: we don't pickle/unpickle this field, which means the 'update_has_hooks'
-        # functionality (which is an optimization) decays after pickling.  Can we fix this?
-
-        self.module_ref = weakref.ref(module) if module is not None else None
         RemovableHandle.next_id += 1
 
         self.extra_dict_ref = (
@@ -46,12 +39,6 @@ class RemovableHandle:
             extra_dict = self.extra_dict_ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
-
-        if self.module_ref is not None:
-            module = self.module_ref()
-            if module is not None:
-                module._update_has_hooks()
-        torch.nn.modules.module._update_has_global_hooks()
 
     def __getstate__(self):
         return (
@@ -74,8 +61,6 @@ class RemovableHandle:
             if len(state) < 3
             else weakref.ref(OrderedDict() if state[2] is None else state[2])
         )
-        # TODO can we actually restore module_ref after unpickling? Do we care?
-        self.module_ref = None
 
     def __enter__(self) -> "RemovableHandle":
         return self
@@ -238,6 +223,11 @@ class BackwardHook:
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
+
+                if self.grad_outputs is not None:
+                    assert self.output_tensors_index is not None  # mypy
+                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
+
             grad_fn.register_hook(hook)
 
         is_tuple = True

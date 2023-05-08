@@ -73,6 +73,16 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    "tacotron2",
+    # https://github.com/pytorch/pytorch/issues/99438
+    "vision_maskrcnn",
+}
+
+SKIP_FOR_CUDA = {
+    "gat",  # only works on CPU
+    "gcn",  # only works on CPU
+    "sage",  # only works on CPU
 }
 
 # Additional models that are skipped in training
@@ -81,11 +91,7 @@ SKIP_TRAIN = {
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
-    # Unusual training setup
-    "opacus_cifar10",
     "maml",
-    # segfault: Internal Triton PTX codegen error
-    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -129,7 +135,11 @@ REQUIRE_COSINE_TOLERACE = {
 }
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = set()
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/98355
+    "mobilenet_v3_large",
+    "vision_maskrcnn",  # eager variant
+}
 
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {
@@ -188,6 +198,11 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
+}
+
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
@@ -204,6 +219,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def skip_models_for_cuda(self):
+        return SKIP_FOR_CUDA
 
     @property
     def slow_models(self):
@@ -235,6 +254,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
     def load_model(
         self,
         device,
@@ -242,7 +267,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
@@ -302,6 +326,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # the right example_inputs
         if model_name == "yolov3":
             example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
+        # See https://github.com/pytorch/benchmark/issues/1561
+        if model_name == "maml_omniglot":
+            batch_size = 5
+            assert example_inputs[0].shape[0] == batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
@@ -326,7 +354,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
 
