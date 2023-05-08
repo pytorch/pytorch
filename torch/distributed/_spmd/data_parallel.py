@@ -487,7 +487,7 @@ def build_data_parallel_strategies(
                     # Activations are usually sharded unless model creates
                     # new tensors during computation, which depend on whether
                     # the new tensor associate with a batch dim or not, it could
-                    # be sharded or replicated, batch dim analyzer should tell
+                    # be shard/replicate/partial, batch dim analyzer should tell
                     # us the correct sharding.
                     for arg in input_args:
                         arg_strategy = dp_strategy_map[arg]
@@ -639,7 +639,6 @@ def partitioner(graph: GraphModule) -> GraphModule:
         aten.expand.default: 1,
         aten.new_zeros.default: 1,
         aten.ones.default: 0,
-        aten.repeat.default: 1,
         aten.reshape.default: 1,
         aten.view.default: 1,
         aten.zeros.default: 0,
@@ -700,6 +699,7 @@ def partitioner(graph: GraphModule) -> GraphModule:
             output_val = node.meta["val"]
 
             if node.target == torch.ops.aten.repeat.default:
+                # for repeat op, we need to infer the repeat sizes
                 assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
                     output_val.shape, out_spec.mesh, out_spec.placements
@@ -793,7 +793,6 @@ def partition_data_parallel(
     )
 
     # 3. Partition the single machine graph to the distribute graph
-    # partitioned_graph = graph
     partitioned_graph = partitioner(graph)
 
     if _preserve_node_type:
