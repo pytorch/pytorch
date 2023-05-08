@@ -137,12 +137,14 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
 }
 
 static void mean_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&] {
-    scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "mean_cpu", [&] {
+    using acc_t = at::opmath_type<scalar_t>;
+    using factor_t = typename c10::scalar_value_type<acc_t>::type;
+    factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
     binary_kernel_reduce(
       iter,
-      MeanOps<scalar_t, scalar_t> {factor},
-      scalar_t(0)
+      MeanOps<scalar_t, acc_t, factor_t, scalar_t> {factor},
+      acc_t(0)
     );
   });
 }

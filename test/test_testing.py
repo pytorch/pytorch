@@ -18,7 +18,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
-    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, skipIfRocm, slowTest,
+    (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
      parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -276,40 +276,6 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
 
-    @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
-    def test_make_tensor(self, device, dtype):
-        def check(size, low, high, requires_grad, noncontiguous):
-            if dtype not in [torch.float, torch.cfloat]:
-                requires_grad = False
-            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
-                            requires_grad=requires_grad, noncontiguous=noncontiguous)
-
-            self.assertEqual(t.shape, size)
-            self.assertEqual(t.device, torch.device(device))
-            self.assertEqual(t.dtype, dtype)
-
-            low = -9 if low is None else low
-            high = 9 if high is None else high
-
-            if t.numel() > 0 and dtype in [torch.long, torch.float]:
-                self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
-
-            self.assertEqual(t.requires_grad, requires_grad)
-
-            if t.numel() > 1:
-                self.assertEqual(t.is_contiguous(), not noncontiguous)
-            else:
-                self.assertTrue(t.is_contiguous())
-
-        for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
-            check(size, None, None, False, False)
-            check(size, 2, 4, True, True)
-
-    def test_make_tensor_complex32(self, device):
-        # verify that we can generate torch.complex32 tensor
-        t = make_tensor((1, 2, 3), dtype=torch.complex32, device=device)
-        self.assertEqual(t.dtype, torch.complex32)
-
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
@@ -452,7 +418,6 @@ instantiate_device_type_tests(TestTesting, globals())
 
 class TestFrameworkUtils(TestCase):
 
-    @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
@@ -1398,6 +1363,202 @@ class TestAssertCloseQuantized(TestCase):
             fn()
 
 
+class TestMakeTensor(TestCase):
+    supported_dtypes = dtypes(
+        torch.bool,
+        torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+        torch.float16, torch.bfloat16, torch.float32, torch.float64,
+        torch.complex32, torch.complex64, torch.complex128,
+    )
+
+    @supported_dtypes
+    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    @parametrize("splat_shape", [False, True])
+    def test_smoke(self, dtype, device, shape, splat_shape):
+        t = torch.testing.make_tensor(*shape if splat_shape else shape, dtype=dtype, device=device)
+
+        self.assertIsInstance(t, torch.Tensor)
+        self.assertEqual(t.shape, shape)
+        self.assertEqual(t.dtype, dtype)
+        self.assertEqual(t.device, torch.device(device))
+
+    @supported_dtypes
+    @parametrize("requires_grad", [False, True])
+    def test_requires_grad(self, dtype, device, requires_grad):
+        make_tensor = functools.partial(
+            torch.testing.make_tensor,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+
+        if not requires_grad or dtype.is_floating_point or dtype.is_complex:
+            t = make_tensor()
+            self.assertEqual(t.requires_grad, requires_grad)
+        else:
+            with self.assertRaisesRegex(
+                    ValueError, "`requires_grad=True` is not supported for boolean and integral dtypes"
+            ):
+                make_tensor()
+
+    @supported_dtypes
+    @parametrize("noncontiguous", [False, True])
+    @parametrize("shape", [tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)])
+    def test_noncontiguous(self, dtype, device, noncontiguous, shape):
+        numel = functools.reduce(lambda a, b: a * b, shape, 1)
+
+        t = torch.testing.make_tensor(shape, dtype=dtype, device=device, noncontiguous=noncontiguous)
+        self.assertEqual(t.is_contiguous(), not noncontiguous or numel < 2)
+
+    @supported_dtypes
+    @parametrize(
+        "memory_format_and_shape",
+        [
+            (None, (2, 3, 4)),
+            (torch.contiguous_format, (2, 3, 4)),
+            (torch.channels_last, (2, 3, 4, 5)),
+            (torch.channels_last_3d, (2, 3, 4, 5, 6)),
+            (torch.preserve_format, (2, 3, 4)),
+        ],
+    )
+    def test_memory_format(self, dtype, device, memory_format_and_shape):
+        memory_format, shape = memory_format_and_shape
+
+        t = torch.testing.make_tensor(shape, dtype=dtype, device=device, memory_format=memory_format)
+
+        self.assertTrue(
+            t.is_contiguous(memory_format=torch.contiguous_format if memory_format is None else memory_format)
+        )
+
+    @supported_dtypes
+    def test_noncontiguous_memory_format(self, dtype, device):
+        with self.assertRaisesRegex(ValueError, "`noncontiguous` and `memory_format` are mutually exclusive"):
+            torch.testing.make_tensor(
+                (2, 3, 4, 5),
+                dtype=dtype,
+                device=device,
+                noncontiguous=True,
+                memory_format=torch.channels_last,
+            )
+
+    @supported_dtypes
+    def test_exclude_zero(self, dtype, device):
+        t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, exclude_zero=True, low=-1, high=2)
+
+        self.assertTrue((t != 0).all())
+
+    @supported_dtypes
+    def test_low_high_smoke(self, dtype, device):
+        low_inclusive, high_exclusive = 0, 2
+
+        t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
+        if dtype.is_complex:
+            t = torch.view_as_real(t)
+
+        self.assertTrue(((t >= low_inclusive) & (t < high_exclusive)).all())
+
+    @supported_dtypes
+    def test_low_high_default_smoke(self, dtype, device):
+        low_inclusive, high_exclusive = {
+            torch.bool: (0, 2),
+            torch.uint8: (0, 10),
+            **{
+                signed_integral_dtype: (-9, 10)
+                for signed_integral_dtype in [
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ]
+            },
+        }.get(dtype, (-9, 9))
+
+        t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
+        if dtype.is_complex:
+            t = torch.view_as_real(t)
+
+        self.assertTrue(((t >= low_inclusive) & (t < high_exclusive)).all())
+
+    @parametrize("low_high", [(0, 0), (1, 0), (0, -1)])
+    @parametrize("value_types", list(itertools.product([int, float], repeat=2)))
+    @supported_dtypes
+    def test_low_ge_high(self, dtype, device, low_high, value_types):
+        low, high = [value_type(value) for value, value_type in zip(low_high, value_types)]
+
+        if low == high and (dtype.is_floating_point or dtype.is_complex):
+            with self.assertWarnsRegex(
+                    FutureWarning,
+                    "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types is deprecated",
+            ):
+                t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low, high=high)
+            self.assertEqual(t, torch.full_like(t, complex(low, low) if dtype.is_complex else low))
+        else:
+            with self.assertRaisesRegex(ValueError, "`low` must be less than `high`"):
+                torch.testing.make_tensor(dtype=dtype, device=device, low=low, high=high)
+
+    @supported_dtypes
+    @parametrize("low_high", [(None, torch.nan), (torch.nan, None), (torch.nan, torch.nan)])
+    def test_low_high_nan(self, dtype, device, low_high):
+        low, high = low_high
+
+        with self.assertRaisesRegex(ValueError, "`low` and `high` cannot be NaN"):
+            torch.testing.make_tensor(dtype=dtype, device=device, low=low, high=high)
+
+    @supported_dtypes
+    def test_low_high_outside_valid_range(self, dtype, device):
+        make_tensor = functools.partial(torch.testing.make_tensor, dtype=dtype, device=device)
+
+        def get_dtype_limits(dtype):
+            if dtype is torch.bool:
+                return 0, 1
+
+            info = (torch.finfo if dtype.is_floating_point or dtype.is_complex else torch.iinfo)(dtype)
+            # We are using integer bounds here, because otherwise it would be impossible to pass `low` and `high`
+            # outside their valid range. Python uses 64bit floating point numbers and thus trying to do something like
+            # `torch.ffinfo(torch.float64)max * 2` will always result in `inf`. On the flipside, Pythons `int` is
+            # unbounded.
+            return int(info.min), int(info.max)
+
+        lowest_inclusive, highest_inclusive = get_dtype_limits(dtype)
+
+        with self.assertRaisesRegex(ValueError, ""):
+            low, high = (-2, -1) if lowest_inclusive == 0 else (lowest_inclusive * 4, lowest_inclusive * 2)
+            make_tensor(low=low, high=high)
+
+        with self.assertRaisesRegex(ValueError, ""):
+            make_tensor(low=highest_inclusive * 2, high=highest_inclusive * 4)
+
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_low_high_boolean_integral1(self, dtype, device):
+        shape = (10_000,)
+        eps = 1e-4
+
+        actual = torch.testing.make_tensor(shape, dtype=dtype, device=device, low=-(1 - eps), high=1 - eps)
+        expected = torch.zeros(shape, dtype=dtype, device=device)
+
+        torch.testing.assert_close(actual, expected)
+
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_low_high_boolean_integral2(self, dtype, device):
+        shape = (10_000,)
+        if dtype is torch.bool:
+            low = 1
+        elif dtype is torch.int64:
+            # Due to its internals, `make_tensor` is not able to sample `torch.iinfo(torch.int64).max`
+            low = torch.iinfo(dtype).max - 1
+        else:
+            low = torch.iinfo(dtype).max
+        high = low + 1
+
+        actual = torch.testing.make_tensor(shape, dtype=dtype, device=device, low=low, high=high)
+        expected = torch.full(shape, low, dtype=dtype, device=device)
+
+        torch.testing.assert_close(actual, expected)
+
+
+instantiate_device_type_tests(TestMakeTensor, globals())
+
+
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """
     test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
@@ -1988,6 +2149,7 @@ class TestImports(TestCase):
                            "torch.testing._internal.distributed.",  # just fails
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
+                           "torch._inductor.triton_helpers",  # depends on triton
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):

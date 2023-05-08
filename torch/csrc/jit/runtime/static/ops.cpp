@@ -108,8 +108,8 @@ at::Tensor& reshape_copy_out(
     return out;
   }
 
-  const void* self_data = self_contig->data_ptr();
-  void* out_data = out.data_ptr();
+  const void* self_data = self_contig->const_data_ptr();
+  void* out_data = out.mutable_data_ptr();
   memcpy(out_data, self_data, nbytes);
 
   return out;
@@ -171,7 +171,7 @@ namespace {
 #define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)             \
   do {                                                             \
     const auto N = self.numel();                                   \
-    const auto self_data = self.data_ptr<self_t>();                \
+    const auto self_data = self.const_data_ptr<self_t>();          \
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                        \
         kHalf,                                                     \
         kBFloat16,                                                 \
@@ -179,7 +179,7 @@ namespace {
         out.scalar_type(),                                         \
         "to_copy_out_inner_loop",                                  \
         [&]() {                                                    \
-          const auto out_data = out.data_ptr<scalar_t>();          \
+          const auto out_data = out.mutable_data_ptr<scalar_t>();  \
           for (const auto idx : c10::irange(N)) {                  \
             /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */      \
             out_data[idx] = static_cast<scalar_t>(self_data[idx]); \
@@ -308,8 +308,8 @@ Tensor& c2_argmin_out(
   if (next_size == 1) {
     AT_DISPATCH_ALL_TYPES_AND2(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
@@ -337,8 +337,8 @@ Tensor& c2_argmin_out(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
           const auto less_or_nan = native::detail::LessOrNan<scalar_t>{};
 
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
@@ -393,7 +393,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   // not guarantee bit exactness vs the jit interpreter. Note aten::relu is not
   // included even though it uses NNC because the results of relu should always
   // match.
-  static const FastSet<std::string> fast_ops{
+  static const c10::FastSet<std::string> fast_ops{
       "aten::add", "aten::tanh", "aten::sigmoid", "aten::logit"};
   return fast_ops.count(op_name) > 0;
 }
@@ -417,7 +417,7 @@ bool hasVarArgs(Node* n) {
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   auto it = node_has_out_variant.find(n);
   if (it != node_has_out_variant.end()) {
     return it->second;
@@ -430,7 +430,7 @@ bool canReuseInputsOutputs(
 // This means the IValues will not change run to run
 bool inputsCanRunOutOfPlace(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
     if (!canReuseInputsOutputs(input->node(), node_has_out_variant)) {
       return false;
@@ -441,7 +441,7 @@ bool inputsCanRunOutOfPlace(
 
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const c10::FastMap<Node*, bool>& node_has_out_variant) {
   const auto& type = n->output()->type();
   bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
@@ -488,7 +488,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const auto& type = n->output()->type()->expectRef<ListType>();
       const size_t size = n->inputs().size();
       if (!can_optimize) {
@@ -543,7 +543,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       const bool can_optimize =
-          isOptimizableContainerType(n, FastMap<Node*, bool>());
+          isOptimizableContainerType(n, c10::FastMap<Node*, bool>());
       const size_t size = n->inputs().size();
       if (!can_optimize) {
         return [size](ProcessedNode* p_node) {
@@ -833,10 +833,10 @@ void varStackFastOut(
   at::native::resize_(out, output_size, c10::nullopt);
 
   AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
-    auto* out_data = out.data_ptr<scalar_t>();
+    auto* out_data = out.mutable_data_ptr<scalar_t>();
     for (const auto i : c10::irange(num_inputs)) {
       auto& tensor = inputs[i];
-      auto* input_ptr = tensor.data_ptr<scalar_t>();
+      auto* input_ptr = tensor.const_data_ptr<scalar_t>();
       out_data[i] = *input_ptr;
     }
   });
@@ -2715,8 +2715,8 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
   auto output_contig = out.expect_contiguous();
 
   AT_DISPATCH_ALL_TYPES(input.scalar_type(), "signed_log1p_kernel", [&]() {
-    const auto input_data = input_contig->data_ptr<scalar_t>();
-    auto output_data = output_contig->data_ptr<float>();
+    const auto input_data = input_contig->const_data_ptr<scalar_t>();
+    auto output_data = output_contig->mutable_data_ptr<float>();
     const auto N = input.numel();
 
     for (const auto i : c10::irange(N)) {

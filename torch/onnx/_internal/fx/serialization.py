@@ -12,7 +12,7 @@ from torch.onnx._internal import _beartype
 @_beartype.beartype
 def _create_tensor_proto_with_external_data(
     tensor: torch.Tensor, name: str, location: str, basepath: str
-) -> "onnx.TensorProto":
+) -> onnx.TensorProto:
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
 

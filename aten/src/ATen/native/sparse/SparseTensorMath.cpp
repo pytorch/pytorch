@@ -13,11 +13,11 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -75,7 +75,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
@@ -482,7 +482,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
         commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
@@ -1771,6 +1771,11 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
   TORCH_CHECK(!grad_.is_cuda(), "_sparse_sum_backward_cpu: expected 'grad_' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!input_.is_cuda(), "_sparse_sum_backward_cpu: expected 'input_' to be CPU tensor, but got CUDA tensor");
 
+  // Short circuit if grad is either zero or empty.
+  if (((grad_.is_sparse() || at::sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
+    return at::zeros_like(input_);
+  }
+
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -2064,4 +2069,4 @@ Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native

@@ -58,9 +58,9 @@ ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
-COPY ./common/install_vision.sh install_vision.sh
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
 # (optional) Install UCC
@@ -91,8 +91,9 @@ ARG TRITON
 COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton.txt triton.txt
+COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
+RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
@@ -136,6 +137,7 @@ RUN rm install_cudnn.sh
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
+RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
 
 USER jenkins
 CMD ["bash"]

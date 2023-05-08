@@ -921,9 +921,13 @@ struct PythonPrintImpl {
     bool hasNonASCII = false;
     auto checkSubvalue = [&hasNonASCII](const IValue& val) {
       if (val.isString()) {
-        const auto maxASCII = 0x7fu;
-        for (auto c : val.toStringRef()) {
-          if (c > maxASCII) {
+        // char's type is implementation designed signedness, likely
+        // signed on x86 and unsigned on ARM. But as of C++11, it is
+        // guaranteed to be twos complement. Therefore, converting to
+        // signed char gives us a range of [-128, 127]. Thus, any
+        // negative number is non-ascii.
+        for (signed char c : val.toStringRef()) {
+          if (c < 0) {
             hasNonASCII = true;
             return true;
           }
@@ -1235,7 +1239,7 @@ struct PythonPrintImpl {
           auto num_necessary = specified_args.first;
           auto num_out = specified_args.second;
 
-          for (size_t i = 0; i < num_necessary; ++i) {
+          for (const auto i : c10::irange(static_cast<size_t>(num_necessary))) {
             if (i > 0)
               stmt << ", ";
             auto v = useOf(node->inputs().at(i));
@@ -1745,7 +1749,9 @@ void jitModuleToPythonCodeAndConstants(
     class_deps.add(class_type);
   }
 
-  for (int i = 0; i < class_deps.size(); ++i) {
+  for (size_t i = 0; i < class_deps.size(); ++i) {
+    // note: PythonPrint may extend class_deps, so re-checking .size() is
+    // necessary
     auto type = class_deps[i];
     auto qualname = uniquer.getUniqueName(type);
     std::string qualifier = qualname.prefix();

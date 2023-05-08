@@ -79,7 +79,7 @@ class RecurrentNetworkExecutorBase {
       const std::vector<std::unique_ptr<ObserverBase<OperatorBase>>>&
           observers_list) {
     if (timestep_ops_template_.size() == 0) {
-      // Firsrt invocation -- compute dependencies
+      // Firrt invocation -- compute dependencies
       CalculateInternalDependencies();
 
       // Label ops based on whether they contain reference to the timestep
@@ -134,7 +134,7 @@ class RecurrentNetworkExecutorBase {
         // For ops that have the timestep blob as an input we need to
         // create a new operator definition with the timestep-specific
         // timestep blob. This is required to avoid race conditions when
-        // multiple timesteps execute in paralle.
+        // multiple timesteps execute in parallel.
         if (rnn_op.has_timestep_blob) {
           OperatorDef op_copy = step_net_def_.op(rnn_op.order);
 
@@ -216,7 +216,7 @@ class RecurrentNetworkExecutorBase {
   }
 
   // Return all outbound dependencies of an op. Special case for
-  // rnn dependencies, that are set in recurent_network_op.
+  // rnn dependencies, that are set in recurrent_network_op.
   std::vector<string> op_deps(int i) {
     std::vector<string> outs;
     auto& opdef = step_net_def_.op(i);

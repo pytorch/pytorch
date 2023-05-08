@@ -74,6 +74,41 @@ C10_DEFINE_TEST(TestExponential, EulerFormula) {
   }
 }
 
+C10_DEFINE_TEST(TestExpm1, Normal) {
+  // expm1(x) = exp(x) - 1
+  {
+    c10::complex<float> x(0.1, 1.2);
+    c10::complex<float> l1 = std::expm1(x);
+    c10::complex<float> l2 = std::exp(x) - 1.0f;
+    C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
+    C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
+  }
+  {
+    c10::complex<double> x(0.1, 1.2);
+    c10::complex<double> l1 = std::expm1(x);
+    c10::complex<double> l2 = std::exp(x) - 1.0;
+    C10_ASSERT_NEAR(l1.real(), l2.real(), tol);
+    C10_ASSERT_NEAR(l1.imag(), l2.imag(), tol);
+  }
+}
+
+C10_DEFINE_TEST(TestExpm1, Small) {
+  // expm1(x) = exp(x) - 1
+  // expm1(x) provides greater precision than exp(x) - 1 for small values of x
+  {
+    c10::complex<float> x(1e-30, 1e-30);
+    c10::complex<float> l1 = std::expm1(x);
+    C10_ASSERT_NEAR(l1.real(), 1e-30, tol);
+    C10_ASSERT_NEAR(l1.imag(), 1e-30, tol);
+  }
+  {
+    c10::complex<double> x(1e-100, 1e-100);
+    c10::complex<double> l1 = std::expm1(x);
+    C10_ASSERT_NEAR(l1.real(), 1e-30, tol);
+    C10_ASSERT_NEAR(l1.imag(), 1e-30, tol);
+  }
+}
+
 C10_DEFINE_TEST(TestLog, Definition) {
   // log(x) = log(r) + i*theta
   {

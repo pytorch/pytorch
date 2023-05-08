@@ -94,14 +94,14 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
             self.assertIsInstance(make_np(tensor), np.ndarray)
 
             # CUDA tensor
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
             self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type
@@ -764,11 +764,11 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa: F812
+        self.assertTrue(all(plt.fignum_exists(figure.number) is True for figure in figures))  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != '3.3.0':
-            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa: F812
+            self.assertTrue(all(plt.fignum_exists(figure.number) is False for figure in figures))  # noqa: F812
         else:
             print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 

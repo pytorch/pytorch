@@ -155,7 +155,51 @@ def squeeze(li: List[int],
   return out
 
 )=====")
-+ std::string(R"=====(def unsqueeze(li: List[int],
++ std::string(R"=====(def squeeze_dims(li: List[int],
+    dims: List[int]) -> List[int]:
+  if torch.eq(torch.len(dims), 0):
+    _0 = li
+  else:
+    wrapped_dims = annotate(List[int], [])
+    for _1 in range(torch.len(dims)):
+      elem = dims[_1]
+      _2 = torch.append(wrapped_dims, elem)
+    for i in range(torch.len(dims)):
+      _3 = wrapped_dims[i]
+      _4 = torch.len(li)
+      if torch.le(_4, 0):
+        dim_post_expr = 1
+      else:
+        dim_post_expr = _4
+      min = torch.neg(dim_post_expr)
+      max = torch.sub(dim_post_expr, 1)
+      if torch.lt(_3, min):
+        _5 = True
+      else:
+        _5 = torch.gt(_3, max)
+      if torch.__not__(_5):
+        pass
+      else:
+        ops.prim.RaiseException("AssertionError: ")
+      if torch.lt(_3, 0):
+        dim = torch.add(_3, dim_post_expr)
+      else:
+        dim = _3
+      _6 = torch._set_item(wrapped_dims, i, dim)
+    result = annotate(List[int], [])
+    for i0 in range(torch.len(li)):
+      if torch.eq(li[i0], 1):
+        _7 = torch.__contains__(wrapped_dims, i0)
+        if torch.__not__(_7):
+          _8 = torch.append(result, li[i0])
+        else:
+          pass
+      else:
+        _9 = torch.append(result, li[i0])
+    _0 = result
+  return _0
+
+def unsqueeze(li: List[int],
     dim: int) -> List[int]:
   _0 = torch.add(torch.len(li), 1)
   if torch.le(_0, 0):
@@ -2627,49 +2671,57 @@ def conv_forwards(input: List[int],
 )=====")
 + std::string(R"=====(def upsample_nearest2d(input: List[int],
     output_size: Optional[List[int]],
-    scale_factors: Optional[List[float]]) -> Optional[List[int]]:
-  _0 = "AssertionError: Must specify exactly one of output_size and scale_factors"
-  _1 = "AssertionError: Either output_size or scale_factors must be presented"
+    scale_factors: Optional[List[float]]) -> List[int]:
+  _0 = "AssertionError: Either output_size or scale_factors must be presented"
+  _1 = "AssertionError: Must specify exactly one of output_size and scale_factors"
+  _2 = uninitialized(Optional[List[float]])
   out = annotate(List[int], [])
-  _2 = torch.append(out, input[0])
-  _3 = torch.append(out, input[1])
+  _3 = torch.append(out, input[0])
+  _4 = torch.append(out, input[1])
+  if torch.__is__(scale_factors, None):
+    _5, scale_factors0 = torch.__is__(output_size, None), scale_factors
+  else:
+    scale_factors1 = unchecked_cast(List[float], scale_factors)
+    _5, scale_factors0 = False, scale_factors1
+  if _5:
+    ops.prim.RaiseException(_0)
+  else:
+    pass
   if torch.__isnot__(output_size, None):
-    output_size0 = unchecked_cast(List[int], output_size)
-    if torch.__is__(scale_factors, None):
-      pass
+    output_size1 = unchecked_cast(List[int], output_size)
+    if torch.__is__(scale_factors0, None):
+      scale_factors3 : Optional[List[float]] = scale_factors0
     else:
-      ops.prim.RaiseException(_0)
-    _5 = torch.eq(torch.len(output_size0), 2)
-    if _5:
+      ops.prim.RaiseException(_1)
+      scale_factors3 = _2
+    _6 = torch.eq(torch.len(output_size1), 2)
+    if _6:
       pass
     else:
       ops.prim.RaiseException("AssertionError: ")
-    _6 = torch.append(out, output_size0[0])
-    _7 = torch.append(out, output_size0[1])
-    _4 : Optional[List[int]] = out
+    _7 = torch.append(out, output_size1[0])
+    _8 = torch.append(out, output_size1[1])
+    scale_factors2, output_size0 = scale_factors3, output_size1
   else:
-    _8 = torch.__isnot__(scale_factors, None)
-    if _8:
-      scale_factors0 = unchecked_cast(List[float], scale_factors)
-      if torch.__is__(output_size, None):
-        pass
-      else:
-        ops.prim.RaiseException(_0)
-      _10 = torch.eq(torch.len(scale_factors0), 2)
-      if _10:
-        pass
-      else:
-        ops.prim.RaiseException("AssertionError: ")
-      _11 = torch.mul(input[2], scale_factors0[0])
-      _12 = torch.append(out, int(_11))
-      _13 = torch.mul(input[3], scale_factors0[1])
-      _14 = torch.append(out, int(_13))
-      _9 : Optional[List[int]] = out
+    scale_factors2, output_size0 = scale_factors0, output_size
+  if torch.__isnot__(scale_factors2, None):
+    scale_factors4 = unchecked_cast(List[float], scale_factors2)
+    if torch.__is__(output_size0, None):
+      pass
     else:
       ops.prim.RaiseException(_1)
-      _9 = None
-    _4 = _9
-  return _4
+    _9 = torch.eq(torch.len(scale_factors4), 2)
+    if _9:
+      pass
+    else:
+      ops.prim.RaiseException("AssertionError: ")
+    _10 = torch.mul(input[2], scale_factors4[0])
+    _11 = torch.append(out, int(_10))
+    _12 = torch.mul(input[3], scale_factors4[1])
+    _13 = torch.append(out, int(_12))
+  else:
+    pass
+  return out
 
 )=====")
 + std::string(R"=====(def broadcast(a: List[int],
@@ -2892,6 +2944,64 @@ def native_batch_norm(input: List[int],
   return (out, _size, _size)
 
 )=====")
++ std::string(R"=====(def cross_entropy_loss(self: List[int],
+    target: List[int],
+    weight: Optional[List[int]]=None,
+    reduction: int=1,
+    ignore_index: int=-100,
+    label_smoothing: float=0.) -> List[int]:
+  self_dim = torch.len(self)
+  target_dim = torch.len(target)
+  if torch.lt(0, self_dim):
+    _0 = torch.le(self_dim, 2)
+  else:
+    _0 = False
+  if _0:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.le(target_dim, 1):
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(self_dim, 1):
+    no_batch_dim = torch.eq(target_dim, 0)
+  else:
+    no_batch_dim = False
+  if no_batch_dim:
+    _1 = True
+  else:
+    _1 = torch.eq(self[0], target[0])
+  if _1:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  n_classes = self[-1]
+  if torch.__is__(weight, None):
+    _2 = True
+  else:
+    weight0 = unchecked_cast(List[int], weight)
+    if torch.eq(torch.len(weight0), 1):
+      _3 = torch.eq(weight0[0], n_classes)
+    else:
+      _3 = False
+    _2 = _3
+  if _2:
+    pass
+  else:
+    ops.prim.RaiseException("AssertionError: ")
+  if torch.eq(reduction, 0):
+    _4 = torch.eq(self_dim, 2)
+  else:
+    _4 = False
+  if _4:
+    reduction_shape = [self[0]]
+  else:
+    reduction_shape = annotate(List[int], [])
+  _5 = (reduction_shape, annotate(List[int], []))
+  return (_5)[0]
+
+)=====")
 + std::string(R"=====(def broadcast_three(a: List[int],
     b: List[int],
     c: List[int]) -> List[int]:
@@ -3076,6 +3186,7 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::arange.start_step(Scalar start, Scalar end, Scalar step, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor", "arange_start_step"},
     {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
     {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
+    {"aten::squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)", "squeeze_dims"},
     {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
     {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
     {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
@@ -3127,6 +3238,9 @@ const OperatorMap<std::string>& GetShapeFunctionMappings() {
     {"aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", "nll_loss_forward"},
     {"aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", "native_layer_norm"},
     {"aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::_native_batch_norm_legit(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", "native_batch_norm"},
+    {"aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor", "cross_entropy_loss"},
     {"aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor", "broadcast_three"},
     {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
     {"aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", "broadcast_inplace"},
