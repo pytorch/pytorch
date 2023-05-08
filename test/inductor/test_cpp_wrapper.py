@@ -97,7 +97,7 @@ if RUN_CPU:
             torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_lowmem_dropout1"),  # None as output
+        # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction

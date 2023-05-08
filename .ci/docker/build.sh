@@ -106,7 +106,7 @@ case "$image" in
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
