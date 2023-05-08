@@ -75,7 +75,7 @@ namespace lazy {
 
 // Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
 // from here?
-std::vector<int64_t> expand_param_if_needed(
+static std::vector<int64_t> expand_param_if_needed(
     at::IntArrayRef list_param,
     const char* param_name,
     int64_t expected_dim) {
@@ -357,7 +357,7 @@ std::vector<Shape> compute_shape_min(const at::Tensor& self) {
   return {Shape(self.scalar_type(), {})};
 }
 
-std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
+static std::vector<Shape> compute_shape_nonzero(const at::Tensor& t, bool as_tuple) {
   if (as_tuple) {
     auto res = std::vector<Shape>();
     for (auto dim_size : t.sizes()) {
@@ -713,7 +713,7 @@ std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_bitwise_and(
+static std::vector<Shape> compute_shape_bitwise_and(
     const at::Tensor& self,
     const at::Scalar& other) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -757,7 +757,7 @@ std::vector<Shape> compute_shape_sort(
       Shape(c10::ScalarType::Long, self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_smooth_l1_loss(
+static std::vector<Shape> compute_shape_smooth_l1_loss(
     const at::Tensor& self,
     const at::Tensor& target,
     int64_t reduction,

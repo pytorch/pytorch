@@ -46,7 +46,7 @@ bool operator==(const SGDOptions& lhs, const SGDOptions& rhs) {
       (lhs.nesterov() == rhs.nesterov());
 }
 
-bool operator==(const SGDParamState& lhs, const SGDParamState& rhs) {
+static bool operator==(const SGDParamState& lhs, const SGDParamState& rhs) {
   return torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer());
 }
 
