@@ -1587,14 +1587,6 @@ def to_numpy_helper(___tmp_0):
 
 
 def to_torch_np_ndarray(___graph_out_0):
-    def convert(obj):
-        if isinstance(obj, torch.Tensor):
-            return torch_np.asarray(obj)
-        elif isinstance(obj, np.ndarray):
-            return torch_np.asarray(torch.from_numpy(obj))
-        elif isinstance(obj, torch_np.ndarray):
-            return obj
-
     if isinstance(___graph_out_0, tuple):
-        return tuple([convert(obj) for obj in ___graph_out_0])
-    return convert(___graph_out_0)
+        return tuple([torch_np.asarray(obj) for obj in ___graph_out_0])
+    return torch_np.asarray(___graph_out_0)

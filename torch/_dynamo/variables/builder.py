@@ -254,7 +254,7 @@ class VariableBuilder:
             ),
         ]
         if config.numpy_ndarray_as_tensor:
-            entries.append(((np.ndarray, torch_np.ndarray), cls.wrap_numpy_ndarray))
+            entries.append((torch_np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -861,9 +861,8 @@ class VariableBuilder:
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
         source = self.get_source()
-        tensor_value = (
-            torch.from_numpy(value) if isinstance(value, np.ndarray) else value.tensor
-        )
+        tensor_value = value.tensor
+
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
