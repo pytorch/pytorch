@@ -3115,7 +3115,7 @@ def convert_arg_type(python_type):
 
 
 def convert_return_type(python_type):
-    # TODO: only support Tensor as func return type
+    # TODO: only support Tensor as func return type for now
     assert (
         python_type == "Tensor"
     ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
