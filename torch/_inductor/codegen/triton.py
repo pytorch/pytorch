@@ -42,11 +42,9 @@ from .common import (
     Kernel,
     OpOverrides,
     PythonPrinter,
-    register_backend_for_device,
     SizeArg,
     TensorArg,
 )
-from .wrapper import WrapperCodeGen
 
 log = logging.getLogger(__name__)
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -2176,6 +2174,3 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
-
-
-register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)

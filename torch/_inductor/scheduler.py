@@ -1255,21 +1255,19 @@ class Scheduler:
 class BaseScheduling:
     def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
-        Check whether the node1 and node2 can be fused or not, while node1 and node2 have
-        internal data dependencies.
+        Check whether node1 and node2 can be vertically fused or not.
         """
         raise NotImplementedError()
 
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
-        Check whether the node1 and node2 can be fused or not, while node1 and node2 do NOT have
-        internal data dependencies.
+        Check whether node1 and node2 can be horizontally fused or not.
         """
         raise NotImplementedError()
 
     def group_fn(self, sizes: tuple[List[Union[int, sympy.Expr]]]):
         """
-        Process the iteration sizes in case needing to apply transformation for the sizes
+        Process the iteration sizes in case a transformation needs to be applied.
         """
         raise NotImplementedError()
 
@@ -1286,18 +1284,18 @@ class BaseScheduling:
 
     def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
         """
-        Given a set of pre-fused nodes, generate a kernel.
+        Generate a kernel given a list of pre-fused nodes.
         """
         raise NotImplementedError()
 
     def codegen_sync(self):
         """
-        Generate the kernel synchronization code. It depends on the hardware characteristic.
+        Generate synchronization code for the kernel. This method depends on the hardware characteristics.
         """
         raise NotImplementedError()
 
     def flush(self):
         """
-        Flush the generated code for both kernel and python wrapper to the source code file.
+        Flush the generated kernel and python wrapper code to the source code file.
         """
         raise NotImplementedError()

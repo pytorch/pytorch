@@ -36,7 +36,6 @@ from .common import (
     KernelArgs,
     OpOverrides,
     OptimizationContext,
-    register_backend_for_device,
 )
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
@@ -2799,6 +2798,3 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
-
-
-register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)

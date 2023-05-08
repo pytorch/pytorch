@@ -24,8 +24,12 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.common import get_wrapper_codegen_for_device
-from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen
+from .codegen.common import (
+    get_scheduling_for_device,
+    get_wrapper_codegen_for_device,
+    register_backend_for_device,
+)
+from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -647,6 +651,16 @@ class GraphLowering(torch.fx.Interpreter):
 
     def codegen(self):
         from .scheduler import Scheduler
+
+        if get_scheduling_for_device("cpu") is None:
+            from .codegen.cpp import CppScheduling
+
+            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+
+        if get_scheduling_for_device("cuda") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
 
         self.init_wrapper_code()
 
