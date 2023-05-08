@@ -25,11 +25,10 @@ CACHE_ZIP_DOWNLOADS = "cache-zip-downloads"
 UNZIPPED_CACHES = "unzipped-caches"
 
 
-# create a custom string type to be used as pr identifiers to know we've gotten the right one
+# Since the pr identifier can be based on include user defined text (like a branch name)
+# we hash it to sanitize the input and avoid corner cases
 class PRIdentifier(str):
     def __new__(cls, value: str) -> "PRIdentifier":
-        # Since the pr identifier can be based on include user defined text (like a branch name)
-        # we hash it to get a clean input and dodge corner cases
         md5 = hashlib.md5(value.encode("utf-8")).hexdigest()
         return super().__new__(cls, md5)
 
@@ -49,7 +48,6 @@ class GithubRepo(NamedTuple):
         owner, name = repo_string.split("/")
         return cls(owner, name)
 
-    # To string method
     def __str__(self) -> str:
         return f"{self.owner}/{self.name}"
 
