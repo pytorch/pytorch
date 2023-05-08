@@ -3331,7 +3331,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [])
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
@@ -3403,7 +3403,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypes(torch.half)
     @dtypesIfCUDA(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    def test_triton_bsr_dense_error_messages(self, device, dtype):
+    def test_triton_bsr_dense_bmm_error_messages(self, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_mm
 
         rhs = torch.rand(32, 32, dtype=dtype, device=device)
@@ -3433,6 +3433,15 @@ class TestSparseCompressedTritonKernels(TestCase):
             lhs = rhs.to_sparse_bsr(blocksize)
             with self.assertRaisesRegex(ValueError, "should be at least 16 and a power of 2"):
                 bsr_dense_mm(lhs, rhs)
+        # out check
+        rhs = torch.rand(2, 32, 32, dtype=dtype, device=device)
+        lhs = rhs.to_sparse_bsr(16)
+        with self.assertRaisesRegex(ValueError, r"`out` argument has wrong shape"):
+            out = torch.rand(2, 30, 30, dtype=dtype, device=device)
+            bsr_dense_mm(lhs, rhs, out=out)
+        with self.assertRaisesRegex(ValueError, r"only row-major/col-major `out`"):
+            out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
+            bsr_dense_mm(lhs, rhs, out=out)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
