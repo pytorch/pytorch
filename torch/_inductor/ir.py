@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -28,7 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -2432,6 +2433,7 @@ class InputsKernel(Buffer):
             set(),
             [],
             None,
+            op_counts=collections.Counter(),
         )
 
     @staticmethod
@@ -3128,8 +3130,6 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3137,19 +3137,12 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
-        def gen_kwarg(k, v):
-            return f"{k}={repr(v)}"
-
-        def get_pexpr(x):
-            if isinstance(x, SymTypes):
-                return pexpr(sympy.expand(repr(x)))
-            else:
-                return repr(x)
-
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
-        args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
+        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
+        # let self.codegen_kwargs handle kwargs
+        self.kwargs.update(kwargs)
+        return args
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -4279,7 +4272,7 @@ class MultiOutputNoSizeAssert(MultiOutput):
         )
 
 
-class ForceInPlace(ExternKernel):
+class InPlaceHint(ExternKernel):
     """
     Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
     Wrap the input of your inplace op to enable this behavior.
@@ -4328,7 +4321,7 @@ class AllReduceCoalesced(ExternKernel):
 
         def wrap_input(var):
             nonlocal res
-            op = ForceInPlace(
+            op = InPlaceHint(
                 FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
             )
             res.append(op)
@@ -4385,7 +4378,7 @@ class AllReduceCoalesced(ExternKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
-        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):
