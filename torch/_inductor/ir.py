@@ -3197,8 +3197,7 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
         self.cpp_op_schema = self.get_cpp_op_schema(kernel)
-
-        # TODO: what if both kwarg and positional arg is possible?
+        self.cpp_op_num_args = len(kernel._schema.arguments)
         self.kwarg_only = [x.name for x in kernel._schema.arguments if x.kwarg_only]
 
     def codegen_args(self):
@@ -3225,6 +3224,9 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
         if self.use_cpp_op_schema:
             assert all(v in kwargs for v in self.kwarg_only), "kwargs not found"
+            assert (
+                len(args) + len(self.kwarg_only) == self.cpp_op_num_args
+            ), "args number is incorrect"
             return list(map(repr, args)) + [
                 V.graph.wrapper_code.val_to_str(kwargs[v]) for v in self.kwarg_only
             ]
