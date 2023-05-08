@@ -57,6 +57,11 @@ def is_float(s: str):
     return True
 
 
+SUPPORTED_FALLBACK_CPP_WRAPPER = [
+    "repeat_interleave.Tensor",
+]
+
+
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
