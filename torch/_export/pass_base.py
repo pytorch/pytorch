@@ -33,27 +33,6 @@ class ExportPassBaseError(RuntimeError):
     pass
 
 
-class InlineInterpreter(torch.fx.Interpreter):
-    """
-    Wrapper around the interpreter to just process the cond/map ops
-    """
-    def __init__(self, graph_module: Optional[torch.fx.GraphModule] = None) -> None:
-        super().__init__(
-            graph_module or torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
-        )
-
-    def call_function(self, target, args, kwargs):
-        if target == torch.ops.cond:
-            pred, true, false, params = args
-            return InlineInterpreter(true).run(*params)
-        elif target == torch.ops.map:
-            f, xs, *params = args
-            sample_out = InlineInterpreter(f).run(xs[0], *params)
-            return sample_out.new_empty([xs.shape[0], *sample_out.shape])
-        else:
-            return super().call_function(target, args, kwargs)
-
-
 class ExportTracer(PythonKeyTracer):
     """
     Tracer used to create nodes during the retracing part of the ExportPassBase
@@ -263,7 +242,7 @@ class ExportPassBase(PassBase):
         args_data, kwargs_data = pytree.tree_map_only(
             ProxyValue, lambda x: x.data, (args, kwargs)
         )
-        res_data = getattr(InlineInterpreter(), kind)(target, args_data, kwargs_data)
+        res_data = getattr(self.interpreter, kind)(target, args_data, kwargs_data)
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
