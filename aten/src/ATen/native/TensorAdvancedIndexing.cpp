@@ -1360,10 +1360,6 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-static Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
-}
-
 Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   // for composite compliance, use out-of-place variant of
   // `index_add` if index tensor is a Tensor Subclass.
