@@ -711,27 +711,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(map(dep_contiguous_score1, external_writes)),
-                sum(map(dep_contiguous_score1, external_deps)),
+                sum(map(dep_contiguous_score, external_writes)),
                 sum(map(dep_symbols_score, external_deps)),
                 sum(map(dep_symbols_score, internal_deps)),
             )
 
-        def dep_contiguous_score1(dep):
+        def dep_contiguous_score(dep):
             if dep.is_contiguous():
-                return 0
-            else:
-                return -1
-
-        def dep_contiguous_score2(dep):
-            """
-            This score is a weaker form of dep.is_contiguous() where we
-            only check the last dimension.
-            """
-            if not dep.var_names or not hasattr(dep, "index"):
-                return 0
-            v = dep.var_names[-1]
-            if v in dep.index.free_symbols and v not in (dep.index - v).free_symbols:
                 return 0
             else:
                 return -1

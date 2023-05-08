@@ -308,6 +308,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        print(code)
         FileCheck() \
             .check("buf0 = empty_strided(") \
             .check("buf2 = empty_strided") \
