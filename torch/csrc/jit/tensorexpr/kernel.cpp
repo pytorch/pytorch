@@ -142,7 +142,8 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-static c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
+static c10::optional<at::Device> pickDeviceType(
+    const std::shared_ptr<Graph>& graph) {
   c10::optional<at::Device> device = c10::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {

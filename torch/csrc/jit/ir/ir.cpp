@@ -128,7 +128,9 @@ static std::ostream& operator<<(
   return printValueRefs(out, nodes);
 }
 
-static std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 

@@ -231,7 +231,9 @@ static std::pair<graph_node_list::iterator, bool> createFusionGroup(
   return std::make_pair(++fusion_node->reverseIterator(), false);
 }
 
-static std::pair<graph_node_list::iterator, bool> scanNode(Node* n, AliasDb* aliasDb) {
+static std::pair<graph_node_list::iterator, bool> scanNode(
+    Node* n,
+    AliasDb* aliasDb) {
   GRAPH_DEBUG("Considering node:", *n);
 
   if (!canHandle(n)) {
