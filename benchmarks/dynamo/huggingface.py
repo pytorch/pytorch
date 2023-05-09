@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main, reset_rng_state, try_download
+from common import BenchmarkRunner, main, reset_rng_state, download_retry_decorator
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -373,6 +373,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "huggingface"
 
+    @download_retry_decorator
     def _download_model(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -412,7 +413,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         reset_rng_state()
-        model = try_download(self._download_model, model_name)
+        model = self._download_model(model_name)
         model = model.to(device, dtype=dtype)
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]

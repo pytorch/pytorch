@@ -11,9 +11,9 @@ from os.path import abspath, exists
 import torch
 
 try:
-    from .common import BenchmarkRunner, main, try_download
+    from .common import BenchmarkRunner, main, download_retry_decorator
 except ImportError:
-    from common import BenchmarkRunner, main, try_download
+    from common import BenchmarkRunner, main, download_retry_decorator
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
@@ -260,6 +260,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
+    @download_retry_decorator
     def _download_model(self, model_name):
         is_training = self.args.training
         try:
@@ -305,8 +306,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
-        model.example_inputs = example_inputs
-        return model
+        return model, example_inputs
 
     def load_model(
         self,
@@ -318,8 +318,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        model = try_download(self._download_model, model_name)
-        example_inputs = model.example_inputs
+        model, example_inputs = self._download_model(model_name)
 
         # Models that must be in train mode while training
         if is_training and (not use_eval_mode or model_name in ONLY_TRAINING_MODE):

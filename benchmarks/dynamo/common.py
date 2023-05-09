@@ -12,10 +12,10 @@ import random
 import signal
 import subprocess
 import sys
-import time
 from contextlib import contextmanager
+import time
 
-from typing import NamedTuple
+from typing import NamedTuple, Callable, Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -944,36 +944,38 @@ def try_script(model, example_inputs):
     except Exception:
         return None
 
-
-def try_download(
-    download_fn: Callable[[str], Any],
-    model_name: str,
-    total_allowed_tries: int = MAX_DOWNLOAD_ATTEMPTS,
-) -> Any:
-    """a wrapper around a function to download a model from a remote location which allows it to be retried if it fails
-
-    Args:
-        download_fn (Callable[str], Any]): callable which downloads and returns a model object.
-        model_name (str): name of the model to download. This is the input into download_fn
-        total_allowed_tries (int, optional): max number of tries. Defaults to 5.
-
-    Returns:
-        Any: the downloaded model or throws an exception if download fails for total_allowed_tries times
+def download_retry_decorator(download_fn):
     """
-    tries = 1
-    model = None
-    while tries <= total_allowed_tries:
-        try:
-            model = download_fn(model_name)
-            return model
-        except Exception as e:
-            tries += 1
-            if tries <= total_allowed_tries:
-                wait = tries * 30
-                print(
-                    f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
-                )
-                time.sleep(wait)
+    Decorator function for applying retry logic to a download function.
+
+    The wrapped function will be called up to 5 times and raises an exception if the function fails each time.
+    After each unsuccessful attempt, there is a delay before the next attempt, which is increased linearly with the number of tries.
+
+    Usage:
+    @download_retry_decorator
+    def download_function(model_name: str):
+        # download logic goes here
+    """
+    @functools.wraps(download_fn)
+    def wrapper(self, *args, **kwargs) -> Any:
+        tries = 0
+        model = None
+        total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
+        while tries < total_allowed_tries:
+            try:
+                model = download_fn(self, *args, **kwargs)
+                return model
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError(f"Failed to load model '{model_name}' with following error(s): {str(e)}.")
+    return wrapper
 
 
 def read_batch_size_from_file(args, filename, model_name):

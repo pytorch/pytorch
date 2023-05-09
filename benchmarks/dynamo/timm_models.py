@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main, try_download
+from common import BenchmarkRunner, main, download_retry_decorator
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
@@ -168,7 +168,7 @@ class TimmRunnner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
-
+    @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
             model_name,
@@ -198,11 +198,10 @@ class TimmRunnner(BenchmarkRunner):
 
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
-        model = try_download(self._download_model, model_name)
+        model = self._download_model(model_name)
 
         if model is None:
             raise RuntimeError(f"Failed to load model '{model_name}'")
-
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
