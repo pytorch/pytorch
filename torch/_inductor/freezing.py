@@ -4,6 +4,7 @@ from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
+from . import config
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -112,7 +113,8 @@ def optimize_for_inference(
     constant_fold(fake_gm, len(preserved_arg_indices))
 
     # invalidate nn Modules
-    invalidate_eager_modules()
+    if config.optimize_for_inference_discard_parameters:
+        invalidate_eager_modules()
     return fake_gm, preserved_arg_indices
 
 
@@ -127,7 +129,8 @@ class ErasedTensor(torch.Tensor):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise RuntimeError(
-            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. The original parameters have been discarded for memeory efficiency. "
+            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
+            "The original parameters have been discarded for memeory efficiency. "
             f"Found in op {func} for erased parameter {self.erased_name} of {self.owning_mod_ref()}"
         )
 
