@@ -4860,6 +4860,16 @@ class TestNLLLoss(TestCaseMPS):
         helper((7, 13))
         helper((2, 8, 4, 5))
 
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
+
     def test_all(self):
         def helper(shape):
             input_xs = []
@@ -9671,6 +9681,34 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(output, input_list)
 
+    def test_index_put_deterministic(self, device="mps"):
+        def helper(dtype, accumulate, deterministic, num_tests=128):
+            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
+            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
+            t_idx = torch.tensor(
+                [0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2,
+                 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2]
+            )
+            for _ in range(num_tests):
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+                    t = torch.zeros(3, dtype=dtype, device=device)
+                    t.index_put_((t_idx,), torch.arange(len(t_idx), device=device, dtype=dtype), accumulate=accumulate)
+                    if accumulate:
+                        self.assertEqual(t, acc_expected)
+                    else:
+                        self.assertEqual(t, non_acc_expected)
+                finally:
+                    torch.use_deterministic_algorithms(False)
+
+        for accumulate, deterministic in product((False, True), (False, True)):
+            dtype = torch.float if accumulate else torch.long
+            if not accumulate and not deterministic:
+                with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
+                    helper(dtype, accumulate, deterministic)
+            else:
+                helper(dtype, accumulate, deterministic)
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -10487,7 +10525,7 @@ class TestErrorInputs(TestCase):
 
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
-        self.assertEqual(device, "mps")
+        self.assertEqual(device, "mps:0")
 
         mps_samples = op.error_inputs(device)
 

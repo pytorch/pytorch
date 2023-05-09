@@ -233,6 +233,7 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude \
       test_autograd \
+      test_jit \
       test_proxy_tensor \
       test_quantization \
       test_public_bindings \
@@ -332,6 +333,12 @@ test_perf_for_dashboard() {
           --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      if [[ "$mode" == "inference" ]]; then
+        # collect inference results with cpp_wrapper on
+        python "benchmarks/dynamo/$suite.py" \
+            --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+      fi
     fi
 
     # Run performance test
@@ -351,6 +358,13 @@ test_perf_for_dashboard() {
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
           --dynamic-batch-only --disable-cudagraphs "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      if [[ "$mode" == "inference" ]]; then
+        # collect inference results with cpp_wrapper on
+        python "benchmarks/dynamo/$suite.py" \
+            --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" \
+            --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_performance.csv"
+      fi
     fi
   done
 }

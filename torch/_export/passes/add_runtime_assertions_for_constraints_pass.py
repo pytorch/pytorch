@@ -1,3 +1,10 @@
+<<<<<<< HEAD
+from collections import defaultdict, namedtuple
+from functools import partial
+from typing import Dict, List, Tuple, Optional
+
+=======
+>>>>>>> 87e3b4d2610 (add runtime assertions for inline constraints.)
 import math
 import operator
 from collections import defaultdict, namedtuple
@@ -79,6 +86,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.constraints = self._process_constraints(get_export_meta(self.current_gm).input_shape_constraints)
         self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
         self.example_inputs = pytree.tree_flatten(get_export_meta(self.current_gm).example_inputs)[0]
+        self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
         return super().call(graph_module)
 
     def _insert_specialized_shapes_assert(self, arg, dims, current_inp):
@@ -159,14 +167,15 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.input_tracker += 1
         return arg
 
+
     def _assert_constraint(self, proxy, lower, upper, assert_msg, low_threshold=2):
         if lower > low_threshold:
-            self._inser_assert_async(operator.ge, proxy, lower, assert_msg)
+            self._insert_assert_async(operator.ge, proxy, lower, assert_msg)
 
         if upper < math.inf:
-            self._inser_assert_async(operator.le, proxy, upper, assert_msg)
+            self._insert_assert_async(operator.le, proxy, upper, assert_msg)
 
-    def _inser_assert_async(self, operator, l, r, assert_msg):
+    def _insert_assert_async(self, operator, l, r, assert_msg):
         cmp = super().call_operator(operator, (l, r), {}, NodeMetadata({}))
         cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, NodeMetadata({}))
         super().call_operator(
@@ -180,6 +189,16 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         ret = super().call_operator(op, args, kwargs, meta)
         if "val" in meta:
             val = meta["val"]
+
+            # In general, we may have to deal the case such as: ret[1].shape[0].
+            # We need first find out what symbols require assertion, then we need to follow the path
+            # from ret to the symbol, construct the proxies along the way and construct the messages
+            # piece-wise at the same time.
+            #
+            # We use post-order traversal to collect all the proxies callbacks needed, construct
+            # the error message callbacks, and at the top-level traversal tree we execute all the callbacks.
+            # We need the callbacks because, in order to call the function to create a proxy for shape[0], we
+            # need the proxy for shape, which further requries the proxy for ret[1], etc.
             def add_assertions(val):
                 call_backs = []
                 messages = []
@@ -209,5 +228,5 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 return call_backs, messages
             callbacks, messages = add_assertions(val)
             for cb, msg in zip(callbacks, messages):
-                cb(proxy=ret, assert_msg=f"{ret.proxy_or_node.node}" + msg)
+                cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
         return ret
