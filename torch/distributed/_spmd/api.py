@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from torch import fx
+from torch._decomp.decompositions import native_layer_norm_backward
 
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
@@ -312,7 +313,7 @@ def _fused_adam_decomp(
             o.copy_(u)
 
 
-FOREACH_DECOMP_TABLE = {
+SPMD_DECOMP_TABLE = {
     aten._foreach_add_.List: _foreach_add_decomp,
     aten._foreach_add_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_add.Scalar
@@ -339,6 +340,7 @@ FOREACH_DECOMP_TABLE = {
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
     ),
     aten._fused_adam_.default: _fused_adam_decomp,
+    aten.native_layer_norm_backward.default: native_layer_norm_backward,
 }
 
 
@@ -482,7 +484,7 @@ def _compile(
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode=tracing_mode,
-            decomposition_table=FOREACH_DECOMP_TABLE,
+            decomposition_table=SPMD_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)
 
