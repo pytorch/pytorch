@@ -626,7 +626,8 @@ class TestDecomp(TestCase):
 
 instantiate_device_type_tests(TestDecomp, globals())
 
-class DecompContiguousTests(TestCase):
+
+class DecompOneOffTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
@@ -657,9 +658,6 @@ class DecompContiguousTests(TestCase):
         res = torch._decomp.decompositions._log_softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-instantiate_device_type_tests(DecompContiguousTests, globals())
-
-class DecompAmpTests(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @onlyCUDA
@@ -699,7 +697,23 @@ class DecompAmpTests(TestCase):
             self.assertEqual(a.dtype, b.dtype)
 
 
-instantiate_device_type_tests(DecompAmpTests, globals())
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_elu_backward(self, device):
+        size = (2, 4, 3, 3)
+        dtype = torch.float32
+        grad_out = torch.randn(size, dtype=dtype, device=device)
+        out = torch.randn(size, dtype=dtype, device=device)
+
+        ref = torch.ops.aten.elu_backward(grad_out, 1.0, 1, 1, True, out)
+        res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
+        self.assertEqual(ref, res)
+
+
+instantiate_device_type_tests(DecompOneOffTests, globals())
+
+
 
 class HasDecompTest(TestCase):
     def setUp(self):

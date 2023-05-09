@@ -10,7 +10,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.overrides import TorchFunctionMode
 
 from . import config
-from .utils import decode_device
+from .utils import decode_device, is_cpu_device
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class AutogradMonkeypatch(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if not kwargs:
             kwargs = {}
-        return replace_fn(func)(*args, **kwargs)
+        return replace_fn(func, is_cpu_device(args))(*args, **kwargs)
 
 
 patch_functions = AutogradMonkeypatch
@@ -28,12 +28,17 @@ patch_functions = AutogradMonkeypatch
 def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
     changed = 0
+    is_cpu = is_cpu_device(example_inputs)
+
     for node in reversed(list(gm.graph.nodes)):
-        if node.op == "call_function" and replace_fn(node.target) is not node.target:
+        if (
+            node.op == "call_function"
+            and replace_fn(node.target, is_cpu) is not node.target
+        ):
             with gm.graph.inserting_before(node):
                 node.replace_all_uses_with(
                     gm.graph.call_function(
-                        replace_fn(node.target), node.args, node.kwargs
+                        replace_fn(node.target, is_cpu), node.args, node.kwargs
                     )
                 )
             gm.graph.erase_node(node)
@@ -129,7 +134,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, p):
         ctx.p = p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         seed, offset = PhiloxRandomState.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
@@ -139,7 +144,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         p = ctx.p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         (seed,) = ctx.saved_tensors
         bool_mask = philox_rand_like(grad_output, seed, ctx.offset) > p
         return bool_mask.to(grad_output.dtype) * grad_output * scale, None
@@ -175,13 +180,13 @@ def rand_like(x, **kwargs):
     )
 
 
-def replace_fn(fn):
+def replace_fn(fn, is_cpu):
     """
     Perform any applicable replacements on `fn`
     """
     if config.fallback_random:
         return fn
-    if config.lowmem_dropout and fn is torch.nn.functional.dropout:
+    if config.lowmem_dropout and fn is torch.nn.functional.dropout and not is_cpu:
         return lowmem_dropout
 
     replacements = {}

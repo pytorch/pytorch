@@ -1271,6 +1271,35 @@ class DeviceCachingAllocator {
     alloc_trace->clear();
   }
 
+  bool isHistoryEnabled() {
+    return record_history;
+  }
+
+  bool checkPoolLiveAllocations(
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+
+    PrivatePool* pool;
+    auto pool_it = graph_pools.find(mempool_id);
+    TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
+    pool = pool_it->second.get();
+
+    size_t allocated_pool_blocks = 0;
+
+    for (Block* b : active_blocks) {
+      if (b->allocated && b->pool->owner_PrivatePool == pool) {
+        if (!expected_live_allocations.count(b->ptr)) {
+          return false;
+        }
+
+        allocated_pool_blocks += 1;
+      }
+    }
+
+    return allocated_pool_blocks == expected_live_allocations.size();
+  }
+
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
     oom_observers_.emplace_back(std::move(observer));
   }
@@ -3176,6 +3205,20 @@ class NativeCachingAllocator : public CUDAAllocator {
         alloc_trace_record_context);
   }
 
+  bool isHistoryEnabled() override {
+    int device;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    return device_allocator[device]->isHistoryEnabled();
+  }
+
+  bool checkPoolLiveAllocations(
+      int device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) override {
+    return device_allocator[device]->checkPoolLiveAllocations(
+        mempool_id, expected_live_allocations);
+  }
+
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     int device;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
@@ -3482,7 +3525,7 @@ void setAllocatorSettings(const std::string& env) {
 }
 
 // Size pretty-printer
-inline std::string format_size(uint64_t size) {
+std::string format_size(uint64_t size) {
   std::ostringstream os;
   os.precision(2);
   os << std::fixed;

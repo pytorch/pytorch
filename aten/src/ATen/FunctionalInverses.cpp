@@ -13,7 +13,7 @@ namespace functionalization {
 // We can't easily share it though, because (eventually) these functions
 // will all call `permute/unsqueeze_copy()` instead of `permute/unsqueeze`.
 
-Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
+static Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
   // invert the permutation
   auto ndims = dims.size();
   std::vector<int64_t> dims_(ndims);
@@ -27,7 +27,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_v
   }
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
+static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
   auto result = self;
 
   int64_t nDims = sizes.size();
@@ -43,7 +43,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool re
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
+static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
   const auto ndim = sizes.size();
   const auto mask = at::dim_list_to_bitset(dim, ndim);
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
