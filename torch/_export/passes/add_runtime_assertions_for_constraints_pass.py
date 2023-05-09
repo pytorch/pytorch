@@ -1,17 +1,19 @@
-from collections import defaultdict, namedtuple
-from typing import Dict, List, Tuple, Optional
-
 import math
 import operator
-import sympy
+from collections import defaultdict, namedtuple
+from functools import partial
+from typing import Dict, List, Optional, Tuple
 
-import torch.utils._pytree as pytree
+import sympy
 import torch
 import torch.fx
-from torch.fx.passes.infra.pass_base import PassResult
-from torch._export.pass_base import ExportPassBase, ProxyValue
+
+import torch.utils._pytree as pytree
 from torch._export.graph_module import get_export_meta
+from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.pass_infra.node_metadata import NodeMetadata
+from torch.fx.experimental.symbolic_shapes import constrain_range
+from torch.fx.passes.infra.pass_base import PassResult
 
 
 __all__ = ["AddRuntimeAssertionsForConstraintsPass"]
@@ -19,6 +21,16 @@ __all__ = ["AddRuntimeAssertionsForConstraintsPass"]
 
 ConstraintSpec = namedtuple("ConstraintSpec", ["constraint_dim", "min_val", "max_val"])
 
+# Convert simple sympy Integers into concrete int to
+# insert into graph
+def _convert_to_int(val):
+    if val == sympy.oo:
+        return math.inf
+    if isinstance(val, sympy.Integer):
+        return int(val)
+    raise RuntimeError(
+        "Export constraints cannot be non-integer expressions"
+    )
 
 class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(self) -> None:
@@ -32,16 +44,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         if constraints is None:
             return constraints_id_to_constraint
 
-        # Convert simple sympy Integers into concrete int to
-        # insert into graph
-        def _convert_to_int(val):
-            if val == sympy.oo:
-                return math.inf
-            if isinstance(val, sympy.Integer):
-                return int(val)
-            raise RuntimeError(
-                "Export constraints cannot be non-integer expressions"
-            )
 
         constraint_id_to_dim: Dict[int, Dict[int, List[Tuple[int, int]]]] = defaultdict(
             lambda: defaultdict(list)
@@ -75,6 +77,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.current_gm = graph_module
         assert isinstance(self.current_gm, torch.fx.GraphModule)
         self.constraints = self._process_constraints(get_export_meta(self.current_gm).input_shape_constraints)
+        self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
         self.example_inputs = pytree.tree_flatten(get_export_meta(self.current_gm).example_inputs)[0]
         return super().call(graph_module)
 
@@ -86,25 +89,25 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 f"Input #{self.input_tracker}'s dimension #{dim} size is "
                 f"specialized at {shapes[dim]}"
             )
-            dim_node = self.call_operator(
+            dim_node = super().call_operator(
                 torch.ops.aten.sym_size,
                 (arg, dim),
                 {},
                 NodeMetadata({}),
             )
-            eq = self.call_operator(
+            eq = super().call_operator(
                 operator.eq,
                 (dim_node, shapes[dim]),
                 {},
                 NodeMetadata({}),
             )
-            tensor_eq = self.call_operator(
+            tensor_eq = super().call_operator(
                 torch.ops.aten.scalar_tensor.default,
                 (eq,),
                 {},
                 NodeMetadata({}),
             )
-            self.call_operator(
+            super().call_operator(
                 torch.ops.aten._assert_async.msg,
                 (tensor_eq, assert_msg),
                 {},
@@ -131,7 +134,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         # x[1] == x[0])
         for constraint in constraints:
             constrained_dims.add(constraint.constraint_dim)
-            dim = self.call_operator(
+            dim = super().call_operator(
                 torch.ops.aten.sym_size,
                 (arg, constraint.constraint_dim),
                 {},
@@ -141,51 +144,12 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 f"Input #{self.input_tracker}'s dimension #{constraint.constraint_dim} size is "
                 f"outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
             )
-
             # TODO (tmanlaibaatar) we are making an assumption that graph generated for
             # input dim N >=2 generalizes to N < 2. Ideally we should check that:
             # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
             # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
             # Above can be achieved via a seperate pass.
-            if constraint.min_val > 2:
-                ge = self.call_operator(
-                    operator.ge,
-                    (dim, constraint.min_val),
-                    {},
-                    NodeMetadata({}),
-                )
-                tensor_ge = self.call_operator(
-                    torch.ops.aten.scalar_tensor.default,
-                    (ge,),
-                    {},
-                    NodeMetadata({}),
-                )
-                self.call_operator(
-                    torch.ops.aten._assert_async.msg,
-                    (tensor_ge, assert_msg),
-                    {},
-                    NodeMetadata({}),
-                )
-
-            if constraint.max_val < math.inf:
-                le = self.call_operator(
-                    operator.le,
-                    (dim, constraint.max_val),
-                    {},
-                    NodeMetadata({}),
-                )
-                tensor_le = self.call_operator(
-                    torch.ops.aten.scalar_tensor.default,
-                    (le,),
-                    {},
-                    NodeMetadata({}),
-                )
-                self.call_operator(
-                    torch.ops.aten._assert_async.msg,
-                    (tensor_le, assert_msg),
-                    {},
-                    NodeMetadata({}),
-                )
+            self._assert_constraint(dim, constraint.min_val, constraint.max_val, assert_msg, low_threshold=2)
 
         specialized_dims = all_dims - constrained_dims
         # Make all non-constrained dims to be static
@@ -194,4 +158,56 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         # TODO Add relational constraints
         self.input_tracker += 1
         return arg
-    # TODO implement adding inline constraints as assertion
+
+    def _assert_constraint(self, proxy, lower, upper, assert_msg, low_threshold=2):
+        if lower > low_threshold:
+            self._inser_assert_async(operator.ge, proxy, lower, assert_msg)
+
+        if upper < math.inf:
+            self._inser_assert_async(operator.le, proxy, upper, assert_msg)
+
+    def _inser_assert_async(self, operator, l, r, assert_msg):
+        cmp = super().call_operator(operator, (l, r), {}, NodeMetadata({}))
+        cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, NodeMetadata({}))
+        super().call_operator(
+            torch.ops.aten._assert_async.msg,
+            (cmp_tensor, assert_msg),
+            {},
+            NodeMetadata({}),
+        )
+
+    def call_operator(self, op, args, kwargs, meta) -> ProxyValue:
+        ret = super().call_operator(op, args, kwargs, meta)
+        if "val" in meta:
+            val = meta["val"]
+            def add_assertions(val):
+                call_backs = []
+                messages = []
+                if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                    expr = val.node._expr
+                    if expr in self.inline_constraints:
+                        constraint = self.inline_constraints[expr]
+                        lower = _convert_to_int(constraint.lower)
+                        upper = _convert_to_int(constraint.upper)
+                        assert_msg = f" is outside of inline constraint [{lower}, {upper}]."
+                        call_backs.append(partial(self._assert_constraint, lower=lower, upper=upper, low_threshold=-1))
+                        messages.append(assert_msg)
+                elif isinstance(val, torch.Tensor):
+                    for i, sym in enumerate(val.shape):
+                        cbs, msgs = add_assertions(sym)
+                        for cb, msg in zip(cbs, msgs):
+                            def sym_size_cb(proxy, assert_msg, dim):
+                                dim_proxy = super(AddRuntimeAssertionsForConstraintsPass, self).call_operator(
+                                    torch.ops.aten.sym_size,
+                                    (proxy, dim),
+                                    {},
+                                    NodeMetadata({}),
+                                )
+                                cb(proxy=dim_proxy, assert_msg=assert_msg)
+                            call_backs.append(partial(sym_size_cb, dim=i))
+                            messages.append(f".shape[{i}]" + msg)
+                return call_backs, messages
+            callbacks, messages = add_assertions(val)
+            for cb, msg in zip(callbacks, messages):
+                cb(proxy=ret, assert_msg=f"{ret.proxy_or_node.node}" + msg)
+        return ret

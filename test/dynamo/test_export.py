@@ -2277,7 +2277,7 @@ def forward(self, x):
         specialize_int=True,
         capture_scalar_outputs=True,
     )
-    def test_export_preserve_constraints_as_metadata(self):
+    def test_export_preserve_constraints_as_metadata_scalar(self):
         from torch._export.constraints import constrain_as_size
 
         def f(x, y):
@@ -2301,6 +2301,37 @@ def forward(self, x):
             gm.meta["input_shape_constraints"],
             [c.serializable_spec for c in constraints],
         )
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
+    @torch._dynamo.config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_tensor(self):
+        from torch._export.constraints import constrain_as_value
+
+        def f(x):
+            b = x.nonzero()
+            constrain_as_value(b.shape[0], min=2, max=5)
+            return b
+
+        y = torch.tensor([8, 8, 6])
+        constraints = []
+        gm, _ = torch._dynamo.export(
+            f,
+            y,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
         preserved = False
         for _, vr in gm.meta["inline_constraints"].items():
             # Should have the constraint with min=2, max=5
