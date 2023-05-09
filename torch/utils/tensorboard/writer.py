@@ -5,6 +5,8 @@ import os
 import time
 import torch
 
+from typing import Optional
+
 from tensorboard.compat import tf
 from tensorboard.compat.proto.event_pb2 import SessionLog
 from tensorboard.compat.proto.event_pb2 import Event
