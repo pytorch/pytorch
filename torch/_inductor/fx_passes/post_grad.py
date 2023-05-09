@@ -49,13 +49,10 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    print(gm)
     if config.reordering:
         # has some issues with mutation in inference mode
         reorder_for_locality(gm.graph)
         gm.recompile()
-
-    print(gm)
 
     if config.pattern_matcher:
         lazy_init()
