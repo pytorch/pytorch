@@ -1,7 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import itertools
-import operator
-from typing import Callable, cast, Optional, Sequence
+from typing import Optional, Sequence
 
 # Import all builtin dist tensor ops
 import torch
