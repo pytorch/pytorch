@@ -83,7 +83,12 @@ class TestSerialize(TestCase):
                 return torch.cat([e, e])
 
         inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
-        mmep = export(DynamicShapeSimpleModel(), inputs, constraints=[dynamic_dim(inputs[0], 0)])
+        constraints = [
+            dynamic_dim(inputs[0], 0),
+            dynamic_dim(inputs[2], 0),
+            dynamic_dim(inputs[2], 0) == dynamic_dim(inputs[0], 0),
+        ]
+        mmep = export(DynamicShapeSimpleModel(), inputs, constraints)
         gm = mmep.find_method("forward")
 
         # Pickle the ExportGraphModule
@@ -135,7 +140,6 @@ class TestSerialize(TestCase):
         new_meta = get_export_meta(loaded_gm)
         self.assertEqual(orig_meta.in_spec, new_meta.in_spec)
         self.assertEqual(orig_meta.out_spec, new_meta.out_spec)
-
 
 if __name__ == '__main__':
     run_tests()
