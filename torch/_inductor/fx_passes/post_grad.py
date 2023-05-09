@@ -51,7 +51,6 @@ def post_grad_passes(gm: torch.fx.GraphModule):
     if config.reordering:
         # has some issues with mutation in inference mode
         reorder_for_locality(gm.graph)
-        gm.recompile()
 
     if config.pattern_matcher:
         lazy_init()
@@ -60,6 +59,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
             patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
 
 
@@ -95,12 +95,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
         ),
         None,
     )
+    past_mutating_epilogue = True if first_copy is None else False
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
-        if first_copy is not None:
-            if first_copy is node:
-                first_copy = None
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
             continue
 
         torch.fx.map_arg((node.args, node.kwargs), visit)
