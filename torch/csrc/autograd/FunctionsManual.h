@@ -220,6 +220,10 @@ at::Tensor logcumsumexp_backward(
     const at::Tensor& self,
     at::Tensor result,
     int64_t dim);
+at::Tensor logcumsumexp_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
+    int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(

@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
-from torch._ops import wrap
+from torch._higher_order_ops.wrap import wrap
 
 
 # Equivalent to backend="eager", but also records graphs that

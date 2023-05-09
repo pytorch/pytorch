@@ -2,11 +2,9 @@
 import unittest
 
 import torch
-import torch._dynamo as torchdynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export
-from torch._export import dynamic_dim
+from torch._export import _export, export, dynamic_dim
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     AddRuntimeAssertionsForConstraintsPass,
@@ -33,7 +31,7 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        gm, _ = torchdynamo.export(f, x, aten_graph=True)
+        gm = export(f, (x,)).find_method("forward")
 
         new_gm = ReplaceBrokenOpsWithFunctionalOpsPass()(gm)
         self.assertIsNotNone(new_gm)
@@ -62,7 +60,7 @@ class TestPasses(TestCase):
                 (node.target == torch.ops.aten.add.Tensor) for node in gm.graph.nodes
             )
 
-        gm, _ = torchdynamo.export(M(), torch.zeros(2, 2, 3), aten_graph=True)
+        gm = export(M(), (torch.zeros(2, 2, 3),)).find_method("forward")
         self.assertEqual(count_additions(gm), 3)
 
         new_gm = ConstPropPass()(gm)
@@ -80,7 +78,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        gm = _export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
+        gm = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -116,7 +114,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -150,7 +148,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -191,7 +189,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        gm = _export(M(), (x, y), constraints=constraints)
+        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
@@ -215,37 +213,6 @@ class TestPasses(TestCase):
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
-
-    def test_runtime_assert_inline_constraints_for_item(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                b = x.item()
-                constrain_as_value(b, min=2, max=5)
-                return b
-
-        x = torch.tensor([2])
-        mod = M()
-        gm = _export(mod, (x,))
-
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        new_gm = pass_result.graph_module
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(new_gm.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(new_gm.graph, torch.ops.aten.scalar_tensor.default)
-        # 1 constraint for shape of x, 2 constraints for b
-        self.assertEqual(num_assert, 3)
-        self.assertEqual(num_scalar_tensor, 3)
-
-        with self.assertRaisesRegex(RuntimeError, r"^_local_scalar_dense_default.*\[2, 5\].$"):
-            new_gm(torch.tensor([6]))
-
-        new_inp = torch.tensor([5])
-        self.assertEqual(mod(new_inp), new_gm(new_inp))
-
 
     def test_runtime_assert_inline_constraints_for_nonzero(self) -> None:
         class M(torch.nn.Module):
@@ -281,11 +248,36 @@ class TestPasses(TestCase):
         new_inp = torch.tensor([1, 1, 1, 1])
         self.assertEqual(mod(new_inp), new_gm(new_inp))
 
-    # TODO: ExportPass is broken with
-    # File "/mnt/xarfuse/uid-25457/c21f003f-seed-nspid4026533179_cgpid8299054-ns-4026533176/torch/_export/pass_base.py", line 47, in make_inline_interpreter
-    # class InlineInterpreter(parent):  # type: ignore[valid-type, misc]
-    # TypeError: super() takes at most 2 arguments (3 given)
-    @unittest.expectedFailure
+    def test_runtime_assert_inline_constraints_for_item(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                b = x.item()
+                constrain_as_value(b, min=2, max=5)
+                return b
+
+        x = torch.tensor([2])
+        mod = M()
+        gm = _export(mod, (x,))
+
+        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
+        new_gm = pass_result.graph_module
+        self.assertTrue(pass_result.modified)
+
+        num_assert = count_call_function(new_gm.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(new_gm.graph, torch.ops.aten.scalar_tensor.default)
+        # 1 constraint for shape of x, 2 constraints for b
+        self.assertEqual(num_assert, 3)
+        self.assertEqual(num_scalar_tensor, 3)
+
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
+            new_gm(torch.tensor([6]))
+
+        new_inp = torch.tensor([5])
+        self.assertEqual(mod(new_inp), new_gm(new_inp))
+
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -311,6 +303,31 @@ class TestPasses(TestCase):
         gm = _export(mod, (torch.tensor(True), x, y))
 
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
+
+        with self.assertRaisesRegex(RuntimeError, "_local_scalar_dense_default is outside of inline constraint"):
+            pass_result.graph_module(torch.tensor(True), torch.tensor([8]), torch.tensor([8]))
+
+
+    def test_runtime_assert_cond_plain(self):
+        def user_fn_mod(x):
+            def true_branch(x):
+                return x + 10
+
+            def false_branch(x):
+                return x * 2
+            return cond(x.shape[0] > 5 and x.shape[0] < 10, true_branch, false_branch, [x])
+
+        t_1 = torch.zeros([8])
+        constraints = [
+            5 < dynamic_dim(t_1, 0),
+            dynamic_dim(t_1, 0) <= 16,
+        ]
+        gm = export(user_fn_mod, (t_1,), constraints=constraints)
+        pass_res = AddRuntimeAssertionsForConstraintsPass()(gm._get_default_method())
+
+        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+            pass_res.graph_module(torch.zeros(4, 4), torch.ones(8))
+
 
 
 if __name__ == '__main__':
