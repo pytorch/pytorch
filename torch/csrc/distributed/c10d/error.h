@@ -15,12 +15,13 @@ namespace fmt {
 
 template <>
 struct formatter<std::error_category> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
+  constexpr decltype(auto) parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(const std::error_category& cat, FormatContext& ctx) {
+  decltype(auto) format(const std::error_category& cat, FormatContext& ctx)
+      const {
     if (std::strcmp(cat.name(), "generic") == 0) {
       return format_to(ctx.out(), "errno");
     } else {
@@ -31,12 +32,12 @@ struct formatter<std::error_category> {
 
 template <>
 struct formatter<std::error_code> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
+  constexpr decltype(auto) parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(const std::error_code& err, FormatContext& ctx) {
+  decltype(auto) format(const std::error_code& err, FormatContext& ctx) const {
     return format_to(
         ctx.out(), "({}: {} - {})", err.category(), err.value(), err.message());
   }
