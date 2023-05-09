@@ -285,7 +285,7 @@ Tensor _mkldnn_convolution(
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -409,7 +409,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   // dtype is float or bfloat16.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -579,7 +579,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
   // dtype is float or bfloat16.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -701,7 +701,7 @@ Tensor _mkldnn_convolution_transpose(
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
 
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -805,7 +805,7 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     c10::optional<c10::string_view> algorithm) {
 
   std::vector<int64_t> weight_IOHW_sizes = _original_deconv_weight_size(weight_t, groups);
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -921,7 +921,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 
   Tensor input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   Tensor weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
-  int64_t dim = weight_t.ndimension() - 2;
+  int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
@@ -1065,7 +1065,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
   bool is_channels_last = mkldnn_conv_use_channels_last(input, weight);
   auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), is_channels_last);
   Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
-  int64_t dim = weight.ndimension() - 2;
+  int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);

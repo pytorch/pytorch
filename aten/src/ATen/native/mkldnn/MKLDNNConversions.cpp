@@ -95,10 +95,9 @@ Tensor mkldnn_reorder_conv2d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-  auto dim = self.ndimension() - 2;
-  const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
-  const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
-  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   auto w = itensor_from_mkldnn(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
@@ -151,10 +150,9 @@ Tensor mkldnn_reorder_conv3d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-  auto dim = self.ndimension() - 2;
-  const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
-  const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
-  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 3);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
   auto w = itensor_from_mkldnn(self);
 
   auto desc =
@@ -252,11 +250,10 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-  auto dim = self.ndimension() - 2;
-  const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
-  const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
-  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
-  const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", dim);
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
+  const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", 2);
   ideep::tensor w = itensor_from_tensor(self);
 
   ideep::dims src_dims = ideep::dims();
