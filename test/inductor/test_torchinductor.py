@@ -6019,6 +6019,7 @@ class CommonTemplate:
 
 @dataclasses.dataclass
 class TestFailure:
+    __test__: bool = False
     suffixes: Tuple[str]
     is_skip: bool = False
 
