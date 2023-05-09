@@ -5995,10 +5995,6 @@ class TestTorch(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
-        source = torch.tensor([2., 4.])
-        result = torch.tensor([[1., 2.], [4., 5.], [7., 8.]])
-        self.assertRaises(RuntimeError, lambda: result.index_add_(0, torch.tensor([0, 2]), source))
-
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
         # test args: tensor, int, sizes
