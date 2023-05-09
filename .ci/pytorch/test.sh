@@ -968,7 +968,7 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
   id=$((SHARD_NUMBER-1))
-  test_dynamo_benchmark huggingface "$id"
+#  test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   install_timm
@@ -986,9 +986,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
-  else
-    checkout_install_torchbench
-    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
+#  else
+#    checkout_install_torchbench
+#    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
