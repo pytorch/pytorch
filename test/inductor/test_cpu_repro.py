@@ -231,7 +231,7 @@ class CPUReproTests(TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.conv_transpose = torch.nn.ConvTranspose2d(
-                    in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=(0,)
+                    in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1
                 )
 
             def forward(self, x):
