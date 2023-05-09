@@ -13,16 +13,14 @@ from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
 import torch.utils._pytree as pytree
+from torch._export.pass_base import PassType
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
-from torch.fx.passes.infra.pass_base import PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
 
 Value = Any
 
-# TODO(angelayi): Move this to PassBase
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 ExportGraphModule = torch.fx.GraphModule
 EXPORT_METADATA = "_export_metadata_key"
 
@@ -108,16 +106,20 @@ def _export(
             tracing_mode="symbolic",
             decomposition_table=DECOMP_TABLE,
             constraints=constraints,
+            assume_static_by_default=True,
         )
 
-    in_spec = pytree.tree_flatten(args)[1]
+    flat_args, in_spec = pytree.tree_flatten(args)
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
     )
+
+    input_shape_constraints = gm.meta.get("input_shape_constraints", None)
+    inline_constraints = gm.meta.get("inline_constraints", None)
     # TODO: Track mutation
     mutation = None
     export_graph_module = graph_module.make_export_graph_module(
-        gm, gm.graph, in_spec, out_spec, mutation
+        gm, gm.graph, in_spec, out_spec, mutation, input_shape_constraints, inline_constraints, flat_args
     )
     return export_graph_module
 
