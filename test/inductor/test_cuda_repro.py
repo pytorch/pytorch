@@ -670,6 +670,36 @@ class CudaReproTests(TestCase):
         with torch.no_grad():
             self.common(mod, (torch.randn(4, 4),))
 
+    def test_issue100806(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear1 = torch.nn.Linear(10, 20)
+                self.linear2 = torch.nn.Linear(20, 30)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = torch.cat((x, x), dim=1)
+                x = x.view(-1, 2, 30)
+                x = x[:, 1, :]
+                x = self.relu(x)
+                return x
+
+        device = "cuda"
+        batch_size = 2
+        x = torch.randn(batch_size, 10).to(device)
+        func = Model().to(device)
+
+        with torch.no_grad():
+            func.train(False)
+            jit_func = torch.compile(func)
+
+            res1 = func(x)
+            res2 = jit_func(x)
+            self.assertEqual(res1, res2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
