@@ -79,7 +79,9 @@ def config_of(args):
             if isinstance(x.expr, (int, sympy.Integer)):
                 # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
                 # _maybe_evaluate_static...
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
+                return V.graph.sizevars.statically_known_or_guard_multiple_of(
+                    x.expr, ALIGNMENT
+                )
             else:
                 return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")

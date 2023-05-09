@@ -307,6 +307,19 @@ class SizeVarAllocator:
         expr = sympy.Eq(numerator % denominator, 0)
         return self.is_expr_static_and_true(expr)
 
+    def statically_known_or_guard_multiple_of(
+        self, numerator: Expr, denominator: Expr
+    ) -> bool:
+        """
+        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
+        """
+        if self.statically_known_multiple_of(numerator, denominator):
+            return True
+        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
+            self.guard_equals(numerator % denominator, 0)
+            return True
+        return False
+
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 

@@ -1933,7 +1933,7 @@ class AliasedLayout(Layout):
             return True
         from .compile_fx import ALIGNMENT
 
-        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
+        return V.graph.sizevars.statically_known_or_guard_multiple_of(offset, ALIGNMENT)
 
 
 class MutationLayout(Layout):
