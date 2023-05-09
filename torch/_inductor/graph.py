@@ -179,6 +179,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
+        self.comp_key = None
+        self.comp_path = None
+        self.comp_linemap = None
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
@@ -692,7 +695,11 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        mod = PyCodeCache.load(code, linemap=linemap)
+        key, path = PyCodeCache.write(code)
+        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        self.comp_key = key
+        self.comp_path = path
+        self.comp_linemap = linemap
 
         for name, value in self.constants.items():
             setattr(mod, name, value)

@@ -701,6 +701,10 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
+    def write(cls, source_code, extra=""):
+        return write(source_code, "py", extra)
+
+    @classmethod
     def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
         return cls.load_by_key_path(key, path, linemap)

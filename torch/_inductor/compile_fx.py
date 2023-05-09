@@ -1,11 +1,17 @@
+import base64
 import dataclasses
 import functools
+import getpass
+import hashlib
 import itertools
 import logging
+import os
+import pickle
 import sys
+import tempfile
 import warnings
 
-from copy import deepcopy
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -144,9 +150,24 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     return make_boxed_func(gm.forward)
 
 
+def compile_fx_inner(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    cudagraphs=None,
+    num_fixed=0,
+    is_backward=False,
+    graph_id=None,
+    cpp_wrapper=False,
+    aot_mode=False,
+    is_inference=False,
+    boxed_forward_device_index=None,
+):
+    graph_args = locals() # List of all parameters passed to function
+    return CompiledGraphCache.load(graph_args)
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-def compile_fx_inner(
+def uncached_compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs=None,
@@ -286,6 +307,10 @@ def compile_fx_inner(
                     )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
+    result.compiled_model_key = graph.comp_key
+    result.compiled_model_path = graph.comp_path
+    result.compiled_model_linemap = graph.comp_linemap
+
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
@@ -321,16 +346,120 @@ def align_inputs(model, inputs, static_input_idxs=()):
         and inputs[i].device.type == "cuda"
     ]
 
-    if len(check_inputs) == 0:
-        return model
+    return AlignedInputsCompiledFunction(compiled_model=model, check_inputs=check_inputs)
 
-    def run(new_inputs):
-        for i in check_inputs:
+
+@dataclasses.dataclass
+class AlignedInputsCompiledFunction:
+    """Class holding a function that receives aligned inputs"""
+    compiled_model: Callable = None
+    compiled_model_key: str = None
+    compiled_model_path: str = None
+    compiled_model_linemap: List = None
+    check_inputs: List[int] = None
+    _boxed_call: bool = None
+
+    def __call__(self, new_inputs) -> Any:
+        # We can't really serialize callables that may be C++/Triton/etc., so we serialize their disk cache location instead
+        # TODO: When making an API that can save compiled models e2e to disk this will need to be better
+        if self.compiled_model is None:
+            from .codecache import PyCodeCache
+            self.compiled_model = PyCodeCache.load_by_key_path(self.compiled_model_key, self.compiled_model_path, self.compiled_model_linemap if self.compiled_model_linemap is not None else ()).call
+
+        for i in self.check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        return model(new_inputs)
+        return self.compiled_model(new_inputs)
 
-    return run
+
+@functools.lru_cache(None)
+def cache_dir():
+    cache_dir = os.environ.get(
+        "TORCHINDUCTOR_COMPILED_GRAPHS_CACHE_DIR",
+        f"{tempfile.gettempdir()}/torchinductor_compiled_graphs_{getpass.getuser()}",
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def get_lock_dir():
+    lock_dir = os.path.join(cache_dir(), "locks")
+    if not os.path.exists(lock_dir):
+        os.makedirs(lock_dir, exist_ok=True)
+    return lock_dir
+
+
+def compiled_graph_hash(
+        compiled_graph_args: List[Any]
+    ):
+    serialized_graph_args = b"".join([pickle.dumps(arg) for arg in compiled_graph_args])
+    hashed_graph_args = base64.b32encode(hashlib.sha256(serialized_graph_args).digest())[:51]
+    return (
+        "cg"
+        + hashed_graph_args
+        .decode("utf-8")
+        .lower()
+    )
+
+
+def get_path(key, ext):
+    basename = key
+    subdir = os.path.join(cache_dir(), basename[2:4])
+    path = os.path.join(subdir, f"{basename}.{ext}")
+    return basename, subdir, path
+
+
+def write(compiled_graph, key, ext):
+    basename, subdir, path = get_path(key, ext)
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    if not os.path.exists(path):
+        write_atomic(path, compiled_graph)
+    return basename, path
+
+
+def write_atomic(path: str, compiled_graph):
+    # use a temp file for thread safety
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "wb") as f:
+        f.write(pickle.dumps(compiled_graph))
+    os.rename(tmp_path, path)
+
+LOCK_TIMEOUT = 600
+class CompiledGraphCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def load(cls, graph_args):
+        key = compiled_graph_hash(graph_args)
+        print("CG cache key is ", key)
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                _, _, cg_path = get_path(key, "cg")
+                print("Path from key is ", cg_path)
+                if not os.path.exists(cg_path):
+                    compiled_graph: AlignedInputsCompiledFunction = uncached_compile_fx_inner(**graph_args)
+                    
+                    disk_compiled_graph = copy(compiled_graph)
+                    # Important as compiled models are not pickeable
+                    disk_compiled_graph.compiled_model = None
+                    # TODO: Figure out if linemaps are important to save, work on pickling if it's the case
+                    disk_compiled_graph.compiled_model_linemap = None
+                    print(disk_compiled_graph)
+                    write(disk_compiled_graph, key, "cg")
+                else:
+                    # Load required info from disk, recreation of compiled model will be on first run
+                    with open(cg_path, "rb") as f:
+                        compiled_graph = pickle.load(f)
+
+                cls.cache[key] = compiled_graph
+
+        return cls.cache[key]
 
 
 @dynamo_utils.dynamo_timed
