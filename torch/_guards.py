@@ -365,6 +365,39 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = state.dynamo_guards
 
 
+class TrainStepCheckpointState:
+    backward_called: bool = False
+
+    def __init__(self, backward_called):
+        self.backward_called = backward_called
+
+    def diff(self, other):
+        if self.backward_called != other.backward_called:
+            return set("backward_called")
+        return None
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class TrainStepContext(Checkpointable[TrainStepCheckpointState]):
+    """
+    Tracks state across dynamo tracing and train-step compiler,
+    mostly to enforce safety invariants.
+    """
+
+    def __init__(self):
+        # only support one backward call
+        self.backward_called = False
+
+    def copy_graphstate(self):
+        return TrainStepCheckpointState(self.backward_called)
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, TrainStepCheckpointState)
+        self.backward_called = state.backward_called
+
+
 _CURRENT_TRACING_CONTEXT = None
 
 """
@@ -392,20 +425,10 @@ class TracingContext:
 
     Note that it is a staticmethod, and invocations outside of `with tracing()` (see below), are valid but
     will return None.
+
+    Everything on TracingContext must support implement `Checkpointable` interface, so it will properly
+    react to Dynamo rolling back and restoring context.
     """
-
-    class TrainStepContext:
-        """
-        Tracks state across dynamo tracing and train-step compiler,
-        mostly to enforce safety invariants.
-        """
-
-        def __init__(self):
-            # only support one backward call
-            self.backward_called = False
-            # ensure all stepped optimizers also get zero_grad'd
-            self.optimizers_zeroed_grad = set()
-            self.optimizers_stepped = set()
 
     @staticmethod
     def get() -> Optional["TracingContext"]:
@@ -417,7 +440,7 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
-        self.trainstep: Optional[TracingContext.TrainStepContext] = None
+        self.trainstep: Optional[TrainStepContext] = None
 
     @staticmethod
     def extract_stack():
@@ -473,7 +496,7 @@ class TracingContext:
         assert (
             tc is not None
         ), "trace_train_step() must be called within an ongoing trace."
-        tc.trainstep = TracingContext.TrainStepContext()
+        tc.trainstep = TrainStepContext()
 
     @staticmethod
     def train_step_context(assert_if_missing=False):
