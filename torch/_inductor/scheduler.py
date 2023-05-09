@@ -358,7 +358,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # (would this have been fixed if I tracked mutations properly above?)
             return False
 
-        if self.is_inplace_hint():
+        if not self.is_inplace_hint():
             # TODO make this a property of the IR
             return False
 
