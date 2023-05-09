@@ -6,7 +6,7 @@ on:
       - ciflow/inductor/*
   workflow_dispatch:
   schedule:
-    # Copied and condensed from periodic.yml
+    # Run every 4 hours during the week and every 12 hours on the weekend
     - cron: 45 0,4,8,12,16,20 * * 1-5
     - cron: 45 4,12 * * 0,6
 
