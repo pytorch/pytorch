@@ -552,20 +552,20 @@ class CUDAWarmupNode:
 
         assert len(new_inputs) == 0
 
+        def add_ref(o):
+            return (o is not None
+                and o.untyped_storage().data_ptr() not in non_cudagraph_inps)
+
         self.outputs_weakrefs.extend(
             [
-                map_to_ref(o)
+                map_to_ref(o) if add_ref(o) else None
                 for o in out
-                if o is not None
-                and o.untyped_storage().data_ptr() not in non_cudagraph_inps
             ]
         )
         self.tensor_weakrefs.extend(
             [
-                TensorWeakRef(o)
+                TensorWeakRef(o) if add_ref(o) else None
                 for o in out
-                if o is not None
-                and o.untyped_storage().data_ptr() not in non_cudagraph_inps
             ]
         )
 
@@ -1877,9 +1877,11 @@ class CUDAGraphTreeManager:
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
         for node in self.current_node._path_from_root:
+            if not len(node.tensor_weakrefs) == len(node.stack_traces):
+                breakpoint() 
             assert len(node.tensor_weakrefs) == len(node.stack_traces)
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
-                ten = t()
+                ten = None if t is None else t()
                 if ten is None:
                     continue
 

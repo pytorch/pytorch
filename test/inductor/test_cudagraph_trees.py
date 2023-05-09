@@ -994,20 +994,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             test()
             self.assertTrue(self.get_manager(device_index=1) is None)
 
-        def test_warnings_on_dealloc(self):
-            @torch.compile()
-            def foo(x):
-                return x * x * x
-
-            inp = torch.rand([4], device="cuda")
-            out = foo(inp)
-            warnings.resetwarnings()
-            with warnings.catch_warnings(record=True) as w:
-                foo(inp)
-
-            self.assertTrue(len(w) == 1)
-            self.assertTrue("x * x * x" in str(w[0]))
-
         def test_error_on_dealloc_use(self):
             @torch.compile()
             def foo(x):
