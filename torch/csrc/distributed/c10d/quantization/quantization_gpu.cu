@@ -90,12 +90,12 @@ at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input) {
       blockDim,
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      input.data_ptr<float>(),
+      input.const_data_ptr<float>(),
       nrows,
       ncols,
       // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
       // NCCL
-      reinterpret_cast<uint16_t*>(output.data_ptr<at::Half>()));
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
   //C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
@@ -136,10 +136,10 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
       at::cuda::getCurrentCUDAStream()>>>(
       // TODO: replace Half by BFloat16, after BFloat16 is supported by Nvidia
       // NCCL
-      reinterpret_cast<uint16_t*>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const uint16_t*>(input.const_data_ptr<at::Half>()),
       nrows,
       ncols,
-      output.data_ptr<float>());
+      output.mutable_data_ptr<float>());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;

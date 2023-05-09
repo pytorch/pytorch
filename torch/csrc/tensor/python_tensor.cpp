@@ -78,6 +78,11 @@ static PyObject* Tensor_new(
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
   }
+  if (tensor_type.is_cuda) {
+    TORCH_WARN_ONCE(
+        "The torch.cuda.*DtypeTensor constructors are no longer recommended. "
+        "It's best to use methods such as torch.tensor(data, dtype=*, device='cuda') to create tensors.")
+  }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
       tensor_type.get_dispatch_key(),
       tensor_type.get_scalar_type(),
@@ -113,15 +118,15 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
+static PyObject* Tensor_dtype(PyTensorType* self, void* unused) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
-PyObject* Tensor_layout(PyTensorType* self, void* unused) {
+static PyObject* Tensor_layout(PyTensorType* self, void* unused) {
   return torch::autograd::utils::wrap(self->layout);
 }
 
-PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
@@ -129,7 +134,7 @@ PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
-PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
   } else {
@@ -137,7 +142,7 @@ PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   }
 }
 
-PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
+static PyObject* Tensor_is_sparse_csr(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::SparseCsr) {
     Py_RETURN_TRUE;
   } else {
@@ -302,7 +307,7 @@ static THPObjectPtr get_tensor_dict() {
 // importing torch.
 static std::vector<PyTensorType*> tensor_types;
 
-void set_default_storage_type(Backend backend, ScalarType dtype) {
+static void set_default_storage_type(Backend backend, ScalarType dtype) {
   THPObjectPtr storage = get_storage_obj(backend, dtype);
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -314,7 +319,7 @@ void set_default_storage_type(Backend backend, ScalarType dtype) {
   }
 }
 
-void set_default_tensor_type(
+static void set_default_tensor_type(
     c10::optional<Backend> backend,
     c10::optional<ScalarType> dtype) {
   if (backend.has_value()) {
@@ -431,6 +436,9 @@ static bool PyTensorType_Check(PyObject* obj) {
 
 void py_set_default_tensor_type(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  TORCH_WARN_ONCE(
+      "torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
+      "please use torch.set_default_dtype() and torch.set_default_device() as alternatives.")
   TORCH_CHECK_TYPE(
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");

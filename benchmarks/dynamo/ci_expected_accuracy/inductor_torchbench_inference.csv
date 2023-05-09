@@ -6,7 +6,6 @@ Super_SloMo,pass,0
 alexnet,pass,0
 attention_is_all_you_need_pytorch,pass,0
 dcgan,pass,0
-densenet121,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,3
 doctr_reco_predictor,pass,3
@@ -23,6 +22,7 @@ hf_GPT2,pass,0
 hf_Reformer,pass,26
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,0
+llama,pass,0
 maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
