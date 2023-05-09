@@ -358,7 +358,6 @@ static at::Tensor quantized_cat(
       zero);
 }
 
-}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
