@@ -383,6 +383,8 @@ static std::vector<c10::optional<at::Tensor>> generateExampleInputs(
   return example_inputs;
 }
 
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
+/*
 static c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
@@ -440,8 +442,8 @@ static c10::IValue preprocess(
   }
   return cu.serialize();
 }
+*/
 
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
 } // namespace nnc
