@@ -29,7 +29,6 @@ runs:
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
         JOB_IDENTIFIER: ${{ inputs.job_identifier }}
-        SHARD: ${{ inputs.shard }}
         REPO: ${{ github.repository }}
       run: |
         python3 .github/scripts/pytest_cache.py \
