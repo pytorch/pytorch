@@ -1163,6 +1163,27 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
 
+    def test_conv_str_padding(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, padding="valid")
+                self.conv2 = torch.nn.Conv2d(
+                    16, 33, (3, 5), stride=1, padding="valid", dilation=(3, 1)
+                )
+                self.conv3 = torch.nn.Conv3d(
+                    16, 33, (3, 5, 2), stride=1, padding="same"
+                )
+
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        x1 = torch.randn(20, 16, 50)
+        x2 = torch.randn(20, 16, 50, 50)
+        x3 = torch.randn(20, 16, 10, 50, 50)
+
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+
     def test_conv_shape_inference(self):
         class Model(torch.nn.Module):
             def __init__(self):

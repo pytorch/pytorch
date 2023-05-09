@@ -10,13 +10,12 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
-    has_triton,
     LineContext,
     sympy_dot,
     sympy_product,
@@ -260,15 +259,16 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-        if has_triton():
-            self.header.splice(
-                """
-                import triton
-                import triton.language as tl
-                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                """
-            )
+    @cache_on_self
+    def write_triton_header_once(self):
+        self.header.splice(
+            """
+            import triton
+            import triton.language as tl
+            from torch._inductor.triton_heuristics import grid, start_graph, end_graph
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            """
+        )
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -314,6 +314,7 @@ class WrapperCodeGen(CodeGen):
             self.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
+        self.write_triton_header_once()
         name = f"stream{index}"
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
@@ -348,6 +349,7 @@ class WrapperCodeGen(CodeGen):
             and config.generate_intermediate_hooks
             and origin_node is not None
         ):
+            counters["inductor"]["intermediate_hooks"] += 1
             self.writeline(
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
@@ -381,6 +383,7 @@ class WrapperCodeGen(CodeGen):
             if config.profiler_mark_wrapper_call:
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
+                self.write_triton_header_once()
                 self.wrapper_call.writeline("start_graph()")
 
             while (
@@ -681,6 +684,10 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
+
+        if not config.allow_buffer_reuse:
+            self.writeline(self.make_buffer_free(buffer))
+            return
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):

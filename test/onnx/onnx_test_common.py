@@ -177,10 +177,11 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
-        rtol: float = 1e-3,
-        atol: float = 1e-7,
+        rtol: Optional[float] = 1e-3,
+        atol: Optional[float] = 1e-7,
         opset_version: int = 18,
         has_mutation: bool = False,
+        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -202,6 +203,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
+            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
+                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
@@ -239,6 +242,15 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+
+        if verbose:
+            export_output.diagnostic_context.dump(
+                f"test_report_{self._testMethodName}"
+                f"_op_level_debug_{self.op_level_debug}"
+                f"_dynamic_axes_{self.dynamic_shapes}"
+                ".sarif",
+                compress=False,
+            )
 
         _compare_pytorch_onnx_with_ort(
             export_output,
@@ -303,6 +315,7 @@ def run_ort(
         ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
@@ -337,8 +350,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: float,
-    rtol: float,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
     has_mutation: bool = False,
 ):
     if has_mutation:
@@ -399,7 +412,7 @@ QINT_TYPES = (
 FLOAT_TYPES = (
     torch.float16,
     torch.float32,
-    torch.float64,
+    # torch.float64,  ORT doesn't support
 )
 
 COMPLEX_TYPES = (
@@ -588,6 +601,13 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
+def reason_onnx_script_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX script doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
+
+
 def reason_onnx_runtime_does_not_support(
     operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
@@ -600,6 +620,15 @@ def reason_onnx_does_not_support(
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
+
+
+def reason_dynamo_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: Dynamo doesn't support the given dtypes."""
+    return (
+        f"{operator} on {dtypes or 'certain dtypes'} not supported by the Dynamo Spec"
+    )
 
 
 def reason_jit_tracer_error(info: str) -> str:

@@ -281,33 +281,26 @@ def sample_inputs_aten_index_put(op_info, device, dtype, requires_grad, **kwargs
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     inputs = []
     adv_idx = torch.LongTensor([[0, 1], [2, 3]])
-    mask_idx = torch.randint(low=0, high=1, size=(5, 6, 7, 8), dtype=torch.bool)
-    # self_shape, indices, values
+    # self_shape, indices
     additional = [
-        ((5, 6, 7, 8), [mask_idx], make_arg(())),
-        ((5, 6, 7, 8), [None, adv_idx, adv_idx, None], None),
-        ((5, 6, 7, 8), [None, adv_idx, None, adv_idx], None),
-        ((5, 6, 7, 8), [adv_idx, None, None, adv_idx], None),
-        ((5, 6, 7, 8), [None, None, adv_idx, adv_idx], None),
-        ((5, 6, 7, 8, 9), [None, None, adv_idx, None, adv_idx], None),
-        ((5, 6, 7, 8, 9), [None, None, adv_idx, adv_idx, None], None),
-        ((5, 6, 7, 8, 9, 10), [None, None, None, adv_idx, adv_idx], None),
-        ((5, 6, 7, 8, 9, 10), [None, None, adv_idx, adv_idx, adv_idx], None),
+        ((5, 6, 7, 8), [None, adv_idx, adv_idx, None]),
+        ((5, 6, 7, 8), [None, adv_idx, None, adv_idx]),
+        ((5, 6, 7, 8), [adv_idx, None, None, adv_idx]),
+        ((5, 6, 7, 8), [None, None, adv_idx, adv_idx]),
+        ((5, 6, 7, 8, 9), [None, None, adv_idx, None, adv_idx]),
+        ((5, 6, 7, 8, 9), [None, None, adv_idx, adv_idx, None]),
+        ((5, 6, 7, 8, 9, 10), [None, None, None, adv_idx, adv_idx]),
+        ((5, 6, 7, 8, 9, 10), [None, None, adv_idx, adv_idx, adv_idx]),
     ]
-    for self_shape, indices, values in additional:
-        inp = make_arg(self_shape)
+    for self_shape, indices in additional:
+        for broadcast_value in [False, True]:
+            inp = make_arg(self_shape)
 
-        if values is None:
             tmp_indices = [slice(None) if idx is None else idx for idx in indices]
             values_shape = inp[tmp_indices].shape
+            if broadcast_value:
+                values_shape = values_shape[3:]
             values = make_arg(values_shape)
-            inputs.append(SampleInput(inp, args=(tuple(indices), values)))
-
-            # broatcasted value
-            values_shape = values_shape[3:]
-            values = make_arg(values_shape)
-            inputs.append(SampleInput(inp, args=(tuple(indices), values)))
-        else:
             inputs.append(SampleInput(inp, args=(tuple(indices), values)))
     return inputs
 

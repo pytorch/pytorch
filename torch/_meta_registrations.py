@@ -3103,6 +3103,51 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(result_size)
 
 
+@register_meta(torch.ops.aten.transpose_)
+def transpose_(self, dim0, dim1):
+    assert self.layout not in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }, f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+
+    ndims = self.ndim
+
+    dim0 = maybe_wrap_dim(dim0, ndims)
+    dim1 = maybe_wrap_dim(dim1, ndims)
+
+    if dim0 == dim1:
+        return self
+
+    size = list(self.size())
+    stride = list(self.stride())
+
+    stride[dim0], stride[dim1] = stride[dim1], stride[dim0]
+    size[dim0], size[dim1] = size[dim1], size[dim0]
+
+    self.as_strided_(size, stride)
+    return self
+
+
+@register_meta(torch.ops.aten.t_)
+def t_(self):
+    ndims = self.ndim
+
+    if self.is_sparse:
+        sparse_dim = self.sparse_dim()
+        dense_dim = self.dense_dim()
+        assert (
+            sparse_dim <= 2 and dense_dim == 0
+        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"  # noqa: B950
+    else:
+        assert (
+            self.dim() <= 2
+        ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+
+    return transpose_(self, 0, 0 if ndims < 2 else 1)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

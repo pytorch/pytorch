@@ -16,7 +16,6 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer, simplify
 
-import torch._dynamo.config as dynamo_config
 import torch._logging
 
 import torch.fx
@@ -29,7 +28,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -872,19 +871,18 @@ class Reduction(Loops):
             }
             and config.split_reductions
         )
-        sr_qualified = split_reduction
-        if sr_qualified and dynamo_config.dynamic_shapes:
+        if split_reduction:
             # TODO(voz): dedup with sizevar util introduced in other PR
             def _is_static(x):
                 return isinstance(x, (int, sympy.Integer))
 
-            sr_qualified = (
+            split_reduction = (
                 all(_is_static(r) for r in ranges)
                 and all(_is_static(r) for r in reduction_ranges)
                 and _is_static(reduction_numel)
             )
 
-        if sr_qualified:
+        if split_reduction:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -914,11 +912,6 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
-        elif split_reduction and dynamo_config.dynamic_shapes:
-            torch._logging.warning_once(
-                log,
-                "Could not do split reduction due to dynamic shapes; performance may be worse",
-            )
 
         return TensorBox.create(
             Reduction(
@@ -3135,6 +3128,8 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
+        from torch._inductor.codegen.wrapper import pexpr
+
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3145,8 +3140,14 @@ class FallbackKernel(ExternKernelAlloc):
         def gen_kwarg(k, v):
             return f"{k}={repr(v)}"
 
+        def get_pexpr(x):
+            if isinstance(x, SymTypes):
+                return pexpr(sympy.expand(repr(x)))
+            else:
+                return repr(x)
+
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(repr(x)) for x in self.constant_args]
+        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
         return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 

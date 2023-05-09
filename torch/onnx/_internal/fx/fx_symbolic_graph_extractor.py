@@ -204,6 +204,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+        diagnostic_context = options.diagnostic_context
         graph_module, bound_args = self._trace_into_fx_graph_via_fx_symbolic_trace(
             model, model_args, model_kwargs
         )
@@ -216,16 +217,20 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         # and we don't want
         #  ModeoProto.graph.input =
         #   [input_0, weight_0, input_1, weight_1, ..., input_n, weight_0, weight_1, ..., weight_m]
-        graph_module = passes.MovePlaceholderToFront(graph_module).run()
+        graph_module = passes.MovePlaceholderToFront(
+            diagnostic_context, graph_module
+        ).run()
         # To save memory, move get_attr to input so that the generated model doesn't
         # have weigh tensors. "replaced_attrs" are a tuple of replaced weight tensors.
         replace_get_attr_with_placeholder_pass = passes.ReplaceGetAttrWithPlaceholder(
-            graph_module
+            diagnostic_context, graph_module
         )
         graph_module = replace_get_attr_with_placeholder_pass.run()
         replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
         # Move all newly created placeholder nodes to the front of the graph.
-        graph_module = passes.MovePlaceholderToFront(graph_module).run()
+        graph_module = passes.MovePlaceholderToFront(
+            diagnostic_context, graph_module
+        ).run()
         # Finalize the graph editing.
         graph_module.recompile()
 
