@@ -94,7 +94,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         func1.__name__ = name
         return func1
 
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
+    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
@@ -127,15 +127,15 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
+                return any(in_output(x) for x in snode.snodes)
+            return any(isinstance(user.node, OutputNode) for user in snode.users)
 
         if in_output(snode):
             outputs.append(fx_node)
         name = snode.get_name()
         fx_node.name = name
 
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
+        fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
@@ -169,7 +169,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
 

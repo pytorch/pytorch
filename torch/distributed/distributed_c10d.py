@@ -2,6 +2,7 @@ import itertools
 import collections.abc
 import contextlib
 import functools
+import hashlib
 import io
 import logging
 import os
@@ -123,6 +124,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 global _c10d_error_logger
 _c10d_error_logger = _get_or_create_logger()
+
 
 def exception_handler(func):
     @functools.wraps(func)
@@ -529,18 +531,25 @@ def _get_pg_device(group: ProcessGroup):
     return torch.device("cpu")
 
 
-def _store_based_barrier(rank, store, timeout, logging_interval=timedelta(seconds=10)):
+# Environment variable to control whether we do a barrier after process group
+# init. Default value is 1 for now to stay the same with previous behavior.
+# Users can change it to 0 if such behavior is undesired. We reserve the right
+# to change the default value to 0 if small rollout is successful.
+_barrier_after_init = int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+
+
+def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
     ``init_process_group`` or ``new_group``. Intended to be used only with
     those two methods and is not a generic alternative to ``barrier()``.
     """
-    store_key = f"{STORE_BASED_BARRIER_PREFIX}:{_world.group_count}"
+    store_key = f"{STORE_BASED_BARRIER_PREFIX}:{group_name}"
     store.add(store_key, 1)
     logger.info("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
-    world_size = get_world_size()
+    world_size = rendezvous_count
     worker_count = store.add(store_key, 0)
 
     last_worker_key = f"{store_key}:last_worker"
@@ -929,7 +938,7 @@ def init_process_group(
             For ``ucc``, blocking wait is supported similar to NCCL. However,
             async error handling is done differently since with UCC we have
             progress thread and not watch-dog thread.
-        group_name (str, optional, deprecated): Group name.
+        group_name (str, optional, deprecated): Group name. This argument is ignored
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
             the construction of specific process groups. As of now, the only
@@ -977,6 +986,12 @@ def init_process_group(
     else:
         backend = Backend("undefined")
 
+    """
+    Group name is not visible to users unless they access
+    internals of c10d. This means we can ignore the value
+    they provide as it not exposed in a public way.
+    """
+    group_name = _process_group_name([], use_hashed_name=False)
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
@@ -985,7 +1000,7 @@ def init_process_group(
                 "MPI runtime.".format(world_size, rank)
             )
 
-        default_pg = _new_process_group_helper(
+        default_pg, _ = _new_process_group_helper(
             -1, -1, [], backend, None, group_name=group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
@@ -1002,7 +1017,7 @@ def init_process_group(
             # different systems (e.g. RPC) in case the store is multi-tenant.
             store = PrefixStore("default_pg", store)
 
-        default_pg = _new_process_group_helper(
+        default_pg, _ = _new_process_group_helper(
             world_size,
             rank,
             [],
@@ -1018,16 +1033,27 @@ def init_process_group(
     _backend = _world.pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
-    # barrier at the end to ensure that once we return from this method, all
-    # process groups including global variables are updated correctly on all
-    # ranks.
-    if backend == Backend.MPI:
-        # MPI backend doesn't use store.
-        barrier()
+    if _barrier_after_init == 1:
+        # barrier at the end to ensure that once we return from this method, all
+        # process groups including global variables are updated correctly on all
+        # ranks.
+        # Update 04/2023: for large-scale runs, this barrier (esp. store-based
+        # barrier) may be costly and/or unscalable. Also, in a lot of cases,
+        # these barriers may be unnecessary, as proved by a green CI after
+        # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
+        # added which, when set to 0, will disable these barriers.
+        if backend == Backend.MPI:
+            # MPI backend doesn't use store.
+            barrier()
+        else:
+            # Use store based barrier here since barrier() used a bunch of
+            # default devices and messes up NCCL internal state.
+            _store_based_barrier(rank, store, group_name, world_size, timeout)
     else:
-        # Use store based barrier here since barrier() used a bunch of
-        # default devices and messes up NCCL internal state.
-        _store_based_barrier(rank, store, timeout)
+        logger.info(
+            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
+            "ProcessGroup initialization."
+        )
 
 
 def _new_process_group_helper(
@@ -1052,10 +1078,6 @@ def _new_process_group_helper(
     """
     global _world
 
-    if not group_name:
-        group_name = str(_world.group_count)
-        _world.group_count = _world.group_count + 1
-
     if group_name in _world.pg_names.values():
         raise RuntimeError(
             "The specified group name has already been "
@@ -1071,7 +1093,8 @@ def _new_process_group_helper(
         # creating with the same tag and rank set results in the same underlying PG
         existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
         if existing_group:
-            return existing_group
+            _, prefix_store = _world.pg_map[existing_group]
+            return existing_group, prefix_store
 
     # The list of group ranks is empty if we're creating the default group.
     is_default_group = len(global_ranks_in_group) == 0
@@ -1081,7 +1104,7 @@ def _new_process_group_helper(
     if not is_default_group:
         global_rank = _get_default_group().rank()
         if global_rank not in global_ranks_in_group:
-            return GroupMember.NON_GROUP_MEMBER
+            return GroupMember.NON_GROUP_MEMBER, None
 
     prefix_store = PrefixStore(f"{group_name}/", store)
     base_pg_options = ProcessGroup.Options(backend=str(backend))
@@ -1213,7 +1236,7 @@ def _new_process_group_helper(
 
     _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
     _world.pg_to_tag[pg] = pg_tag
-    return pg
+    return pg, prefix_store
 
 def destroy_process_group(group: Optional[ProcessGroup] = None):
     """
@@ -1922,7 +1945,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         _warn_not_in_group("all_reduce_coalesced")
         return
 
-    if any([t.is_complex() for t in tensors]) and not supports_complex(op):
+    if any(t.is_complex() for t in tensors) and not supports_complex(op):
         raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
 
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
@@ -2532,7 +2555,7 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_rank = get_rank(group)
+    my_rank = get_rank()
     pg_device = _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
@@ -3607,7 +3630,28 @@ def _create_process_group_wrapper(
     wrapped_pg = _ProcessGroupWrapper(wrapped_pg, helper_pg)
     return wrapped_pg
 
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None):
+
+def _process_group_name(ranks, use_hashed_name):
+    global _world
+    if use_hashed_name:
+        pg_name = hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
+        while pg_name in _world.pg_names.values():
+            pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
+    else:
+        pg_name = str(_world.group_count)
+        _world.group_count += 1
+    return pg_name
+
+def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
+    # Default to the same backend as the global process group
+    #  if backend is not specified.
+    if not backend:
+        backend = get_backend(_get_default_group())
+    return Backend(backend)
+
+
+
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
 
@@ -3661,13 +3705,34 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
             the construction of specific process groups. i.e. for the ``nccl``
             backend, ``is_high_priority_stream`` can be specified so that
             process group can pick up high priority cuda streams.
+        use_local_synchronization (bool, optional): perform a group-local
+            barrier at the end of the process group creation. This is different
+            in that non-member ranks don't need to call into API and don't
+            join the barrier.
 
     Returns:
-        A handle of distributed group that can be given to collective calls.
-    """
-    return _new_group_with_tag(ranks, timeout, backend, pg_options)
+        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
 
-def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, pg_tag=None):
+    N.B. use_local_synchronization doesn't work with MPI.
+
+    N.B. While use_local_synchronization=True can be significantly faster with larger
+    clusters and small process groups, care must be taken since it changes cluster behavior
+    as non-member ranks don't join the group barrier().
+
+    N.B. use_local_synchronization=True can lead to deadlocks when each rank creates
+    multiple overlaping process groups. To avoid that, make sure all ranks follow the
+    same global creation order.
+    """
+    return _new_group_with_tag(ranks, timeout, backend, pg_options, None, use_local_synchronization=use_local_synchronization)
+
+def _new_group_with_tag(
+    ranks=None,
+    timeout=default_pg_timeout,
+    backend=None,
+    pg_options=None,
+    pg_tag=None,
+    use_local_synchronization=False
+):
     """
     This is a variant of ``new_group`` that exposes tag creation.
 
@@ -3685,6 +3750,13 @@ def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg
     # if the backend is not specified.
     if not backend:
         backend = default_backend
+    backend = Backend(backend)
+    if use_local_synchronization:
+        # MPI backend doesn't have have a way for us to perform a partial sync
+        if backend == Backend.MPI:
+            raise RuntimeError("MPI backend doesn't support use_local_synchronization=True")
+        if ranks is not None and get_rank() not in ranks:
+            return None
 
     # checks the input ranks
     if ranks is not None:
@@ -3712,15 +3784,16 @@ def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg
         group_world_size = global_world_size
         group_rank = global_rank
 
-    backend = Backend(backend)
+    group_name = _process_group_name(ranks, use_hashed_name=use_local_synchronization)
 
     with record_function(f"## process_group:init with ranks: {ranks}"):
-        pg = _new_process_group_helper(
+        pg, pg_store = _new_process_group_helper(
             group_world_size,
             group_rank,
             ranks,
             backend,
             default_store,
+            group_name=group_name,
             pg_options=pg_options,
             timeout=timeout,
             pg_tag=pg_tag
@@ -3731,16 +3804,29 @@ def _new_group_with_tag(ranks=None, timeout=default_pg_timeout, backend=None, pg
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
-    # barrier at the end to ensure that once we return from this method, all
-    # process groups including global variables are updated correctly on all
-    # ranks.
-    if backend == Backend.MPI:
-        # MPI doesn't have store.
-        barrier()
+    if _barrier_after_init == 1:
+        # barrier at the end to ensure that once we return from this method, all
+        # process groups including global variables are updated correctly on all
+        # ranks.
+        # Update 04/2023: for large-scale runs, these barriers (esp. store-based
+        # barrier) may be costly and/or unscalable. Also, in a lot of cases,
+        # these barriers may be unnecessary, as proved by a green CI after
+        # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
+        # added which, when set to 0, will disable these barriers.
+        if backend == Backend.MPI:
+            # MPI doesn't have store.
+            barrier()
+        else:
+            barrier_store = pg_store if use_local_synchronization else default_store
+            world_size = len(ranks) if use_local_synchronization else get_world_size()
+            # Use store based barrier here since barrier() used a bunch of
+            # default devices and messes up NCCL internal state.
+            _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
     else:
-        # Use store based barrier here since barrier() used a bunch of
-        # default devices and messes up NCCL internal state.
-        _store_based_barrier(global_rank, default_store, timeout)
+        logger.info(
+            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
+            "ProcessGroup initialization."
+        )
 
     return pg
 
@@ -3753,9 +3839,9 @@ def new_subgroups(
     pg_options=None,
 ):
     """
-    Creates GPU subgroups of equal size. By default, it creates intra-machine subgroups,
+    Creates subgroups of equal size. By default, it creates intra-machine subgroups,
     where each of which contains all the ranks of a machine, based on the assumption
-    that each machine has the same number of CUDA devices.
+    that each machine has the same number of devices.
 
     This is a convenience API that calls ``new_group`` to generate multiple subgroups.
     It requires that all processes in the main group (i.e. all
@@ -3763,13 +3849,13 @@ def new_subgroups(
     if they are not going to be members of the group.
 
     .. warning::
-        This API only works when CUDA is available.
-
-    .. warning::
         If ``group_size`` is passed in, the world size must be divisible by ``group_size``.
-        If no ``group_size`` is passed in, and not all the machines have the same number
-        of devices, the subgroup division will be different across nodes and can cause
-        unexpected behaviors.
+        If no ``group_size`` is passed in, it believe that you are creating a group based
+        on CUDA and determining the group size by number of CUDA devices, and if not all
+        the machines have the same number of devices, the subgroup division will be
+        different across nodes and can cause unexpected behaviors. Therefore, if you are
+        creating a subgroup that does not depend on CUDA (such as Gloo on CPU), please
+        pass in ``group_size`` correctly.
 
     .. warning::
         Using multiple process groups with the ``NCCL`` backend concurrently
@@ -3836,11 +3922,15 @@ def new_subgroups(
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)
     """
-    if not torch.cuda.is_available():
-        raise ValueError("Subgroups can only be created when CUDA is available")
-
     if group_size is None:
+        if not torch.cuda.is_available():
+            raise ValueError("Default group size only takes effect when CUDA is available."
+                             "If your subgroup using a backend that does not depend on CUDA,"
+                             "please pass in 'group_size' correctly.")
         group_size = torch.cuda.device_count()
+    if group_size <= 0:
+        raise ValueError(f"The arg 'group_size' ({group_size}) must be positive")
+
     world_size = get_world_size()
     if world_size < group_size:
         raise ValueError(f"The arg 'group_size' ({group_size}) must not exceed the world size ({world_size})")
@@ -3880,7 +3970,7 @@ def new_subgroups_by_enumeration(
     pg_options=None,
 ):
     """
-    Creates GPU subgroups by dividing the global world, where the division is specified by
+    Creates subgroups by dividing the global world, where the division is specified by
     a nested list of ranks. The subgroups cannot have overlap, and some ranks may not have
     to be in any subgroup.
 
@@ -3949,12 +4039,8 @@ def new_subgroups_by_enumeration(
         tensor([2])     # Subgroup 0: ranks 0 and 2
         tensor([4])     # Subgroup 1: ranks 1 and 3
     """
-    if not torch.cuda.is_available():
-        raise ValueError("Subgroups can only be created when CUDA is available")
     if ranks_per_subgroup_list is None or len(ranks_per_subgroup_list) == 0:
         raise ValueError("The arg 'ranks_per_subgroup_list' cannot be empty")
-
-    world_size = get_world_size()
 
     subgroups = []
     cur_subgroup = None
@@ -4030,3 +4116,34 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     if tag.startswith("user:"):
         tag = tag[5:]
     return tag
+
+
+# This ops are not friently to TorchDynamo. So, we decide to disallow these ops
+# in FX graph, allowing them to run them on eager, with torch.compile.
+dynamo_unsupported_distributed_c10d_ops = [
+    all_reduce_multigpu,
+    recv,
+    all_gather_object,
+    all_gather_coalesced,
+    all_to_all_single,
+    all_reduce,
+    gather_object,
+    all_to_all,
+    all_reduce_coalesced,
+    gather,
+    broadcast_object_list,
+    barrier,
+    reduce_multigpu,
+    scatter,
+    scatter_object_list,
+    reduce,
+    reduce_scatter_multigpu,
+    all_gather,
+    broadcast_multigpu,
+    all_gather_multigpu,
+    reduce_scatter,
+    all_gather_into_tensor,
+    broadcast,
+    reduce_scatter_tensor,
+    send,
+]

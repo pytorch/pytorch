@@ -685,7 +685,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -736,8 +736,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, T
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention, log_sumexp, debug_attn_mask;
-  int64_t philox_seed{0}, philox_offset{0};
+  Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
   std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_reshaped,
@@ -802,7 +801,7 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   return static_cast<int64_t>(backend);
 }
 
-std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -825,8 +824,7 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
 
-  Tensor logsumexp, debug_attn_mask;
-  uint64_t philox_seed{0}, philox_offset{0};
+  Tensor logsumexp, debug_attn_mask, philox_seed, philox_offset;
   std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
       query,
       key,
@@ -845,13 +843,10 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
 
   debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
 
-  int64_t signed_philox_seed = c10::bit_cast<int64_t>(philox_seed);
-  int64_t signed_philox_offset= c10::bit_cast<int64_t>(philox_offset);
-
-  return std::make_tuple(output, logsumexp, signed_philox_seed, signed_philox_offset, debug_attn_mask);
+  return std::make_tuple(output, logsumexp, philox_seed, philox_offset, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor(), 0, 0, Tensor());
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
