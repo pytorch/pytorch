@@ -404,11 +404,33 @@ def checkInputsSolver(
     )
 
 
-def checkUplo(uplo: str):
-    uplo_uppercase = uplo.upper()
-    assert (
-        len(uplo) == 1 and uplo_uppercase == "U" or uplo_uppercase == "L"
-    ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
+def checkUplo(UPLO: str):
+    UPLO_uppercase = UPLO.upper()
+    check(
+        len(UPLO) == 1 and (UPLO_uppercase == "U" or UPLO_uppercase == "L"),
+        lambda: f"Expected UPLO argument to be 'L' or 'U', but got {UPLO}",
+    )
+
+
+@register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta__linalg_eigh(A: Tensor, UPLO: str = "L", compute_v: bool = True):
+    squareCheckInputs(A, "linalg.eigh")
+    checkUplo(UPLO)
+
+    shape = list(A.shape)
+    if compute_v:
+        eigenvectors = A.new_empty(shape)
+        eigenvectors.as_strided_(
+            shape, make_contiguous_strides_for(shape, row_major=False)
+        )
+    else:
+        eigenvectors = A.new_empty([0])
+
+    shape.pop()
+    eigenvalues = A.new_empty(shape, dtype=toRealValueType(A.dtype))
+
+    return eigenvalues, eigenvectors
 
 
 # @register_meta(aten.linalg_eigh.default)
