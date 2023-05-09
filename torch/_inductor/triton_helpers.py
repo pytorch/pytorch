@@ -1,6 +1,8 @@
 import triton
 import triton.language as tl
 
+TRITON_HAS_REDUCE = hasattr(tl, "reduce")
+
 
 @triton.jit
 def is_floating(x):
@@ -35,14 +37,35 @@ def maximum(a, b):
     return tl.where(mask, a, b)
 
 
-@triton.jit
-def min(a, dim):
-    return tl.reduce(a, dim, minimum)
+if TRITON_HAS_REDUCE:
 
+    @triton.jit
+    def min2(a, dim):
+        return tl.reduce(a, dim, minimum)
 
-@triton.jit
-def max(a, dim):
-    return tl.reduce(a, dim, maximum)
+    @triton.jit
+    def max2(a, dim):
+        return tl.reduce(a, dim, maximum)
+
+else:
+
+    @triton.jit
+    def min2(a, dim):
+        min_values = tl.min(a, dim)
+        if is_floating(a):
+            has_nan = tl.sum(a != a, dim)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
+            min_values = tl.where(has_nan, nan, min_values)
+        return min_values
+
+    @triton.jit
+    def max2(a, dim):
+        max_values = tl.max(a, dim)
+        if is_floating(a):
+            has_nan = tl.sum(a != a, dim)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
+            max_values = tl.where(has_nan, nan, max_values)
+        return max_values
 
 
 @triton.jit
@@ -77,14 +100,50 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
     return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
 
 
-@triton.jit
-def min_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, minimum_with_index)
+if TRITON_HAS_REDUCE:
 
+    @triton.jit
+    def min_with_index(value, index, dim):
+        return tl.reduce((value, index), dim, minimum_with_index)
 
-@triton.jit
-def max_with_index(value, index, dim):
-    return tl.reduce((value, index), dim, maximum_with_index)
+    @triton.jit
+    def max_with_index(value, index, dim):
+        return tl.reduce((value, index), dim, maximum_with_index)
+
+else:
+
+    @triton.jit
+    def _argreduce_index(reduction_result, value, index, dim):
+        reduction_result_keepdim = reduction_result[None, :]
+        if dim == 0:
+            pass
+        elif dim == 1:
+            reduction_result_keepdim = reduction_result[:, None]
+        else:
+            tl.device_assert(False)
+
+        equal = value == reduction_result_keepdim
+        if is_floating(value):
+            # Treat nan as equal
+            result_is_nan = reduction_result_keepdim != reduction_result_keepdim
+            equal |= (value != value) and result_is_nan
+
+        invalid_index = 2**62
+        indices = tl.where(equal, index, invalid_index)
+        index = tl.min(indices, dim)
+        return index
+
+    @triton.jit
+    def min_with_index(value, index, dim):
+        min_values = min2(value, dim)
+        min_index = _argreduce_index(min_values, value, index, dim)
+        return min_values, min_index
+
+    @triton.jit
+    def max_with_index(value, index, dim):
+        max_values = max2(value, dim)
+        max_index = _argreduce_index(max_values, value, index, dim)
+        return max_values, max_index
 
 
 @triton.jit
