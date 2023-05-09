@@ -7227,6 +7227,13 @@ class TestNLLLoss(TestCaseMPS):
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
+        # Check it works for different dtypes
+        for dtype in [torch.float16, torch.int8, torch.int32, torch.int16, torch.int64]:
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype).bernoulli(0.5)
+            self.assertEqual(mps_out.min().item(), 0.)
+            self.assertEqual(mps_out.max().item(), 1.)
+
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
