@@ -11,7 +11,7 @@ import unittest
 
 import torch
 import torch.utils.benchmark as benchmark_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_SANDCASTLE, IS_WINDOWS, slowTest, TEST_WITH_ASAN
 import expecttest
 import numpy as np
 
@@ -477,6 +477,7 @@ class TestBenchmarkUtils(TestCase):
     @slowTest
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
+    @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,

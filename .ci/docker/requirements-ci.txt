@@ -81,10 +81,10 @@ mypy==0.960
 #Pinned versions: 0.960
 #test that import: test_typing.py, test_type_hints.py
 
-networkx==2.6.3
+networkx==2.8.8
 #Description: creation, manipulation, and study of
 #the structure, dynamics, and functions of complex networks
-#Pinned versions: 2.6.3 (latest version that works with Python 3.7+)
+#Pinned versions: 2.8.8
 #test that import: functorch
 
 #ninja
@@ -199,7 +199,8 @@ pygments==2.12.0
 #Pinned versions: 10.9.0
 #test that import:
 
-scikit-image
+scikit-image==0.19.3 ; python_version < "3.10"
+scikit-image==0.20.0 ; python_version >= "3.10"
 #Description: image processing routines
 #Pinned versions:
 #test that import: test_nn.py
@@ -224,7 +225,7 @@ scipy==1.9.3 ; python_version == "3.11"
 #Pinned versions:
 #test that import:
 
-tb-nightly
+tb-nightly==2.13.0a20230426
 #Description: TensorBoard
 #Pinned versions:
 #test that import:
@@ -262,4 +263,9 @@ ghstack==0.7.1
 jinja2==3.1.2
 #Description: jinja2 template engine
 #Pinned versions: 3.1.2
+#test that import:
+
+pytest-cpp==2.3.0
+#Description: This is used by pytest to invoke C++ tests
+#Pinned versions: 2.3.0
 #test that import:

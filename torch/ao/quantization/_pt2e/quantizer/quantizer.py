@@ -1,3 +1,4 @@
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from typing import Callable, List, NamedTuple, Optional
@@ -65,18 +66,16 @@ class QuantizationSpec:
 def get_observer_kwargs(quant_spec: QuantizationSpec):
     kwargs_dict = asdict(quant_spec)
     kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
-    return kwargs_dict
+    return copy.deepcopy(kwargs_dict)
 
 
 # In the absence of better name, just winging it with QuantizationConfig
-QuantizationConfig = NamedTuple(
-    "QuantizationConfig",
-    [
-        ("activation", Optional[QuantizationSpec]),
-        ("weight", Optional[QuantizationSpec]),
-        ("bias", Optional[QuantizationSpec]),
-    ],
-)
+@dataclass(eq=True, frozen=True)
+class QuantizationConfig:
+    activation: Optional[QuantizationSpec]
+    weight: Optional[QuantizationSpec]
+    bias: Optional[QuantizationSpec]
+    is_qat: bool = False
 
 OperatorPatternType = List[Callable]
 

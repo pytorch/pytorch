@@ -299,6 +299,10 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
 
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
 
+    const int64_t bin_size = bin_ct.size();
+    TORCH_CHECK(
+        N == bin_size,
+        "histogramdd: The size of bins must be equal to the innermost dimension of the input.");
     for (const auto dim : c10::irange(N)) {
         linspace_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
                 bin_ct[dim] + 1, bin_edges_out[dim]);
