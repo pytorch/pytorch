@@ -233,7 +233,6 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude \
       test_autograd \
-      test_jit \
       test_proxy_tensor \
       test_quantization \
       test_public_bindings \
