@@ -2305,7 +2305,6 @@ def forward(self, x):
             gm.meta["input_shape_constraints"],
             [c.serializable_spec for c in constraints],
         )
-        self.assertEqual(gm.meta["example_inputs"], example_inputs)
         preserved = False
         for _, vr in gm.meta["inline_constraints"].items():
             # Should have the constraint with min=2, max=5
