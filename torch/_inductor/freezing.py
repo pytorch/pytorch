@@ -7,6 +7,9 @@ from typing import Optional
 import torch
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+<<<<<<< HEAD
+from . import config
+=======
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.compile_utils import fx_graph_cse
 from torch._inductor.fx_passes.freezing_patterns import get_freezing_patterns
@@ -17,6 +20,7 @@ from .decomposition import select_decomp_table
 
 
 aten = torch.ops.aten
+>>>>>>> bdcdabde256... Fold Conv-Bn
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -175,6 +179,7 @@ def optimize_for_inference(
     # invalidate nn Modules
     if config.optimize_for_inference_discard_parameters:
         invalidate_eager_modules()
+
     return gm, preserved_arg_indices
 
 
@@ -189,7 +194,8 @@ class ErasedTensor(torch.Tensor):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise RuntimeError(
-            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. The original parameters have been discarded for memeory efficiency. "
+            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
+            "The original parameters have been discarded for memeory efficiency. "
             f"Found in op {func} for erased parameter {self.erased_name} of {self.owning_mod_ref()}"
         )
 
