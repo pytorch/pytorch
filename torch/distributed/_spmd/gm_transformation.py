@@ -1,7 +1,7 @@
 from typing import Callable
 
 from torch import fx
-from torch.distributed._spmd.graph_optimization import (
+from torch.distributed._spmd.graph_transformations import (
     comm_fusion_with_concat,
     enable_graph_optimization_dump,
     remove_copy_from_optimizer,
