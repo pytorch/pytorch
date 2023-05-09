@@ -15,17 +15,21 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    init_once_fakemode,
     KeywordArg,
     ListOf,
     Match,
     MULTIPLE,
     PatternMatcherPass,
+    register_graph_pattern,
+    stable_topological_sort,
 )
 from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -56,10 +60,11 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
 
 
-@functools.lru_cache(None)
+@init_once_fakemode
 def lazy_init():
     if torch._C.has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
@@ -109,6 +114,41 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.cumsum.default,
+        CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                torch.ops.aten.full.default,
+                [Arg(), Arg()],
+                1,
+                dtype=Ignored(),
+                layout=Ignored(),
+                device=KeywordArg("device"),
+                pin_memory=False,
+                _users=MULTIPLE,
+            ),
+            KeywordArg("dtype"),
+            _users=MULTIPLE,
+        ),
+        1,
+    ),
+    pass_dict=pass_patterns[1],
+)
+def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
+    """Based on a pattern in OPTForCausalLM"""
+
+    def repl():
+        return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
+            size0, size1
+        )
+
+    # only replace the output node, not all nodes
+    match.nodes = [match.output_node()]
+    match.replace_by_example(repl, [])
 
 
 def shape_of_mm(a, b):
@@ -229,7 +269,9 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
+    # size should be within first.get_size()[dim] such that the optimization is valid.
+    # For negative `end`, we currently fallback to not optimizing.
+    if size >= 0 and V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [

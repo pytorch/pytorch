@@ -57,9 +57,6 @@ def prepare_pt2e_quantizer(
     quantizer.validate(model)
     propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 # TODO: update this to prepare_qat_pt2e

@@ -30,7 +30,7 @@ import torch
 from torch import inf, Tensor
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
-from torch.storage import TypedStorage
+from torch.storage import UntypedStorage, TypedStorage
 from torch.types import (
     _bool,
     _complex,
@@ -99,6 +99,7 @@ class dtype:
     is_floating_point: _bool
     is_complex: _bool
     is_signed: _bool
+    itemsize: _int
 
 # Defined in torch/csrc/TypeInfo.cpp
 class iinfo:
@@ -980,6 +981,7 @@ def _crash_if_aten_asan() -> _int: ...  # THPModule_crashIfATenASAN
 def _show_config() -> str: ...  # THPModule_showConfig
 def _cxx_flags() -> str: ...  # THPModule_cxxFlags
 def _parallel_info() -> str: ...  # THPModule_parallelInfo
+def _get_cpu_capability() -> str: ...  # THPModule_getCpuCapability
 def _set_backcompat_broadcast_warn(
     arg: _bool,
 ) -> None: ...  # THPModule_setBackcompatBroadcastWarn
@@ -1132,6 +1134,7 @@ def is_autocast_enabled() -> _bool: ...
 def clear_autocast_cache() -> None: ...
 def set_autocast_cpu_enabled(enabled: _bool) -> None: ...
 def is_autocast_cpu_enabled() -> _bool: ...
+def _is_any_autocast_enabled() -> _bool: ...
 def set_autocast_cpu_dtype(dtype: _dtype) -> None: ...
 def set_autocast_gpu_dtype(dtype: _dtype) -> None: ...
 def get_autocast_cpu_dtype() -> _dtype: ...

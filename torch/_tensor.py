@@ -429,7 +429,7 @@ class Tensor(torch._C._TensorBase):
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
     ):
-        r"""Computes the gradient of current tensor w.r.t. graph leaves.
+        r"""Computes the gradient of current tensor wrt graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
