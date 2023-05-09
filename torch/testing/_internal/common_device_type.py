@@ -62,8 +62,8 @@ except ImportError:
 # class TestClassFoo(TestCase):
 #
 #   # A template test that can be specialized with a device
-#   # NOTE: this test case is not runnably by unittest or pytest because it
-#   #   accepts an extra positional argument, "device", they do not understand
+#   # NOTE: this test case is not runnable by unittest or pytest because it
+#   #   accepts an extra positional argument, "device", that they do not understand
 #   def test_bar(self, device):
 #     pass
 #
@@ -106,7 +106,7 @@ except ImportError:
 #     test_bar(self, 'cuda:0')
 # --------------------------------------------------------
 #
-# These instantiated test classes are discoverable and runnable by both
+# These instantiated test classes ARE discoverable and runnable by both
 #   unittest and pytest. One thing that may be confusing, however, is that
 #   attempting to run "test_bar" will not work, despite it appearing in the
 #   original template code. This is because "test_bar" is no longer discoverable
@@ -613,7 +613,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
-# See note "Generic Device Type Testing."
+# See note "Writing Test Templates"
 def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -1107,7 +1107,7 @@ class toleranceOverride:
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
-#   (2) Can be overridden for the CPU or CUDA, respectively, using dtypesIfCPU
+#   (2) Can be overridden for CPU or CUDA, respectively, using dtypesIfCPU
 #       or dtypesIfCUDA.
 #   (3) Can accept an iterable of dtypes or an iterable of tuples
 #       of dtypes.
