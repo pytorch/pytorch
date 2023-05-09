@@ -2631,7 +2631,7 @@ def error_inputs_index_select(op_info, device, **kwargs):
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
 
-def error_inputs_index_add(op_info, **kwargs):
+def error_inputs_index_add(op_info, device, **kwargs):
     result = torch.tensor([[1., 2.], [4., 5.], [7., 8.]])
     source = torch.tensor([2., 4.])
 
