@@ -271,7 +271,7 @@ test_inductor() {
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
   BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
-  python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -626,7 +626,7 @@ test_vulkan() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
+    CPP_TESTS_DIR="${TORCH_TEST_DIR}" LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
   fi
 }
 
