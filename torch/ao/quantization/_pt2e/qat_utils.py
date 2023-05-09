@@ -225,7 +225,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             #
             #   getitem_placeholder -> conv -> bn -> getitem
             #
-            if any([isinstance(a, Node) for a in original_node.args]):
+            if any(isinstance(a, Node) for a in original_node.args):
                 continue
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
