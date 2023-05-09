@@ -20,8 +20,6 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import (
-    context as fx_context,
-    fx_symbolic_graph_extractor,
     serialization as fx_serialization,
 )
 from torch.testing._internal import common_utils
@@ -685,47 +683,38 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             prefix=model_name, suffix=".pt"
         ) as tmp_file, tempfile.TemporaryDirectory(
             suffix="large_scale_export"
-        ) as tmp_folder:
+        ):
             # Dump state_dict to a file to simulate how HuggingFace model is initialized.
             # The file will be loaded via .load_state_dict(...)
             torch.save(model.state_dict(), tmp_file.name)
 
-            ftm = fake_tensor.FakeTensorMode(
-                allow_non_fake_inputs=True, allow_fallback_kernels=False
-            )
-            ctx = fx_context.FxToOnnxContext()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
             #  2. Convert nn.Module into ONNX model without initializers.
             #  3. Record the file paths to find real initializers.
-            with ctx, ftm:
-                # Toy model with parameters and buffers as FakeTensor's.
-                fake_model = create_model()
-                fake_model.load_state_dict(torch.load(tmp_file.name))
-                # Toy inputs as FakeTensor's.
-                fake_args = create_args()
-                # Export ONNX model without initializers while ctx.paths records
-                # all files that contains real initializers.
+            # with ctx, ftm:
+            # Toy model with parameters and buffers as FakeTensor's.
+            fake_model = create_model()
+            fake_model.load_state_dict(torch.load(tmp_file.name))
+            # Toy inputs as FakeTensor's.
+            fake_args = create_args()
+            # Export ONNX model without initializers while ctx.paths records
+            # all files that contains real initializers.
 
-                options = torch.onnx.ExportOptions(
-                    opset_version=self.opset_version,
-                    dynamic_shapes=self.dynamic_shapes,
-                    op_level_debug=self.op_level_debug,
-                )
-                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
-                    options
-                )
-                export_options.fx_tracer = (
-                    fx_symbolic_graph_extractor.FXSymbolicTracer()
-                )
-                export_output = torch.onnx.dynamo_export(
-                    fake_model,
-                    *fake_args,
-                    export_options=export_options,
-                )
-
-                onnx_model = export_output.model_proto
+            options = torch.onnx.ExportOptions(
+                opset_version=self.opset_version,
+                dynamic_shapes=self.dynamic_shapes,
+                op_level_debug=self.op_level_debug,
+            )
+            export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
+                options
+            )
+            export_output = torch.onnx.dynamo_export(
+                fake_model,
+                *fake_args,
+                export_options=export_options,
+            )
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -733,18 +722,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             #     a seperated folder.
             #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
             #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
-
-            # Model saved to tmp_folder/onnx_model_location
-            # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
-            onnx_model_location = model_name + "_external_data.onnx"
-            onnx_initializer_location = model_name + "_initializers"
-            fx_serialization.save_model_with_external_data(
-                tmp_folder,
-                onnx_model_location,
-                onnx_initializer_location,
-                tuple(ctx.paths),
-                onnx_model,
-            )
 
             # Generate random inputs.
             args = create_args()
@@ -760,7 +737,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args_not_none = args_not_none[: len(args) - len(kwargs)]
 
             ort_outputs = onnx_test_common.run_ort(
-                os.path.join(tmp_folder, onnx_model_location),
+                export_output,
                 args_not_none,
             )
 
