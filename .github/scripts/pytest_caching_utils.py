@@ -185,23 +185,33 @@ def _get_s3_key_prefix(
 def _merge_pytest_caches(
     pytest_cache_dir_to_merge_from: Path, pytest_cache_dir_to_merge_into: Path
 ) -> None:
-    # Most files are identical across all caches, and we'll just use the first one we find in any of the caches
-    # However, everthing in the "v/cache" folder is unique to each cache, so we'll merge those
+    # LASTFAILED_FILE_PATH is the only file we actually care about in the cache
+    # since it contains all the tests that failed.
+    #
+    # The remaining files are static supporting files that don't really matter. They
+    # make the cache folder play nice with other tools devs tend to use (e.g. git).
+    # But since pytest doesn't recreate these files if the .pytest_cache folder already exists,
+    # we'll copy them over as a way to protect against future bugs where a certain tool
+    # may need those files to exist to work properly (their combined file size is negligible)
+    static_files_to_copy = [
+        ".gitignore",
+        "CACHEDIR.TAG",
+        "README.md",
+    ]
 
-    # Copy over all files except the 'lastfailed' file in the "v/cache" folder.
-    for file in pytest_cache_dir_to_merge_from.glob("**/*"):
-        relative_path = file.relative_to(pytest_cache_dir_to_merge_from)
-        if relative_path == LASTFAILED_FILE_PATH:
-            continue  # We'll merge this later
+    # Copy over the static files
+    for static_file in static_files_to_copy:
+        source_file = pytest_cache_dir_to_merge_from / static_file
 
-        if file.is_dir():
+        if not source_file.is_file():
             continue
 
-        # We don't care much about the other files, so only copy them if they don't already exist in the new cache
-        to_file_path = pytest_cache_dir_to_merge_into / relative_path
-        if not to_file_path.exists():
-            copy_file(file, to_file_path)
+        # These files never change, so only copy them if they don't already exist in the new cache
+        dest_file = pytest_cache_dir_to_merge_into / static_file
+        if not dest_file.exists():
+            copy_file(source_file, dest_file)
 
+    # Handle the v/cache/lastfailed file
     _merge_lastfailed_files(
         pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
     )
