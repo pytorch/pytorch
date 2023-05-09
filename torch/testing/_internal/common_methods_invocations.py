@@ -15802,7 +15802,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values'),
                # AssertionError: Scalars are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                            dtypes=(torch.float32, torch.int64, torch.complex64),),
+                            dtypes=(torch.int64, torch.complex64),),
                # IndexError: tuple index out of range
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                # IndexError: tuple index out of range
@@ -15817,6 +15817,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"),
+                            'TestLazyOpInfo'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
