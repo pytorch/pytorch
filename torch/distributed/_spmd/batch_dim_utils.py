@@ -88,7 +88,7 @@ class BatchDimAnalyzer:
             return self.batch_dim_map[node]
 
         if node.target in self.dim_rule_map:
-            view_op_rule = view_op_rules[self.dim_rule_map[node.target]]
+            view_op_rule = view_op_rules[self.dim_rule_map[node.target]]  # type: ignore[index]
             args_val = pytree.tree_map_only(fx.Node, lambda n: n.meta["val"], node.args)
             kwargs_val = pytree.tree_map_only(
                 fx.Node, lambda n: n.meta["val"], node.kwargs
