@@ -14,6 +14,7 @@ from torch._dynamo.eval_frame import Constraint
 
 import torch.utils._pytree as pytree
 from torch._export.pass_base import PassType
+from torch._export.passes import AddRuntimeAssertionsForConstraintsPass
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
@@ -221,6 +222,9 @@ class MultiMethodExportedProgram:
         "please look up one of its methods first via `find_method(method_name)` "
         "to access property: {property_name}."""
         return getattr(default_module, property_name)
+
+    def add_runtime_assertions(self) -> "MultiMethodExportedProgram":
+        return self.transform(AddRuntimeAssertionsForConstraintsPass())
 
     @property
     def meta(self):
