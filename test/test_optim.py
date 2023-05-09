@@ -420,9 +420,7 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
-    def _test_complex_2d(self, optimizer_constructor, f=None):
-        if f is None:
-            f = rosenbrock
+    def _test_complex_2d(self, optimizer_constructor):
         a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
         a1_real = a1.real.clone().detach()
         a1_imag = a1.imag.clone().detach()
@@ -435,8 +433,8 @@ class TestOptim(TestCase):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            f(a1).abs().backward()
-            f(a2).abs().backward()
+            rosenbrock(a1).abs().backward()
+            rosenbrock(a2).abs().backward()
 
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
@@ -1500,9 +1498,6 @@ class TestOptim(TestCase):
                     [params], maximize=False, weight_decay=0.9, foreach=foreach
                 )
             )
-            self._test_complex_optimizer(
-                lambda params: optim.ASGD([params], weight_decay=0.9, foreach=foreach)
-            )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optim.ASGD(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
 
@@ -1555,7 +1550,7 @@ class TestOptim(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
-    def test_lbfgs_return_type(self):
+    def test_lbfgs_returns_consistent_type(self):
         params = [torch.randn(10, 5), torch.randn(10)]
         opt1 = optim.LBFGS(params, 0.01, tolerance_grad=math.inf)
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-math.inf)
@@ -1568,41 +1563,90 @@ class TestOptim(TestCase):
         self.assertEqual(type(res1), type(res2))
 
     def test_invalid_param_type(self):
-        with self.assertRaises(TypeError):
-            optim.SGD(Parameter(torch.randn(5, 5)), lr=3)
+        self.assertRaisesRegex(
+            TypeError,
+            'params argument given to the optimizer should be an iterable of Tensors or dicts',
+            lambda: optim.LBFGS(Parameter(torch.randn(5, 5)))
+            )
 
-    def test_duplicate_params_in_param_group(self):
-        param = Parameter(torch.randn(5, 5))
+    def test_duplicate_params_in_one_param_group(self):
+        param = Parameter(torch.randn(1,1))
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            optim.SGD([param, param], lr=0.1)
+            optim.SGD([param, param], lr=0.01)
             self.assertEqual(len(w), 1)
             self.assertIn(
                 "a parameter group with duplicate parameters", str(w[0].message)
             )
 
-    def test_no_grad_for_all_params(self):
-        params = [torch.randn(5, 5, requires_grad=False) for _ in range(2)]
+    def test_duplicate_params_across_param_groups(self):
+        param = Parameter(torch.randn(1,1))
+        self.assertRaisesRegex(
+            ValueError,
+            'some parameters appear in more than one parameter group',
+            lambda: optim.Adadelta([{'params': param}, {'params': param}])
+        )
+
+    def test_step_is_noop_when_params_have_no_grad(self):
+        params = [torch.randn(2, 3, requires_grad=False) for _ in range(2)]
+        old_params = [p.clone().detach() for p in params]
 
         optimizer_list = [
             optim.Adadelta,
             optim.AdamW,
             optim.Adam,
+            optim.RAdam,
+            optim.NAdam,
             optim.Adagrad,
             optim.Adamax,
             optim.RMSprop,
             optim.SGD,
             optim.SparseAdam,
             optim.ASGD,
+            optim.LBFGS
         ]
         for optim_ctr in optimizer_list:
             opt = optim_ctr(params, lr=0.1)
-            # make sure step can still run even if
-            # all params have no grad
             opt.step()
+        self.assertEqual(old_params, params)
 
-    # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_optimizer_with_foundinf(self):
+
+    def test_step_is_noop_for_empty_grads(self):
+        optimizers = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.RAdam,
+            optim.NAdam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+            optim.LBFGS
+        ]
+        param = torch.randn(5, 1, requires_grad=True)
+        old_param = param.clone().detach()
+
+        def closure():
+            return torch.tensor([1])
+
+        for optimizer in optimizers:
+            opt = optimizer([param], lr=1e-5)
+            param.grad = torch.zeros_like(param)
+            if optimizer is optim.SparseAdam:
+                # Intentionally construct a multidimensional empty v for the sparse grad
+                # Single dim v passes the test while multidim correctly repros the issue
+                # https://github.com/pytorch/pytorch/issues/82486
+                i = torch.empty(1, 0)
+                v = torch.empty(0, 1)
+                param.grad = torch.sparse_coo_tensor(i, v, (5, 1))
+            opt.step(closure)
+            self.assertEqual(old_param, param)
+
+
+    def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
@@ -1648,38 +1692,6 @@ class TestOptim(TestCase):
             )
             self.assertEqual(params, prev_params)
 
-    def test_empty_grad(self):
-        optimizers = [
-            torch.optim.Adadelta,
-            torch.optim.Adagrad,
-            torch.optim.Adam,
-            torch.optim.AdamW,
-            torch.optim.Adamax,
-            torch.optim.ASGD,
-            torch.optim.NAdam,
-            torch.optim.RAdam,
-            torch.optim.RMSprop,
-            torch.optim.Rprop,
-            torch.optim.SGD,
-            torch.optim.SparseAdam,
-        ]
-
-        for optimizer in optimizers:
-            net = torch.nn.Embedding(
-                5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam
-            )
-            original_params = (param.detach().clone() for param in net.parameters())
-            # Simulate a batch that only indexes the embedding at padding_idx
-            x = torch.tensor([[0, 0]]).int()
-            y = torch.tensor([[[3.0], [4.0]]])
-            opt = optimizer(net.parameters(), lr=1e-5)
-            torch.nn.MSELoss()(net.forward(x), y).backward()
-
-            opt.step()
-
-            for original_param, param in zip(original_params, net.parameters()):
-                # assert that the parameters have not changed
-                self.assertEqual(original_param, param)
 
     @skipIfTorchDynamo()
     def test_post_hook(self):
