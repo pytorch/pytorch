@@ -36,11 +36,10 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         super().__init__()
         self.current_gm: Optional[torch.fx.GraphModule] = None
 
-    def _process_shape_constraints(self, constraints) -> Dict[int, List[ConstraintSpec]]:
+    def _process_shape_constraints(self, constraints) -> Dict[str, List[ConstraintSpec]]:
         constraints_name_to_constraint: Dict[str, List[ConstraintSpec]] = defaultdict(
             list
         )
-
 
         constraint_name_to_dim: Dict[str, Dict[int, List[Tuple[int, int]]]] = defaultdict(
             lambda: defaultdict(list)

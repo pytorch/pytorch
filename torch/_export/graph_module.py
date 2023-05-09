@@ -1,5 +1,7 @@
 import dataclasses
 from collections import defaultdict
+import sympy
+from sympy.logic.boolalg import Boolean as SympyBoolean
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -25,6 +27,9 @@ LeafValue = Union[
     torch.layout,
     torch.memory_format,
 ]
+
+
+ConstraintExpr = Union[sympy.Expr, SympyBoolean]
 
 
 @dataclasses.dataclass
@@ -116,15 +121,14 @@ def make_export_graph_module(
     gm = fx.GraphModule(root, graph, class_name)
 
     input_tracker = 0
-    input_shape_constraints_by_src_name = {}
 
     # group by input id
     input_shape_constraints_by_tensor_id = defaultdict(list)
     for constraint in input_shape_constraints:
         input_shape_constraints_by_tensor_id[constraint["t_id"]].append((constraint["dim"], constraint["min"], constraint["max"]))
 
-    input_shape_constraints_by_src_name = {}
-    input_name_to_example_inputs = {}
+    input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
+    input_name_to_example_inputs: Dict[str, Any] = {}
     if example_inputs is not None:
         input_tracker = 0
         for node in gm.graph.nodes:
