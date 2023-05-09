@@ -44,7 +44,7 @@ class BatchDimAnalyzer:
         # batch dim size is used to track the batch dim size of the input tensor
         self.batch_dim_size = -1
 
-        self.dim_rule_map: Dict[torch.ops.OpOverload, Callable[..., torch.Tensor]] = {
+        self.dim_rule_map: Dict[torch._ops.OpOverload, Callable[..., torch.Tensor]] = {
             aten.squeeze.default: torch.squeeze,
             aten.squeeze.dim: torch.squeeze,
             aten.view.default: Tensor.view,
