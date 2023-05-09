@@ -30,14 +30,12 @@ from . import config, ir, overrides, test_operators  # NOQA: F401
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
-    ForeachPointwise,
     IndexingConstant,
     PermuteView,
     Pointwise,
     Reduction,
     SqueezeView,
     TensorBox,
-    TensorList,
     validate_ir,
     View,
 )
@@ -436,9 +434,13 @@ def make_pointwise(
 
 def make_foreach_pointwise(fn):
     def inner(*inputs: List[List[TensorBox]], alpha=None):
-        list_inputs = [TensorList.create(input) for input in inputs]
+        for t in itertools.chain(*inputs):
+            assert isinstance(t, TensorBox)
+            t.realize()
 
-        return ForeachPointwise.create(*list_inputs, fn)
+        outputs = [fn(*x, alpha=alpha) for x in zip(*inputs)]
+        V.graph.register_list([output.realize() for output in outputs])
+        return outputs
 
     return inner
 
@@ -515,7 +517,7 @@ def register_pointwise(
 
 def register_foreach_pointwise(
     aten_fn,
-    aten_pointwise_fn,
+    pointwise_lowering_fn,
     name=None,
     broadcast=True,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -527,12 +529,8 @@ def register_foreach_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
-    foreach_ops.add(aten_fn)
-    pw_name = aten_pointwise_fn.__name__
-    fn = ops_wrapper(name)
-    pw_fn = ops_wrapper(pw_name)
 
-    fn = make_foreach_pointwise(pw_fn)
+    fn = make_foreach_pointwise(pointwise_lowering_fn)
     fn = _register_foreach_lowering(
         aten_fn,
         fn,
@@ -4103,7 +4101,7 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, aten.add)
+register_foreach_pointwise(aten._foreach_add.List, add)
 
 
 def register_inplace(aten_op, outplace_op):

@@ -98,7 +98,6 @@ def validate_ir(node_or_nodes):
                 (
                     DynamicScalar,
                     TensorBox,
-                    TensorList,
                     RandSeedBuffer,
                     sympy.Symbol,
                     sympy.core.relational.Relational,
@@ -4085,115 +4084,17 @@ class StorageBox(MutableBox):
         )
 
 
-class TensorListInputsWrapper:
-    def __init__(self, tensor_boxes: List[TensorBox]):
-        self.list_name = V.graph.register_list([t.data.realize() for t in tensor_boxes])
-        self.tensor_boxes = tensor_boxes
-        self.layouts = [t.data.get_layout() for t in tensor_boxes]
-
-    def make_loader(self):
-        def fn():
-            return ops.load(self.list_name, self.layouts)
-
-        return fn
-
-    def __getitem__(self, ind):
-        return self.tensor_boxes[ind]
-
-    def get_layouts(self):
-        return [t.data.get_layout() for t in self.tensor_boxes]
-
-    def realize(self):
-        return self.list_name
-
-
-# This class is used to represent a list of tensors
-# Since each list provided as args to a kernel is a
-# different immmutable list object of tensors
-# this is used to track which lists are passed to foreach ops
-# and ensure the same list of args is mapped to the same TensorList
-class TensorList(IRNode):
-    def __init__(self, tensor_boxes):
-        assert isinstance(
-            tensor_boxes, (ForeachPointwise, TensorListInputsWrapper, BufferList)
-        )
-        self.data: Union[
-            ForeachPointwise, TensorListInputsWrapper, BufferList
-        ] = tensor_boxes
-
-    @classmethod
-    def create(cls, tensor_boxes):
-        if isinstance(tensor_boxes, list):
-            tensor_box = tensor_boxes[0]
-            if isinstance(tensor_box, TensorListItem) and TensorListItem.is_valid_list(
-                tensor_boxes
-            ):
-                return tensor_box.tensor_list
-
-            return cls(TensorListInputsWrapper(tensor_boxes))
-
-        return cls(tensor_boxes)
-
-    def __getitem__(self, ind):
-        return TensorListItem(self, ind)
-
-    def make_loader(self):
-        return self.data.make_loader()
-
-    def get_layouts(self):
-        return self.data.get_layouts()
-
-    def realize(self):
-        if not isinstance(self.data, (BufferList, TensorListInputsWrapper)):
-            self.data = BufferList(self.data)
-            self.name = self.data.list_name
-
-        return self.data.name
-
-
-# This class is used to get around how FX
-# inserts item calls after each list in the graph
-# if downstream is a foreach op, we extract the upstream foreach
-# op and fuse them.
-# In GraphLowering, if a non-foreach op accesses a TensorListItem
-# we realize the TensorList
-@dataclasses.dataclass
-class TensorListItem:
-    tensor_list: TensorList
-    ind: int
-
-    def get_value(self):
-        self.tensor_list.realize()
-        return self.tensor_list.data[self.ind]
-
-    @staticmethod
-    def is_valid_list(items):
-        if len(items) == 0:
-            return True
-
-        tensor_list = items[0].tensor_list
-        for ind, item in enumerate(items):
-            if item.tensor_list != tensor_list or item.ind != ind:
-                return False
-
-        return True
-
-
-# This will have some other metadata and stuffs
 class ForeachPointwise(IRNode):
-    def __init__(self, left, right, op_fn):
+    def __init__(self, fns):
         super().__init__()
-        self.layouts = [
-            FixedLayout(layout.device, layout.dtype, layout.size)
-            for layout in left.get_layouts()
-        ]
-        self.left = left
-        self.right = right
-        self.op_fn = op_fn
+        self.fns = fns
 
     @classmethod
-    def create(cls, *args, **kwargs):
-        return TensorList.create(cls(*args, **kwargs))
+    def create(cls, left_list, right_list, **kwargs):
+        for t in itertools.chain(left_list, right_list):
+            t.data.realize()
+
+        return cls(*args, **kwargs)
 
     def get_inputs(self):
         return itertools.chain(self.left, self.right)

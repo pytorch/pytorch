@@ -30,15 +30,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import (
-    Constant,
-    FixedLayout,
-    InputBuffer,
-    Pointwise,
-    Reduction,
-    TensorBox,
-    TensorList,
-)
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -370,9 +362,7 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(
-            args[0], (list, tuple, TensorList)
-        ):
+        if target is operator.getitem and isinstance(args[0], (list, tuple)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -503,17 +493,6 @@ class GraphLowering(torch.fx.Interpreter):
                     result = super().run_node(n)
             else:
                 result = super().run_node(n)
-
-            def all_users_are_foreach(n):
-                for user in n.users:
-                    if not (user.op == "call_function" and user.target in foreach_ops):
-                        return False
-
-                return True
-
-            if isinstance(result, ir.TensorListItem) and not all_users_are_foreach(n):
-                # if the result is a TensorListItem, but it is not used by a foreach op, we need to realize it
-                result = result.get_value()
 
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
