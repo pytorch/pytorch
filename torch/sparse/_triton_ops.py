@@ -431,9 +431,6 @@ if _has_triton():
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
         out: Optional[torch.Tensor] = None,
     ):
-        m, kl = bsr.shape[-2:]
-        kr, n = dense.shape[-2:]
-
         def check(cond, msg):
             if not cond:
                 raise ValueError(msg)
@@ -463,18 +460,41 @@ if _has_triton():
                 f"but got bsr.dim() == {bsr.dim()} and dense.dim() == {dense.dim()}.",
             )
 
+            m, kl = bsr.shape[-2:]
+            kr, n = dense.shape[-2:]
+
             check(
                 kl == kr,
                 "bsr_dense_mm(): argument sizes are not compatible for matrix multiplication, "
                 f"got bsr.shape[-1] == {kl} which is not equal to dense.shape[-2] == {kr}.",
             )
 
-            row_block = bsr.values().shape[-2]
+            row_block, col_block = bsr.values().shape[-2:]
             check(
                 not n % row_block,
                 f"bsr_dense_mm(): dense.size(-1) == {n} should be divisible by "
                 f"blocksize[0] == {row_block}.",
             )
+
+            def is_power_of_two(v):
+                return not (v & (v - 1))
+
+            def is_compatible_blocksize(b):
+                assert len(b) == 2
+                res = True
+                for blocksize in b:
+                    # Triton loads only blocks which are at least 16 and powers of 2.
+                    res = (blocksize >= 16 and is_power_of_two(blocksize)) and res
+                return res
+
+            check(
+                is_compatible_blocksize((row_block, col_block)),
+                f"bsr_dense_mm(): sparse inputs' blocksize ({row_block}, {col_block}) "
+                "should be at least 16 and a power of 2 in each dimension.",
+            )
+        else:
+            m, kl = bsr.shape[-2:]
+            kr, n = dense.shape[-2:]
 
         original_batch_dims_broadcasted = broadcast_batch_dims(bsr, dense)
 
