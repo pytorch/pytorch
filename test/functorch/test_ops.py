@@ -42,6 +42,7 @@ from common_utils import (
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
 )
+from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -375,7 +376,7 @@ aliasing_ops_list_return = {
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 class TestOperators(TestCase):
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
-    @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + additional_op_db + autograd_function_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides

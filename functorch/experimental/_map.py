@@ -163,12 +163,16 @@ def map_autograd(f, num_mapped_args, *args):
     pos_args = args[num_mapped_args:]
 
     with disable_proxy_modes_tracing():
-        example_xs = _unstack_pytree(mapped_xs)[0]
-        example_pos_args = pos_args
+        # By constructing the example inputs with detach then requires_grad_, we
+        # make them leaves of autograd graph so that grad_fn is not required.
+        example_xs = [xs.detach().requires_grad_() if xs.requires_grad else xs.detach() for xs in _unstack_pytree(mapped_xs)[0]]
+        example_pos_args = [arg.detach().requires_grad_() if arg.requires_grad else arg.detach() for arg in pos_args]
         example_flat_out, _ = pytree.tree_flatten(f(*example_xs, *example_pos_args))
         example_grad = [torch.ones_like(out) for out in example_flat_out if out is not None and out.requires_grad]
 
     fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+    print("create forward graph")
+    fw_graph.print_readable()
 
     def joint_f(*example_args):
         joint_mapped_args = example_args[:joint_num_mapped]
@@ -187,6 +191,8 @@ def map_autograd(f, num_mapped_args, *args):
 
     joint_num_mapped = len(example_grad) + len(example_xs)
     joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
+    print("corresponding backward graph")
+    joint_graph.print_readable()
     flat_out = MapAutogradOp.apply(fw_graph, joint_graph, num_mapped_args, *args)
     return flat_out
 
