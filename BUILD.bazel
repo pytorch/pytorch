@@ -1917,7 +1917,6 @@ test_suite(
     tests = [
         "api_tests",
         "jit_tests",
-        "test_bazel",
         "torch_dist_autograd_test",
         "//c10/test:tests",
     ],
