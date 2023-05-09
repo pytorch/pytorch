@@ -588,7 +588,6 @@ class CUDAWarmupNode:
 
         yield from reversed(nodes)
 
-
     def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
         "Returns all live storages weakrefs that created by nodes in this path"
         for node in self._path_from_root:
@@ -1902,7 +1901,6 @@ class CUDAGraphTreeManager:
             if storage_ref() and storage_ref.data_ptr() not in deleted:
                 deleted.add(storage_ref.data_ptr())
                 torch._C._free_And_Remove_DeleterFn(storage_ref())
-
 
     def clear_current_path_state_and_set_to_none(self):
         self.current_node.clear_path_state()
