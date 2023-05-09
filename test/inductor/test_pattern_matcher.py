@@ -13,17 +13,40 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
 
-        args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+        args_list = [
+            (
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            # https://github.com/pytorch/pytorch/issues/100670.
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+            ),
+            (
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
+        for args in args_list:
+            counters.clear()
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_addmm(self):
         def fn(a, b, c):
