@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Type
+from typing import Dict, Optional, Set
 
 import torch
 from torch._ops import OpOverload, OpOverloadPacket
@@ -25,6 +25,30 @@ def is_view_op(schema: torch._C.FunctionSchema) -> bool:
     return schema.arguments[0].alias_info is not None
 
 
+def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOverload]:
+    if not is_view_op(schema):
+        return None
+    if schema.name.startswith("aten::"):
+        view_op_name = schema.name.split("::")[1]
+        view_op_overload = (
+            schema.overload_name
+            if schema.overload_name != ""
+            else "default"
+        )
+        view_copy_op_name = view_op_name + "_copy"
+        if not hasattr(torch.ops.aten, view_copy_op_name):
+            return None
+
+        view_copy_op_overload_packet = getattr(torch.ops.aten, view_copy_op_name)
+
+        if not hasattr(view_copy_op_overload_packet, view_op_overload):
+            return None
+
+        return getattr(view_copy_op_overload_packet, view_op_overload)
+
+    return None
+
+
 class ReplaceViewOpsWithViewCopyOpsPass(ExportPassBase):
     """
     Our backend expects pure functional operators. For efficiency
@@ -41,19 +65,7 @@ class ReplaceViewOpsWithViewCopyOpsPass(ExportPassBase):
         if op in _BLACK_LISTED_OPS:
             return super().call_operator(op, args, kwargs, meta)
 
-        if op._schema.name.startswith("aten::") and is_view_op(
-            op._schema
-        ):
-            view_op_name = op._schema.name.split("::")[1]
-            view_op_overload = (
-                op._schema.overload_name
-                if op._schema.overload_name != ""
-                else "default"
-            )
-            view_copy_op_name = view_op_name + "_copy"
-            view_copy_op = getattr(
-                getattr(torch.ops.aten, view_copy_op_name), view_op_overload
-            )
+        if view_copy_op := get_view_copy_of_view_op(op):
             return super().call_operator(view_copy_op, args, kwargs, meta)
 
         return super().call_operator(op, args, kwargs, meta)

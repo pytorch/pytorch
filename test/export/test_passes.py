@@ -12,6 +12,10 @@ from torch._export.passes import (
     ConstPropPass,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
+    is_view_op,
+    get_view_copy_of_view_op,
+)
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -229,6 +233,25 @@ class TestPasses(TestCase):
         pass_result = ReplaceViewOpsWithViewCopyOpsPass()(gm)
         self.assertTrue(pass_result.modified)
         self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
+
+    def test_views_op_having_view_copy(self) -> None:
+        schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
+        aten_schemas = [s[6:] for s in schemas if s.startswith("aten::")]
+
+        for aten_schema in aten_schemas:
+            val = aten_schema.split(".")
+            assert len(val) <= 2
+            name = ""
+            overload = ""
+            if len(val) == 1:
+                name = val[0]
+                overload = "default"
+            else:
+                name, overload = val[0], val[1]
+
+            op_overload = getattr(getattr(torch.ops.aten, name), overload)
+            if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
+                self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
 
 
 if __name__ == '__main__':
