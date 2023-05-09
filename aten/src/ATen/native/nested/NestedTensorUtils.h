@@ -32,11 +32,14 @@ struct NestedTensorImpl;
 // The following functions are used to construct nested tensors from buffers and
 // metadata.
 
-inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
-    at::Tensor nested_sizes) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      buffer.is_contiguous(), "Given buffer must be contiguous.");
+inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
+  TORCH_CHECK(
+      buffer.dim() == 1,
+      "Expected given buffer to be 1dim, but got ",
+      buffer.dim(),
+      " instead.");
+  TORCH_CHECK(
+      buffer.is_contiguous(), "Expected given buffer to be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer), std::move(nested_sizes));
 }
