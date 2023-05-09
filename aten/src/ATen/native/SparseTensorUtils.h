@@ -120,6 +120,8 @@ TORCH_API Tensor flatten_indices_by_dims(
 // Find the CSR representation for a row `indices` from the COO format
 TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
+TORCH_API Tensor zeros_like_with_indices(const Tensor& t);
+
 template <size_t static_shape_max_len>
 class TensorGeometryHolder {
   using geometry_holder_t = std::array<int64_t, static_shape_max_len>;

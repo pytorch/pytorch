@@ -1427,7 +1427,7 @@ PyTypeObject Tensor::Type = {
 // dim() --------------------
 
 bool relevant_op(_Py_CODEUNIT c) {
-    switch(_Py_OPCODE(c)) {
+    switch(c) {
         case STORE_NAME:
         case STORE_GLOBAL:
         case STORE_FAST:

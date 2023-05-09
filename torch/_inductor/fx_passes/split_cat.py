@@ -7,6 +7,7 @@ from ..pattern_matcher import (
     Arg,
     CallFunction,
     CallMethod,
+    config_flag,
     get_arg_value,
     MULTIPLE,
     PatternEntry,
@@ -39,7 +40,7 @@ class NormalizeSplit(PatternEntry):
         if isinstance(split_size, (list, tuple)):
             return
         if "example_value" not in split_node.meta:
-            log.warning("example value absent for node", split_node)
+            log.warning("example value absent for node: %s", split_node)
             return
         assert isinstance(split_node.meta["example_value"], (list, tuple))
         split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
@@ -78,5 +79,7 @@ def _split_cat_init():
         CallMethod("split", Arg(), Arg(), dim=Arg(), _users=MULTIPLE),
         CallMethod("split", Arg(), split_size=Arg(), dim=Arg(), _users=MULTIPLE),
     ]:
-        pattern = NormalizeSplit(pattern=pattern, extra_check=lambda arg: True)
+        pattern = NormalizeSplit(
+            pattern=pattern, extra_check=config_flag("split_cat_fx_passes")
+        )
         pattern.register(patterns)

@@ -21,7 +21,7 @@ ElectraForQuestionAnswering,pass,7
 GPT2ForSequenceClassification,pass,9
 LayoutLMForMaskedLM,pass,7
 LayoutLMForSequenceClassification,pass,9
-M2M100ForConditionalGeneration,0.0000,0
+M2M100ForConditionalGeneration,infra_error,0
 MBartForCausalLM,pass,7
 MBartForConditionalGeneration,OOM,4
 MT5ForConditionalGeneration,pass,7

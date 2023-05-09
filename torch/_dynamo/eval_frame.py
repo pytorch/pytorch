@@ -7,6 +7,7 @@ import functools
 import inspect
 import logging
 import os
+import re
 import sys
 import textwrap
 import threading
@@ -79,7 +80,7 @@ most_recent_backend: Optional[CompilerFn] = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
-    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_exporter.py"),
+    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
 
 
@@ -110,7 +111,8 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
-            self.__call__ = self._call_lazy_check
+            self._forward = self.forward
+            self.forward = self._call_lazy_check
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -135,7 +137,7 @@ class OptimizedModule(torch.nn.Module):
             # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
-        return super().__call__(*args, **kwargs)
+        return self._forward(*args, **kwargs)
 
 
 def remove_from_cache(f):
@@ -244,7 +246,9 @@ class _TorchDynamoContext:
             filename = None
         if (
             (filename is None or skipfiles.check(filename))
-            and (getattr(fn, "__name__", "") != "_call_impl")
+            and (
+                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+            )
             and filename not in DONT_WRAP_FILES
         ):
             # call to a builtin without a frame for us to capture
@@ -671,6 +675,22 @@ class Constraint:
             "you can specify them separately instead."
         )
 
+    @property
+    def serializable_spec(self):
+        # We need a serialization compatible format of the constraint so that it
+        # can be savedin the graph module w/o breaking the module serialization.
+        # The saved constraints will be used directly for the post-exporting pass
+        # that converts constraints to runtime assertion. The saved constraints
+        # will not be saved in the serialized module.
+        # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
+        # which is not reliable
+        return {
+            "t_id": self.t_id,
+            "dim": self.dim,
+            "min": self.constraint_range.vr.lower,
+            "max": self.constraint_range.vr.upper,
+        }
+
 
 def export(
     f: Callable[..., Any],
@@ -705,8 +725,7 @@ def export(
         decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
         Required if aten_graph or tracing_mode is specified. Default is None.
 
-        tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
-        If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
+        tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -716,7 +735,7 @@ def export(
         Guards: The guards we accumulated during tracing f above
 
     Raises:
-        AssertionError: If decomposition_table or tracing_mode is specified without setting aten_graph=True,
+        AssertionError: If decomposition_table is specified without setting aten_graph=True,
         or if graph breaks during tracing in export.
 
         AssertionError: If Dynamo input and output is not consistent with traced input/output.
@@ -774,6 +793,7 @@ def export(
 
     fake_mode = None
     example_inputs = []
+    var_to_range_map = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -784,9 +804,11 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs
+        nonlocal fake_mode, example_inputs, var_to_range_map
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
+        if fake_mode and fake_mode.shape_env:
+            var_to_range_map = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -826,6 +848,15 @@ def export(
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        log.warning(
+            "Summary of dimension constraints:%s",
+            dim_constraints.prettify_results(inspect.signature(f)),
+        )
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -896,6 +927,20 @@ def export(
     new_graph = ChangeInputOutputSignature(
         graph,
     ).transform()
+
+    # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
+    new_graph.meta["input_shape_constraints"] = (
+        [constraint.serializable_spec for constraint in constraints]
+        if constraints
+        else None
+    )
+    new_graph.meta["inline_constraints"] = {
+        node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
+        for node in new_graph.graph.nodes
+        if node.op != "placeholder" and "val" in node.meta
+        # Find constraints frome unbacked symints
+        and re.match(r"^i\d+$", str(node.meta["val"]))
+    }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object

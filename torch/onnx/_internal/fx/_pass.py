@@ -153,20 +153,26 @@ class Transform(abc.ABC):
     """The module to be transformed."""
     module: torch.fx.GraphModule
 
-    def __init__(self, module: torch.fx.GraphModule):
+    def __init__(
+        self,
+        diagnostic_context: diagnostics.DiagnosticContext,
+        module: torch.fx.GraphModule,
+    ):
         """Initialize the transform.
 
         Args:
+            diagnostic_context: The diagnostic context for recording diagnostics.
             module: The module to be transformed.
         """
         self.module = module
+        self.diagnostic_context = diagnostic_context
 
     @abc.abstractmethod
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         ...
 
     @diagnostics.diagnose_call(
-        rule=diagnostics.rules.fx_pass,
+        diagnostics.rules.fx_pass,
         exception_report_level=diagnostics.levels.ERROR,
         diagnostic_message_formatter=_transform_diagnose_call_message_formatter,
     )
@@ -180,7 +186,7 @@ class Transform(abc.ABC):
             *args: Positional arguments for `self.module` to run.
             **kwargs: Keyword arguments for `self.module` to run.
         """
-        diagnostic = diagnostics.export_context().inflight_diagnostic(
+        diagnostic = self.diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_pass
         )
         # Gather graph information before transform.

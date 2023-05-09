@@ -44,6 +44,7 @@ __all__ = [
     "as_tensor",
     "asin",
     "atan",
+    "atan2",
     "baddbmm",
     "batch_norm",
     "bernoulli",
@@ -721,6 +722,29 @@ def acos(g: jit_utils.GraphContext, self):
 @_beartype.beartype
 def atan(g: jit_utils.GraphContext, self):
     return g.op("Atan", self)
+
+
+@_onnx_symbolic("aten::atan2")
+@_beartype.beartype
+def atan2(g: jit_utils.GraphContext, self, other):
+    # self is y, and other is x on coordinate
+    slope = g.op("Div", self, other)
+    atan = g.op("Atan", slope)
+    const_zero = g.op("Constant", value_t=torch.tensor(0))
+    const_pi = g.op("Constant", value_t=torch.tensor(math.pi))
+
+    condition_second_or_third_quadrant = g.op("Greater", self, const_zero)
+    second_third_quadrant = g.op(
+        "Where",
+        condition_second_or_third_quadrant,
+        g.op("Add", atan, const_pi),
+        g.op("Sub", atan, const_pi),
+    )
+
+    condition_14_or_23_quadrant = g.op("Less", other, const_zero)
+    result = g.op("Where", condition_14_or_23_quadrant, second_third_quadrant, atan)
+
+    return result
 
 
 @_onnx_symbolic("aten::sigmoid")
@@ -2494,6 +2518,72 @@ def _convolution(
         return n
 
 
+@_onnx_symbolic("aten::_convolution_mode")
+@symbolic_helper.parse_args(
+    "v",
+    "v",
+    "v",
+    "is",
+    "s",
+    "is",
+    "i",
+)
+@_beartype.beartype
+def _convolution_mode(
+    g: jit_utils.GraphContext,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+):
+    weight_size = symbolic_helper._get_tensor_sizes(weight)
+    try:
+        kernel_shape = weight_size[2:]
+    except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
+        kernel_shape = None
+
+    if kernel_shape is None or any(i is None for i in kernel_shape):
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of convolution for kernel of unknown shape.",
+            input,
+        )
+
+    args = [input, weight]
+    # ONNX only supports 1D bias
+    if (
+        not symbolic_helper._is_none(bias)
+        and symbolic_helper._get_tensor_rank(bias) == 1
+    ):
+        args.append(bias)
+
+    if padding == "valid":
+        padding = "VALID"
+    elif padding == "same":
+        padding = "SAME_UPPER"
+    kwargs = {
+        "kernel_shape_i": weight_size[2:],
+        "strides_i": stride,
+        "auto_pad_s": padding,
+        "dilations_i": dilation,
+        "group_i": groups,
+    }
+
+    n = g.op("Conv", *args, **kwargs)
+
+    if (
+        not symbolic_helper._is_none(bias)
+        and symbolic_helper._get_tensor_rank(bias) != 1
+    ):
+        return g.op("Add", n, bias)
+    else:
+        return n
+
+
 @_onnx_symbolic("aten::convolution")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
 @_beartype.beartype
@@ -2528,75 +2618,117 @@ def convolution(
 
 
 @_onnx_symbolic("aten::conv1d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv1d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv2d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv2d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv3d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv3d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv_transpose1d")

@@ -178,7 +178,6 @@ struct CollectiveFingerPrint {
              << ", but Rank " << rank
              << " is running collective: " << rank_fingerprint << ".";
           auto diff_result = compute_collective_diff(rank_fingerprint);
-          auto has_diff = std::get<0>(diff_result);
           if (std::get<0>(diff_result)) {
             ss << std::get<1>(diff_result);
           }
@@ -231,11 +230,12 @@ struct CollectiveFingerPrint {
     // collective type, etc) for easier understanding of how mismatched
     // collectives across ranks differ.
     bool found_diff = false;
-    std::string ret = "Collectives differ in the following aspects: ";
+    std::stringstream ss;
+    ss << "Collectives differ in the following aspects: ";
     // Check seq_num
     if (other.sequence_number_ != sequence_number_) {
       found_diff = true;
-      ret += c10::str(
+      ss << c10::str(
           "\t Sequence number: ",
           sequence_number_,
           "vs ",
@@ -246,22 +246,22 @@ struct CollectiveFingerPrint {
     auto this_op = opTypeToString(op_type_);
     if (other_op.compare(this_op) != 0) {
       found_diff = true;
-      ret += c10::str("  Op type: ", this_op, "vs ", other_op);
+      ss << c10::str("  Op type: ", this_op, "vs ", other_op);
     }
 
-    auto check = [&ret, &found_diff](
+    auto check = [&ss, &found_diff](
                      const char* arg,
                      std::vector<std::string> other,
                      std::vector<std::string> curr) {
       if (other.size() != curr.size()) {
         found_diff = true;
-        ret += c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+        ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
         return;
       }
       for (size_t i = 0; i < other.size(); ++i) {
         if (other[i].compare(curr[i]) != 0) {
           found_diff = true;
-          ret += c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
+          ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
           return;
         }
       }
@@ -283,10 +283,9 @@ struct CollectiveFingerPrint {
 
     check("Tensor devices", other_devices, this_devices);
     if (!found_diff) {
-      std::string r = "";
-      return std::make_pair(false, r);
+      return std::make_pair(false, ss.str());
     } else {
-      return std::make_pair(true, ret);
+      return std::make_pair(true, ss.str());
     }
   }
 
