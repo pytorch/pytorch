@@ -15,6 +15,7 @@ from weakref import ReferenceType
 
 import torch
 import torch.utils._device
+from torch._dynamo.source import TensorProperty, TensorPropertySource
 
 from torch._guards import (
     DuplicateInputs,
@@ -24,7 +25,13 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import is_concrete_int, SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_concrete_int,
+    SYMPY_INTERP,
+)
+
+from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -472,10 +479,45 @@ class GuardBuilder(GuardBuilderBase):
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
+
+        def get_sources(t_id, dim):
+            # Looks up base sources mapped to a tensor id and uses them to create
+            # sources for the corresponding tensor dimension.
+            return [
+                TensorPropertySource(source, TensorProperty.SIZE, dim)
+                for source in output_graph.tracked_fakes_id_to_source[t_id]
+            ]
+
+        if output_graph.export_constraints:
+            source_pairs: List[Tuple[Source, Source]] = []
+            for constraint in output_graph.export_constraints:
+                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+                # When t.size()[dim] maps to src0, src1, ..., srcN, we add
+                # constraints that make src0 "equal" to src1, ..., srcN.
+                source_pairs.extend(
+                    (source, other_source) for other_source in other_sources
+                )
+                if constraint.shared is not None:
+                    # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+                    # and t'.size()[dim'] maps to src1', ..., srcN', we add
+                    # constraints that also make src0 "equal" to src1', ..., srcN'.
+                    other_sources = get_sources(
+                        constraint.shared.t_id, constraint.shared.dim
+                    )
+                    source_pairs.extend(
+                        (source, other_source) for other_source in other_sources
+                    )
+            equalities_inputs = EqualityConstraint(
+                source_pairs=source_pairs,
+                warn_only=False,
+            )
+        else:
+            equalities_inputs = None
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
+            equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
             # Export keeps static.
             ignore_static=(not self.check_fn_manager.output_graph.export),
@@ -741,35 +783,33 @@ class CheckFunctionManager:
             )
             dynamic_dims_sizes = None
             dynamic_dims_strides = None
-            if config.dynamic_shapes:
 
-                def convert(size_or_stride):
-                    converted: List[Optional[int]] = []
-                    for dim in size_or_stride:
-                        if is_concrete_int(dim):
-                            converted.append(int(dim))
-                        else:
-                            converted.append(None)
-                    return converted
+            def convert(size_or_stride):
+                converted: List[Optional[int]] = []
+                for dim in size_or_stride:
+                    if is_concrete_int(dim):
+                        converted.append(int(dim))
+                    else:
+                        converted.append(None)
+                return converted
 
-                dynamic_dims_sizes = [
-                    convert(
-                        self.output_graph.tracing_context.fake_mode.from_tensor(
-                            t,
-                            memoized_only=True,
-                        ).size()
-                    )
-                    for t in tensor_check_examples
-                ]
-                dynamic_dims_strides = [
-                    convert(
-                        self.output_graph.tracing_context.fake_mode.from_tensor(
-                            t,
-                            memoized_only=True,
-                        ).stride()
-                    )
-                    for t in tensor_check_examples
-                ]
+            dynamic_dims_sizes = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "size"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_dims_strides = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "stride"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
@@ -820,7 +860,14 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)
-        set_guard_fail_hook(guard_fail_hook)
+
+        if config.report_guard_failures or guard_fail_fn is not None:
+            # Guard fail hook is called everytime guard eval fails. For a cache
+            # lookup where there are multiple entries in the same cache line,
+            # this can lead to very high performance overhead. So, we have
+            # decided to hide this behing a config flag.
+            set_guard_fail_hook(guard_fail_hook)
+
         out: Dict[str, Any] = dict()
         exec(py_code, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
