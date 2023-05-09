@@ -1567,10 +1567,10 @@ class TestOptim(TestCase):
             TypeError,
             'params argument given to the optimizer should be an iterable of Tensors or dicts',
             lambda: optim.LBFGS(Parameter(torch.randn(5, 5)))
-            )
+        )
 
     def test_duplicate_params_in_one_param_group(self):
-        param = Parameter(torch.randn(1,1))
+        param = Parameter(torch.randn(1))
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             optim.SGD([param, param], lr=0.01)
@@ -1580,7 +1580,7 @@ class TestOptim(TestCase):
             )
 
     def test_duplicate_params_across_param_groups(self):
-        param = Parameter(torch.randn(1,1))
+        param = Parameter(torch.randn(1))
         self.assertRaisesRegex(
             ValueError,
             'some parameters appear in more than one parameter group',
@@ -1590,6 +1590,9 @@ class TestOptim(TestCase):
     def test_step_is_noop_when_params_have_no_grad(self):
         params = [torch.randn(2, 3, requires_grad=False) for _ in range(2)]
         old_params = [p.clone().detach() for p in params]
+
+        def closure():
+            return torch.tensor([1])
 
         optimizer_list = [
             optim.Adadelta,
@@ -1607,7 +1610,7 @@ class TestOptim(TestCase):
         ]
         for optim_ctr in optimizer_list:
             opt = optim_ctr(params, lr=0.1)
-            opt.step()
+            opt.step(closure)
         self.assertEqual(old_params, params)
 
 
