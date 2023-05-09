@@ -446,18 +446,6 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
-# @register_meta(aten.linalg_eigh.default)
-def meta_linalg_eigh(self, uplo="L"):
-    squareCheckInputs(self, "linalg_eigh")
-    checkUplo(uplo)
-    real_dtype = toRealValueType(self.dtype)
-    assert self.dim() >= 2
-    values = self.new_empty(self.shape, dtype=real_dtype)
-    values.transpose_(-2, -1)
-    vectors = self.new_empty(self.shape[:-1])
-    return (values, vectors)
-
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_cholesky_ex.default)
 def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = False):
