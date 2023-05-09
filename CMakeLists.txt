@@ -369,8 +369,10 @@ endif()
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
 if(WIN32)
-  set(USE_TENSORPIPE OFF)
-  message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+  if(USE_TENSORPIPE)
+    set(USE_TENSORPIPE OFF)
+    message(WARNING "TensorPipe cannot be used on Windows. Set it to OFF")
+  endif()
 
   if(USE_DISTRIBUTED AND NOT DEFINED ENV{libuv_ROOT})
     find_library(

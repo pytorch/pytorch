@@ -859,9 +859,11 @@ if(USE_FBGEMM)
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
-  message(WARNING
-    "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
-  caffe2_update_option(USE_FAKELOWP OFF)
+  if(USE_FAKELOWP)
+    message(WARNING
+      "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
+    caffe2_update_option(USE_FAKELOWP OFF)
+  endif()  
 endif()
 
 # ---[ LMDB
