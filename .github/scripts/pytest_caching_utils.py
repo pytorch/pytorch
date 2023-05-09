@@ -199,14 +199,14 @@ def _merge_pytest_caches(
         "README.md",
     ]
 
-    # Copy over the static files
+    # Copy over the static files. These files never change, so only copy them
+    # if they don't already exist in the new cache
     for static_file in static_files_to_copy:
         source_file = pytest_cache_dir_to_merge_from / static_file
 
         if not source_file.is_file():
             continue
 
-        # These files never change, so only copy them if they don't already exist in the new cache
         dest_file = pytest_cache_dir_to_merge_into / static_file
         if not dest_file.exists():
             copy_file(source_file, dest_file)
