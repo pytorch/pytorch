@@ -1715,7 +1715,8 @@ template_rule(
         # Set default to 11.2. Otherwise Torchvision complains about incompatibility.
         "{{CUDA_VERSION}}": "11.2",
         "{{VERSION}}": "2.0.0",
-        "{{GIT_VERSION}}": "34c7adf1d72177d9fd08d866a018df5c0d5aa2ec",
+        # TODO: can we automatically get correct git SHA here?
+        "{{GIT_VERSION}}": "0000000000000000000000000000000000000000",
     },
 )
 
