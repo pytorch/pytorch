@@ -1,38 +1,31 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import functools
-import gc
 import importlib
+import os
 import sys
 import unittest
-import os
-import warnings
 
 import torch
 
 import torch._dynamo
-import torch.nn as nn
 from torch._inductor import config
-from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch.testing import FileCheck
 from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from inductor.test_torchinductor import copy_tests, check_model, check_model_cuda
-
-
-
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_LINUX,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
+
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -95,7 +88,6 @@ class OptimizeForInferenceTemplate(TestCase):
         )
 
     def test_mutation(self):
-
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -121,7 +113,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_eager, out_comp)
             self.assertEqual(out_eager2, out_comp2)
-
 
     def test_autocast(self):
         if self.device == "cpu":
@@ -153,11 +144,12 @@ class OptimizeForInferenceTemplate(TestCase):
         with torch.no_grad():
             foo(mod, x)
 
-        with self.assertRaisesRegex(RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+        ):
             mod(x)
 
     def test_rng_op(self):
-
         @torch.compile()
         def foo():
             return torch.rand([4, 4], device=self.device) + 1
@@ -183,7 +175,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         common = check_model_cuda
         device = "cuda"
         autocast = torch.cuda.amp.autocast
-
 
     copy_tests(OptimizeForInferenceTemplate, CudaTests, "cuda")
 
