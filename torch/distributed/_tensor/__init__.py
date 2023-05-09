@@ -78,23 +78,23 @@ def ones(
     by the variable argument ``size``.
 
     Args:
-        size (int...): a sequence of integers defining the shape of the output DTensor.
+        size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.
         Can be a variable number of arguments or a collection like a list or tuple.
         E.g.: ones(1,2,3..) or ones([1,2,3..]) or ones((1,2,3..))
 
     Keyword args:
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned DTensor.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        device (:class:`torch.device`, optional): the desired device of returned DTensor.
-            Default: if ``None``, uses the current device for the default tensor type
+        device (:class:`torch.device`, optional): the desired device of returned :class:`DTensor`.
+            Default: if ``None``, uses the current device for the default :class:`DTensor` type
             (see :func:`torch.set_default_tensor_type`). device will be the CPU for CPU
-            tensor types and the current CUDA device for CUDA tensor types.
-        layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
+            :class:`DTensor` types and the current CUDA device for CUDA :class:`DTensor` types.
+        layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
-            returned tensor. Default: ``False``.
+            returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placement: a sequence of :class:`Placement` type: Shard, Replicate, _Partial
+        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
 
     Returns:
         A :class:`DTensor` object on each rank
@@ -105,6 +105,63 @@ def ones(
         dtype=dtype,
         device=device,
         layout=layout,
+        requires_grad=requires_grad,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+
+
+def empty(
+    *size,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: torch.layout = torch.strided,
+    memory_format=torch.contiguous_format,
+    pin_memory=False,
+    requires_grad: bool = False,
+    device_mesh: Optional[DeviceMesh] = None,
+    placements: Optional[Sequence[Placement]] = None,
+) -> DTensor:
+    """
+    Returns a :class:`DTensor` filled with uninitialized data. The shape of the :class:`DTensor`
+    is defined by the variable argument ``size``.
+
+    Args:
+        size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.
+        Can be a variable number of arguments or a collection like a list or tuple.
+        E.g.: empty(1,2,3..) or empty([1,2,3..]) or empty((1,2,3..))
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        device (:class:`torch.device`, optional): the desired device of returned :class:`DTensor`.
+            Default: if ``None``, uses the current device for the default :class:`DTensor` type
+            (see :func:`torch.set_default_tensor_type`). device will be the CPU for CPU
+            :class:`DTensor` types and the current CUDA device for CUDA :class:`DTensor` types.
+        layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
+            Default: ``torch.strided``.
+        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+            returned :class:`DTensor`.
+            Default: ``torch.contiguous_format``.
+        pin_memory (bool, optional): If set, returned :class:`DTensor` would be allocated
+            in the pinned memory. Works only for CPU :class:`DTensor`.
+            Default: ``False``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned :class:`DTensor`. Default: ``False``.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+
+    Returns:
+        A :class:`DTensor` object on each rank
+    """
+    return _dtensor_init_helper(
+        torch.empty,
+        *size,
+        dtype=dtype,
+        device=device,
+        layout=layout,
+        memory_format=memory_format,
+        pin_memory=pin_memory,
         requires_grad=requires_grad,
         device_mesh=device_mesh,
         placements=placements,
@@ -123,18 +180,18 @@ def zeros(
     Returns a :class:`DTensor` filled with the scalar value 0.
 
     Args:
-        size (int...): a sequence of integers defining the shape of the output
-            Dtensor. Can be a variable number of arguments or a collection like a list or tuple.
+        size (int...): a sequence of integers defining the shape of the output :class:`DTensor`.
+            Can be a variable number of arguments or a collection like a list or tuple.
             E.g.: zeros(1,2,3..) or zeros([1,2,3..]) or zeros((1,2,3..))
     Keyword args:
         requires_grad (bool, optional): If autograd should record operations on the
-            returned tensor. Default: ``False``.
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            returned :class:`DTensor`. Default: ``False``.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+        layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placement: a sequence of :class:`Placement` type: Shard, Replicate, _Partial
+        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
 
     Returns:
         A :class:`DTensor` object on each rank
