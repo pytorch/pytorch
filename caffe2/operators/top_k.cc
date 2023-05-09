@@ -259,7 +259,7 @@ Returns up to three outputs:
 Given two equivalent values, this operator uses the indices along the last dimension as a tiebreaker. That is, the element with the lower index will appear first.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/top_k.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/top_k.cc
 
 
 <details>

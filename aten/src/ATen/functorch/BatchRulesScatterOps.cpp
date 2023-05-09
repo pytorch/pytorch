@@ -17,6 +17,7 @@
 
 namespace at { namespace functorch {
 
+namespace {
 static bool any_has_value(ArrayRef<optional<int64_t>> bdims) {
   for (const auto& bdim : bdims) {
     if (bdim.has_value()) {
@@ -55,7 +56,7 @@ static int64_t get_max_index_logical_dim(
   return max_logical_dim;
 }
 
-std::vector<optional<Tensor>> batchIndices(
+static std::vector<optional<Tensor>> batchIndices(
   ArrayRef<optional<Tensor>> indices,
   ArrayRef<optional<int64_t>> indices_bdims,
   int64_t batch_size,
@@ -831,7 +832,6 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-namespace {
 Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t dim) {
   if (index.dim() == 0) {
     return index.expand(self_size);
@@ -854,7 +854,6 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
     index_ = index_.expand(new_index_shape);
   }
   return index_;
-}
 }
 
 Tensor index_select_decomp(const Tensor &self, int64_t dim, const Tensor &index)
@@ -1194,6 +1193,7 @@ std::tuple<Tensor,optional<int64_t>> index_fill_int_tensor_batch_rule(
   return index_fill_int_tensor_batch_rule_impl(self_, self_bdim, dim, index, index_bdim, value, value_bdim, false);
 }
 
+}
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index.Tensor", index_plumbing);
