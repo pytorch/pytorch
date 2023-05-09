@@ -415,10 +415,6 @@ def unsupported_complex_op(op):
     op_name = op.name()
     if "fft" in op_name:
         return True
-    if "_linalg_svd" in op_name:
-        return True
-    if op is torch.ops.prims.svd.default:
-        return True
     return False
 
 
