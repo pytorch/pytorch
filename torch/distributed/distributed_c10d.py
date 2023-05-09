@@ -269,6 +269,9 @@ class BackendConfig:
                 "cpu": backend_val,
                 "cuda": backend_val,
             }
+            custom_device_name = torch._C._get_privateuse1_backend_name()
+            if hasattr(torch, custom_device_name) and getattr(torch, custom_device_name).is_available():
+                self.device_backend_map[custom_device_name] = backend_val
         else:
             # make sure the backend string is in the correct format
             # "{device_type1}:{backend1},{device_type2}:{backend2}"
