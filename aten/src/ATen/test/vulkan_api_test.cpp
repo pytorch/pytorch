@@ -1464,6 +1464,54 @@ TEST_F(VulkanAPITest, conv2d_transposed_prepack) {
     1);             // groups
 }
 
+TEST_F(VulkanAPITest, conv2d_clamp_after_div) {
+  c10::InferenceMode mode;
+
+  constexpr std::array<int64_t, 2u> stride{2, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 1};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+  constexpr int64_t groups = 1;
+
+  const auto input_numerator = at::rand({1, 3, 64, 64}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_denominator = at::rand({3, 1, 1}, at::device(at::kCPU).dtype(at::kFloat)) + 0.01;
+  const auto input_cpu = at::div(input_numerator, input_denominator);
+  const auto input_vk = at::div(input_numerator.vulkan(), input_denominator.vulkan());
+  at::Tensor weight = at::rand({24, 3, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  at::Tensor bias = at::rand({24}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // cpu
+  const auto prepack_cpu = callOpByName(
+      "prepacked::conv2d_clamp_prepack",
+      "",
+      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+
+  const auto out_cpu = callOpByName(
+      "prepacked::conv2d_clamp_run",
+      "",
+      input_cpu, prepack_cpu)[0].toTensor();
+
+  // vulkan
+  const auto prepack_vk = callOpByName(
+      "vulkan_prepack::create_conv2d_context",
+      "",
+      weight, bias, stride, padding, dilation, groups, 0.0f, c10::nullopt)[0];
+
+  const auto out_vk = callOpByName(
+      "vulkan_prepack::run_conv2d_context",
+      "",
+      input_vk, prepack_vk)[0].toTensor();
+
+  const auto out_vk_cpu = out_vk.cpu();
+
+  // check
+  const bool check = almostEqual(out_cpu, out_vk_cpu);
+  if (!check) {
+    showRtol(out_cpu, out_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
