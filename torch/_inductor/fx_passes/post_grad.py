@@ -13,7 +13,6 @@ from ..pattern_matcher import (
     Arg,
     CallFunction,
     filter_nodes,
-    MultiOutputPattern,
     get_arg_value,
     Ignored,
     init_once_fakemode,
@@ -103,15 +102,6 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 #   - order patterns are defined in
 ################################################################################
 
-@register_lowering_pattern(
-    MultiOutputPattern(    
-        (CallFunction(aten.mm.default, KeywordArg('inp'), KeywordArg('w1')), 
-         CallFunction(aten.mm.default, KeywordArg('inp'), KeywordArg('w2'))
-    ))  
-)
-def foo(*args, **kwargs):
-    breakpoint()
-    raise
 
 @register_lowering_pattern(
     CallFunction(
@@ -123,85 +113,6 @@ def foo(*args, **kwargs):
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
-
-# @register_lowering_pattern(
-#     MultiOutputPattern((
-#         CallFunction(
-#             torch.ops.aten.view.default,
-#             KeywordArg("self"), Arg(),
-#         ),
-#         CallFunction(
-#             torch.ops.aten.view.default,
-#             KeywordArg("self"), Arg(),
-#         ),
-#     )),
-#     pass_number=0,
-#     extra_check=is_same_view,
-# )
-
-
-def elias(*args):
-    breakpoint()
-    raise
-
-
-@register_lowering_pattern(
-    MultiOutputPattern((
-        CallFunction(
-            torch.ops.aten.mm.default,
-            KeywordArg("self"), Arg(),
-        ),
-        CallFunction(
-            torch.ops.aten.mm.default,
-            KeywordArg("self"), Arg(),
-        ),
-    )),
-    pass_number=1,
-    extra_check=elias,
-)
-def temp(*args, **kwargs):
-    breakpoint()
-    raise
-
-
-def _sfdp_pattern_7():
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
-    div = div.to(torch.float32)
-    attn_weight = torch.softmax(div, dim=-1)
-    attn_weight = torch.dropout(attn_weight, dropout_p, True)
-    attn_weight = attn_weight.to(torch.float16)
-    return attn_weight @ v
-
-
-def _sfdp_replacement_7(query, key, value, dropout_p):
-    counters["inductor"]["fuse_attention"] += 1
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        attn_mask=None,  # attn_mask,
-        dropout_p=dropout_p,
-        is_causal=False,
-    )
-
-
-# @register_lowering_pattern(
-#     CallFunction(
-#         torch.ops.aten.mm.default,
-#         KeywordArg("inp"), Arg(),
-#     ),
-#     pass_number=1,
-#     extra_check=elias,
-# )
-# def temp(*args, **kwargs):
-#     breakpoint()
-#     raise
 
 def shape_of_mm(a, b):
     m, _ = a.get_size()

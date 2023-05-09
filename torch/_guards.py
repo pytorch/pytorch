@@ -404,8 +404,6 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
-        # this is only set after aot_autograd
-        self.fw_metadata = None
 
     @staticmethod
     def extract_stack():
