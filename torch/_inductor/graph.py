@@ -35,7 +35,6 @@ from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
-    foreach_ops,
     layout_constraints,
     lowerings,
     make_fallback,

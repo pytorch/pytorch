@@ -227,22 +227,6 @@ def _register_foreach_lowering(
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
         assert len(args) == 2
-        updated_args = []
-        for left, right in zip(*args):
-            if hasattr(left, "get_dtype") and hasattr(right, "get_dtype"):
-                dtype = get_promoted_dtype(
-                    left, right, type_promotion_kind=type_promotion_kind
-                )
-                # TODO: handle type promotion by fusing the cast
-                if left.get_dtype() != dtype or right.get_dtype() != dtype:
-                    return fallback_handler(aten_fn, False)(*args, **kwargs)
-
-            updated_args.append(
-                transform_args(
-                    (left, right), broadcast, type_promotion_kind, convert_input_to_bool
-                )
-            )
-        args = [list(pair) for pair in zip(*updated_args)]
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out

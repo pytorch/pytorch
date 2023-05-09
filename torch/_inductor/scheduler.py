@@ -557,7 +557,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     @cache_on_self
     def is_foreach(self):
-        return any(x.is_foreach() for x in self.snodes)
+        return False
 
     def get_device(self):
         return self.group[0]
@@ -593,12 +593,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
         raise NotImplementedError
 
 
-class ForeachKernelSchedulerNode(BaseSchedulerNode):
-    def __init__(self, scheduler: "Scheduler", node):
-        super().__init__(scheduler, node)
-        self.group = (node.get_device(), 0)
-        self.node = node
-        self.origins = node.origins
+class ForeachKernelSchedulerNode(FusedSchedulerNode):
+    def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
+        super().__init__(scheduler, nodes)
+        # TODO: ensure all buffers are on the same device in lowerings
+        self.group = (nodes[0].node.get_device(), 0)
+        self.snodes = nodes
+        self.origins = nodes[0].node.origins
+
+    def prune_deps(self):
+        pass
 
     def mark_run(self):
         if isinstance(self.node, ir.ListElemBuffer):
@@ -679,27 +683,15 @@ class Scheduler:
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
         }
-        for node in nodes:
-            assert (
-                node.origins is not None
-            ), "All nodes passed to scheduling must have an origin"
-            if node.is_no_op():
-                self.nodes.append(NopKernelSchedulerNode(self, node))
-            elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-                group_fn = self.get_backend(node.get_device()).group_fn
-                self.nodes.append(SchedulerNode(self, node, group_fn))
-            elif isinstance(node, (ir.BufferList, ir.ListElemBuffer)):
-                self.nodes.append(ForeachKernelSchedulerNode(self, node))
-            elif isinstance(node, ir.ExternKernel):
-                self.nodes.append(ExternKernelSchedulerNode(self, node))
-            else:
-                raise NotImplementedError(node)
+
+        self.nodes = [self.create_scheduler_node(n) for n in nodes]
+
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_node = {node.get_name(): node for node in self.nodes}
+        self.name_to_node = {n.get_name(): n for n in self.nodes}
         self.name_to_fused_node = None  # set in fuse_nods()
 
         # we handle mutation by renaming modified versions of the same
@@ -719,6 +711,7 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.create_foreach_nodes()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -746,6 +739,34 @@ class Scheduler:
             log.info("%s:", label)
             for node in self.nodes:
                 node.log_details()
+
+    def create_scheduler_node(self, node):
+        assert (
+            node.origins is not None
+        ), "All nodes passed to scheduling must have an origin"
+        if node.is_no_op():
+            return NopKernelSchedulerNode(self, node)
+        elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
+            group_fn = self.get_backend(node.get_device()).group_fn
+            return SchedulerNode(self, node, group_fn)
+        elif isinstance(node, ir.ExternKernel):
+            return ExternKernelSchedulerNode(self, node)
+        else:
+            raise NotImplementedError(node)
+
+    def create_foreach_nodes(self):
+        removed_node_names = set()
+        for names in V.graph.lists.values():
+            removed_node_names.update(names)
+            self.nodes.append(
+                ForeachKernelSchedulerNode(
+                    self, [self.name_to_node[name] for name in names]
+                )
+            )
+
+        self.nodes = [
+            node for node in self.nodes if node.get_name() not in removed_node_names
+        ]
 
     def compute_dependencies(self):
         """
