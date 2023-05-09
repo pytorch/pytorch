@@ -72,7 +72,6 @@ coordinate_descent_tuning = (
 
 layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
 force_contiguous_inputs = os.environ.get("TORCHINDUCTOR_FORCE_CONTIGUOUS_INPUTS", "0") == "1"
-fallback_batchnorm = os.environ.get("TORCHINDUCTOR_FALLBACK_BATCH_NROM", "1") == "1"
 
 force_mix_layout = os.environ.get("TORCHINDUCTOR_FORCE_MIX_LAYOUT", "0") == "1"
 verify_uniform_layouts = os.environ.get("TORCHINDUCTOR_VERIFY_UNIFORM_LAYOUTS", "0") == "1"
@@ -237,10 +236,7 @@ class triton:
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     # cudagraph_trees = not is_fbcode()
-    # XXX cause error for resnet18 training:
-    # https://gist.github.com/shunting314/a29b7d0b39e27a46e5dc9a59f7cb0708
-    # Add the envvar to guard temprarily.
-    cudagraph_trees = os.environ.get("TORCHIINDUCTOR_USE_CUDAGRAPH_TREES", "0") == "1"
+    cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "1") == "1"
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True

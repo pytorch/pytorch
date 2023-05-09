@@ -597,7 +597,20 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
                                                                  deterministic, allow_tf32);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
-    c10::cuda::CUDACachingAllocator::emptyCache();
+
+    /*
+     * The emptyCache() line here will cause crash when using cudagraph trees
+     * together with layout optimization.
+     *
+     * Here is the python stack trace: https://gist.github.com/shunting314/f8d39649d6e9054e9efd7504f921d81b
+     * Here is the C++ stack trace captured in GDB: https://gist.github.com/shunting314/3aa009de8073e74431612d389303155d
+     *
+     * Disable this line for now to unblock. Work with Elias to figure out the
+     * correct fix.
+     */
+    if (std::getenv("CONV_EMPTY_CACHE")) {
+        c10::cuda::CUDACachingAllocator::emptyCache();
+    }
     try_plans(plans, key, handle, x, y, w);
   }
 }
