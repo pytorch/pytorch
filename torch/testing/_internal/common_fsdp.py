@@ -913,7 +913,6 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier()
 
         dist.destroy_process_group()
-        sys.exit(0)
 
     def _train_for_several_steps(
         self,
