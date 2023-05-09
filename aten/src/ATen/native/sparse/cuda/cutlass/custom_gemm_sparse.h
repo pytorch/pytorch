@@ -34,16 +34,16 @@
 
 #pragma once
 
-#include "cutlass/cutlass.h"
-#include "cutlass/numeric_types.h"
-#include "cutlass/arch/arch.h"
-#include "cutlass/device_kernel.h"
+#include <cutlass/cutlass.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/arch/arch.h>
+#include <cutlass/device_kernel.h>
 
-#include "cutlass/gemm/threadblock/threadblock_swizzle.h"
-#include "ATen/native/sparse/cuda/cutlass/custom_sparse_gemm.h"
+#include <cutlass/gemm/threadblock/threadblock_swizzle.h>
+#include <ATen/native/sparse/cuda/cutlass/custom_sparse_gemm.h>
 
-#include "ATen/native/sparse/cuda/cutlass/custom_default_gemm_sparse.h"
-#include "cutlass/gemm/device/default_gemm_configuration.h"
+#include <ATen/native/sparse/cuda/cutlass/custom_default_gemm_sparse.h>
+#include <cutlass/gemm/device/default_gemm_configuration.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -57,8 +57,8 @@ namespace device {
   be invoked from host code.
 
   The contributions of this class are:
-    
-    1. At compile time, it maps data types and high-level structural parameters onto 
+
+    1. At compile time, it maps data types and high-level structural parameters onto
        specific CUTLASS components.
 
     2. At runtime, it maps logical arguments to GEMM problems to kernel parameters.
@@ -68,9 +68,9 @@ namespace device {
   The intent is to provide a convenient mechanism for interacting with most plausible GEMM
   configurations for each supported architecture. Consequently, not all parameters are exposed
   to the top-level interface. Rather, sensible defaults at each level of the CUTLASS hierarchy
-  are selected to tradeoff simplicity of the interface with flexibility. We expect 
-  most configurations to be specified at this level. Applications with more exotic requirements 
-  may construct their kernels of interest using CUTLASS components at the threadblock, warp, 
+  are selected to tradeoff simplicity of the interface with flexibility. We expect
+  most configurations to be specified at this level. Applications with more exotic requirements
+  may construct their kernels of interest using CUTLASS components at the threadblock, warp,
   and thread levels of abstraction.
 
   CUTLASS exposes computations using the functor design pattern in which objects compose some
@@ -117,48 +117,48 @@ namespace device {
     template <
       /// Element type for A matrix operand
       typename ElementA,
-      
+
       /// Layout type for A matrix operand
       typename LayoutA,
-      
+
       /// Element type for B matrix operand
       typename ElementB,
-      
+
       /// Layout type for B matrix operand
       typename LayoutB,
-      
+
       /// Element type for C and D matrix operands
       typename ElementC,
-      
+
       /// Layout type for C and D matrix operands
       typename LayoutC,
-      
+
       /// Element type for internal accumulation
       typename ElementAccumulator,
 
       /// Operator class tag
       typename OperatorClass,
-      
+
       /// Tag indicating architecture to tune for.  This is the minimum SM that
       /// supports the intended feature. The device kernel can be built
       /// targeting any SM larger than this number.
       typename ArchTag,
-      
+
       /// Threadblock-level tile size (concept: GemmShape)
       typename ThreadblockShape,
-      
+
       /// Warp-level tile size (concept: GemmShape)
       typename WarpShape,
-      
+
       /// Warp-level tile size (concept: GemmShape)
       typename InstructionShape,
-      
+
       /// Epilogue output operator
       typename EpilogueOutputOp,
-      
+
       /// Threadblock-level swizzling operator
       typename ThreadblockSwizzle,
-      
+
       /// Number of stages used in the pipelined mainloop
       int Stages
     >
@@ -310,7 +310,7 @@ class CustomSparseGemm {
 
     }
 
-    /// Constructs an Arguments structure 
+    /// Constructs an Arguments structure
     CUTLASS_HOST_DEVICE
     Arguments(
       GemmCoord problem_size_,
@@ -319,7 +319,7 @@ class CustomSparseGemm {
       TensorRef<ElementC const, LayoutC> ref_C_,
       TensorRef<ElementC, LayoutC> ref_D_,
       TensorRef<ElementE, LayoutE> ref_E_,
-      typename EpilogueOutputOp::Params epilogue_ = 
+      typename EpilogueOutputOp::Params epilogue_ =
         typename EpilogueOutputOp::Params(),
       int split_k_slices = 1
     ):
@@ -370,17 +370,17 @@ public:
 
   /// Gets the workspace size
   static size_t get_workspace_size(Arguments const &args) {
-    
+
     size_t bytes = 0;
 
     // Determine grid shape
     ThreadblockSwizzle threadblock_swizzle;
 
     cutlass::gemm::GemmCoord tiled_shape = threadblock_swizzle.get_tiled_shape(
-      args.problem_size, 
+      args.problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
       args.split_k_slices);
-    
+
     if (kSplitKSerial && args.split_k_slices > 1) {
 
       bytes += sizeof(int) * size_t(tiled_shape.m()) * size_t(tiled_shape.n());
@@ -396,7 +396,7 @@ public:
     ThreadblockSwizzle threadblock_swizzle;
 
     cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
-      args.problem_size, 
+      args.problem_size,
       {ThreadblockShape::kM, ThreadblockShape::kN, ThreadblockShape::kK},
       args.split_k_slices);
 
@@ -407,7 +407,7 @@ public:
         }
 
         size_t bytes = get_workspace_size(args);
-      
+
         cudaError_t result = cudaMemsetAsync(workspace, 0, bytes, stream);
 
         if (result != cudaSuccess) {
@@ -434,7 +434,7 @@ public:
       args.epilogue,
       static_cast<int *>(workspace)
     };
-    
+
     int smem_size = int(sizeof(typename GemmKernel::SharedStorage));
     if (smem_size >= (48 << 10)) {
       cudaError_t result = cudaFuncSetAttribute(Kernel<GemmKernel>,
@@ -451,8 +451,8 @@ public:
 
   /// Lightweight update given a subset of arguments
   Status update(Arguments const &args, void *workspace = nullptr) {
-    
-    if (kSplitKSerial && args.split_k_slices > 1) {  
+
+    if (kSplitKSerial && args.split_k_slices > 1) {
       if (!workspace) {
         return Status::kErrorWorkspaceNull;
       }
@@ -493,12 +493,12 @@ public:
 
   /// Runs the kernel using initialized state.
   Status operator()(
-    Arguments const &args, 
-    void *workspace = nullptr, 
+    Arguments const &args,
+    void *workspace = nullptr,
     cudaStream_t stream = nullptr) {
-    
+
     Status status = initialize(args, workspace, stream);
-    
+
     if (status == Status::kSuccess) {
       status = run(stream);
     }
