@@ -2555,7 +2555,7 @@ def scatter_object_list(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
-    my_rank = get_rank(group)
+    my_rank = get_rank()
     pg_device = _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
@@ -3635,7 +3635,7 @@ def _process_group_name(ranks, use_hashed_name):
     global _world
     if use_hashed_name:
         pg_name = hashlib.sha1(bytes("_".join(map(str, ranks)), "utf-8")).hexdigest()
-        while pg_name in _world.pg_names:
+        while pg_name in _world.pg_names.values():
             pg_name = hashlib.sha1(bytes(pg_name + "_", "utf-8")).hexdigest()
     else:
         pg_name = str(_world.group_count)

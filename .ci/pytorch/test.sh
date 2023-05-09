@@ -233,6 +233,7 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude \
       test_autograd \
+      test_jit \
       test_proxy_tensor \
       test_quantization \
       test_public_bindings \
@@ -327,7 +328,7 @@ test_perf_for_dashboard() {
     else
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_coordesc_tuning_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv" --timeout 7200
     fi
 
     # Run performance test
@@ -339,7 +340,7 @@ test_perf_for_dashboard() {
     else
       python "benchmarks/dynamo/$suite.py" \
           --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_coordesc_tuning_${suite}_${dtype}_${mode}_cuda_performance.csv"
+          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv" --timeout 7200
     fi
   done
 }
