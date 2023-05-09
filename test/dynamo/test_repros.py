@@ -877,8 +877,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # repeat_interleave is a dynamic shape operator we do not execute/
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
-        self.assertEqual(cnt.frame_count, ifdyn(4, 4))
-        self.assertEqual(cnt.op_count, ifdyn(18, 10))
+        self.assertEqual(cnt.frame_count, ifdyn(2, 4))
+        self.assertEqual(cnt.op_count, ifdyn(9, 10))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -2987,10 +2987,39 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
 
+    def test_optim_state_references_cleared(self):
+        model = torch.nn.Linear(2048, 2048, bias=False)
+        x = torch.ones(2048)
+        state_ref = 0
+
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
+
+        def opt_step():
+            optimizer.step()
+
+        compiled_opt_step = torch._dynamo.optimize("eager")(opt_step)
+
+        def compiled_model_step(x):
+            optimizer.zero_grad()
+            y = model(x)
+            torch.sum(y).backward()
+            compiled_opt_step()
+
+        compiled_model_step(x)
+
+        # Picked "square_avg" arbitrarily to check that
+        # optimizer state tensors are deallocated
+        state_ref = weakref.ref(
+            optimizer.state[optimizer.param_groups[0]["params"][0]]["square_avg"]
+        )
+        optimizer = None
+
+        self.assertIsNone(state_ref())
+
     def test_grad_references_cleared(self):
         model = torch.nn.Linear(2048, 2048, bias=False)
         x = torch.ones(2048)
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
 
         def opt_step():
             optimizer.step()
@@ -3082,6 +3111,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         finally:
             torch.set_default_device(None)
+
+    def test_list_self_reference(self):
+        # Issue - https://github.com/pytorch/pytorch/issues/100150
+        root = []
+        root[:] = [root, root, None, None]
+
+        @torch._dynamo.optimize("eager")
+        def test_bug():
+            return root
+
+        test_bug()
 
     def test_hf_bigbird_unsqueeze(self):
         def torch_bmm_nd(inp_1, inp_2, ndim=None):
