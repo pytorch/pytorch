@@ -19,6 +19,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
+from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
@@ -2258,7 +2259,7 @@ def forward(self, x):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_no_raise_on_relationship(self):
+    def test_export_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
 
         def my_dyn_fn(a, b, c):
@@ -2269,6 +2270,12 @@ def forward(self, x):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        constraints += [
+            dynamic_dim(y, 1) == dynamic_dim(y, 0),
+            dynamic_dim(y, 2) == dynamic_dim(y, 0),
+        ]
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     def test_export_no_raise(self):
@@ -2282,7 +2289,7 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_multi_dynamic_dim_safe_relationship(self):
+    def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
         z = torch.randn([3, 3, 3])
@@ -2294,6 +2301,9 @@ def forward(self, x):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(
@@ -2302,9 +2312,7 @@ def forward(self, x):
         specialize_int=True,
         capture_scalar_outputs=True,
     )
-    def test_export_preserve_constraints_as_metadata(self):
-        from torch._export.constraints import constrain_as_size
-
+    def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
             constrain_as_size(b, min=2, max=5)
@@ -2333,6 +2341,35 @@ def forward(self, x):
                 preserved = True
         self.assertTrue(preserved)
 
+    @torch._dynamo.config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_tensor(self):
+        def f(x):
+            b = x.nonzero()
+            constrain_as_value(b.shape[0], min=2, max=5)
+            return b
+
+        y = torch.tensor([8, 8, 6])
+        constraints = []
+        gm, _ = torch._dynamo.export(
+            f,
+            y,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
     @config.patch(
         dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
@@ -2341,8 +2378,6 @@ def forward(self, x):
     )
     def test_exported_graph_serialization(self):
         import io
-
-        from torch._export.constraints import constrain_as_size
 
         def f(x, y):
             b = x.item()
@@ -2398,6 +2433,9 @@ def forward(self, x):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
@@ -3015,6 +3053,18 @@ def forward(self, x):
                 *example_inputs,
                 aten_graph=True,
             )
+
+    def test_byte_tensor_does_not_crash(self):
+        # See https://github.com/pytorch/pytorch/issues/100455
+        def func(text):
+            tensor = torch.ByteTensor(list(bytes(text, "utf8")))
+            return tensor + tensor
+
+        text = "".join(chr(a % 90 + 40) for a in range(111))
+        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
+        for i in [99, 100]:
+            input = text[:i]
+            opt_func(input)
 
     def test_export_defaults_ok(self):
         class DynamicSliceExportMod(torch.nn.Module):
