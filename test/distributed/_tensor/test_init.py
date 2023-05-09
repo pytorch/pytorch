@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros, ones
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -34,6 +34,46 @@ class DTensorConstructorTest(DTensorTestBase):
     @property
     def world_size(self):
         return 4
+    
+    @with_comms
+    def test_ones(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements_list = [[Shard(0)], [Shard(1)], [Shard(2)], [Replicate()]]
+
+        # 1d mesh evenly sharding
+        tensor_size = [4, 8, 12]
+        for placements in placements_list:
+            local_tensor_size = tensor_size.copy()
+            if isinstance(placements[0], Shard):
+                shard_dim = placements[0].dim
+                local_tensor_size[shard_dim] //= self.world_size
+
+            dist_tensor = torch.distributed._tensor.ones(
+                tensor_size,
+                device_mesh=device_mesh,
+                placements=placements,
+            )
+            ones_expected = torch.ones(local_tensor_size)
+            self.assertEqual(ones_expected, dist_tensor.to_local())
+
+        # 1d mesh unevenly sharding
+        tensor_size = [5, 10, 15]
+        for placements in placements_list:
+            dist_tensor = torch.distributed._tensor.ones(
+                tensor_size,
+                device_mesh=device_mesh,
+                placements=placements,
+            )
+            if isinstance(placements[0], Shard):
+                shard_dim = placements[0].dim
+                ones_expected_list = list(
+                    torch.chunk(torch.ones(tensor_size), self.world_size, dim=shard_dim)
+                )
+                if self.rank < len(ones_expected_list):
+                    self.assertEqual(ones_expected_list[self.rank], dist_tensor.to_local())
+            else:
+                ones_expected = torch.ones(tensor_size)
+                self.assertEqual(ones_expected, dist_tensor.to_local())
 
     @with_comms
     def test_zeros_full_mesh(self):
