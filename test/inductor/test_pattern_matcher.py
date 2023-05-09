@@ -3,6 +3,7 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -147,6 +148,26 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_cumsum(self):
+        def fn1():
+            ones = torch.full(
+                [1, 128], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1) * ones
+
+        def fn2():
+            ones = torch.full(
+                [55, 10], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1)
+
+        for fn in (fn1, fn2):
+            result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+            self.assertNotIn("aten.cumsum", code)
+            self.assertEqual(result, fn())
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            counters.clear()
 
     def test_splitwithsizes_cat(self):
         # Good case
