@@ -178,7 +178,6 @@ jobs:
         working-directory: builder
 
       - name: Check if the job is disabled
-        if: ${{ github.event.workflow_run.head_branch != 'nightly' }}
         id: filter
         uses: ./pytorch/.github/actions/filter-test-configs
         with:
@@ -191,13 +190,13 @@ jobs:
             ]}
 
       - name: Pull Docker image
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
       - name: Build PyTorch binary
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         run: |
           set -x
           mkdir -p artifacts/
@@ -229,14 +228,14 @@ jobs:
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
 
       - name: Chown artifacts
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         shell: bash
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
       - uses: actions/upload-artifact@v3
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}
           if-no-files-found: error

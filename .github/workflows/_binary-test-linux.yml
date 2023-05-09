@@ -171,7 +171,6 @@ jobs:
         working-directory: builder
 
       - name: Check if the job is disabled
-        if: ${{ github.event.workflow_run.head_branch != 'nightly' }}
         id: filter
         uses: ./pytorch/.github/actions/filter-test-configs
         with:
@@ -184,7 +183,7 @@ jobs:
             ]}
 
       - name: Download Build Artifacts
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
@@ -192,16 +191,16 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && (github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False') }}
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
       - name: Test Pytorch binary
-        if: ${{ github.event.workflow_run.head_branch == 'nightly' || steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Teardown Linux
