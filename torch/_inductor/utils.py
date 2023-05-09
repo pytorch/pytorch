@@ -295,10 +295,10 @@ def get_fused_kernel_name(node_schedule):
         sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"], str):
-                    sources.append(origin.meta["source_fn"])
+                if isinstance(origin.meta["source_fn"][1], str):
+                    sources.append(origin.meta["source_fn"][1])
                 else:
-                    sources.append(origin.meta["source_fn"].__name__)
+                    sources.append(origin.meta["source_fn"][1].__name__)
         sources = sorted(set(sources))
     elif config.triton.descriptive_names == "inductor_node":
         sources = [
@@ -367,14 +367,14 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
