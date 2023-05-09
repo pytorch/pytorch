@@ -233,9 +233,8 @@ def write(source_code, ext, extra=""):
 def write_atomic(path: str, source_code: str):
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
-    salt = f"{os.getpid()}.{threading.get_ident()}"
     path = pathlib.Path(path)
-    tmp_path = path.parent / f".{path.name}.{salt}.tmp"
+    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     with tmp_path.open("w") as f:
         f.write(source_code)
 
