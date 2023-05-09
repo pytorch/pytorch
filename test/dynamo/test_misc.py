@@ -5008,45 +5008,45 @@ def fn():
                 return input + input
 
         model = Model()
-        prof = CompileProfiler()
-        compiled = torch.compile(model, backend=prof)
-        base_checker = (
-            lambda: FileCheck()
-            .check("Torchdynamo Profiler Report")
-            .check("Graph Breaks")
-            .check("No graph breaks detected.")
-            .check("Recompilation")
-        )
-        input = torch.rand((2, 3, 4))
-        _ = compiled(input)
-        base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((3, 3, 4))
-        _ = compiled(new_shape_input)
-
-        # Not an exhaustive test of dynamic shapes behavior, but some sanity
-        if (
-            not torch._dynamo.config.dynamic_shapes
-            or torch._dynamo.config.assume_static_by_default
-        ):
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
-        else:
+        with CompileProfiler() as prof:
+            compiled = torch.compile(model, backend=prof)
+            base_checker = (
+                lambda: FileCheck()
+                .check("Torchdynamo Profiler Report")
+                .check("Graph Breaks")
+                .check("No graph breaks detected.")
+                .check("Recompilation")
+            )
+            input = torch.rand((2, 3, 4))
+            _ = compiled(input)
             base_checker().check("No recompilation detected.").run(prof.report())
 
-        # Ensure correct guard fail message is selected to show to user
-        if not torch._dynamo.config.dynamic_shapes:
-            new_shape_input = torch.rand((4, 3, 4))
+            new_shape_input = torch.rand((3, 3, 4))
             _ = compiled(new_shape_input)
 
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-            ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-            ).run(
-                prof.report()
-            )
+            # Not an exhaustive test of dynamic shapes behavior, but some sanity
+            if (
+                not torch._dynamo.config.dynamic_shapes
+                or torch._dynamo.config.assume_static_by_default
+            ):
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "cache_size_limit to 1"
+                ).run(prof.report())
+            else:
+                base_checker().check("No recompilation detected.").run(prof.report())
+
+            # Ensure correct guard fail message is selected to show to user
+            if not torch._dynamo.config.dynamic_shapes:
+                new_shape_input = torch.rand((4, 3, 4))
+                _ = compiled(new_shape_input)
+
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+                ).check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+                ).run(
+                    prof.report()
+                )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call

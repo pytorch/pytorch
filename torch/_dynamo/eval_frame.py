@@ -246,7 +246,9 @@ class _TorchDynamoContext:
             filename = None
         if (
             (filename is None or skipfiles.check(filename))
-            and (getattr(fn, "__name__", "") != "_call_impl")
+            and (
+                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+            )
             and filename not in DONT_WRAP_FILES
         ):
             # call to a builtin without a frame for us to capture
@@ -927,7 +929,6 @@ def export(
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
-    new_graph.meta["example_inputs"] = example_inputs
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
