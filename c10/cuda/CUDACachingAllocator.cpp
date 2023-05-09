@@ -3525,7 +3525,7 @@ void setAllocatorSettings(const std::string& env) {
 }
 
 // Size pretty-printer
-inline std::string format_size(uint64_t size) {
+std::string format_size(uint64_t size) {
   std::ostringstream os;
   os.precision(2);
   os << std::fixed;
