@@ -127,7 +127,9 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def get_reordered_tests(tests: List[ShardedTest]) -> List[ShardedTest]:
+def get_reordered_tests(
+    tests: List[ShardedTest],
+) -> Tuple[List[ShardedTest], List[ShardedTest]]:
     """
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
@@ -138,7 +140,7 @@ def get_reordered_tests(tests: List[ShardedTest]) -> List[ShardedTest]:
             changed_files = _query_changed_test_files()
         except Exception:
             # If unable to get changed files from git, quit without doing any sorting
-            return tests
+            return ([], tests)
 
         prefix = f"test{os.path.sep}"
         prioritized_tests = [
@@ -161,13 +163,13 @@ def get_reordered_tests(tests: List[ShardedTest]) -> List[ShardedTest]:
             f"reordering tests for PR:\n"
             f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n"
         )
-        return bring_to_front + the_rest
+        return (bring_to_front, the_rest)
     else:
         print(
             f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
             f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n"
         )
-        return tests
+        return ([], tests)
 
 
 def get_test_case_configs(dirpath: str) -> None:
