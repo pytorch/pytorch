@@ -1420,27 +1420,10 @@ fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 
-    xfail('linalg.cond', ''),
-    xfail("linalg.matrix_norm"),
-    xfail("linalg.norm"),
-    xfail("linalg.matrix_norm"),
-    xfail("linalg.matrix_rank"),
-    xfail("linalg.norm"),
-    xfail("linalg.norm", "subgradients_at_zero"),
-    xfail("linalg.svd"),
-    xfail("linalg.svdvals"),
-
-    xfail("norm", "nuc"),
-    xfail("pca_lowrank"),
     xfail("stft"),
-    xfail("svd"),
-    xfail("svd_lowrank"),
-    xfail("linalg.matrix_norm"),
 }
 
 symbolic_tensor_failures = {
-    # Needs complex-value support
-    xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1456,7 +1439,6 @@ symbolic_tensor_failures = {
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.cond', ''),  # Tensors of type TensorImpl do not have numel
     xfail('linalg.eigh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.eigvalsh', ''),  # aten._linalg_eigh.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.householder_product', ''),  # aten.linalg_householder_product.default - couldn't find symbolic meta funct...
@@ -1468,7 +1450,6 @@ symbolic_tensor_failures = {
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_power'),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shape
-    xfail('linalg.matrix_rank', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.matrix_rank', 'hermitian'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomposition
@@ -1579,9 +1560,6 @@ inplace_symbolic_tensor_failures = {
     xfail('unique', ''),
     # in-place has a different signature than out-of-place
     xfail('uniform', ''),
-    # Views
-    xfail('t', ''),
-    xfail('transpose', ''),
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications

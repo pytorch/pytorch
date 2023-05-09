@@ -8,6 +8,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -141,6 +142,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
         TORCH_CHECK(
             indexSelectPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       }
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(indexSelectPSO, indexFunction, {inputTensor});
 
       [computeEncoder setComputePipelineState:indexSelectPSO];
       [computeEncoder setBuffer:indexAB offset:0 atIndex:0];
@@ -160,6 +163,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(indexSelectPSO);
     }
   });
 
