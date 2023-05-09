@@ -27,6 +27,7 @@ from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -64,7 +65,10 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    StrictMinMaxConstraint,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -631,10 +635,9 @@ def explain(f, *args, **kwargs):
 
 
 @dataclasses.dataclass
-class Constraint:
+class ConstraintTarget:
     """
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.  Don't create this
+    This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`torch._export.dynamic_dim`.
     """
 
@@ -642,15 +645,30 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
+
+
+@dataclasses.dataclass
+class Constraint(ConstraintTarget):
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
+
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: StrictMinMaxConstraint
+    # Represent that `constraint_range` is shared with another ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
+    shared: Optional[ConstraintTarget] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
+        return Constraint(
+            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+        )
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
@@ -690,6 +708,19 @@ class Constraint:
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
         }
+
+    def __eq__(self, other):
+        constraint_range = StrictMinMaxConstraint(
+            vr=self.constraint_range.vr & other.constraint_range.vr,
+            warn_only=False,
+        )
+        return Constraint(
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+        )
 
 
 def export(
@@ -834,6 +865,7 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
+    constraint_violation_error = None
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
@@ -850,23 +882,34 @@ def export(
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = opt_f(*args, **kwargs)
+        try:
+            result_traced = opt_f(*args, **kwargs)
+        except ConstraintViolationError as e:
+            constraint_violation_error = e
     remove_from_cache(f)
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        msg = dim_constraints.prettify_results(inspect.signature(f))
+        if constraint_violation_error:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            log.warning(
+                "Summary of dimension constraints:%s",
+                msg,
+            )
+    if constraint_violation_error:
+        raise constraint_violation_error
 
     assert (
         graph is not None
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
