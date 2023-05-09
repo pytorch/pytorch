@@ -1032,6 +1032,7 @@ class TestOptim(TestCase):
         )
         self._test_complex_2d(optim.Adam)
         self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
