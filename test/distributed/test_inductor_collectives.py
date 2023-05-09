@@ -313,7 +313,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf2 = empty_strided") \
             .check("triton_poi__0.run(arg0_1, buf0, buf2") \
             .check_not("copy_(") \
-            .check("= buf0; del buf0  # reuse") \
+            .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("_register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf1)") \

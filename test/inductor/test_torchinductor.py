@@ -653,7 +653,8 @@ class CommonTemplate:
         def fn(x, y):
             x = x + y
             x = test_operators.realize(x)
-            x = x.permute(1, 0, 4, 3, 2).reshape(9 * 8, 7 * 6 * 5)
+            s0, s1, s2, s3, s4 = x.size()
+            x = x.permute(1, 0, 4, 3, 2).reshape(s0 * s1, s2 * s3 * s4)
             return x
 
         x = torch.randn(9, 8, 7, 6, 5, device=self.device)

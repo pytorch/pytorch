@@ -224,14 +224,7 @@ class BaseSchedulerNode:
             return
 
         if (
-            (
-                isinstance(self, (SchedulerNode,))
-                # o what have i done.  lets make this an api
-                or (
-                    isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
-                )
-            )
+            (isinstance(self, SchedulerNode) or self.is_inplace_hint())
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
@@ -269,9 +262,14 @@ class BaseSchedulerNode:
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
-                        and read_counts[read.name] == 1
-                        and self.get_name() in writes
-                        and read.index == writes[self.get_name()].index
+                        and (
+                            self.is_inplace_hint()
+                            or (
+                                read_counts[read.name] == 1
+                                and self.get_name() in writes
+                                and read.index == writes[self.get_name()].index
+                            )
+                        )
                     ):
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
@@ -298,6 +296,9 @@ class BaseSchedulerNode:
             if isinstance(use.node, OutputNode):
                 return False
         return True
+
+    def is_inplace_hint(self):
+        return False
 
     def codegen_originating_info(self, buffer, only_once=True):
         if not config.comment_origin:
@@ -357,9 +358,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # (would this have been fixed if I tracked mutations properly above?)
             return False
 
-        if not isinstance(
-            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
-        ):
+        if self.is_inplace_hint():
             # TODO make this a property of the IR
             return False
 
@@ -368,6 +367,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             return read_dep.numbytes_hint() == write_dep.numbytes_hint()
 
         return False
+
+    def is_inplace_hint(self):
+        return isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
