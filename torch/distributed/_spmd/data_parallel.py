@@ -167,7 +167,7 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     # TODO: Only NCCL supports AVG so using backend like Gloo would
     # crash, we should figure out a way to support avg reduction
     # for non-NCCL backend
-    reduce_op = c10d.ReduceOp.AVG
+    reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
         output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
     )
@@ -306,7 +306,6 @@ def build_data_parallel_strategies(
                 else:
                     assert isinstance(arg_strategy, DataParallelStrategy)
                     arg_node_type = arg_strategy.node_type
-                    input_full_reduction = arg_strategy.reduction_over_batch
                     if arg_node_type == NodeType.PARAM:
                         replica_strategy = _gen_replicate_strategy(mesh)
                         dp_strategy_map[node] = DataParallelStrategy(
@@ -497,11 +496,11 @@ def build_data_parallel_strategies(
                         input_specs.append(input_spec)
 
                     act_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
-                    node_strategy = PlacementStrategy(
+                    op_strategy = PlacementStrategy(
                         output_spec=act_spec, input_specs=input_specs
                     )
                     dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [node_strategy]
+                        NodeType.ACT, [op_strategy]
                     )
 
         elif node.op == "output":
