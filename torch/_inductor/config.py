@@ -180,10 +180,6 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
 disable_cpp_codegen = is_fbcode()
 
-optimize_for_inference = True
-
-optimize_for_inference_discard_parameters = False
-
 
 # config specific to codegen/cpp.py
 class cpp:
