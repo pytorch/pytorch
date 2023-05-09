@@ -60,6 +60,8 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
+MAX_DOWNLOAD_ATTEMPTS = 5
+
 
 class CI(NamedTuple):
     backend: str  # aot_eager or inductor
@@ -941,6 +943,37 @@ def try_script(model, example_inputs):
         return torch.jit.script(model)
     except Exception:
         return None
+
+
+def try_download(
+    download_fn: Callable[[str], Any],
+    model_name: str,
+    total_allowed_tries: int = MAX_DOWNLOAD_ATTEMPTS,
+) -> Any:
+    """a wrapper around a function to download a model from a remote location which allows it to be retried if it fails
+
+    Args:
+        download_fn (Callable[str], Any]): callable which downloads and returns a model object.
+        model_name (str): name of the model to download. This is the input into download_fn
+        total_allowed_tries (int, optional): max number of tries. Defaults to 5.
+
+    Returns:
+        Any: the downloaded model or throws an exception if download fails for total_allowed_tries times
+    """
+    tries = 1
+    model = None
+    while tries <= total_allowed_tries:
+        try:
+            model = download_fn(model_name)
+            return model
+        except Exception as e:
+            tries += 1
+            if tries <= total_allowed_tries:
+                wait = tries * 30
+                print(
+                    f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                )
+                time.sleep(wait)
 
 
 def read_batch_size_from_file(args, filename, model_name):

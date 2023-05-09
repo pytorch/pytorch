@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main, reset_rng_state
+from common import BenchmarkRunner, main, reset_rng_state, try_download
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -373,16 +373,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "huggingface"
 
-    def load_model(
-        self,
-        device,
-        model_name,
-        batch_size=None,
-    ):
-        is_training = self.args.training
-        use_eval_mode = self.args.use_eval_mode
-        dtype = torch.float32
-        reset_rng_state()
+    def _download_model(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -406,10 +397,23 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         if "auto" in model_cls.__module__:
             # Handle auto classes
-            model = model_cls.from_config(config).to(device, dtype=dtype)
+            model = model_cls.from_config(config)
         else:
-            model = model_cls(config).to(device, dtype=dtype)
+            model = model_cls(config)
+        return model
 
+    def load_model(
+        self,
+        device,
+        model_name,
+        batch_size=None,
+    ):
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dtype = torch.float32
+        reset_rng_state()
+        model = try_download(self._download_model, model_name)
+        model = model.to(device, dtype=dtype)
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
