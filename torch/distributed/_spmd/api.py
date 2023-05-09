@@ -458,6 +458,7 @@ def _compile(
 
     if is_data_parallel_mode:
         fake_mode = FakeTensorMode()
+        data_parallel_mode = cast(DataParallel, parallel_mode)
 
         def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
             # since compilation happens in the first iteration and we
@@ -467,7 +468,7 @@ def _compile(
             fake_arg = fake_mode.from_tensor(arg)
             arg_dims = [1] * arg.ndim
             # expand the tensor to full batch size on its batch dim
-            arg_dims[parallel_mode.input_batch_dim] *= dist.get_world_size()
+            arg_dims[data_parallel_mode.input_batch_dim] *= dist.get_world_size()
             return fake_arg.repeat(arg_dims)
 
         args = pytree.tree_map_only(

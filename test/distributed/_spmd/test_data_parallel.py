@@ -225,7 +225,6 @@ class TestDataParallel(DTensorTestBase):
                 mod, ddp_mod, opt, ddp_opt, train_batch, train_step, parallel_mode
             )
 
-
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_fully_shard_non_0_batch_dim(self):
