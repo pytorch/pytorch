@@ -2,7 +2,6 @@ import warnings
 import weakref
 import sys
 import torch
-import torch._dynamo.external_utils
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from typing import Tuple, Union, List, cast, TYPE_CHECKING
@@ -22,6 +21,13 @@ The new check is a bit more hackish, but that's all we have for now.
 def _is_running_under_torch_deploy():
     return torch._meta_registrations is object
 
+
+if _is_running_under_torch_deploy():
+    def is_torchdynamo_compiling():
+        """Can't import torchdynamo in torchdeploy builds currently."""
+        return False
+else:
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 
 """
 New traceable, functional collectives.
@@ -322,7 +328,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     return (tag, rankset, group_size)
 
 def _are_we_tracing() -> bool:
-    if torch._dynamo.external_utils.is_compiling():
+    if is_torchdynamo_compiling():
         return True
     mode = get_innermost_proxy_mode()
     if mode is None:

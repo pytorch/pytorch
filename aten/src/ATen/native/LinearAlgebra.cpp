@@ -1284,11 +1284,11 @@ Tensor inner(const Tensor& self, const Tensor& other) {
 
   // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
-      self.size(-1) == other.size(-1),
+      self.sym_size(-1) == other.sym_size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
-      self.sizes(),
+      self.sym_sizes(),
       " and ",
-      other.sizes());
+      other.sym_sizes());
 
   return at::tensordot(self, other, -1, -1);
 }

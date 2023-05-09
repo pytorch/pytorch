@@ -86,20 +86,20 @@ ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
-COPY ./common/install_vision.sh install_vision.sh
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
 # (optional) Install Android NDK
 ARG ANDROID
 ARG ANDROID_NDK
 ARG GRADLE_VERSION
-COPY ./common/install_android.sh install_android.sh
+COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 COPY ./android/AndroidManifest.xml AndroidManifest.xml
 COPY ./android/build.gradle build.gradle
 RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh
+RUN rm install_android.sh cache_vision_models.sh common_utils.sh
 RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}

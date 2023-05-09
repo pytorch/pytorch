@@ -432,6 +432,14 @@ static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_getCpuCapability(
+    PyObject* module,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_cpu_capability());
+  END_HANDLE_TH_ERRORS
+}
+
 void DLPack_Capsule_Destructor(PyObject* data) {
   if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
     // early out, see DLPack spec: if a consuming library sets the capsule
@@ -1039,6 +1047,7 @@ static PyMethodDef TorchMethods[] = {
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
+    {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
      THPModule_setBackcompatBroadcastWarn,
      METH_O,
