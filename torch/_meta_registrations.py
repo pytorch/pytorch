@@ -413,24 +413,37 @@ def checkUplo(UPLO: str):
 
 
 @register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
-@out_wrapper("eigenvalues", "eigenvectors")
-def meta__linalg_eigh(A: Tensor, UPLO: str = "L", compute_v: bool = True):
+def meta__linalg_eigh(
+    A: Tensor,
+    UPLO: str = "L",
+    compute_v: bool = True,
+    *,
+    eigenvalues: Tensor = None,
+    eigenvectors: Tensor = None,
+):
     squareCheckInputs(A, "linalg.eigh")
     checkUplo(UPLO)
 
     shape = list(A.shape)
     if compute_v:
-        eigenvectors = A.new_empty(shape)
-        eigenvectors.as_strided_(
-            shape, make_contiguous_strides_for(shape, row_major=False)
-        )
+        vecs = A.new_empty(shape)
+        vecs.as_strided_(shape, make_contiguous_strides_for(shape, row_major=False))
     else:
-        eigenvectors = A.new_empty([0])
+        vecs = A.new_empty([0])
 
     shape.pop()
-    eigenvalues = A.new_empty(shape, dtype=toRealValueType(A.dtype))
+    vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
 
-    return eigenvalues, eigenvectors
+    if eigenvalues is not None and eigenvectors is not None:
+        assert isinstance(eigenvalues, TensorLike)
+        assert isinstance(eigenvectors, TensorLike)
+        eigenvalues = _maybe_resize_out(eigenvalues, vals.shape)
+        eigenvectors = _maybe_resize_out(eigenvectors, vecs.shape)
+        _safe_copy_out(copy_from=vals, copy_to=eigenvalues)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=vecs, copy_to=eigenvectors)  # type: ignore[arg-type]
+        return eigenvalues, eigenvectors
+
+    return vals, vecs
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
