@@ -20,7 +20,7 @@ ignore =
     # these ignores are from flake8-logging-format; please fix!
     G100,G101,G200,G201,G202
     # these ignores are from flake8-simplify. please fix or ignore with commented reason
-    SIM105,SIM108,SIM109,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
+    SIM105,SIM108,SIM110,SIM111,SIM113,SIM114,SIM115,SIM116,SIM117,SIM118,SIM119,SIM12,
     # flake8-simplify code styles
     SIM102,SIM103,SIM106,SIM112,
 per-file-ignores =

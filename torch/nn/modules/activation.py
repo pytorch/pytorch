@@ -1068,6 +1068,8 @@ class MultiheadAttention(Module):
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
+            Set ``need_weights=False`` to use the optimized ``scaled_dot_product_attention``
+            and achieve the best performance for MHA.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
             :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
