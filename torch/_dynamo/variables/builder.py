@@ -53,6 +53,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
+    requires_higher_order_op,
     tensor_always_has_static_shape,
     torch_np,
     tuple_iterator,
@@ -103,7 +104,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchHigherOrderOperator,
+    TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -425,6 +426,7 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not requires_higher_order_op(value)
         ):
             return SkipFilesVariable(
                 value,
@@ -489,7 +491,7 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperator(
+            return TorchHigherOrderOperatorVariable(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
