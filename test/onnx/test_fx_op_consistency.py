@@ -183,8 +183,18 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
     ),
     xfail(
-        "any", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        "any", dtypes=(torch.uint8, torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Any")
+    ),
+    xfail(
+        "arange",
+        dtypes=(torch.uint8, torch.int8),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
+    ),
+    xfail(
+        "arange",
+        dtypes=(torch.int16, torch.int32),
+        reason="AssertionError: The values for attribute 'shape' do not match",
     ),
     xfail(
         "argmax",
@@ -438,11 +448,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "amin",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
-    ),
-    skip(
-        "arange",
-        matcher=lambda sample: len(sample.args) != 1,
-        reason="arange_start overload takes two arguments (input, start)",
     ),
     skip(
         "cat",

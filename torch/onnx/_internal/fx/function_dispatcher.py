@@ -6,8 +6,10 @@ import operator
 from typing import (
     Any,
     Callable,
-    Dict,
+    Collection,
+    List,
     Mapping,
+    Optional,
     Protocol,
     runtime_checkable,
     Sequence,
@@ -15,27 +17,24 @@ from typing import (
 )
 
 import onnx
-
+import onnx.defs  # type: ignore[import]
 import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building,
-    ops,  # noqa: F401
-    registration,  # type: ignore[import]
-)
 
 import torch
+import torch._ops
 import torch.fx
-from torch.onnx import _type_utils
+from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype
 
+from torch.onnx._internal.fx import registration
 
 _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: dict[
     Union[Callable[..., Any], str], torch._ops.OpOverload
 ] = {
-    operator.mul: torch.ops.aten.mul.default,
-    operator.add: torch.ops.aten.add.default,
-    operator.pow: torch.ops.aten.pow.int,
-    operator.sub: torch.ops.aten.sub.default,
+    operator.mul: torch.ops.aten.mul.default,  # type: ignore[attr-defined]
+    operator.add: torch.ops.aten.add.default,  # type: ignore[attr-defined]
+    operator.pow: torch.ops.aten.pow.int,  # type: ignore[attr-defined]
+    operator.sub: torch.ops.aten.sub.default,  # type: ignore[attr-defined]
 }
 
 
@@ -48,7 +47,7 @@ class TensorLike(Protocol):
         ...
 
 
-class Dispatcher:
+class OnnxDispatcher:
     """
     The Dispatcher class is responsible for finding the best matched function for a given aten op in the FX exporter.
 
@@ -65,29 +64,33 @@ class Dispatcher:
             - Int to Float
     """
 
-    def __init__(self, registry: registration.Registry):
+    def __init__(self, registry: registration.OnnxRegistry, opset_version: int):
         """Initialize the Dispatcher.
 
         Args:
             registry: The registration registry.
+            opset_version: The model opset version.
         """
         self._registry = registry
+        self._opset_version = opset_version
 
     @property
-    def registry(self) -> registration.Registry:
-        """Get the registration registry.
+    def opset_version(self) -> int:
+        """Get the model opset version."""
+        return self._opset_version
 
-        Returns:
-            The registration registry.
-        """
+    @property
+    def registry(self) -> registration.OnnxRegistry:
+        """Get the registration registry."""
         return self._registry
 
+    @_beartype.beartype
     def dispatch(
         self,
         node: torch.fx.Node,
-        onnx_args: Sequence[graph_building.TorchScriptTensor],
-        onnx_kwargs: Mapping[str, onnxscript.values.Value],
-    ) -> Union[onnxscript.values.ONNXFunction, onnxscript.values.TracedONNXFunction]:
+        onnx_args: Sequence,
+        onnx_kwargs: Mapping,
+    ) -> Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]:
         """Dispatch a function based on the given node, arguments, and keyword arguments.
 
         Args:
@@ -98,23 +101,79 @@ class Dispatcher:
         Returns:
             The result of the function.
         """
-        aten_op = node.target
+        aten_name = self._get_aten_name(node)
+        function_overloads = self._get_function_overloads(node, aten_name)
 
-        if aten_op == operator.getitem:
-            aten_name = "aten::getitem"
-        elif isinstance(aten_op, torch._ops.OpOverloadPacket):
+        # TODO(titaiwang): OrderedDict to record function matching score.
+        if len(function_overloads) == 1:
+            return function_overloads[0]
+        # TODO: Cache the OpSchemaWrapper so we don't need to run the init logic everytime
+        for overload_func in function_overloads:
+            function_opschema = OpSchemaWrapper(overload_func.op_schema)
+            if function_opschema.match_inputs(onnx_args, onnx_kwargs):
+                return overload_func
+            # TODO(titaiwang): move this out of the loop.
+            if function_opschema.nearest_match_inputs(onnx_args, onnx_kwargs):
+                return overload_func
+        raise RuntimeError(f"There are no overloaded function for {aten_name}")
+
+    def dispatch_opset_version(
+        self, target: int, registered_opsets: Collection[int]
+    ) -> Optional[int]:
+        """Finds the registered opset given a target opset version and the available opsets.
+
+        O(number of registered versions of an op) search is performed to find the most
+        recent version of the op.
+
+        Args:
+            target: The target opset version.
+            registered_opsets: The available opsets.
+
+        Returns:
+            The registered opset version.
+        """
+        if not registered_opsets:
+            return None
+
+        descending_registered_versions = sorted(registered_opsets, reverse=True)
+        # Linear search for the opset version, which is fine since the number of opset
+        # versions is small.
+
+        if target >= _constants.ONNX_BASE_OPSET:
+            # Always look down toward opset 1 when the target is >= ONNX_BASE_OPSET (opset 9).
+            # When a custom op is register at opset 1, we want to be able to discover it as a
+            # fallback for all opsets >= ONNX_BASE_OPSET.
+            for version in descending_registered_versions:
+                if version <= target:
+                    return version
+            return None
+
+        # target < opset 9. This is the legacy behavior to support opset 7 and opset 8.
+        # for caffe2 support. We search up toward opset 9.
+        for version in reversed(descending_registered_versions):
+            # Count back up until _constants.ONNX_BASE_OPSET
+            if target <= version <= _constants.ONNX_BASE_OPSET:
+                return version
+
+        return None
+
+    def _get_aten_name(self, node: torch.fx.Node) -> str:
+        """Get the aten name from the target."""
+        if node.target == operator.getitem:
+            return "aten::getitem"
+        if isinstance(node.target, torch._ops.OpOverloadPacket):
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor
-            if aten_op != torch.ops.aten.sym_size:
+            if node.target != torch.ops.aten.sym_size:
                 raise ValueError(
-                    f"Unsupported OverloadPacket: {aten_op}, aten.sym_size is the only allowed OverloadPacket!"
+                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
                 )
             # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
-            aten_op_default = aten_op.default
-            aten_name = aten_op_default.name()
-        elif aten_op in _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE:
+            aten_op_default = node.target.default
+            return aten_op_default.name()  # type: ignore[attr-defined]
+        if node.target in _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE:
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
@@ -124,45 +183,47 @@ class Dispatcher:
                     )
                 ):
                     raise ValueError(
-                        f"Unsupported node arg: {node_arg} with builtin function: {aten_op},"
+                        f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
                         " only int/float/SymInt/SymFloat is supported with built-in ops!"
                     )
-            aten_op = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[aten_op]
-            aten_name = aten_op.name()
-        elif isinstance(aten_op, torch._ops.OpOverload):
-            aten_name = aten_op.name()
-        else:
-            raise RuntimeError(f"Unknown call_function target: {node.target}")
+            aten_op = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[node.target]
+            return aten_op.name()
+        if isinstance(node.target, torch._ops.OpOverload):
+            return node.target.name()
 
-        if self.registry.is_registered(aten_name):
-            func = self.registry.get_functions(aten_name)
-        elif hasattr(aten_op, "overloadpacket") and self.registry.is_registered(
-            aten_op.overloadpacket._qualified_op_name
+        raise RuntimeError(f"Unknown call_function target: {node.target}")
+
+    def _get_function_overloads(
+        self, node: torch.fx.Node, aten_name: str
+    ) -> List[Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]]:
+        """Get the function overloads from the registry."""
+        function_group = None
+
+        if self.registry.is_registered_op(aten_name, self.opset_version):
+            function_group = self.registry.get_function_group(aten_name)
+
+        # Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
+        elif hasattr(node.target, "overloadpacket") and self.registry.is_registered_op(
+            node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
+            self.opset_version,
         ):
-            # Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
-            func = self.registry.get_functions(
-                aten_op.overloadpacket._qualified_op_name
-            )
-        else:
-            raise RuntimeError(
-                f"aten name: {aten_name} is not registered in the torchlib registry!"
+            function_group = self.registry.get_function_group(
+                node.target.overloadpacket._qualified_op_name  # type: ignore[union-attr]
             )
 
-        # TODO(titaiwang): OrderedDict to record function matching score.
-        if len(func.overloads) == 1:
-            return func.overloads[0]
-        # TODO: Cache the OpSchemaWrapper so we don't need to run the init logic everytime
-        for overload_func in func.overloads:
-            function_opschema = OpSchemaWrapper(overload_func.op_schema)
-            if function_opschema.match_inputs(onnx_args, onnx_kwargs):
-                return overload_func
-            if function_opschema.nearest_match_inputs(onnx_args, onnx_kwargs):
-                return overload_func
-        raise RuntimeError(f"There are no overloaded function for {aten_name}")
+        if function_group is not None:
+            # TODO(titaiwang): dispatch opset version.
+            dispatched_version = self.dispatch_opset_version(
+                self.opset_version, function_group.support_opset()
+            )
+            if dispatched_version is not None:
+                function_overloads = function_group.get(dispatched_version)
+                if function_overloads is not None:
+                    return function_overloads
 
-
-# TODO(titaiwang): Need converter registry
-fx_dispatcher = Dispatcher(registration.default_registry)
+        raise RuntimeError(
+            f"aten name: {aten_name} is not registered in the ONNX registry!"
+        )
 
 
 class OpSchemaWrapper:
@@ -234,8 +295,9 @@ class OpSchemaWrapper:
         return True
 
 
+@_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Union[TensorLike, str, int, float, bool]
+    torch_input: Union[TensorLike, str, int, float, bool, list, tuple]
 ) -> set[str]:
     """Find the data type of the input."""
     if isinstance(torch_input, TensorLike):
@@ -260,85 +322,3 @@ def _find_onnx_data_type(
             # constant list of non-tensor type
             return set_dtype
     raise RuntimeError(f"Unknown input type from input: {torch_input}")
-
-
-def _create_op_overload_to_exporter_key_table() -> (
-    Mapping[Union[torch._ops.OpOverload, Callable], str]
-):
-    # TODO(justinchuby): Improve how the table is constructed.
-    table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
-
-    # Some ops in `torch.ops.aten` are not discoverable through `dir(torch.ops.aten)`,
-    # but retrievable via explicit lookup.
-    # https://github.com/pytorch/pytorch/issues/99681
-    # This is a workaround to make sure we register ONNX symbolic functions for these.
-    onnx_supported_aten_lookup_table = [
-        k.split("::")[1].split(".")[0]
-        for k in registration.default_registry
-        if k.startswith("aten::")
-    ]
-
-    for op_namespace in (torch.ops.aten, torch.ops.prims):
-        attr_names = dir(op_namespace)
-        if op_namespace is torch.ops.aten:
-            attr_names += onnx_supported_aten_lookup_table
-        for attr_name in attr_names:
-            if not hasattr(op_namespace, attr_name):
-                # torchlib owns some attributes that are not aten ops.
-                continue
-            op_overload_packet = getattr(op_namespace, attr_name)
-            if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
-                continue
-
-            exporter_look_up_key = op_overload_packet._qualified_op_name
-            # TODO(titaiwang): registry API
-            if (
-                registration.default_registry.get_functions(exporter_look_up_key)
-                is None
-            ):
-                # This aten op doesn't have ONNX exporter.
-                continue
-
-            for overload_name in op_overload_packet.overloads():
-                op_overload = getattr(op_overload_packet, overload_name)
-                # This line maps torch.ops.aten.add.Tensor, torch.ops.aten.add.Scalar, torch.ops.aten.add.out, etc
-                # to "aten::add". This means the exporter for "aten::add" is used for all overloads of "aten::add".
-                # This is applied to all ops under torch.ops.aten.
-                #
-                # TODO(wechi): in the future, we might want to write individual exporter for each overload, if,
-                # for example, they have different type promotion rules. If so, just map different overloads to
-                # different exporter keys.
-                table[op_overload] = op_overload_packet._qualified_op_name
-    return table
-
-
-# Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
-# _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
-_OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
-
-
-@_beartype.beartype
-def _create_onnx_friendly_decomposition_table() -> (
-    Dict[torch._ops.OpOverload, Callable]
-):
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
-    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
-        # Skip decomposition into "prim::*" ops (defined in 'torch._refs'), because they
-        # are not generally supported by ONNX.
-        # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
-        # symbolic function.
-        if (
-            "torch._refs" in decomp_fn.__module__
-            or op_overload in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            continue
-        decomposition_table[op_overload] = decomp_fn
-    return decomposition_table
-
-
-# This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
-# op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
-# function in the DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE.
-DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
-    torch._ops.OpOverload, Callable
-] = _create_onnx_friendly_decomposition_table()

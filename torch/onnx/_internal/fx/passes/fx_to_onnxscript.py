@@ -21,7 +21,7 @@ from torch._subclasses import fake_tensor
 from torch.onnx import _type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.exporter import ResolvedExportOptions
-from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validation
+from torch.onnx._internal.fx import diagnostics, op_validation
 from torch.utils import _pytree
 
 
@@ -379,7 +379,7 @@ def _export_fx_node_to_onnxscript(
             complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
 
-        symbolic_fn = function_dispatcher.fx_dispatcher.dispatch(
+        symbolic_fn = options.onnx_dispatcher.dispatch(
             node=node, onnx_args=onnx_args, onnx_kwargs=onnx_kwargs
         )
 

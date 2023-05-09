@@ -102,6 +102,19 @@ class ResolvedExportOptions(ExportOptions):
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
+    from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
+        registration,
+    )
+
+    onnx_registry: registration.OnnxRegistry
+    """The ONNX registry used to register ATen operators to ONNX functions."""
+
+    from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
+        function_dispatcher,
+    )
+
+    onnx_dispatcher: function_dispatcher.OnnxDispatcher
+
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
 
@@ -121,6 +134,8 @@ class ResolvedExportOptions(ExportOptions):
             self.op_level_debug = options.op_level_debug
             self.logger = options.logger
             self.fx_tracer = options.fx_tracer
+            self.onnx_registry = options.onnx_registry
+            self.onnx_dispatcher = options.onnx_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
         else:
@@ -138,12 +153,20 @@ class ResolvedExportOptions(ExportOptions):
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
             from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
+                decomposition_table,
                 function_dispatcher,
+                registration,
             )
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
+            self.onnx_registry = registration.OnnxRegistry()
             self.decomposition_table = (
-                function_dispatcher.DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE
+                decomposition_table.create_onnx_friendly_decomposition_table(
+                    self.onnx_registry
+                )
+            )
+            self.onnx_dispatcher = function_dispatcher.OnnxDispatcher(
+                self.onnx_registry, self.opset_version
             )
             self.op_level_debug = resolve(options.op_level_debug, False)
             self.logger = resolve(

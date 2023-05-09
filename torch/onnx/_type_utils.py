@@ -346,6 +346,7 @@ TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS = {
     torch.int32: {"tensor(int32)"},
     torch.int64: {"tensor(int64)"},
     torch.int8: {"tensor(int8)"},
+    torch.uint8: {"tensor(uint8)"},
     str: {"tensor(string)"},
     int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
     float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
