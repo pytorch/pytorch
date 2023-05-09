@@ -291,7 +291,7 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     # TODO: Only NCCL supports AVG so using backend like Gloo would
     # crash, we should figure out a way to support avg reduction
     # for non-NCCL backend
-    reduce_op = c10d.ReduceOp.AVG
+    reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
         output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
     )
