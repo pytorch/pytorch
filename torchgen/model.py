@@ -968,7 +968,12 @@ class NativeFunction:
         if (
             "rand" in str(self.func.name)
             or (
-                "dropout" in str(self.func.name)
+                (
+                    "dropout" in str(self.func.name)
+                    or any(
+                        "dropout" in arg.name for arg in self.func.arguments.flat_all
+                    )
+                )
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
                 and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]

@@ -96,19 +96,10 @@ void MPSStream::commitAndWait() {
   }
 
   if (_commandBuffer) {
-    if (_enableCommitAndContinue) {
-      // no need to release the command buffer with CommitAndContinue
-      // This improves the performance by eliminating the overhead of recreating
-      // command buffers, and avoiding distruption to commitAndContinue's internal cache
-      id<MTLCommandBuffer> rootCommandBuffer = _commandBuffer.rootCommandBuffer;
-      [_commandBuffer commitAndContinue];
-      [rootCommandBuffer waitUntilCompleted];
-    } else {
-      [_commandBuffer commit];
-      [_commandBuffer waitUntilCompleted];
-      [_commandBuffer release];
-      _commandBuffer = nil;
-    }
+    [_commandBuffer commit];
+    [_commandBuffer waitUntilCompleted];
+    [_commandBuffer release];
+    _commandBuffer = nil;
   }
 }
 
