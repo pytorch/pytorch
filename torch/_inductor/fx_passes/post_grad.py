@@ -49,9 +49,13 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
+    print(gm)
     if config.reordering:
         # has some issues with mutation in inference mode
         reorder_for_locality(gm.graph)
+        gm.recompile()
+
+    print(gm)
 
     if config.pattern_matcher:
         lazy_init()
@@ -82,8 +86,27 @@ def reorder_for_locality(graph: torch.fx.Graph):
             node.prepend(other_node)
 
     seen_nodes = set()
+
+    # only reorder nodes before the first copy_ in the graph.
+    # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
+    # and this reordering doesnt work well with mutation
+    first_copy = next(
+        (
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.copy_.default
+        ),
+        None,
+    )
+
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
+        if first_copy is not None:
+            if first_copy is node:
+                first_copy = None
+            continue
+
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
