@@ -2931,7 +2931,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 5, "ok": 5})
+        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
         self.assertEqual(
             dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
         )
