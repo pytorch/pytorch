@@ -475,6 +475,11 @@ def _compile(
             _get_full_batch_arg,
             args,
         )
+        kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            kwargs,
+        )
 
     with _enable_compile():
         # FIXME(@mrshenli): functionalization does not work for our use
