@@ -916,10 +916,11 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   const auto& grad = THPVariable_Unpack(py_grad);
   TORCH_CHECK_TYPE(
       var.dtype() == grad.dtype(),
-      "assigned grad has data of type ",
+      "attempting to assign a gradient with dtype '",
       grad.dtype(),
-      " that differs from the required type ",
-      var.dtype());
+      "' to a tensor with dtype '",
+      var.dtype(),
+      "'. Please ensure that the grad and the tensor have the same dtype");
   bool gradIsSparse =
       (var.dtype() == grad.dtype() &&
        var.device().type() == grad.device().type() && grad.layout() == kSparse);
