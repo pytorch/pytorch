@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -712,15 +713,16 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
   if (output.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + c10::str(approximate);
+    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + std::to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
 
       MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
+      if (approximate_type == GeluType::Tanh) {
         outputTensor = tanh(mpsGraph, inputTensor);
       } else {
         outputTensor = normcdf(mpsGraph, inputTensor);
@@ -752,17 +754,18 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   if (grad_input.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + c10::str(approximate);
+    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + std::to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto dataType = getMPSDataType(self);
 
       MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), getMPSShape(grad));
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(self));
       MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
+      if (approximate_type == GeluType::Tanh) {
         constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * (0.5f);
         constexpr float kKappa = 0.044715f;
         MPSGraphTensor* betaf = [mpsGraph constantWithScalar:kBeta shape:@[ @1 ] dataType:dataType];

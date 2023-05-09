@@ -263,7 +263,7 @@ def _parallelize_linear(
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
-    if isinstance(parallel_style, RowwiseParallel):
+    if isinstance(parallel_style, (RowwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -271,7 +271,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, ColwiseParallel):
+    elif isinstance(parallel_style, (ColwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -334,24 +334,27 @@ def _parallelize_multihead_attn(
         tp_multi_head_attention.copy(module)
         module = tp_multi_head_attention
 
-    if isinstance(module, TensorParallelMultiheadAttention):  # shard TPMA
-        for n, m in module.named_children():
-            if n == "qkv":
-                # Col-wise Parallelize the qkv layer.
-                distribute_module(
-                    m,
-                    device_mesh,
-                    _colwise_parallelize_linear_fn,
-                    input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
-                )
-            elif n == "proj":
-                # Row-wise Parallelize the proj layer
-                distribute_module(
-                    m,
-                    device_mesh,
-                    _rowwise_parallelize_linear_fn,
-                    output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
-                )
+    assert isinstance(module, TensorParallelMultiheadAttention), (
+        f"Expects TensorParallelMultiheadAttention but got {type(module)}"
+    )
+    # shard TPMA
+    for n, m in module.named_children():
+        if n == "qkv":
+            # Col-wise Parallelize the qkv layer.
+            distribute_module(
+                m,
+                device_mesh,
+                _colwise_parallelize_linear_fn,
+                input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+            )
+        elif n == "proj":
+            # Row-wise Parallelize the proj layer
+            distribute_module(
+                m,
+                device_mesh,
+                _rowwise_parallelize_linear_fn,
+                output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+            )
     return module
 
 

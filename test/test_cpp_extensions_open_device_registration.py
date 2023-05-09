@@ -264,6 +264,17 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
 
+        def test_open_device_storage_resize(self):
+            torch.utils.rename_privateuse1_backend('foo')
+            cpu_tensor = torch.randn([8])
+            foo_tensor = cpu_tensor.foo()
+            foo_storage = foo_tensor.storage()
+            self.assertTrue(foo_storage.size() == 8)
+            foo_storage.resize_(8)
+            self.assertTrue(foo_storage.size() == 8)
+            with self.assertRaisesRegex(RuntimeError, 'overflow'):
+                foo_storage.resize_(8**29)
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -274,6 +285,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage()
         test_open_device_storage_pin_memory()
         test_open_device_serialization()
+        test_open_device_storage_resize()
+
 
 if __name__ == "__main__":
     common.run_tests()

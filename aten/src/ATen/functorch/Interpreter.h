@@ -201,7 +201,7 @@ std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begi
 
 DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key);
 
-void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include);
+void setup_dispatch_key_tls(TransformType key, DispatchKeySet include);
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
