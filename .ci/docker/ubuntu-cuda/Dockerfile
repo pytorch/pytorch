@@ -58,9 +58,9 @@ ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
-COPY ./common/install_vision.sh install_vision.sh
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
 # (optional) Install UCC
@@ -137,6 +137,7 @@ RUN rm install_cudnn.sh
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
 RUN if [ -h /usr/local/cuda-11.7/cuda-11.7 ]; then rm /usr/local/cuda-11.7/cuda-11.7; fi
+RUN if [ -h /usr/local/cuda-12.1/cuda-12.1 ]; then rm /usr/local/cuda-12.1/cuda-12.1; fi
 
 USER jenkins
 CMD ["bash"]
