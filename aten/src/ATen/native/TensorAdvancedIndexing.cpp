@@ -2125,7 +2125,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   auto out = at::empty({}, self.options().dtype(kLong));
-  *out.data_ptr<int64_t>() = thread_count_nonzero[0];
+  *out.mutable_data_ptr<int64_t>() = thread_count_nonzero[0];
   return out;
 }
 
@@ -2372,6 +2372,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // order of indexing matters
+      .enforce_linear_iteration()
       .add_output(self)
       .add_input(*b_mask)
       .build();

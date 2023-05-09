@@ -740,7 +740,7 @@ void initJitScriptBindings(PyObject* module) {
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
-          .def("_type", [](Module& m) { return m.type(); })
+          .def("_type", [](Object& o) { return o.type(); })
           .def(
               "_get_method",
               [](Object& self, const std::string& name) -> Method {

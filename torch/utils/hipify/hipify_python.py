@@ -278,7 +278,7 @@ def processKernelLaunches(string, stats):
             char = string[i]
 
             # Handle Templating Arguments
-            if status == START or status == AT_TEMPLATE:
+            if status in (START, AT_TEMPLATE):
                 if char == ">":
                     if status == START:
                         status = AT_TEMPLATE

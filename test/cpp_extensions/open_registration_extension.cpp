@@ -100,6 +100,48 @@ at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
   return result;
 }
 
+// basic dummy functions related to pin_memory.
+std::vector<void*> custom_pinned_data_ptr;
+
+at::Tensor custom__pin_memory(const at::Tensor& self, c10::optional<at::Device> device) {
+  TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
+
+  // record pinned data ptr
+  at::Tensor dump_pinned_tensor = self * 1.0;
+  custom_pinned_data_ptr.push_back(dump_pinned_tensor.storage().data_ptr().get());
+
+  return dump_pinned_tensor;
+}
+
+bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) {
+  // Only CPU tensors can be pinned
+  if (!self.is_cpu()) {
+    return false;
+  }
+
+  void* query_pinned_ptr = self.storage().data_ptr().get();
+  for (const auto& iter_ptr : custom_pinned_data_ptr) {
+    if (iter_ptr == query_pinned_ptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
+                          c10::optional<at::MemoryFormat> optional_memory_format) {
+  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
+  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
+  const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
+  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
+  if (storage_size > storage.nbytes()) {
+    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
+  }
+
+  return self;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -116,6 +158,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
+  m.impl("_pin_memory", &custom__pin_memory);
+  m.impl("is_pinned", &custom_is_pinned);
+  m.impl("resize_", &custom_resize_);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
