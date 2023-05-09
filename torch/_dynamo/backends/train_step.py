@@ -233,7 +233,7 @@ def _train_step_compiler(backend_compile_fn):
             # TODO cleaner iteration and deal with multiple param groups
             opt.param_groups[0]["params"] = params_flat
             fake_to_real_param = dict(zip(fake_params_flat, params_flat))
-            
+
             # TODO try clearing states, setting (or asserting) param grads exist, and then running
             # opt._init_group instead of manual zeroing
             for fake, real in zip(fake_params_flat, params_flat):
