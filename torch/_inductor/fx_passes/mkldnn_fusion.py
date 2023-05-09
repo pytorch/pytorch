@@ -285,9 +285,6 @@ if torch._C.has_mkldnn:
             for n in binary_nodes
         ):
             return False
-        # check args[0] and args[1] is not same
-        if any(n.args[0] == n.args[1] for n in binary_nodes):
-            return False
         if any(
             n.args[0].meta["val"].size() != n.args[1].meta["val"].size()
             or n.args[0].meta["val"].device != n.args[1].meta["val"].device
@@ -318,6 +315,9 @@ if torch._C.has_mkldnn:
                 for n in binary_nodes
             ):
                 return False
+            # check args[0] and args[1] is not same
+            if any(n.args[0] == n.args[1] for n in binary_nodes):
+                return False
             return True
 
         return fn
@@ -327,15 +327,14 @@ if torch._C.has_mkldnn:
         computation_op,
         binary_op,
         fusion_op,
-        check_fn=_is_valid_computation_binary,
         unary_attr=None,
-        other_index=None,
     ):
         @register_lowering_pattern(
-            pattern, extra_check=check_fn(computation_op, binary_op, other_index)
+            pattern, extra_check=_is_valid_computation_binary(computation_op, binary_op)
         )
         def fn(match, *args, **kwargs):
             other = kwargs.get("other")
+            assert isinstance(other, ir.TensorBox)
             binary_attr = _binary_attr[binary_op]
             args_list = list(args)
             computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
@@ -350,6 +349,49 @@ if torch._C.has_mkldnn:
                 else:
                     computation_args += [1.0, None, [], None]
             return L[fusion_op](*computation_args)
+
+        return fn
+
+    def _register_binary_unary_maybe_inplace_fusion_lowering(
+        pattern,
+        computation_op,
+        binary_op,
+        inplace_fusion_op,
+        outplace_fusion_op,
+        unary_attr=None,
+        other_index=None,
+    ):
+        @register_lowering_pattern(
+            pattern,
+            extra_check=_is_valid_computation_binary_inplace(
+                computation_op, binary_op, other_index
+            ),
+        )
+        def fn(match, *args, **kwargs):
+            other = kwargs.get("other")
+            assert isinstance(other, ir.TensorBox)
+            binary_attr = _binary_attr[binary_op]
+            args_list = list(args)
+            computation_args = [args_list[0], other] + args_list[1:-3] + [binary_attr]
+            if len(args_list) > 6:
+                if unary_attr is not None:
+                    computation_args += [
+                        1.0,
+                        unary_attr.op_name,
+                        unary_attr.scalars_attr,
+                        unary_attr.algorithm_attr,
+                    ]
+                else:
+                    computation_args += [1.0, None, [], None]
+            # Make sure the other is not an alias or mutation(fx side doesn't has such info).
+            other.realize()
+            can_be_inplace = not (
+                isinstance(other.data, ir.ReinterpretView)
+                or isinstance(other.get_layout(), (ir.MutationLayout, ir.AliasedLayout))
+            )
+            if not can_be_inplace:
+                return L[outplace_fusion_op](*computation_args)
+            return L[inplace_fusion_op](*computation_args)
 
         return fn
 
@@ -404,46 +446,47 @@ if torch._C.has_mkldnn:
 
     def _register_inplace_fusion():
         binary_ops = [aten.add, ops.add]
-        fusion_op = mkldnn._convolution_pointwise_.binary
+        inplace_fusion_op = mkldnn._convolution_pointwise_.binary
+        outplace_fusion_op = mkldnn._convolution_pointwise.binary
         computation_call = _computation_user_1[0]
         computation_op = computation_ops[0]
         for binary_op in binary_ops:
             binary_v1 = _binary_fusion_v1(computation_call, binary_op)
             binary_unary_v1 = _combined_fusion(binary_v1, aten.relu)
-            _register_binary_unary_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v1,
                 computation_op,
                 binary_op,
-                fusion_op,
-                check_fn=_is_valid_computation_binary_inplace,
+                inplace_fusion_op,
+                outplace_fusion_op,
                 other_index=0,
                 unary_attr=UnaryAttr("relu"),
             )
-            _register_binary_unary_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v1,
                 computation_op,
                 binary_op,
-                fusion_op,
-                check_fn=_is_valid_computation_binary_inplace,
+                inplace_fusion_op,
+                outplace_fusion_op,
                 other_index=0,
             )
             binary_v2 = _binary_fusion_v2(computation_call, binary_op)
             binary_unary_v2 = _combined_fusion(binary_v2, aten.relu)
-            _register_binary_unary_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_unary_v2,
                 computation_op,
                 binary_op,
-                fusion_op,
-                check_fn=_is_valid_computation_binary_inplace,
+                inplace_fusion_op,
+                outplace_fusion_op,
                 other_index=1,
                 unary_attr=UnaryAttr("relu"),
             )
-            _register_binary_unary_fusion_lowering(
+            _register_binary_unary_maybe_inplace_fusion_lowering(
                 binary_v2,
                 computation_op,
                 binary_op,
-                fusion_op,
-                check_fn=_is_valid_computation_binary_inplace,
+                inplace_fusion_op,
+                outplace_fusion_op,
                 other_index=1,
             )
 

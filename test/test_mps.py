@@ -60,13 +60,6 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-        # Top 60
-        # CPU: empty is returning all 0's and there is a mismatch with MPS
-        # allocation (MacOS 13). According to
-        # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
-        'empty': [torch.float16, torch.float32],
-
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -119,7 +112,6 @@ def mps_ops_grad_modifier(ops):
         'signal.windows.hann': [torch.float32],
         'signal.windows.kaiser': [torch.float32],
         'signal.windows.nuttall': [torch.float32],
-        'empty_permuted': [torch.float16, torch.float32],
         'eye': [torch.float16, torch.float32],
 
         # trunc_tensor not working properly for float16
@@ -315,11 +307,6 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # fill tensors with uninitialized data, causing mismatch with CPU
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -678,12 +665,6 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
 
-        # these fill tensors with uninitialized data, causing mismatch with CPU
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # 'empty': [torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
         # zero to negative integer powers are undefined
@@ -714,12 +695,33 @@ def mps_ops_modifier(ops):
         'byte': [torch.float16, torch.float32],
     }
 
+    EMPTY_OPS_SKIPLIST = {
+        # Fill tensors with uninitialized data, causing mismatch with CPU.
+        # They occasionally match, thus skipping them.
+        # See https://github.com/pytorch/pytorch/issues/100175
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
 
     for op in ops:
         key = op.name + op.variant_test_name
+        if key in EMPTY_OPS_SKIPLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip("Skipping empty ops."),
+                         dtypes=EMPTY_OPS_SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -772,6 +774,10 @@ def mps_ops_error_inputs_modifier(ops):
         # MPS does not support tensor dimensions > 16
         'amax',
         'amin',
+        'aminmax',
+
+        # memory overlapping checks
+        'index_select',
 
         # unimplemented
         'logcumsumexp',
@@ -2012,9 +2018,19 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
 
     def test_batch_norm_backward(self):
-        inputs = torch.rand(1, 8, 4, 4, device='mps', requires_grad=True)
+        inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
         x = torch.nn.BatchNorm2d(8).to("mps")
         y = torch.nn.BatchNorm2d(8).to("mps")
+        y.weight.requires_grad = False
+        y.bias.requires_grad = False
+        outputs = y(x(inputs))
+        # This used to crash, see https://github.com/pytorch/pytorch/issues/98602
+        outputs.sum().backward()
+
+    def test_layer_norm_backward(self):
+        inputs = torch.rand(4, 4, device="mps", requires_grad=True)
+        x = torch.nn.LayerNorm(4).to("mps")
+        y = torch.nn.LayerNorm(4).to("mps")
         y.weight.requires_grad = False
         y.bias.requires_grad = False
         outputs = y(x(inputs))
@@ -4843,6 +4859,16 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
 
     def test_all(self):
         def helper(shape):
@@ -10466,7 +10492,9 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
-class TestErrorInputs(TestCaseMPS):
+class TestErrorInputs(TestCase):
+    _ignore_not_implemented_error = True
+
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps")

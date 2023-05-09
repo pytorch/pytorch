@@ -7,11 +7,16 @@ import types
 from typing import Dict, List
 
 import torch._C
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ODictGetItemSource
-from ..utils import check_constant_args, identity, proxy_args_kwargs
+from ..utils import (
+    check_constant_args,
+    HAS_NUMPY_TORCH_INTEROP,
+    identity,
+    proxy_args_kwargs,
+)
 from .base import MutableLocal, VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
@@ -565,7 +570,30 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+            unimplemented(f"numpy.{self.value}()")
+        import torch_np
+
+        from .builder import wrap_fx_proxy_cls
+        from .tensor import NumpyNdarrayVariable
+
+        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        # lookup method name in torch_np
+        if hasattr(torch_np, self.value.__name__):
+            func = getattr(torch_np, self.value.__name__)
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyNdarrayVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    func,
+                    *proxy_args_kwargs(args, kwargs),
+                ),
+                example_value=None,
+                **options,
+            )
+        else:
+            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,

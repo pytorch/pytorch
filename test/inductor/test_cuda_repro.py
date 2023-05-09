@@ -599,6 +599,37 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_embedding_var_mean(self):
+        def forward(arg0_1):
+            full = torch.ops.aten.full.default(
+                [1, 2048],
+                1,
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=torch.device(type="cuda", index=0),
+                pin_memory=False,
+            )
+            convert_element_type_1 = torch.ops.prims.convert_element_type.default(
+                full, torch.int64
+            )
+            cumsum = torch.ops.aten.cumsum.default(convert_element_type_1, 1)
+            mul = torch.ops.aten.mul.Tensor(cumsum, convert_element_type_1)
+            sub_1 = torch.ops.aten.sub.Tensor(mul, 1)
+            slice_5 = torch.ops.aten.slice.Tensor(sub_1, 0, 0, 9223372036854775807)
+            slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 0, 9223372036854775807)
+            add_2 = torch.ops.aten.add.Tensor(slice_6, 2)
+            embedding_1 = torch.ops.aten.embedding.default(arg0_1, add_2)
+            var_mean = torch.ops.aten.var_mean.correction(
+                embedding_1, [2], correction=0, keepdim=True
+            )
+            return [var_mean[0], var_mean[1], add_2]
+
+        emb = torch.randn([2050, 768], device="cuda")
+        gm = make_fx(forward)(emb)
+        opt = torch._inductor.compile_fx.compile_fx_inner(gm, [emb])
+        opt([emb])
+        torch.cuda.synchronize()
+
     def test_deterministic_algorithms(self):
         N = 10000
 

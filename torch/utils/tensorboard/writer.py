@@ -41,7 +41,6 @@ from .summary import (
 
 __all__ = ['FileWriter', 'SummaryWriter']
 
-
 class FileWriter:
     """Writes protocol buffers to event files to be consumed by TensorBoard.
 
@@ -74,24 +73,13 @@ class FileWriter:
         # TODO: See if we can remove this in the future if we are
         # actually the ones passing in a PosixPath
         log_dir = str(log_dir)
-
-        self._log_dir = log_dir
-        self._max_queue = max_queue
-        self._flush_secs = flush_secs
-        self._filename_suffix = filename_suffix
-        self._event_writer = None
-
-    @property
-    def event_writer(self):
-        if self._event_writer is None:
-            self._event_writer = EventFileWriter(
-                self._log_dir, self._max_queue, self._flush_secs, self._filename_suffix
-            )
-        return self._event_writer
+        self.event_writer = EventFileWriter(
+            log_dir, max_queue, flush_secs, filename_suffix
+        )
 
     def get_logdir(self):
         """Returns the directory where event file will be written."""
-        return self._log_dir
+        return self.event_writer.get_logdir()
 
     def add_event(self, event, step=None, walltime=None):
         """Adds an event to the event file.
@@ -159,15 +147,13 @@ class FileWriter:
         Call this method to make sure that all pending events have been written to
         disk.
         """
-        if self._event_writer:
-            self.event_writer.flush()
+        self.event_writer.flush()
 
     def close(self):
         """Flushes the event file to disk and close the file.
         Call this method when you do not need the summary writer anymore.
         """
-        if self._event_writer:
-            self.event_writer.close()
+        self.event_writer.close()
 
     def reopen(self):
         """Reopens the EventFileWriter.
@@ -175,8 +161,7 @@ class FileWriter:
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
-        if self._event_writer:
-            self.event_writer.reopen()
+        self.event_writer.reopen()
 
 
 class SummaryWriter:
@@ -258,8 +243,8 @@ class SummaryWriter:
 
         # Initialize the file writers, but they can be cleared out on close
         # and recreated later as needed.
-        self.file_writer = self.all_writers = None
-        self._get_file_writer()
+        self._file_writer: Optional[FileWriter] = None
+        self._all_writers: Optional[Dict[str, FileWriter]] = None
 
         # Create default bins for histograms, see generate_testdata.py in tensorflow/tensorboard
         v = 1e-12
@@ -270,6 +255,38 @@ class SummaryWriter:
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
+
+    def _initialize_writers(self):
+        if self._all_writers is not None:
+            return
+
+        self._file_writer = FileWriter(
+            self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
+        )
+        self._all_writers = {self._file_writer.get_logdir(): self._file_writer}
+
+        if self.purge_step is not None:
+            most_recent_step = self.purge_step
+            self._file_writer.add_event(
+                Event(step=most_recent_step, file_version="brain.Event:2")
+            )
+            self._file_writer.add_event(
+                Event(
+                    step=most_recent_step,
+                    session_log=SessionLog(status=SessionLog.START),
+                )
+            )
+            self.purge_step = None
+
+    @property
+    def all_writers(self):
+        self._initialize_writers()
+        return self._all_writers
+
+    @property
+    def file_writer(self):
+        self._initialize_writers()
+        return self._file_writer
 
     def _check_caffe2_blob(self, item):
         """
@@ -285,27 +302,6 @@ class SummaryWriter:
         workspace.FetchBlobs([blob_name1, blob_name2, ...])
         """
         return isinstance(item, str)
-
-    def _get_file_writer(self):
-        """Returns the default FileWriter instance. Recreates it if closed."""
-        if self.all_writers is None or self.file_writer is None:
-            self.file_writer = FileWriter(
-                self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
-            )
-            self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
-            if self.purge_step is not None:
-                most_recent_step = self.purge_step
-                self.file_writer.add_event(
-                    Event(step=most_recent_step, file_version="brain.Event:2")
-                )
-                self.file_writer.add_event(
-                    Event(
-                        step=most_recent_step,
-                        session_log=SessionLog(status=SessionLog.START),
-                    )
-                )
-                self.purge_step = None
-        return self.file_writer
 
     def get_logdir(self):
         """Returns the directory where event files will be written."""
@@ -352,7 +348,7 @@ class SummaryWriter:
 
         if not run_name:
             run_name = str(time.time())
-        logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
+        logdir = os.path.join(self.file_writer.get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
@@ -403,7 +399,7 @@ class SummaryWriter:
         summary = scalar(
             tag, scalar_value, new_style=new_style, double_precision=double_precision
         )
-        self._get_file_writer().add_summary(summary, global_step, walltime)
+        self.file_writer.add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
         """Adds many scalar data to summary.
@@ -436,7 +432,7 @@ class SummaryWriter:
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_scalars")
         walltime = time.time() if walltime is None else walltime
-        fw_logdir = self._get_file_writer().get_logdir()
+        fw_logdir = self.file_writer.get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
             assert self.all_writers is not None
@@ -496,7 +492,7 @@ class SummaryWriter:
             values = workspace.FetchBlob(values)
         if isinstance(bins, str) and bins == "tensorflow":
             bins = self.default_bins
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             histogram(tag, values, bins, max_bins=max_bins), global_step, walltime
         )
 
@@ -567,7 +563,7 @@ class SummaryWriter:
             raise ValueError(
                 "len(bucket_limits) != len(bucket_counts), see the document."
             )
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             histogram_raw(
                 tag, min, max, num, sum, sum_squares, bucket_limits, bucket_counts
             ),
@@ -626,7 +622,7 @@ class SummaryWriter:
             from caffe2.python import workspace
 
             img_tensor = workspace.FetchBlob(img_tensor)
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime
         )
 
@@ -674,7 +670,7 @@ class SummaryWriter:
             from caffe2.python import workspace
 
             img_tensor = workspace.FetchBlob(img_tensor)
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             image(tag, img_tensor, dataformats=dataformats), global_step, walltime
         )
 
@@ -724,7 +720,7 @@ class SummaryWriter:
                 labels = [labels]
             if len(labels) != box_tensor.shape[0]:
                 labels = None
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             image_boxes(
                 tag,
                 img_tensor,
@@ -784,7 +780,7 @@ class SummaryWriter:
             vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_video")
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             video(tag, vid_tensor, fps), global_step, walltime
         )
 
@@ -808,7 +804,7 @@ class SummaryWriter:
             from caffe2.python import workspace
 
             snd_tensor = workspace.FetchBlob(snd_tensor)
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime
         )
 
@@ -827,13 +823,13 @@ class SummaryWriter:
             writer.add_text('rnn', 'This is an rnn', 10)
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_text")
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             text(tag, text_string), global_step, walltime
         )
 
     def add_onnx_graph(self, prototxt):
         torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
-        self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
+        self.file_writer.add_onnx_graph(load_onnx_graph(prototxt))
 
     def add_graph(
         self, model, input_to_model=None, verbose=False, use_strict_trace=True
@@ -852,7 +848,7 @@ class SummaryWriter:
         torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         if hasattr(model, "forward"):
             # A valid PyTorch model should have a 'forward' method
-            self._get_file_writer().add_graph(
+            self.file_writer.add_graph(
                 graph(model, input_to_model, verbose, use_strict_trace)
             )
         else:
@@ -874,7 +870,7 @@ class SummaryWriter:
                 # Handles cnn.CNNModelHelper, model_helper.ModelHelper
                 current_graph = model_to_graph_def(model)
             event = event_pb2.Event(graph_def=current_graph.SerializeToString())
-            self._get_file_writer().add_event(event)
+            self.file_writer.add_event(event)
 
     @staticmethod
     def _encode(rawstr):
@@ -936,7 +932,7 @@ class SummaryWriter:
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
-        save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
+        save_path = os.path.join(self.file_writer.get_logdir(), subdir)
 
         fs = tf.io.gfile
         if fs.exists(save_path):
@@ -981,7 +977,7 @@ class SummaryWriter:
         from google.protobuf import text_format
 
         config_pbtxt = text_format.MessageToString(self._projector_config)
-        write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
+        write_pbtxt(self.file_writer.get_logdir(), config_pbtxt)
 
     def add_pr_curve(
         self,
@@ -1025,7 +1021,7 @@ class SummaryWriter:
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_pr_curve")
         labels, predictions = make_np(labels), make_np(predictions)
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             pr_curve(tag, labels, predictions, num_thresholds, weights),
             global_step,
             walltime,
@@ -1062,7 +1058,7 @@ class SummaryWriter:
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/README.md
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_pr_curve_raw")
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             pr_curve_raw(
                 tag,
                 true_positive_counts,
@@ -1095,7 +1091,7 @@ class SummaryWriter:
             "tensorboard.logging.add_custom_scalars_multilinechart"
         )
         layout = {category: {title: ["Multiline", tags]}}
-        self._get_file_writer().add_summary(custom_scalars(layout))
+        self.file_writer.add_summary(custom_scalars(layout))
 
     def add_custom_scalars_marginchart(
         self, tags, category="default", title="untitled"
@@ -1115,7 +1111,7 @@ class SummaryWriter:
         )
         assert len(tags) == 3
         layout = {category: {title: ["Margin", tags]}}
-        self._get_file_writer().add_summary(custom_scalars(layout))
+        self.file_writer.add_summary(custom_scalars(layout))
 
     def add_custom_scalars(self, layout):
         """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
@@ -1137,7 +1133,7 @@ class SummaryWriter:
             writer.add_custom_scalars(layout)
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_custom_scalars")
-        self._get_file_writer().add_summary(custom_scalars(layout))
+        self.file_writer.add_summary(custom_scalars(layout))
 
     def add_mesh(
         self,
@@ -1200,7 +1196,7 @@ class SummaryWriter:
             writer.close()
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_mesh")
-        self._get_file_writer().add_summary(
+        self.file_writer.add_summary(
             mesh(tag, vertices, colors, faces, config_dict), global_step, walltime
         )
 
@@ -1215,12 +1211,14 @@ class SummaryWriter:
             writer.flush()
 
     def close(self):
-        if self.all_writers is None:
+        if self._all_writers is None:
             return  # ignore double close
-        for writer in self.all_writers.values():
+
+        for writer in self._all_writers.values():
             writer.flush()
             writer.close()
-        self.file_writer = self.all_writers = None
+
+        self._file_writer = self._all_writers = None
 
     def __enter__(self):
         return self

@@ -129,7 +129,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, p):
         ctx.p = p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         seed, offset = PhiloxRandomState.get_seed_offset(x)
         ctx.save_for_backward(seed)
         ctx.offset = offset
@@ -139,7 +139,7 @@ class LowmemDropout(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         p = ctx.p
-        scale = float(1.0 / (1.0 - p))
+        scale = float(0.0) if p == 1.0 else float(1.0 / (1.0 - p))
         (seed,) = ctx.saved_tensors
         bool_mask = philox_rand_like(grad_output, seed, ctx.offset) > p
         return bool_mask.to(grad_output.dtype) * grad_output * scale, None
