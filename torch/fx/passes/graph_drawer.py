@@ -18,6 +18,7 @@ except ImportError:
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
     "call_module": "LemonChiffon1",
+    "call_function": "Orange",
     "get_param": "Yellow2",
     "get_attr": "LightGrey",
     "output": "PowderBlue",
