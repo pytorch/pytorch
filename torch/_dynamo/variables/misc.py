@@ -263,11 +263,13 @@ class AutogradFunctionVariable(VariableTracker):
             # onto tx if sound.
             # TODO(voz): NOTE: This function identity is unguarded, but the odds of someone swapping self.fn_cls from
             # autograd fn to something else is very low.
+            # breakpoint()
+            module_source = AttrSource(tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__)
+            trampoline_autograd_fwd._source = AttrSource(module_source, "forward")
             higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd)
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
             )
-
             # On varying strides of grads
             #
             # A varying stride in speculated_fwd_result can produce potentially unsound code.
@@ -278,12 +280,13 @@ class AutogradFunctionVariable(VariableTracker):
             # autograd function is leading to issues, we can extend this to rewrite bwd to coerce the guards to
             # be the expected strides.
             bwd_args = [ctx, speculated_fwd_result]
-            # ctx.value.saved_tensors = ctx.value.to_save
+            trampoline_autograd_bwd._source = AttrSource(module_source, "backward")
             if not is_fn_safe_to_run(
                 tx, TorchHigherOrderOperator(trampoline_autograd_bwd), bwd_args
             ):
+                breakpoint()
                 unimplemented("Unsafe bwd in autograd.function")
-
+            # breakpoint()
             # If fwd and backward are sound, we want apply in the graph.
             # And we don't want backwards for the obvious reasons.
             args = args[1:]
@@ -311,6 +314,23 @@ class AutogradFunctionVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
+    def call_method(self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]"):
+        from .builder import wrap_fx_proxy
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        # breakpoint()
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                self.fn_cls.forward if name == "forward" else self.fn_cls.backward,
+                *proxy_args_kwargs(args, kwargs),
+            ),
+            **options,
+        )
 
 class SaveSimulatingAutogradFunctionContext(torch.autograd.function.FunctionCtx):
     def __init__(self):

@@ -189,6 +189,7 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        # print("Calling", self.value)
         from . import (
             ConstantVariable,
             CUDAStreamContextVariable,
@@ -799,13 +800,14 @@ def is_fn_safe_to_run(tx, f, sub_args):
     # Snapshot state
     graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
     # Will raise if not sound
-    output, graph, lifted_freevars = speculate_subgraph(
-        tx, f, sub_args, graph_checkpoint, checkpoint, always_restore=True
-    )
-    # If we got here, we are probably sound, but we do not support freevars yet, so lets call cases where we found them
-    # unsafe.
-    if lifted_freevars:
+    try:
+        f.call_function(tx, sub_args, {})
+    except Exception as e:
+        breakpoint()
         return False
+    finally:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
     return True
 
 
@@ -1271,9 +1273,14 @@ class TorchHigherOrderOperator(VariableTracker):
             "trampoline_autograd_bwd",
             "trampoline_autograd_apply",
         ):
+            from . import AutogradFunctionVariable, UserFunctionVariable
+
             pre_side_effects = tx.output.side_effects.clone()
             always_restore = self.value.__name__ == "trampoline_autograd_bwd"
-            fn = TorchVariable(self.value)
+            if self.value.__name__ == "trampoline_autograd_apply":
+                fn = TorchVariable(self.value)
+            else:
+                fn = UserFunctionVariable(self.value, source=self.value._source)
             checkpoint = tx.copy_graphstate()
             pre_guards_len = len(tx.output.guards)
             graph_checkpoint = tx.output.graph
@@ -1299,8 +1306,17 @@ class TorchHigherOrderOperator(VariableTracker):
 
             post_side_effects = tx.output.side_effects
             if post_side_effects.diff(pre_side_effects):
-                breakpoint()
-                unimplemented("NYI - side effects in autograd function.")
+                diff = (
+                    post_side_effects.id_to_variable.keys()
+                    - pre_side_effects.id_to_variable.keys()
+                )
+                for d in diff:
+                    if not isinstance(
+                        post_side_effects.id_to_variable[d].value,
+                        AutogradFunctionVariable,
+                    ):
+                        breakpoint()
+                        unimplemented("NYI - side effects in autograd function.")
 
             if always_restore:
                 if post_guards_len - pre_guards_len > 0:
@@ -1316,7 +1332,6 @@ class TorchHigherOrderOperator(VariableTracker):
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
         else:
-            breakpoint()
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call

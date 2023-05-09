@@ -131,8 +131,6 @@ class MaterializingGradFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_out1, grad_out2):
-        if grad_out2 is None:
-            print("grad_out2 is None!")
         return grad_out1, grad_out2
 
 
@@ -141,13 +139,28 @@ class MaterializingGradModule(torch.nn.Module):
         return MaterializingGradFunction.apply(x)
 
 
+class CustomFuncBwdStride(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, grad_output.stride()
+
+
+class BwdStrideModule(torch.nn.Module):
+    def forward(self, x):
+        return CustomFuncBwdStride.apply(x)
+
+
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # Sound behaviors, tested for working capture
     def test_autograd_function_equivalence(self):
         for grad in [True, False]:
             for i in range(1, 5):
                 model = globals()[f"Module{i}"]()
-                opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+                opt_model = torch._dynamo.optimize("eager")(model)
                 self.assertTrue(
                     torch.allclose(
                         opt_model(torch.ones(2, 3, requires_grad=grad)),
@@ -177,6 +190,12 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
     def test_materialize_grad(self):
         model = MaterializingGradModule()
+        opt_model = torch._dynamo.optimize("eager")(model)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        opt_model(x)
+
+    def test_stride_in_bwd(self):
+        model = BwdStrideModule()
         opt_model = torch._dynamo.optimize("eager")(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)

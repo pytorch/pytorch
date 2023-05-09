@@ -590,7 +590,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
             self.output.guards.update(fn.guards)
             return result
-        except Exception:
+        except Exception as e:
+            # breakpoint()
             self.restore_graphstate(state)
             raise
 
@@ -2128,12 +2129,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        if skipfiles.check(
-            func.get_filename()
-        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
-            unimplemented(
-                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
-            )
+        if "trampoline_autograd" not in func.get_name():
+            if skipfiles.check(
+                func.get_filename()
+            ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+                unimplemented(
+                    f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+                )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
@@ -2149,7 +2151,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
-        )
+        ), breakpoint()
         InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)

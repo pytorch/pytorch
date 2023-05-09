@@ -182,6 +182,7 @@ class TensorVariable(VariableTracker):
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
+            # breakpoint()
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         # It's hard to get resize_() on graph input work properly across
