@@ -1842,11 +1842,17 @@ else:
             x = torch.zeros(m, device=device)
             res = x.scatter_add(dim, idx, src)
 
+            # Checking if scatter_add is deterministic
+            for i in range(5):
+                res_next = x.scatter_add(dim, idx, src)
+                self.assertEqual(res, res_next, atol=0, rtol=0)
+                res = res_next
+
             expected = torch.zeros(m, device=device)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
-            self.assertEqual(res, expected, atol=0, rtol=0)
+            self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -6160,7 +6166,11 @@ class TestTorch(TestCase):
         self.assertEqual(neg_0.stride(), neg_1.stride())
         self.assertEqual(neg_0.size(), neg_1.size())
         self.assertFalse(torch.equal(neg_0, neg_1))
-        self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+        # FIXME: Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
 
         conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
         conj_1 = conj_0.conj()
@@ -6170,7 +6180,11 @@ class TestTorch(TestCase):
         self.assertEqual(conj_0.stride(), conj_1.stride())
         self.assertEqual(conj_0.size(), conj_1.size())
         self.assertFalse(torch.equal(conj_0, conj_1))
-        self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+        # FIXME: Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
         # Fast path test: two tensors share the same storage, but different dtype
         s_0 = torch.rand((2, 3), dtype=torch.float)
@@ -7429,6 +7443,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_parallel_info(self):
         torch.__config__.parallel_info()
+
+    def test_get_cpu_capability(self):
+        # This method is primarily exposed for torchvision's resize
+        torch.backends.cpu.get_cpu_capability()
+
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):

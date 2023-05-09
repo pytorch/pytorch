@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
@@ -824,6 +825,9 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
                                                              getGatherScatterScalarType(output),
                                                              /*needsScatter=*/false);
 
+    // this function call is a no-op if MPS Profiler is not enabled
+    getMPSProfiler().beginProfileKernel(gatherPSO, functionName, {src, output});
+
     uint32_t kernel_size = src.sizes().size();
     std::vector<uint32_t> src_sizes(kernel_size == 0 ? 1 : kernel_size);
     std::vector<uint32_t> src_strides(kernel_size == 0 ? 1 : kernel_size);
@@ -852,6 +856,8 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
 
     MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
     [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+
+    getMPSProfiler().endProfileKernel(gatherPSO);
   });
 
   return (dst.has_storage()) ? dst : output;
@@ -887,6 +893,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
                                                                 getGatherScatterScalarType(output),
                                                                 /*needsScatter=*/true);
 
+      getMPSProfiler().beginProfileKernel(scatterPSO, functionName, {src, output});
+
       uint32_t kernel_size = output.sizes().size();
       std::vector<uint32_t> output_sizes(kernel_size == 0 ? 1 : kernel_size);
       std::vector<uint32_t> output_strides(kernel_size == 0 ? 1 : kernel_size);
@@ -915,6 +923,8 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadsPerThreadgroup];
+
+      getMPSProfiler().endProfileKernel(scatterPSO);
     }
   });
 
