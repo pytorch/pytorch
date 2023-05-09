@@ -973,8 +973,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_

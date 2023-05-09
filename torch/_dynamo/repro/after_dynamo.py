@@ -20,7 +20,6 @@ from torch._dynamo.debug_utils import (
     minifier_dir,
     NNModuleToString,
     run_fwd_maybe_bwd,
-    TEST_REPLACEABLE_COMMENT,
 )
 
 from .. import config
@@ -165,7 +164,6 @@ from torch._dynamo.debug_utils import same_two_models
 
 {generate_config_string()}
 
-{TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -265,7 +263,6 @@ from torch._dynamo.testing import rand_strided
 
 {generate_config_string()}
 
-{TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
