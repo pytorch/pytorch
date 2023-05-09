@@ -109,30 +109,16 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        # Binary workflows checkout to pytorch subdirectory instead
-        uses: ./pytorch/.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default" },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: actions/upload-artifact@v3
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        if: always()
         with:
           name: libtorch-cpu-shared-with-deps-debug
           retention-days: 14
@@ -241,25 +227,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Check if the job is disabled
-        id: filter
-        # Binary workflows checkout to pytorch subdirectory instead
-        uses: ./pytorch/.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          # NB: Use a mock test matrix with a default value here. After filtering, if the
-          # returned matrix is empty, it means that the job is disabled
-          test-matrix: |
-            { include: [
-              { config: "default" },
-            ]}
       - name: Populate binary env
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        if: steps.filter.outputs.is-test-matrix-empty == 'False'
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"

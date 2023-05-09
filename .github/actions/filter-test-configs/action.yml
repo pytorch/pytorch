@@ -42,14 +42,9 @@ runs:
           python3 -m pip install requests==2.26.0 pyyaml==6.0
 
     - name: Parse ref
-      id: parse-ref
       shell: bash
-      run: |
-        set -x
-
-        # Use relative path here as this could be checked out anywhere, not necessarily
-        # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
+      id: parse-ref
+      run: .github/scripts/parse_ref.py
 
     - name: Get the job name
       id: get-job-name
@@ -85,17 +80,14 @@ runs:
         echo "Workflow: ${GITHUB_WORKFLOW}"
         echo "Job name: ${JOB_NAME}"
 
-        # Use relative path here as this could be checked out anywhere, not necessarily
-        # in runner workspace
-        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
+        .github/scripts/filter_test_configs.py \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
           --pr-number "${{ github.event.pull_request.number }}" \
           --tag "${{ steps.parse-ref.outputs.tag }}" \
           --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}" \
-          --branch "${{ github.event.workflow_run.head_branch }}"
+          --schedule "${{ github.event.schedule }}"
 
     - name: Print the filtered test matrix
       shell: bash
