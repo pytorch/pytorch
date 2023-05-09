@@ -1,3 +1,5 @@
+# Owner(s): ["module: bazel"]
+
 """
 This test module contains a minimalistic "smoke tests" for the bazel build.
 
