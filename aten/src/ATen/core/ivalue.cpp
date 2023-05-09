@@ -1076,8 +1076,11 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
+        // TODO (rohan-varma): for tensors created with at::sparse_coo_tensor held
+        // in a python object, this might need a coalesce().
         weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
         weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
+        LOG(INFO) << "RV: successfully did storages";
       } else {
         // A dense/strided tensor contains 1 storage
         weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());

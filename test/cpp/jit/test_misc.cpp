@@ -81,6 +81,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "ATen/cuda/CUDAContext.h"
 
 namespace torch {
 namespace jit {
@@ -2397,6 +2398,21 @@ TEST(FuturesTest, Basic) {
   f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
+}
+
+// Sparse CUDA tensor test
+TEST(FutureTest, SparseTensor) {
+  // Skip test if CUDA is not available.
+  if (!at::cuda::is_available()) {
+    LOG(INFO) << "CUDA not available, skipping test";
+  }
+  auto f = c10::make_intrusive<Future>(TensorType::get());
+  at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
+  auto sparse_tensor = at::sparse_coo_tensor(torch::ones(10), torch::ones(10), opts);
+  // Runs storage extraction for CUDA tensors
+  f->markCompleted(sparse_tensor);
+  ASSERT_TRUE(f->completed());
+  ASSERT_FALSE(f->hasError());
 }
 
 // Basic error cases.
