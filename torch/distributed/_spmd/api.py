@@ -466,8 +466,8 @@ def _compile(
             # propagations
             fake_arg = fake_mode.from_tensor(arg)
             arg_dims = [1] * arg.ndim
-            # we assume the first dim is batch dim in data parallel
-            arg_dims[0] *= dist.get_world_size()
+            # expand the tensor to full batch size on its batch dim
+            arg_dims[parallel_mode.input_batch_dim] *= dist.get_world_size()
             return fake_arg.repeat(arg_dims)
 
         args = pytree.tree_map_only(

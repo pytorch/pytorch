@@ -236,14 +236,14 @@ class TestDataParallel(DTensorTestBase):
 
             def forward(self, x):
                 reshaped_x = x.t().contiguous()
-                return self.mlp(reshaped_x)
+                return self.mlp(reshaped_x).t()
 
         mod = WrapperModule().cuda(self.rank)
         opt = torch.optim.Adam(mod.parameters(), lr=0.1, fused=True)
 
         train_batch = (
             torch.randn((50, 128), device=torch.device(self.rank)),
-            torch.randn((128, 8), device=torch.device(self.rank)),
+            torch.randn((8, 128), device=torch.device(self.rank)),
         )
 
         ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
