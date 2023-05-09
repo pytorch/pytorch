@@ -634,7 +634,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   // Empty index
-  if (num_indices == 0) {
+  if (num_indices == 0 || self.numel() == 0) {
     return output;
   }
 
