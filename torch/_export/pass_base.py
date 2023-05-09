@@ -270,13 +270,11 @@ class ExportPassBase(PassBase):
             ProxyValue, lambda x: x.data, (args, kwargs)
         )
         res_data = getattr(interpreter, kind)(target, args_data, kwargs_data)
-
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
         res_proxy = self.tracer.create_proxy(kind, target, args_proxy, kwargs_proxy)
         res_proxy.node.meta.update(meta.data)
-
         self.tracer.set_metadata(res_proxy.node, res_data)
         return ProxyValue(res_data, res_proxy)
 

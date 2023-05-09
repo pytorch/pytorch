@@ -7,6 +7,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard, replicate
+from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
@@ -278,6 +280,28 @@ class TestFSDPCheckpoint(FSDPTest):
             True,
             False,
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_state_dict_fsdp_submodules(self):
+        model = CompositeModel(device=torch.device("cuda"))
+
+        full_shard_args = {"strategy": ShardingStrategy.FULL_SHARD}
+        no_shard_args = {"strategy": ShardingStrategy.NO_SHARD}
+
+        model.u1 = fully_shard(model.u1, **full_shard_args)
+        model.u2 = fully_shard(model.u2, **no_shard_args)
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+
+        state_dict = model.state_dict()
+        for fqn, tensor in state_dict.items():
+            if "u1" in fqn:
+                self.assertIsInstance(tensor, ShardedTensor)
+            elif "u2" in fqn:
+                self.assertIsInstance(tensor, torch.Tensor)
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)

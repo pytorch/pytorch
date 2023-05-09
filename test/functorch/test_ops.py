@@ -1084,7 +1084,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
@@ -1183,7 +1182,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'prod'),
         xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.max_unpool3d', ''),
