@@ -1,5 +1,4 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
-#include "c10d/Work.hpp"
 
 #ifdef USE_C10D_GLOO
 
