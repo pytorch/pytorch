@@ -89,6 +89,8 @@ namespace at { namespace functorch {
 // Note [Writing batch rule for in-place operators]
 // TODO: This is kinda complicated. Saving this for a future date.
 
+namespace{
+
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -114,25 +116,6 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
   return std::make_tuple(self_.repeat_symint(sizes_with_bdim), 0);
 }
 
-
-std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
-    const Tensor& input,
-    optional<int64_t> input_bdim,
-    int64_t diagonal) {
-  if (!input_bdim) {
-    return std::make_tuple(at::diag(input, diagonal), nullopt);
-  }
-  auto input_ = moveBatchDimToFront(input, input_bdim);
-  auto rank = rankWithoutBatchDim(input, input_bdim);
-
-  if (rank == 1) {
-    return std::make_tuple(at::diag_embed(input_, diagonal), 0);
-  } else if (rank == 2) {
-    return std::make_tuple(at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2);
-  } else {
-    throw std::runtime_error("Passed in an invalid shape to at::diag");
-  }
-}
 
 std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
@@ -275,12 +258,6 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
 std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(
     const Tensor& self, optional<int64_t> bdim, int64_t dim) {
   return squeeze_dims_batch_rule(self, bdim, {dim});
-}
-
-std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t chunks, int64_t dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
-  return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
 }
 
 std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
@@ -581,6 +558,8 @@ std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto result = at::triu(self_, diagonal);
   return std::make_tuple(std::move(result), 0);
+}
+
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {

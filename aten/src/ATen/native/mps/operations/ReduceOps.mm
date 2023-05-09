@@ -954,7 +954,9 @@ Tensor nansum_mps(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, c10
   return nansum_out_mps(self, dim, keepdim, dtype, result);
 }
 
-Tensor trace_mps_out(const Tensor& self) {
+Tensor trace_mps(const Tensor& self) {
+  TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+
   Tensor output_t =
       at::empty({}, get_dtype_from_self(self, c10::nullopt, true), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
@@ -967,7 +969,7 @@ Tensor trace_mps_out(const Tensor& self) {
                          c10::nullopt,
                          const_cast<Tensor&>(output_t),
                          mps::MPSReductionType::TRACE,
-                         "trace_mps_out");
+                         "trace_mps");
 
   return output_t;
 }

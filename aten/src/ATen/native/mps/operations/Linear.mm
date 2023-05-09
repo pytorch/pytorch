@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
@@ -21,10 +22,25 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
   auto input_size = input.sizes();
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight.size(0));
+
+  TORCH_CHECK(input.size(-1) == weight_arg.size(-1),
+              "linear(): input and weight.T shapes cannot be multiplied (",
+              input.size(-2),
+              "x",
+              input.size(-1),
+              " and ",
+              weight_arg.size(-1),
+              "x",
+              weight_arg.size(-2),
+              ")");
+
+  if (is_bias_defined) {
+    // Check bias and output shapes compatibility only.
+    inferExpandGeometry_dimvector(bias.sizes(), bias.strides(), output_size);
+  }
+
   Tensor output =
       at::empty(output_size, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, input.suggest_memory_format());
-
-  TORCH_CHECK(output.is_mps());
 
   if (output.numel() == 0) {
     return output;
@@ -60,7 +76,8 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const c10::opt
         MPSGraphTensor* inputFlattened = inputTensor;
         bool doReshape = false;
         // workaround to improve the performance with 3D+ inputs
-        if (input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32) {
+        if (input_size.size() > 2 && input_size[0] > 1 && input_size[1] >= 1 && input_size[1] <= 32 &&
+            bias.dim() <= 1) {
           doReshape = true;
           inputFlattened = [mpsGraph flatten2DTensor:inputTensor axis:-1 name:nil];
         }

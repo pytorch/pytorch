@@ -3,7 +3,7 @@
 import io
 import itertools
 import sys
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
 from typing import Any, Dict
@@ -899,7 +899,7 @@ class TestFSDPStateDict(FSDPTest):
 
         def _create_module(wrap_fsdp=True):
             LINEAR_SKIP = "linear_skip"
-            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else suppress()
+            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else nullcontext()
             with ctx:
                 module = SkipModel(double_nest=double_nest)
                 # Full name of linear_skip param tensors in SkipModel, as would be

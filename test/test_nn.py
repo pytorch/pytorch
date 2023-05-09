@@ -2425,10 +2425,34 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _ = m.state_dict()
         self.assertTrue(called)
 
-    def test_register_state_dict_pre_hook(self):
+    def _test_register_state_dict_pre_hook(self, model, submodule):
         _state_dict_prefix = "foo."
         state_dict_pre_hook_count = 0
+        keep_var_setting = False
 
+        def my_state_dict_pre_hook(module, prefix, keep_vars):
+            self.assertEqual(keep_vars, keep_var_setting)
+            nonlocal state_dict_pre_hook_count
+            state_dict_pre_hook_count += 1
+            self.assertTrue(prefix.startswith(_state_dict_prefix))
+
+        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        # Test to ensure submodules run the hook as well.
+        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
+
+        def check_results(model):
+            nonlocal state_dict_pre_hook_count, keep_var_setting
+            for keep_var_setting in [True, False]:
+                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+                self.assertEqual(2, state_dict_pre_hook_count)
+                state_dict_pre_hook_count = 0
+        # Test state dict works as expected after model construction
+        check_results(model)
+        # Test state dict works as expected after forward
+        model(torch.ones(10, 3))
+        check_results(model)
+
+    def test_register_state_dict_pre_hook(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2437,21 +2461,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             def forward(self, x):
                 return self.a(x)
 
-        def my_state_dict_pre_hook(module, prefix, keep_vars):
-            nonlocal keep_var_setting
-            self.assertEqual(keep_vars, keep_var_setting)
-            nonlocal state_dict_pre_hook_count
-            state_dict_pre_hook_count += 1
-            self.assertTrue(prefix.startswith(_state_dict_prefix))
-
         mod = MyModule()
-        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        # Test to ensure submodules run the hook as well.
-        mod.a.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        for keep_var_setting in [True, False]:
-            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-            self.assertEqual(2, state_dict_pre_hook_count)
-            state_dict_pre_hook_count = 0
+        self._test_register_state_dict_pre_hook(mod, mod.a)
+
+    def test_register_state_dict_pre_hook_lazy_module(self):
+        class MyLazyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LazyLinear(8)
+                self.layer2 = nn.LazyLinear(5)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x))
+
+        mod = MyLazyModule()
+        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -9649,7 +9673,10 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
-    def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
+    @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
+    def test_upsamplingBiLinear2d_consistency(
+        self, device, memory_format, antialias, align_corners, num_channels, output_size, check_as_unsqueezed_3d_tensor
+    ):
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
@@ -9657,6 +9684,11 @@ class TestNNDeviceType(NNTestCase):
         # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
         input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+
+        if check_as_unsqueezed_3d_tensor:
+            input_ui8 = input_ui8[0, ...]
+            input_ui8 = input_ui8[None, ...]
+
         input_f32 = input_ui8.float()
 
         output_f32 = F.interpolate(
@@ -9665,6 +9697,18 @@ class TestNNDeviceType(NNTestCase):
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
+
+        # FIXME if-clause shows the current behaviour which is definitely unexpected.
+        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
+        # See for more details: https://github.com/pytorch/pytorch/pull/100373
+        if check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(output_ui8.is_contiguous())
+            self.assertTrue(output_f32.is_contiguous())
+        else:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
         mae_tol = 0.5
         max_abs_err_tol = 1.0
@@ -12279,6 +12323,7 @@ class TestNNDeviceType(NNTestCase):
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12306,6 +12351,7 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):

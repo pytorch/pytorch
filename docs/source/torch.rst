@@ -714,7 +714,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/master/compile/index.html>`__
+`torch.compile documentation <https://pytorch.org/docs/main/compile/index.html>`__
 
 Operator Tags
 ------------------------------------
