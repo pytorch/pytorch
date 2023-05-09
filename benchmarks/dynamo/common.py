@@ -12,10 +12,10 @@ import random
 import signal
 import subprocess
 import sys
-from contextlib import contextmanager
 import time
+from contextlib import contextmanager
 
-from typing import NamedTuple, Callable, Any
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -944,6 +944,7 @@ def try_script(model, example_inputs):
     except Exception:
         return None
 
+
 def download_retry_decorator(download_fn):
     """
     Decorator function for applying retry logic to a download function.
@@ -956,6 +957,7 @@ def download_retry_decorator(download_fn):
     def download_function(model_name: str):
         # download logic goes here
     """
+
     @functools.wraps(download_fn)
     def wrapper(self, *args, **kwargs) -> Any:
         tries = 0
@@ -974,7 +976,10 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(f"Failed to load model '{model_name}' with following error(s): {str(e)}.")
+                    raise RuntimeError(
+                        f"Failed to load model '{model_name}' with following error(s): {str(e)}."
+                    )
+
     return wrapper
 
 
