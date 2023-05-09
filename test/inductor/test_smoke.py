@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._logging
 
-from torch.testing._internal.common_utils import IS_LINUX, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -62,5 +62,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     if IS_LINUX and torch.cuda.is_available():
-        if torch.cuda.get_device_properties(0).major > 5:
+        if torch.cuda.get_device_properties(0).major > 5 or TEST_WITH_ROCM:
             run_tests()

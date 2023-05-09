@@ -11,7 +11,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
 
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -43,6 +43,7 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    @skipIfRocm
     @patches
     def test_linear_relu(self):
         @torch.compile
@@ -59,6 +60,7 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
+    @skipIfRocm
     @patches
     def test_addmm(self):
         @torch.compile
@@ -92,6 +94,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm(self):
         @torch.compile
@@ -129,6 +132,7 @@ class TestSelectAlgorithm(TestCase):
         # float64 not supported by tl.dot()
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
 
+    @skipIfRocm
     @patches
     def test_bmm(self):
         @torch.compile
@@ -142,6 +146,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm_not_even_k(self):
         @torch.compile
@@ -154,6 +159,7 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_baddbmm(self):
         @torch.compile
@@ -168,6 +174,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm_plus_mm(self):
         @torch.compile
@@ -183,6 +190,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_convolution1(self):
         @torch.compile
@@ -207,6 +215,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     def test_mm_dropout(self):
         @torch.compile
@@ -223,6 +232,7 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=False)
     def test_convolution2(self):
@@ -248,6 +258,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocm
     @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=True)
     def test_convolution_as_mm(self):

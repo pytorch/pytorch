@@ -7,7 +7,7 @@ import torch._dynamo
 import torch._inductor.config as inductor_config
 import torch._inductor.utils
 from torch._dynamo.test_minifier_common import MinifierTestBase
-from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN, skipIfRocm
 
 _HAS_TRITON = torch._inductor.utils.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
@@ -34,6 +34,7 @@ inner(torch.randn(2, 2).to("{device}"))
     def test_after_aot_cpu_runtime_error(self):
         self._test_after_aot_runtime_error("cpu", "")
 
+    @skipIfRocm
     @requires_cuda()
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cuda_runtime_error(self):

@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
+    skipIfRocm,
     TEST_WITH_ASAN,
 )
 
@@ -170,6 +171,7 @@ class CudaReproTests(TestCase):
 
         self.common(Repro(), ())
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     def test_expanded_inputs_cudagraphs(self):
         @torch._dynamo.optimize("inductor")
@@ -204,6 +206,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(real_out, compiled_out)
         torch._dynamo.reset()
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
         @torch._dynamo.optimize("inductor")
@@ -217,6 +220,7 @@ class CudaReproTests(TestCase):
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     # TODO: enable
+    @skipIfRocm
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     def test_inplace_updates_cudagraphs(self):

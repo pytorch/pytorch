@@ -39,12 +39,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.testing._internal.common_utils import skipIfRocm
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -2043,6 +2043,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -2082,7 +2083,6 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
     @skipIfRocm
     def test_convolution1(self):
         m = torch.nn.Sequential(
@@ -2116,6 +2116,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfRocm
     def test_convolution3(self):
         # Test stride or padding or dilation is 1 element list.
         m = torch.nn.Sequential(
@@ -3370,7 +3371,6 @@ class CommonTemplate:
                 ),
             )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3465
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -3918,7 +3918,6 @@ class CommonTemplate:
         )
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
-    @skipIfRocm
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -5110,7 +5109,6 @@ class CommonTemplate:
         b = torch.rand(2, 2, 1, 4, 1).int()
         self.common(fn, (a, b))
 
-    @skipIfRocm
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5122,9 +5120,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3849
-    @skipIfRocm
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -5485,7 +5480,9 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch({"triton.cudagraphs": True if not torch.version.hip else False}),
+                lambda: config.patch(
+                    {"triton.cudagraphs": True if not torch.version.hip else False}
+                ),
             ]
 
         for context in contexts:
@@ -6346,6 +6343,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
 
+        @skipIfRocm
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
@@ -6433,5 +6431,5 @@ if HAS_CPU:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA):
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
