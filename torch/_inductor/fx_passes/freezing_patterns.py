@@ -1,16 +1,15 @@
-
 import functools
-import logging
 
 import torch
 from ..pattern_matcher import (
     inference_graph,
-    register_replacement,
+    init_once_fakemode,
     PatternMatcherPass,
-    init_once_fakemode
+    register_replacement,
 )
 
 aten = torch.ops.aten
+
 
 @init_once_fakemode
 @functools.lru_cache(None)
@@ -23,13 +22,18 @@ def get_freezing_patterns():
     else:
         device = "cpu"
 
-    val = functools.partial(torch.empty, (10 , 10), device=device, requires_grad=False)
+    val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
-        weights = [match.kwargs["w1"], match.kwargs["w2"], match.kwargs["w3"]] #, match.kwargs["w3"]]
-        
+        weights = [
+            match.kwargs["w1"],
+            match.kwargs["w2"],
+            match.kwargs["w3"],
+        ]
+
         out = all(
-            w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape for w in weights
+            w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape
+            for w in weights
         )
         if not out:
             breakpoint()
@@ -50,11 +54,11 @@ def get_freezing_patterns():
         inference_graph,
         patterns,
         extra_check=check_concat_weights,
-        exclusive_arg_names=("w1", "w2", "w3")
+        exclusive_arg_names=("w1", "w2", "w3"),
     )
 
     # def addmm_fuse_pattern(inp, w1, w2, w3, b1, b2, b3):
-    #     return (aten.addmm(inp, w1, b1), aten.addmm(inp, w2, b2), aten.addmm(inp, w3, b3))  
+    #     return (aten.addmm(inp, w1, b1), aten.addmm(inp, w2, b2), aten.addmm(inp, w3, b3))
 
     # def addmm_fuse_replacement(inp, w1, w2, w3, b1, b2, b3):
     #     cat_t = torch.cat((w1, w2, w3), dim=1)
@@ -71,9 +75,12 @@ def get_freezing_patterns():
     #     exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3")
     # )
 
-
     def addmm_fuse_pattern_second(inp, w1, w2, w3, b1, b2, b3):
-        return (aten.addmm(b1, inp, w1), aten.addmm(b2, inp, w2), aten.addmm(b3, inp, w3))  
+        return (
+            aten.addmm(b1, inp, w1),
+            aten.addmm(b2, inp, w2),
+            aten.addmm(b3, inp, w3),
+        )
 
     def addmm_fuse_replacement_second(inp, w1, w2, w3, b1, b2, b3):
         cat_w = torch.cat((w1, w2, w3), dim=1)
@@ -87,8 +94,7 @@ def get_freezing_patterns():
         inference_graph,
         patterns,
         extra_check=check_concat_weights,
-        exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3")
+        exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
     )
-
 
     return patterns

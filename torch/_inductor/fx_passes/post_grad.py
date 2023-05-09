@@ -13,13 +13,13 @@ from ..pattern_matcher import (
     Arg,
     CallFunction,
     filter_nodes,
-    MultiOutputPattern,
     get_arg_value,
     Ignored,
     init_once_fakemode,
     KeywordArg,
     ListOf,
     Match,
+    MultiOutputPattern,
     MULTIPLE,
     PatternMatcherPass,
     stable_topological_sort,
@@ -52,7 +52,6 @@ def post_grad_passes(gm: torch.fx.GraphModule):
     if config.reordering:
         # has some issues with mutation in inference mode
         reorder_for_locality(gm.graph)
-        gm.recompile()
 
     if config.pattern_matcher:
         lazy_init()
@@ -61,6 +60,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
             patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
 
 
@@ -96,12 +96,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
         ),
         None,
     )
+    past_mutating_epilogue = True if first_copy is None else False
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
-        if first_copy is not None:
-            if first_copy is node:
-                first_copy = None
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
             continue
 
         torch.fx.map_arg((node.args, node.kwargs), visit)
@@ -123,15 +123,19 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 #   - order patterns are defined in
 ################################################################################
 
+
 @register_lowering_pattern(
-    MultiOutputPattern(    
-        (CallFunction(aten.mm.default, KeywordArg('inp'), KeywordArg('w1')), 
-         CallFunction(aten.mm.default, KeywordArg('inp'), KeywordArg('w2'))
-    ))  
+    MultiOutputPattern(
+        (
+            CallFunction(aten.mm.default, KeywordArg("inp"), KeywordArg("w1")),
+            CallFunction(aten.mm.default, KeywordArg("inp"), KeywordArg("w2")),
+        )
+    )
 )
 def foo(*args, **kwargs):
     breakpoint()
     raise
+
 
 @register_lowering_pattern(
     CallFunction(
@@ -166,16 +170,20 @@ def elias(*args):
 
 
 @register_lowering_pattern(
-    MultiOutputPattern((
-        CallFunction(
-            torch.ops.aten.mm.default,
-            KeywordArg("self"), Arg(),
-        ),
-        CallFunction(
-            torch.ops.aten.mm.default,
-            KeywordArg("self"), Arg(),
-        ),
-    )),
+    MultiOutputPattern(
+        (
+            CallFunction(
+                torch.ops.aten.mm.default,
+                KeywordArg("self"),
+                Arg(),
+            ),
+            CallFunction(
+                torch.ops.aten.mm.default,
+                KeywordArg("self"),
+                Arg(),
+            ),
+        )
+    ),
     pass_number=1,
     extra_check=elias,
 )
@@ -222,6 +230,7 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
 # def temp(*args, **kwargs):
 #     breakpoint()
 #     raise
+
 
 def shape_of_mm(a, b):
     m, _ = a.get_size()
