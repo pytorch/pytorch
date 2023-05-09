@@ -1,6 +1,8 @@
 import math
 import os
 import subprocess
+import pathlib
+import json
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
@@ -131,6 +133,37 @@ def _query_changed_test_files() -> List[str]:
     lines = proc.stdout.decode().strip().split("\n")
     lines = [line.strip() for line in lines]
     return lines
+
+
+def _get_previously_failing_tests() -> List[str]:
+    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = pathlib.Path(".pytorch_cache/v/cache/lastfailed")
+
+    if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
+        return []
+    
+    with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
+        last_failed_tests = json.load(f)
+    
+    return _parse_prev_failing_tests(last_failed_tests)
+
+def _parse_prev_failing_tests(last_failed_tests: Dict[str, bool]) -> List[str]:
+    tests_to_prioritize = set()
+    
+    # The keys are formatted as "test_file.py::test_class::test_method[params]"
+    # We just need the test_file.py part
+    for test in last_failed_tests:
+        test = test.split("::")[0]
+        tests_to_prioritize.add(test)
+
+    return list(tests_to_prioritize)
+
+# Sample last_failed_tests date
+last_failed_tests = {
+    "tools/tests/zzztest_fun.py::test_num[17]": True,
+    "tools/tests/zzztest_fun.py::test_num[25]": True,
+    "tools/tests/ssstest_fun copy.py::test_fun_copy[17]": True,
+    "tools/tests/test_fun copy.py::test_fun_copy[25]": True
+}
 
 
 def get_reordered_tests(
