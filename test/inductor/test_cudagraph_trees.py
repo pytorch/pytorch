@@ -1008,6 +1008,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(len(w) == 1)
             self.assertTrue("x * x * x" in str(w[0]))
 
+        def test_error_on_dealloc_use(self):
+            @torch.compile()
+            def foo(x):
+                return x * x * x
+
+            inp = torch.rand([4], device="cuda")
+            out = foo(inp)
+            out2 = foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out2 + out2
+
         def test_single_stream_use(self):
             @torch.compile()
             def foo(x):
