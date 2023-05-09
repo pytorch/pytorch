@@ -1,9 +1,8 @@
+import math
+import operator
 from collections import defaultdict, namedtuple
 from functools import partial
 from typing import Dict, List, Tuple, Optional
-
-import math
-import operator
 
 import sympy
 import torch
