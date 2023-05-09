@@ -706,9 +706,6 @@ class TestTransformers(NNTestCase):
         out = transformer_encoder(src=x, src_key_padding_mask=mask)
         self.assertEqual(out.shape[1], 6)
 
-    # CPU unit test has_torch_functions in test environment,
-    #   preventing successful completion
-    @onlyCUDA
     def test_with_nested_tensor_input(self, device):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=256,
