@@ -1711,13 +1711,18 @@ template_rule(
     name = "gen_version_py",
     src = ":torch/version.py.tpl",
     out = "torch/version.py",
-    substitutions = {
+    substitutions = if_cuda({
         # Set default to 11.2. Otherwise Torchvision complains about incompatibility.
         "{{CUDA_VERSION}}": "11.2",
         "{{VERSION}}": "2.0.0",
         # TODO: can we automatically get correct git SHA here?
         "{{GIT_VERSION}}": "0000000000000000000000000000000000000000",
-    },
+    }, {
+        "{{CUDA_VERSION}}": "None",
+        "{{VERSION}}": "2.0.0",
+        # TODO: can we automatically get correct git SHA here?
+        "{{GIT_VERSION}}": "0000000000000000000000000000000000000000",
+    }),
 )
 
 rules.py_library(
