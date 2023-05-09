@@ -79,7 +79,7 @@ class TestExperimentalExport(TestCase):
             return cond(torch.tensor(x.shape[0] > 4), true_fn, false_fn, [x])
 
 
-class TestExport(TestCase):
+class TestDynamismExpression(TestCase):
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_export_constraints(self):
 
@@ -132,6 +132,21 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid ranges"):
             _export(conflicting_constraints, inp)
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_export_assume_static_by_default(self):
+        def branch_on_shape(x: torch.Tensor):
+            if x.shape[0] == 4:
+                return x + 1
+            else:
+                return x
+
+        inp = (torch.rand(4, 5),)
+
+        # Being able to export means shape is preserved as static
+        _export(branch_on_shape, inp)
+
+
+class TestExport(TestCase):
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
     def test_capture_multiple(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
