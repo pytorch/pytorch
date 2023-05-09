@@ -783,7 +783,7 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
-static void addInputs(
+void addInputs(
     Node* n,
     const char* name,
     c10::optional<caffe2::TypeMeta> opt_dtype) {
