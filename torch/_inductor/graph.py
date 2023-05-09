@@ -152,7 +152,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         if GraphLowering.ITER == -1:
             from fxana import analyze, print_upstream, print_downstream
-            analyze(gm)
+            # analyze(gm)
             # print_upstream(gm.graph, "gt_142")
             breakpoint()
 
@@ -160,7 +160,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Follow models are skipped due to this:
         # jx_nest_base
-        if nconv > 0 and nconv <= 3 and len(list(gm.graph.nodes)) >= 1000:
+        # volo_d1_224
+        if nconv > 0 and len(list(gm.graph.nodes)) >= 300 * nconv:
             print("ONLY A FEW CONV, SKIP LAYOUT OPT")
             config.layout_opt = False
 
@@ -174,6 +175,11 @@ class GraphLowering(torch.fx.Interpreter):
         # - shufflenet_v2_x1_0
         # - timm_regnet
         # - resnext50_32x4d
+        #
+        # Unfortunately, this also exclude the following models which can have good
+        # speedup via layout-opt
+        # - convmixer_768_32 (1x -> 3x)
+        # - fbnetc_100
         if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 for n in gm.graph.nodes):
             print("FOUND GROUPED CONVOLUTION!")
             config.layout_opt = False
