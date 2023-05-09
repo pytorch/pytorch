@@ -15,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -230,15 +231,15 @@ def write(source_code, ext, extra=""):
 
 
 def write_atomic(path: str, source_code: str):
-    # Write into tempdir first to avoid conflicts between threads
+    # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
+    salt = f"{os.getpid()}.{threading.get_ident()}"
     path = pathlib.Path(path)
-    with tempfile.TemporaryDirectory(dir=path.parent) as tempdir:
-        tmp_path = pathlib.Path(tempdir) / path.name
-        with tmp_path.open("w") as f:
-            f.write(source_code)
+    tmp_path = path.parent / f".{path.name}.{salt}.tmp"
+    with tmp_path.open("w") as f:
+        f.write(source_code)
 
-        tmp_path.rename(path)
+    tmp_path.rename(path)
 
 
 def cpp_compiler():
