@@ -10,6 +10,8 @@ from sys import platform
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
 if not dist.is_available():
     print("torch.distributed not available, skipping tests", file=sys.stderr)
@@ -111,6 +113,15 @@ class StoreTestBase:
     def test_compare_set(self):
         self._test_compare_set(self._create_store())
 
+    def _test_simple_wait(self, fs):
+        with self.assertRaisesRegex(RuntimeError, "[t -i]imeout"):
+            fs.wait(["bad_key"], timedelta(seconds=0.25))
+        fs.add("good_key", 1)
+        fs.wait(["good_key"])
+
+    def test_simple_wait(self):
+        self._test_simple_wait(self._create_store())
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -168,6 +179,7 @@ class HashStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+
 class PrefixStoreTest(TestCase):
     def setUp(self):
         # delete is false as FileStore will automatically clean up the file
@@ -181,6 +193,7 @@ class PrefixStoreTest(TestCase):
             with self.subTest(f"Testing getting underlying_store for {type(store)}"):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
+
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -585,6 +598,39 @@ class TestPythonStore(TestCase):
         self.assertEqual(1, len(store.multi_sets))
         self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
         self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+
+class TestMultiThreadedWait(MultiThreadedTestCase):
+    # TODO: Use less hacky means of instantiating stores.
+    # Note, stores accumulate values per test.
+    stores = [
+        dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1),
+        dist.HashStore(),
+        dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
+        create_tcp_store(),
+        dist.PrefixStore("pre", create_tcp_store())
+    ]
+
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    # Iterates over self.stores, keep 5 in sync with len(self.stores).
+    @parametrize("i", range(5))
+    def test_wait(self, i):
+        store = self.stores[i]
+        store.set_timeout(timedelta(seconds=2))
+        if dist.get_rank() == 0:
+            store.wait(["key1"])
+            self.assertEqual(b"value1", store.get("key1"))
+        if dist.get_rank() == 1:
+            store.set("key1", "value1")
+
+
+instantiate_parametrized_tests(TestMultiThreadedWait)
 
 if __name__ == "__main__":
     assert (

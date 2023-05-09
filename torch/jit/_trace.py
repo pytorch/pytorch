@@ -329,7 +329,7 @@ def _check_trace(
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
-                func.__self__ if hasattr(func, "__self__") else func,
+                getattr(func, "__self__", func),
                 copied_dict,
                 check_trace=False,
                 strict=strict,

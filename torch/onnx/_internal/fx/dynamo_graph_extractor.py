@@ -3,13 +3,23 @@ from __future__ import annotations
 import copy
 import functools
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 import torch._dynamo
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter
-from torch.onnx._internal.fx import fx_exporter
+from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.utils import _pytree as pytree
 
 
@@ -87,10 +97,10 @@ class _PyTreeExtensionContext:
             )
 
 
-class DynamoFlattenOutputStep(fx_exporter.FlattenOutputStep):
+class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     """Flatten nested collection and custom python types and return a flat list of elements.
 
-    Extended from :class:`fx_exporter.FlattenOutputStep` to support flattening arbitrary
+    Extended from :class:`io_adapter.FlattenOutputStep` to support flattening arbitrary
     types via pytree extension. By default this supports many common user defined python
     types such as :class:`ModelOutput` from HuggingFace transformers.
 
@@ -140,42 +150,52 @@ def _wrap_model_with_output_adapter(
     return wrapped
 
 
-class DynamoExporter(fx_exporter.FXGraphModuleExporter):
-    def export(self) -> torch.onnx.ExportOutput:
-        self._input_adapter = exporter.InputAdapter()
-        self._output_adapter = exporter.OutputAdapter()
+class DynamoExport(exporter.FXGraphExtractor):
+    """Generates a FX GraphModule using torch.dynamo.export API
+    Args:
+        aten_graph: If True, exports a graph with ATen operators.
+                    If False, exports a graph with Python operators.
+    """
 
+    def __init__(
+        self,
+        aten_graph: Optional[bool] = None,
+    ):
+        super().__init__()
+        self.aten_graph = aten_graph or True
+
+    def generate_fx(
+        self,
+        options: exporter.ResolvedExportOptions,
+        model: Union[torch.nn.Module, Callable],
+        model_args: Sequence[Any],
+        model_kwargs: Mapping[str, Any],
+    ) -> torch.fx.GraphModule:
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-        args = copy.deepcopy(self.model_args)
-        kwargs = copy.deepcopy(self.model_kwargs)
+        args = copy.deepcopy(model_args)
+        kwargs = copy.deepcopy(model_kwargs)
 
         # `dynamo.export` does not recognize custom user defined classes as output type.
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
         dynamo_flatten_output_step = DynamoFlattenOutputStep()
         wrapped_model = _wrap_model_with_output_adapter(
-            self.model, dynamo_flatten_output_step
+            model, dynamo_flatten_output_step
         )
         # Record the output adapter step.
-        self._output_adapter.append_step(dynamo_flatten_output_step)
+        self.output_adapter.append_step(dynamo_flatten_output_step)
 
         # Translate callable to FX graph.
         #
-        # TODO(wechi): There are several symbolic tracing mechanisms to convert
-        # nn.Module to FX graph. We should choose the right one after they are
-        # matured.
-        # TODO(titaiwang): Set `tracing_mode` according to `self.options.dynamic_shapes`
+        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
         graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *args, aten_graph=True, **kwargs
+            wrapped_model, *args, tracing_mode=fx_mode, **kwargs
         )
         del graph_guard  # Unused
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
-        #
-        # `args` and `kwargs` are merged and flattened by `dynamo.export`.
-        # Apply and record this input adapt step.
-        merged_args, _ = self._apply_input_adapt_step(
-            fx_exporter.FlattenInputWithTreeSpecValidationStep, args, kwargs
+        self.input_adapter.append_step(
+            io_adapter.FlattenInputWithTreeSpecValidationStep()
         )
-        return self.export_fx_to_onnx(graph_module, merged_args)
+        return graph_module  # type: ignore[return-value]
