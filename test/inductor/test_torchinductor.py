@@ -824,6 +824,14 @@ class CommonTemplate:
         for dtype in dtypes:
             self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
+    def test_min_max_reduction_nan(self):
+        def fn(a):
+            return (torch.max(a), torch.min(a))
+
+        t1 = torch.randn(32)
+        t1[16] = float("nan")
+        self.common(fn, (t1,))
+
     def test_fmin_fmax(self):
         def fn(a, b):
             return (
@@ -3548,6 +3556,10 @@ class CommonTemplate:
         template([1, 1, 8, 8], [0, 0, 0, 0])
         template([1, 1, 8, 8], [1, 1, 1, 1])
         template([1, 1, 8, 8], [1, 2, 3, 4])
+        template([1, 1, 8, 8], [0, -1, 2, 2])
+        template([1, 1, 8, 8], [-1, 0, 2, 2])
+        template([1, 1, 8, 8], [2, 2, 0, -1])
+        template([1, 1, 8, 8], [2, 2, -1, 0])
 
     def test_grid_sampler_2d(self):
         def fn(a, b):
@@ -5116,17 +5128,58 @@ class CommonTemplate:
                 aten.argmin(x, 1),
             )
 
-        self.common(
-            fn,
-            [
-                torch.randn([144, 144]),
-            ],
-            # Mismatched elements: 1 / 144 (0.7%)
-            # Greatest absolute difference: 26 at index (71,)
-            # Greatest relative difference: 0.4126984179019928 at index (71,)
-            atol=1e-5,
-            rtol=0.5,
-        )
+        self.common(fn, (torch.randn([144, 144]),))
+
+    def test_argmax_argmin_with_duplicates(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        # Unrolled reduction
+        t1 = torch.randint(2, size=(6, 6))
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randint(8, size=(32, 32))
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randint(8, size=(1028, 1028))
+        self.common(fn, (t1,))
+
+    def test_argmax_argmin_with_nan(self):
+        def fn(x):
+            return (
+                aten.argmax(x, 0),
+                aten.argmin(x, 0),
+                aten.argmax(x, 1),
+                aten.argmin(x, 1),
+            )
+
+        if self.device == "cpu":
+            raise unittest.SkipTest("broken on CPU")
+
+        # Unrolled reduction
+        t1 = torch.randn((6, 6))
+        t1[:, 1] = float("nan")
+        t1[:, 3] = float("nan")
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randn((32, 32))
+        t1[:, 4] = float("nan")
+        t1[:, 8] = float("nan")
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randn((1028, 1028))
+        t1[:, 40] = float("nan")
+        t1[:, 100] = float("nan")
+        self.common(fn, (t1,))
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
@@ -5618,7 +5671,7 @@ class CommonTemplate:
             [x],
         )
 
-    @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
+    @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):
             z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
@@ -5956,6 +6009,17 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(x, 2), opt_fn(x, 2))
 
+    def test_inplace_resize_as(self):
+        def fn(x, y):
+            x.resize_as_(y)
+            return x
+
+        x = torch.randn(2, 3)
+        y = torch.randn(200, 300)
+        x_clone = x.clone()
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        same(fn(x, y), opt_fn(x_clone, y))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6105,7 +6169,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            inps = [torch.randn(2, 4, 16, 16, device="cuda")]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
@@ -6179,6 +6243,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")

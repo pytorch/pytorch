@@ -69,6 +69,13 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   size_t ret = reader.getRecord("key1", dst.data(), size);
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
+  // chunked getRecord() test
+  ret = reader.getRecord(
+      "key1", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+        memcpy(dst, src, n);
+      });
+  ASSERT_EQ(ret, size);
+  ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
 
   std::tie(data_ptr, size) = reader.getRecord("key2");
   size_t off2 = reader.getRecordOffset("key2");
@@ -80,6 +87,13 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   // inplace getRecord() test
   dst.resize(size);
   ret = reader.getRecord("key2", dst.data(), size);
+  ASSERT_EQ(ret, size);
+  ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
+  // chunked getRecord() test
+  ret = reader.getRecord(
+      "key2", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+        memcpy(dst, src, n);
+      });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
 }
@@ -127,6 +141,14 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   EXPECT_THROW(reader.getRecord("key3"), c10::Error);
   std::vector<uint8_t> dst(data1.size());
   EXPECT_THROW(reader.getRecord("key3", dst.data(), data1.size()), c10::Error);
+  EXPECT_THROW(
+      reader.getRecord(
+          "key3",
+          dst.data(),
+          data1.size(),
+          3,
+          [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); }),
+      c10::Error);
 
   // Reader should still work after throwing
   EXPECT_TRUE(reader.hasRecord("key1"));
@@ -179,6 +201,13 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   EXPECT_EQ(size, 0);
   std::vector<uint8_t> dst(data1.size());
   size_t ret = reader.getRecord("key1.debug_pkl", dst.data(), data1.size());
+  EXPECT_EQ(ret, 0);
+  ret = reader.getRecord(
+      "key1.debug_pkl",
+      dst.data(),
+      data1.size(),
+      3,
+      [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   EXPECT_EQ(ret, 0);
 }
 
