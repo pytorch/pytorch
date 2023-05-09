@@ -83,6 +83,7 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
                 continue
             if "@functional_datapipe" in line:
                 method_name = extract_method_name(line)
+                doc_string_dict[method_name] = []
                 continue
             if method_name and "class " in line:
                 class_name = extract_class_name(line)
@@ -201,6 +202,8 @@ def get_method_definitions(file_path: Union[str, List[str]],
         else:
             output_type = default_output_type
         doc_string = "".join(methods_and_doc_strings[method_name])
+        if doc_string == "":
+            doc_string = "    ...\n"
         method_definitions.append(f"# Functional form of '{class_name}'\n"
                                   f"def {method_name}({arguments}) -> {output_type}:\n"
                                   f"{doc_string}")
