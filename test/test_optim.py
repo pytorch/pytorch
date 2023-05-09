@@ -55,14 +55,14 @@ from unittest.mock import patch
 load_tests = load_tests
 
 
-# Assumes an input of a tensor with exactly 2 scalars
 def rosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
-# Assumes an input of a tensor with exactly 2 scalars
 def drosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
