@@ -613,8 +613,9 @@ test_aot_compilation() {
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
 
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then
-    python test/run_test.py --cpp --verbose -i cpp/test_mobile_nnc
+    CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_mobile_nnc
   fi
+
   if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then
     source test/mobile/nnc/test_aot_compile.sh
   fi
@@ -643,6 +644,7 @@ test_distributed() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
 
+    export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
     # These are distributed tests, so let's continue running them sequentially here to avoid
     # any surprise
     python test/run_test.py --cpp --verbose -i cpp/FileStoreTest
@@ -670,7 +672,8 @@ test_rpc() {
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
-    python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
+
+    CPP_TESTS_DIR="${TORCH_BIN_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_cpp_rpc
   fi
 }
 
