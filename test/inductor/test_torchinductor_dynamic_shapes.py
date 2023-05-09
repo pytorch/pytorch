@@ -151,6 +151,27 @@ class TestInductorDynamic(TestCase):
         ref = fn(x, x.size(0))
         self.assertEqual(res, ref)
 
+    @torch._inductor.config.patch(disable_cpp_codegen=True)
+    def test_floor(self):
+        # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
+        # If cpp codegen is disabled, we should generate `math.floor` using PythonPrinter.
+        def fn(x):
+            n = x.size(-1)
+            y = x + int(n * 0.2) + 1
+            return y
+
+        opt = self.compile_fn(fn)
+        # The first run doesn't trigger dynamic shapes.
+        x0 = torch.rand(5)
+        ref0 = fn(x0)
+        res0 = opt(x0)
+        self.assertEqual(ref0, res0)
+        # The second run triggers dynamic shapes.
+        x1 = torch.rand(8)
+        ref1 = fn(x1)
+        res1 = opt(x1)
+        self.assertEqual(ref1, res1)
+
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):

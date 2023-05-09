@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import numbers
+from itertools import chain
 
 import torch
 import torch._decomp as decomp
@@ -103,6 +104,13 @@ def check_device(a: Tensor, b: Tensor):
     return a.is_cuda and b.is_cuda
 
 
+def is_symbolic(a: Tensor, b: Tensor):
+    return any(
+        isinstance(x, torch.SymInt)
+        for x in chain(a.size(), a.stride(), b.size(), b.stride())
+    )
+
+
 def get_padded_length(x, alignment_size):
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
@@ -121,6 +129,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.addmm, input=input)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -167,7 +176,10 @@ def should_pad_bench(mat1, mat2, op, input=None):
     import triton.testing
 
     do_bench = functools.partial(
-        triton.testing.do_bench, warmup=5, rep=100, fast_flush=True, percentiles=None
+        triton.testing.do_bench,
+        warmup=5,
+        rep=100,
+        fast_flush=True,
     )
 
     with no_dispatch():
@@ -249,6 +261,7 @@ def mm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.mm)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -280,6 +293,7 @@ def bmm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
     ):
         m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
