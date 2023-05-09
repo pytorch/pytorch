@@ -538,9 +538,9 @@ is the loss of the entire computation (producing a real loss) and
 :math:`s` is the output of our function. The goal here is to compute
 :math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of
 the function.  It turns out that in the case of real loss, we can
-get away with *only* calculating :math:`\frac{\partial L}{\partial z^*}`,
+get away with *only* calculating :math:`\frac{\partial L}{\partial s^*}`,
 even though the chain rule implies that we also need to
-have access to :math:`\frac{\partial L}{\partial z^*}`.  If you want
+have access to :math:`\frac{\partial L}{\partial s}`.  If you want
 to skip this derivation, look at the last equation in this section
 and then skip to the next section.
 
@@ -567,10 +567,10 @@ functions, and :math:`L` is real by our assumption that :math:`f` is a
 part of a real valued function, we have:
 
     .. math::
-        (\frac{\partial L}{\partial s})^* = \frac{\partial L}{\partial s^*}
+        \frac{\partial L}{\partial s} = (\frac{\partial L}{\partial s^*})^*
         :label: [2]
 
-i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
+i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`(grad\_output)^*`.
 
 Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:`\frac{\partial L}{\partial v}`, we get:
 
