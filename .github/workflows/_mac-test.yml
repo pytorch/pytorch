@@ -135,13 +135,6 @@ jobs:
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv "${ORIG_WHLNAME}" "${ARM_WHLNAME}"
 
-      - name: Download pytest cache
-        uses: ./.github/actions/pytest-cache-download
-        continue-on-error: true
-        with:
-          cache_dir: .pytest_cache
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
-
       - name: Set Test step time
         id: test-timeout
         shell: bash
@@ -206,15 +199,6 @@ jobs:
           set -e
 
           ${CONDA_RUN} .ci/pytorch/macos-test.sh
-
-      - name: Upload pytest cache if tests failed
-        uses: ./.github/actions/pytest-cache-upload
-        continue-on-error: true
-        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
-        with:
-          cache_dir: .pytest_cache
-          shard: ${{ matrix.shard }}
-          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
 
       - name: Print remaining test logs
         shell: bash
