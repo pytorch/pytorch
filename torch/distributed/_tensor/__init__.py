@@ -22,6 +22,50 @@ __all__ = [
 ]
 
 
+def _dtensor_init_helper(init_op, *size, **kwargs) -> DTensor:
+    # get default device mesh if there's nothing specified
+    device_mesh = kwargs.pop("device_mesh", None)
+    if device_mesh is None:
+        device_mesh = get_global_device_mesh()
+
+    # set default placements to replicated if not specified
+    placements = kwargs.pop("placements", None)
+    if placements is None:
+        placements = [Replicate() for _ in range(device_mesh.ndim)]
+
+    # check device_mesh againts placements
+    assert device_mesh.ndim == len(
+        placements
+    ), "mesh dimension does not match the length of placements"
+
+    # normalize the size argument
+    if len(size) == 1 and isinstance(size[0], Sequence):
+        torch_size = size[0]
+    else:
+        torch_size = list(size)
+    torch_size = torch.Size(torch_size)
+    assert kwargs["layout"] == torch.strided, "layout value not supported!"
+    torch_stride = torch._prims_common.make_contiguous_strides_for(torch_size)
+
+    # get local tensor shape
+    local_shape = compute_local_shape(torch_size, device_mesh, placements)
+    # initialize the local tensor
+    if len(local_shape) == 0:
+        local_tensor = torch.empty(0, **kwargs)
+    else:
+        local_tensor = init_op(local_shape, **kwargs)
+
+    return DTensor(
+        local_tensor=local_tensor,
+        device_mesh=device_mesh,
+        placements=placements,
+        shape=torch_size,
+        dtype=local_tensor.dtype,
+        stride=torch_stride,
+        requires_grad=kwargs["requires_grad"],
+    )
+
+
 def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
@@ -57,48 +101,15 @@ def ones(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    # get default device mesh if there's nothing specified
-    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
-    # set default placements to replicated if not specified
-    if placements is None:
-        placements = [Replicate() for _ in range(device_mesh.ndim)]
-    # check device_mesh againts placements
-    assert device_mesh.ndim == len(
-        placements
-    ), "mesh dimension does not match the length of placements"
-
-    # normalize the size argument
-    if len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = size[0]
-    else:
-        torch_size = list(size)
-    torch_size = torch.Size(torch_size)
-
-    # get local tensor shape
-    local_shape = compute_local_shape(torch_size, device_mesh, placements)
-    # initialize the local tensor
-    if len(local_shape) == 0:
-        local_tensor = torch.tensor([], dtype=dtype, requires_grad=requires_grad)
-    else:
-        local_tensor = torch.ones(
-            local_shape,
-            dtype=dtype,
-            device=device,
-            requires_grad=requires_grad,
-            layout=layout,
-        )
-
-    # compute dtensor stride from the size argument
-    torch_stride = torch._prims_common.make_contiguous_strides_for(torch_size)
-
-    return DTensor(
-        local_tensor,
-        device_mesh,
-        placements,
-        shape=torch_size,
-        dtype=local_tensor.dtype,
+    return _dtensor_init_helper(
+        torch.ones,
+        *size,
+        dtype=dtype,
+        device=device,
+        layout=layout,
         requires_grad=requires_grad,
-        stride=torch_stride,
+        device_mesh=device_mesh,
+        placements=placements,
     )
 
 
@@ -130,43 +141,12 @@ def zeros(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    # if device_mesh is None, use the global one
-    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
-    # set default placements to replicated if not specified
-    if placements is None:
-        placements = [Replicate() for _ in range(device_mesh.ndim)]
-    assert device_mesh.ndim == len(
-        placements
-    ), "mesh dimension does not match the length of placements"
-
-    if len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = size[0]
-    else:
-        torch_size = list(size)
-    torch_size = torch.Size(torch_size)
-    assert layout == torch.strided, "layout value not supported!"
-    torch_stride = torch._prims_common.make_contiguous_strides_for(torch_size)
-
-    local_shape = compute_local_shape(torch_size, device_mesh, placements)
-    if len(local_shape) == 0:
-        local_tensor = torch.tensor([], dtype=dtype, requires_grad=requires_grad)
-    else:
-        local_tensor = torch.zeros(
-            local_shape,
-            device=device_mesh.device_type,
-            dtype=dtype,
-            layout=layout,
-            requires_grad=requires_grad,
-        )
-
-    dtensor = DTensor(
-        local_tensor=local_tensor,
+    return _dtensor_init_helper(
+        torch.zeros,
+        *size,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
         device_mesh=device_mesh,
         placements=placements,
-        shape=torch_size,
-        dtype=local_tensor.dtype,
-        stride=torch_stride,
-        requires_grad=requires_grad,
     )
-
-    return dtensor
