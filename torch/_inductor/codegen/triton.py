@@ -1178,7 +1178,8 @@ class TritonKernel(Kernel):
             set(self.range_tree_nodes.keys()), original_index.free_symbols
         )
         if is_inplace and is_broadcasted:
-            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+            # self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+            pass
 
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
