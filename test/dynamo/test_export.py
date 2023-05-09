@@ -2348,11 +2348,6 @@ def forward(self, x):
         capture_scalar_outputs=True,
     )
     def test_export_preserve_constraints_as_metadata_tensor(self):
-<<<<<<< HEAD
-=======
-        from torch._export.constraints import constrain_as_value
-
->>>>>>> 87e3b4d2610 (add runtime assertions for inline constraints.)
         def f(x):
             b = x.nonzero()
             constrain_as_value(b.shape[0], min=2, max=5)

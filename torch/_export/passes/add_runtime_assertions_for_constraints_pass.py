@@ -1,15 +1,8 @@
-<<<<<<< HEAD
-from collections import defaultdict, namedtuple
-from functools import partial
-from typing import Dict, List, Tuple, Optional
-
-=======
->>>>>>> 87e3b4d2610 (add runtime assertions for inline constraints.)
 import math
 import operator
 from collections import defaultdict, namedtuple
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import sympy
 import torch
@@ -19,7 +12,6 @@ import torch.utils._pytree as pytree
 from torch._export.graph_module import get_export_meta
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.pass_infra.node_metadata import NodeMetadata
-from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.fx.passes.infra.pass_base import PassResult
 
 
