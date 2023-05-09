@@ -366,7 +366,40 @@ class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "huggingface"
+    def install_model(
+        self,
+        model_name
+    ):
+        dtype = torch.float32
+        reset_rng_state()
+        if model_name not in EXTRA_MODELS:
+            model_cls = get_module_cls_by_model_name(model_name)
+            config_cls = model_cls.config_class
+            config = config_cls()
 
+            # NB: some models need a pad token defined to handle BS > 1
+            if (
+                model_cls
+                in [
+                    GPT2ForSequenceClassification,
+                    GPTNeoForSequenceClassification,
+                    GPTJForSequenceClassification,
+                ]
+                or model_cls.__name__.startswith("Roberta")
+                or model_cls.__name__.startswith("Marian")
+            ):
+                config.pad_token_id = 0
+
+        else:
+            config, model_cls = EXTRA_MODELS[model_name]
+
+        if "auto" in model_cls.__module__:
+            # Handle auto classes
+            model = model_cls.from_config(config)
+        else:
+            model = model_cls(config)
+        # save model
+        torch.save(model, f"hugging_face_models/{model_name}.pt")
     def load_model(
         self,
         device,

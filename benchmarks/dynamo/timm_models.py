@@ -169,6 +169,27 @@ class TimmRunnner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+    def install_model(self, model_name):
+        model = create_model(
+                    model_name,
+                    in_chans=3,
+                    scriptable=False,
+                    num_classes=None,
+                    drop_rate=0.0,
+                    drop_path_rate=None,
+                    drop_block_rate=None,
+                    pretrained=True,
+                    # global_pool=kwargs.pop('gp', 'fast'),
+                    # num_classes=kwargs.pop('num_classes', None),
+                    # drop_rate=kwargs.pop('drop', 0.),
+                    # drop_path_rate=kwargs.pop('drop_path', None),
+                    # drop_block_rate=kwargs.pop('drop_block', None),
+                )
+
+            # save model
+        print(f"saving {model_name}")
+        torch.save(model, f"timm_models/{model_name}.pt")
+        print(f"saved {model_name}")
 
     def load_model(
         self,
