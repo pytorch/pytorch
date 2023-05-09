@@ -2372,6 +2372,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // order of indexing matters
+      .enforce_linear_iteration()
       .add_output(self)
       .add_input(*b_mask)
       .build();

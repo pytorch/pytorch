@@ -20,12 +20,11 @@ from torch._dynamo.debug_utils import (
     minifier_dir,
     NNModuleToString,
     run_fwd_maybe_bwd,
-    TEST_REPLACEABLE_COMMENT,
 )
 
 from .. import config
 from ..backends.registry import lookup_backend, register_debug_backend
-from ..utils import clone_inputs
+from ..debug_utils import clone_inputs_retaining_gradness
 
 log = logging.getLogger(__name__)
 
@@ -111,7 +110,8 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
         return compiled_gm
 
     debug_wrapper._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
-
+    if hasattr(unconfigured_compiler_fn, "compiler_name"):
+        debug_wrapper.__name__ = unconfigured_compiler_fn.compiler_name
     return debug_wrapper
 
 
@@ -164,7 +164,6 @@ from torch._dynamo.debug_utils import same_two_models
 
 {generate_config_string()}
 
-{TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -264,7 +263,6 @@ from torch._dynamo.testing import rand_strided
 
 {generate_config_string()}
 
-{TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
 args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
@@ -376,8 +374,10 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
     from difflib import SequenceMatcher
 
     try:
+        # Run the original gm to check eager validity
+        run_fwd_maybe_bwd(gm, clone_inputs_retaining_gradness(example_inputs))
         compiled_gm = compiler_fn(gm, example_inputs)
-        run_fwd_maybe_bwd(compiled_gm, clone_inputs(example_inputs))
+        run_fwd_maybe_bwd(compiled_gm, clone_inputs_retaining_gradness(example_inputs))
         return False
     except Exception as e:
         new_failure = str(e)
