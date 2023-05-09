@@ -1054,6 +1054,7 @@ class TritonKernel(Kernel):
         if config.triton.assert_indirect_indexing and torch.version.hip is None:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less # error-prone to use and/or/not, which is suported by triton
+            size = self.rename_indexing(size)
             cond = f"(0 <= {var}) & ({var} < {size})"
             cond_print = f"0 <= {var} < {size}"
 
