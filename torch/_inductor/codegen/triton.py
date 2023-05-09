@@ -250,7 +250,10 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        return V.kernel.indexing(expr)[0]
+        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        var = V.kernel.cse.generate(V.kernel.compute, index_str)
+        var.mask_vars = mask_vars
+        return var
 
     @staticmethod
     def masked(mask, body, other):
@@ -694,7 +697,8 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        self.indirect_max_sizes = {}
+        self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
+        self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         self.initialize_range_tree(pid_cache)
@@ -1063,7 +1067,7 @@ class TritonKernel(Kernel):
             def __call__(self):
                 # The conditions need to be in parens because of Python's operator precedence.
                 # It'd be less # error-prone to use and/or/not, which is suported by triton
-                size = V.graph.sizevars.simplify(self.size_map[(self.var, self.mask)])
+                size = self.size_map[(self.var, self.mask)]
                 cond = f"(0 <= {self.var}) & ({self.var} < {size})"
                 cond_print = f"0 <= {self.var} < {size}"
                 if self.mask:
@@ -1076,33 +1080,44 @@ class TritonKernel(Kernel):
         var_str = str(var)
 
         if config.triton.assert_indirect_indexing and torch.version.hip is None:
-            mask_vars = list(var.mask_vars)
+            mask_vars = set(var.mask_vars)
             if self._load_mask:
-                mask_vars.append(self._load_mask)
+                mask_vars.add(self._load_mask)
 
             mask = ""
             if mask_vars:
                 mask = (
-                    f"{mask_vars[0]}"
+                    f"{list(mask_vars)[0]}"
                     if len(mask_vars) == 1
-                    else f"({' & '.join(mask_vars)})"
+                    else f"({' & '.join(str(v) for v in mask_vars)})"
                 )
 
-            size = self.rename_indexing(size)
+            # tl.device_assert doesn't work for constexpr values, and we can't
+            # tell from here if a var is constexpr or not, so promote everything
+            var_str = str(
+                self.cse.generate(
+                    self.compute, f"triton_helpers.promote_to_tensor({var})"
+                )
+            )
 
             # An assertion line may have been written already, if so just
             # update the max size.
-            size_map = self.indirect_max_sizes
             map_key = (var_str, mask)
-            existing_size = size_map.get(map_key)
-            if existing_size is None:
-                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
-                size_map[map_key] = size
-                self.compute.writeline(
-                    IndirectAssertLine(line, var_str, mask, size_map)
-                )
+            existing_size = self.indirect_max_sizes_expr.get(map_key)
+            if existing_size is not None:
+                size = sympy.Min(size, existing_size)
             else:
-                size_map[map_key] = sympy.Min(size, existing_size)
+                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
+                self.compute.writeline(
+                    IndirectAssertLine(
+                        line, var_str, mask, self.indirect_max_sizes_printed
+                    )
+                )
+
+            self.indirect_max_sizes_expr[map_key] = size
+            self.indirect_max_sizes_printed[map_key] = texpr(
+                self.rename_indexing(self.codegen_indexing(size))
+            )
 
         return sympy_symbol(str(var))
 
