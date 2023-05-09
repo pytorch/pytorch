@@ -2,6 +2,7 @@ from typing import Dict, Optional, Set
 
 import torch
 from torch._ops import OpOverload, OpOverloadPacket
+from torch._export.error import InternalError
 from torch._export.pass_base import ExportPassBase
 
 
@@ -22,13 +23,12 @@ _BLACK_LISTED_OPS: Set[OpOverloadPacket] = {
 def is_view_op(schema: torch._C.FunctionSchema) -> bool:
     if len(schema.arguments) == 0:
         return False
-    return schema.arguments[0].alias_info is not None
+    alias_info = schema.arguments[0].alias_info
+    return (alias_info is not None) and (not alias_info.is_write)
 
 
 def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOverload]:
-    if not is_view_op(schema):
-        return None
-    if schema.name.startswith("aten::"):
+    if is_view_op(schema) and schema.name.startswith("aten::"):
         view_op_name = schema.name.split("::")[1]
         view_op_overload = (
             schema.overload_name
@@ -37,12 +37,12 @@ def get_view_copy_of_view_op(schema: torch._C.FunctionSchema) -> Optional[OpOver
         )
         view_copy_op_name = view_op_name + "_copy"
         if not hasattr(torch.ops.aten, view_copy_op_name):
-            return None
+            raise InternalError(f"{schema.name} is missing a view_copy variant")
 
         view_copy_op_overload_packet = getattr(torch.ops.aten, view_copy_op_name)
 
         if not hasattr(view_copy_op_overload_packet, view_op_overload):
-            return None
+            raise InternalError(f"{schema.name} is missing a view_copy variant")
 
         return getattr(view_copy_op_overload_packet, view_op_overload)
 
@@ -65,7 +65,7 @@ class ReplaceViewOpsWithViewCopyOpsPass(ExportPassBase):
         if op in _BLACK_LISTED_OPS:
             return super().call_operator(op, args, kwargs, meta)
 
-        if view_copy_op := get_view_copy_of_view_op(op):
+        if view_copy_op := get_view_copy_of_view_op(op._schema):
             return super().call_operator(view_copy_op, args, kwargs, meta)
 
         return super().call_operator(op, args, kwargs, meta)
