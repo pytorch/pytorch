@@ -1251,9 +1251,9 @@ class CppVecKernel(CppKernel):
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16, torch.float16]:
             if opt_ctx.is_load_bf16_as_fp32:
-                line = f"load_bf16_as_float({loadbuf})"
+                line = f"load_as_float<bfloat16>({loadbuf})"
             elif opt_ctx.is_load_fp16_as_fp32:
-                line = f"load_fp16_as_float({loadbuf})"
+                line = f"load_as_float<half>({loadbuf})"
             elif opt_ctx.is_bf16_mem_copy:
                 line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
             else:
@@ -1299,9 +1299,9 @@ class CppVecKernel(CppKernel):
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16, torch.float16]:
             if opt_ctx.is_store_fp32_as_bf16:
-                line = f"store_float_as_bf16({var_expr}, {value});"
+                line = f"store_from_float<bfloat16>({var_expr}, {value});"
             elif opt_ctx.is_store_fp32_as_fp16:
-                line = f"store_float_as_fp16({var_expr}, {value});"
+                line = f"store_from_float<half>({var_expr}, {value});"
             elif opt_ctx.is_bf16_mem_copy:
                 line = f"{value}.store({var_expr}, {self.tiling_factor});"
             else:
@@ -1509,14 +1509,16 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16, torch.float16]:
                 if opt_ctx.is_load_bf16_as_fp32:
-                    line = f"load_bf16_as_float({loadbuf})"
+                    line = f"load_as_float<bfloat16>({loadbuf})"
                 elif opt_ctx.is_load_fp16_as_fp32:
-                    line = f"load_fp16_as_float({loadbuf})"
+                    line = f"load_as_float<half>({loadbuf})"
                 elif opt_ctx.is_bf16_mem_copy:
                     line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
                 else:
                     assert opt_ctx.is_fp16_mem_copy
                     line = f"at::vec::Vectorized<half>::loadu({loadbuf}, {self.tiling_factor})"
+            else:
+                line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
@@ -1542,14 +1544,16 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16, torch.float16]:
                 if opt_ctx.is_store_fp32_as_bf16:
-                    line = f"store_float_as_bf16({storebuf}, {value});"
+                    line = f"store_from_float<bfloat16>({storebuf}, {value});"
                 elif opt_ctx.is_store_fp32_as_fp16:
-                    line = f"store_float_as_fp16({storebuf}, {value});"
+                    line = f"store_from_float<half>({storebuf}, {value});"
                 elif opt_ctx.is_bf16_mem_copy:
                     line = f"{value}.store({storebuf}, {self.tiling_factor});"
                 else:
                     assert opt_ctx.is_fp16_mem_copy
                     line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            else:
+                line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
         else:
             new_index = self.scale_index_with_offset(

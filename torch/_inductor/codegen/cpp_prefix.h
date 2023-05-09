@@ -114,30 +114,40 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
+template <
+    typename T,
+    typename std::enable_if_t<at::vec::is_reduced_floating_point_v<T>, int> = 0>
+inline at::vec::Vectorized<float> load_as_float(const T* buf);
+template <>
+inline at::vec::Vectorized<float> load_as_float<bfloat16>(const bfloat16* buf) {
   at::vec::Vectorized<float> res_vec(0);
-  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
+  at::vec::load_fp32_from_bf16(buf, res_vec);
+  return res_vec;
+}
+template <>
+inline at::vec::Vectorized<float> load_as_float<half>(const half* buf) {
+  at::vec::Vectorized<float> res_vec(0);
+  at::vec::load_fp32_from_fp16(buf, res_vec);
   return res_vec;
 }
 
-inline void store_float_as_bf16(
-    bfloat16* bf16_buf,
+template <
+    typename T,
+    typename std::enable_if_t<at::vec::is_reduced_floating_point_v<T>, int> = 0>
+inline void store_from_float(T* buf, at::vec::Vectorized<float> src_buf);
+template <>
+inline void store_from_float<bfloat16>(
+    bfloat16* buf,
     at::vec::Vectorized<float> src_buf) {
   auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
-  res.store(bf16_buf, at::vec::Vectorized<float>::size());
+  res.store(buf, at::vec::Vectorized<float>::size());
 }
-
-inline at::vec::Vectorized<float> load_fp16_as_float(const half* fp16_buf) {
-  at::vec::Vectorized<float> res_vec(0);
-  at::vec::load_fp32_from_fp16(fp16_buf, res_vec);
-  return res_vec;
-}
-
-inline void store_float_as_fp16(
-    half* fp16_buf,
+template <>
+inline void store_from_float<half>(
+    half* buf,
     at::vec::Vectorized<float> src_buf) {
   auto res = at::vec::convert_float_half(src_buf, src_buf);
-  res.store(fp16_buf, at::vec::Vectorized<float>::size());
+  res.store(buf, at::vec::Vectorized<float>::size());
 }
 
 template <typename SRC>
