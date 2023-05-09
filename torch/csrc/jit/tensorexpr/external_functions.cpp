@@ -358,11 +358,6 @@ static at::Tensor quantized_cat(
       zero);
 }
 
-static at::Tensor quantized_relu(const at::Tensor& qx) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::relu", "")
-                      .typed<at::Tensor(at::Tensor)>();
-  return op.call(qx);
 }
 #endif // _WIN32
 
