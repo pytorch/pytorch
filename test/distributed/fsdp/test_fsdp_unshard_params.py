@@ -522,7 +522,7 @@ class TestUnshardParams(TestUnshardParamsBase):
 
         def _get_error_context(is_supported: bool):
             return (
-                contextlib.suppress()
+                contextlib.nullcontext()
                 if is_supported
                 else self.assertRaises(NotImplementedError)
             )  # some configs are not implemented yet

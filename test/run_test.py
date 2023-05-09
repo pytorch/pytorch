@@ -385,6 +385,7 @@ if dist.is_available():
             "UCX_TLS": "tcp",
             "UCC_TLS": "nccl,ucp",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -545,13 +546,14 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = (
-        "--subprocess" not in command
-        and not RERUN_DISABLED_TESTS
+    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    timeout = (
+        THRESHOLD * 3
+        if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
+        else None
     )
-    timeout = THRESHOLD * 3 if should_file_rerun else None
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
     with open(log_path, "w") as f:
@@ -562,7 +564,7 @@ def run_test(
             stderr=f,
             env=env,
             timeout=timeout,
-            retries=1 if should_file_rerun else 0,
+            retries=2 if should_file_rerun else 0,
         )
 
         # Pytest return code 5 means no test is collected. This is needed
@@ -1231,7 +1233,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options):
+def get_selected_tests(options) -> List[ShardedTest]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1263,7 +1265,7 @@ def get_selected_tests(options):
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal"]
+        selected_tests = ["test_mps", "test_metal", "test_modules"]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
@@ -1406,34 +1408,14 @@ def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional
     return message
 
 
-def main():
-    options = parse_args()
-
-    test_directory = str(REPO_ROOT / "test")
-    selected_tests = get_selected_tests(options)
-
-    if options.verbose:
-        print_to_stderr(
-            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
-        )
-
-    if options.dry_run:
-        return
-
-    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
-        shell(["coverage", "erase"])
-
-    if IS_CI:
-        selected_tests = get_reordered_tests(selected_tests)
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-
-    if options.dynamo:
-        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
-    elif options.inductor:
-        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
-
+def run_tests(
+    selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
+) -> None:
     failure_messages = []
+
+    if len(selected_tests) == 0:
+        print_to_stderr(f"No tests in group `{group_name}`")
+        return failure_messages
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
@@ -1441,9 +1423,10 @@ def main():
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
+    print(f"TEST GROUP: {group_name}")
     print_to_stderr(
-        "parallel (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
+        "parallel (file granularity) tests :\n {}".format(
+            "\n".join(str(x) for x in selected_tests_parallel)
         )
     )
     print_to_stderr(
@@ -1456,7 +1439,6 @@ def main():
     pool = get_context("spawn").Pool(
         NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
     )
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     def handle_error_messages(err_message):
         if err_message is None:
@@ -1502,10 +1484,58 @@ def main():
             test_failed = handle_error_messages(err_message)
             if test_failed and not options.continue_through_error:
                 raise RuntimeError(err_message)
+
     finally:
         pool.terminate()
         pool.join()
 
+    return failure_messages
+
+
+def main():
+    options = parse_args()
+
+    test_directory = str(REPO_ROOT / "test")
+    selected_tests = get_selected_tests(options)
+
+    if options.verbose:
+        print_to_stderr(
+            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
+        )
+
+    if options.dry_run:
+        return
+
+    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
+        shell(["coverage", "erase"])
+
+    prioritized_tests = []
+    remaining_tests = selected_tests
+    if IS_CI:
+        (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        # downloading test cases configuration to local environment
+        get_test_case_configs(dirpath=test_directory)
+
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
+    failure_messages = []
+
+    # First run the prioritized tests, then the remaining tests.
+    try:
+        failure_messages = run_tests(
+            prioritized_tests, test_directory, options, "Prioritized tests"
+        )
+
+        failure_messages += run_tests(
+            remaining_tests, test_directory, options, "General tests"
+        )
+
+    finally:
         if options.coverage:
             from coverage import Coverage
 

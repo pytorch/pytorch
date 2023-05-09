@@ -13,9 +13,11 @@ import torch._dynamo
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -726,6 +728,42 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 1)
             del x
             self.assertEqual(all_live_block_count(), 0)
+
+        @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
+        def test_workspace_allocation_error(self):
+            torch._C._cuda_clearCublasWorkspaces()
+
+            prev = torch._inductor.cudagraph_trees.clear_cublas_manager
+
+            try:
+                torch._inductor.cudagraph_trees.clear_cublas_manager = (
+                    contextlib.nullcontext
+                )
+
+                @torch.compile()
+                def foo(x, y):
+                    return x @ x
+
+                inps = [torch.rand([400, 400], device="cuda") for _ in range(2)]
+
+                thrown = False
+                try:
+                    foo(*inps)
+                except Exception as e:
+                    thrown = True
+                    FileCheck().check("at::cuda::getNewWorkspace").check(
+                        "at::cuda::blas::gemm<float>"
+                    ).run(str(e))
+
+                self.assertTrue(thrown)
+
+            finally:
+                torch._C._cuda_clearCublasWorkspaces()
+                torch._inductor.cudagraph_trees.clear_cublas_manager = prev
+                torch._inductor.cudagraph_trees.get_container(
+                    self.device_idx
+                ).tree_manager = None
 
         def test_peristed_output_livenes(self):
             @torch.compile
