@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import itertools
+from unittest import patch
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
@@ -66,6 +67,8 @@ binary_list = {
 }
 
 
+# Dynamic shapes does not work with Mlkdnn
+@patch.object(torch._dynamo.config, "dynamic_shapes", False)
 class TestPaternMatcher(TestCase):
     def _clone_inputs(self, inputs):
         def clone(x):
