@@ -4,7 +4,6 @@ import functools
 import inspect
 import typing
 import weakref
-from collections import defaultdict
 
 from torchgen.model import FunctionSchema, OperatorName, SchemaKind
 
@@ -209,10 +208,13 @@ class CustomOp:
     # needs to be done in a separate self._lib.impl call.
     def _register_impl(self, kind, func, stacklevel=2):
         if self._has_impl(kind):
+            func_and_location = self._impls[kind]
+            assert func_and_location is not None  # Pacify mypy
+            location = func_and_location.location
             raise RuntimeError(
                 f"Attempting to register a {kind} impl for operator {self._qualname} "
                 f"that already has a {kind} impl registered from Python at "
-                f"{self._impls[kind].location}. This is not supported."
+                f"{location}. This is not supported."
             )
         frame = inspect.stack()[stacklevel]
         location = f"{frame.filename}:{frame.lineno}"
