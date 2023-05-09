@@ -816,7 +816,10 @@ class Scheduler:
         while again:
             updated_nodes = []
             for node in self.nodes:
-                if any(n.get_name() not in V.graph.removed_buffers for n in node.users) or node.has_side_effects()::
+                if (
+                    any(n.get_name() not in V.graph.removed_buffers for n in node.users)
+                    or node.has_side_effects()
+                ):
                     updated_nodes.append(node)
                 else:
                     # dead code
