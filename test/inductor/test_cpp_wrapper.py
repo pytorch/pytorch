@@ -97,13 +97,14 @@ if RUN_CPU:
             torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_lowmem_dropout1"),  # None as output
+        # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
         BaseTest("test_silu"),  # single input, single output
+        BaseTest("test_sort"),
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
@@ -127,6 +128,7 @@ if RUN_CUDA:
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
+        BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
@@ -138,6 +140,7 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8

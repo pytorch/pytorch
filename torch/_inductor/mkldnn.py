@@ -248,8 +248,8 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         if isinstance(example_input, torch.Tensor)
     )
 
-    # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
+    # make sure the autograd and autocast are disabled.
+    if torch.is_grad_enabled() or torch.is_autocast_cpu_enabled():
         return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm

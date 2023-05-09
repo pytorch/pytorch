@@ -22,9 +22,14 @@ def _maybe_insert_input_and_output_observers_for_node(
 ):
     this_node_dtype_info = node.meta["target_dtype_info"] if "target_dtype_info" in node.meta else None
     if "val" in node.meta:
+        def check_node_meta_val_fake_tensor(node_meta_val):
+            if isinstance(node_meta_val, (tuple, list)):
+                return all(check_node_meta_val_fake_tensor(element) for element in node_meta_val)
+            else:
+                return isinstance(node_meta_val, FakeTensor)
         output_is_a_tensor = (
             this_node_dtype_info is not None and
-            isinstance(node.meta["val"], FakeTensor)
+            check_node_meta_val_fake_tensor(node.meta["val"])
         )
     else:
         output_is_a_tensor = this_node_dtype_info is not None
