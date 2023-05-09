@@ -688,6 +688,16 @@ void initDispatchBindings(PyObject* module) {
         return names;
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+  m.def(
+      "_dispatch_set_report_error_callback",
+      [](c10::OperatorHandle& handle, py::object callback) {
+        auto obj = callback.ptr();
+        // SafePyObject steals a reference
+        Py_INCREF(obj);
+        auto callback_obj =
+            std::make_unique<c10::SafePyObject>(obj, getPyInterpreter());
+        handle.setReportErrorCallback_(std::move(callback_obj));
+      });
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
