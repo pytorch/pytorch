@@ -43,7 +43,7 @@ def ones(
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned DTensor.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        device (:class:`torch.device`, optional): the desired device of returned DTensor. 
+        device (:class:`torch.device`, optional): the desired device of returned DTensor.
             Default: if ``None``, uses the current device for the default tensor type
             (see :func:`torch.set_default_tensor_type`). device will be the CPU for CPU
             tensor types and the current CUDA device for CUDA tensor types.

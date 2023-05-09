@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros, ones
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard, zeros
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -34,7 +34,7 @@ class DTensorConstructorTest(DTensorTestBase):
     @property
     def world_size(self):
         return 4
-    
+
     @with_comms
     def test_ones(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -70,7 +70,9 @@ class DTensorConstructorTest(DTensorTestBase):
                     torch.chunk(torch.ones(tensor_size), self.world_size, dim=shard_dim)
                 )
                 if self.rank < len(ones_expected_list):
-                    self.assertEqual(ones_expected_list[self.rank], dist_tensor.to_local())
+                    self.assertEqual(
+                        ones_expected_list[self.rank], dist_tensor.to_local()
+                    )
             else:
                 ones_expected = torch.ones(tensor_size)
                 self.assertEqual(ones_expected, dist_tensor.to_local())
