@@ -46,7 +46,9 @@ def validate_op_between_ort_torch(
     # trace_only function is regular python function
     function_name = (
         symbolic_fn.name
-        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
+        if isinstance(
+            symbolic_fn, (onnxscript.OnnxFunction, onnxscript.values.TracedOnnxFunction)
+        )
         else symbolic_fn.__name__
     )
 
