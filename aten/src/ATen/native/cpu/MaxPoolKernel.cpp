@@ -564,13 +564,36 @@ void max_pool2d_kernel_impl(
 }
 
 void max_pool3d_kernel_impl(
-    const Tensor& output,
-    const Tensor& indices,
+    Tensor& output,
+    Tensor& indices,
     const Tensor& input,
     int kW, int kH, int kD,
     int dW, int dH, int dD,
     int padW, int padH, int padD,
     int dilationW, int dilationH, int dilationD) {
+  if (input.ndimension() == 4) {
+    Tensor input_cl_check = input.unsqueeze(0);
+    // align with cuda:
+    // work around buggy behavior of suggest_memory_format here where
+    // suggested format of unsqueezed tensor is contiguous while it is
+    // really only contiguous in ChannelsLast3d
+    if ((!input_cl_check.is_contiguous()) &&
+                     input_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      DimVector out_sizes(output.sizes().begin(), output.sizes().end());
+      out_sizes.insert(out_sizes.begin(), 1);
+      output.resize_(out_sizes, at::MemoryFormat::ChannelsLast3d);
+      DimVector indices_sizes(indices.sizes().begin(), indices.sizes().end());
+      indices_sizes.insert(indices_sizes.begin(), 1);
+      indices.resize_(indices_sizes, at::MemoryFormat::ChannelsLast3d);
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool3d_channels_last", [&] {
+        cpu_max_pool_channels_last<scalar_t, /*is 3d*/true>(output, indices, input_cl_check,
+          {kW, kH, kD}, {dW, dH, dD}, {padW, padH, padD}, {dilationW, dilationH, dilationD});
+      });
+      output.squeeze_(0);
+      indices.squeeze_(0);
+      return;
+    }
+  }
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool3d", [&] {
@@ -614,9 +637,28 @@ void max_pool2d_backward_kernel_impl(
 }
 
 void max_pool3d_backward_kernel_impl(
-    const Tensor& grad_input,
+    Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& indices) {
+  if (grad_output.ndimension() == 4) {
+    Tensor grad_output_cl_check = grad_output.unsqueeze(0);
+    // align with cuda:
+    // work around buggy behavior of suggest_memory_format here where
+    // suggested format of unsqueezed tensor is contiguous while it is
+    // really only contiguous in ChannelsLast3d
+    if ((!grad_output_cl_check.is_contiguous()) &&
+                     grad_output_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      DimVector sizes(grad_input.sizes().begin(), grad_input.sizes().end());
+      sizes.insert(sizes.begin(), 1);
+      grad_input.resize_(sizes, at::MemoryFormat::ChannelsLast3d);
+      auto _indices = indices.unsqueeze(0).contiguous(at::MemoryFormat::ChannelsLast3d);
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "max_pool3d_backward_channels_last", [&] {
+        cpu_max_pool_backward_channels_last<scalar_t, /*is_3d*/ true>(grad_input, grad_output_cl_check, _indices);
+      });
+      grad_input.squeeze_(0);
+      return;
+    }
+  }
   switch (grad_output.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "max_pool3d_backward", [&] {

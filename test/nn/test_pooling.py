@@ -931,17 +931,14 @@ torch.cuda.synchronize()
         helper(4, 8, 8, 8, 8, 7)
         helper(4, 8, 8, 8, 8, (5, 6, 7))
         helper(1, 8, 8, 8, 8, (5, 6, 7))
-        if device != "cpu":
-            helper(0, 6, 12, 13, 14, (5, 6, 7))
+        helper(0, 6, 12, 13, 14, (5, 6, 7))
         helper(4, 8, 7, 7, 7, 3, stride=1)
         helper(10, 128, 19, 19, 19, 3, stride=2)
         helper(10, 128, 19, 19, 19, (1, 2, 3), stride=2)
         helper(1, 128, 19, 19, 19, (1, 2, 3), stride=2)
-        if device != "cpu":
-            helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
+        helper(0, 128, 19, 19, 19, (1, 2, 3), stride=2)
         helper(1, 79, 4, 4, 4, 3, stride=2)
-        if device != "cpu":
-            helper(0, 79, 4, 4, 4, 3, stride=2)
+        helper(0, 79, 4, 4, 4, 3, stride=2)
 
     @onlyCPU
     def test_max_pool_bfloat16(self, device):
