@@ -732,7 +732,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             dims together, therefor fewer symbols mean more contiguous
             dims.
             """
-            if not hasattr(dep, "index"):
+            if isinstance(dep, StarDep):
                 return 0
             score = 0
             symbols = set(dep.index.free_symbols)
