@@ -144,6 +144,11 @@ class TritonCSEVariable(CSEVariable):
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
 class TritonOverrides(OpOverrides):
@@ -1067,7 +1072,7 @@ class TritonKernel(Kernel):
                     indirect_var = body.indirect_vars[idx]
                     indirect_bounds[indirect_name[indirect_var]] = rg
 
-        def gen_min_max(var, size):
+        def assert_min_max(var, size):
             # TODO At the moment we just give per-LoopBody bounds. This is why
             # we may have a `var not in indirect_bounds`. We should be able
             # to perform this analysis for a whole SchedulerNode! Same for
@@ -1097,20 +1102,20 @@ class TritonKernel(Kernel):
                         return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
 
                 size = print_min(sizes)
-            gen_min, gen_max = gen_min_max(var, size)
+            assert_min, assert_max = assert_min_max(var, size)
             # FooBar
-            if not (gen_min or gen_max):
+            if not (assert_min or assert_max):
                 continue
-            elif gen_min and gen_max:
+            elif assert_min and assert_max:
                 # The conditions need to be in parens because of Python's operator precedence.
                 # It'd be less # error-prone to use and/or/not, which is suported by triton
                 cond = f"(0 <= {var}) & ({var} < {size})"
                 cond_print = f"0 <= {var} < {size}"
-            elif gen_min:
+            elif assert_min:
                 cond = f"0 <= {var}"
                 cond_print = cond
             else:
-                # gen_max
+                # assert_max
                 cond = f"{var} <= {size}"
                 cond_print = cond
 
@@ -1227,8 +1232,10 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
+            use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
+            if reduction_type in {"max", "min"}:
+                return f"{module}.{reduction_type}2({value}, {dim})[{', '.join(sizes)}]"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         def final_argreduce(buffer, result_var, value, index):

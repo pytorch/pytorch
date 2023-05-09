@@ -131,6 +131,16 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv2d_autocast(self):
+        v = torch.randn(1, 3, 28, 18, dtype=torch.float32)
+        mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).eval()
+        with torch.no_grad(), torch.cpu.amp.autocast():
+            self.common(
+                mod,
+                (v,),
+            )
+
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
@@ -210,6 +220,27 @@ class CPUReproTests(TestCase):
                     mod,
                     (v,),
                 )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_conv_transpose2d_has_output_size_input(self):
+        # https://github.com/pytorch/pytorch/issues/100344.
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_transpose(x, output_size=(10, 10))
+
+        mod = M().eval()
+        v = torch.randn(1, 3, 10, 10, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
 
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
@@ -381,6 +412,47 @@ class CPUReproTests(TestCase):
 
                 real_out = fn(x, scale, zero_point, use_dequant, use_quant)
                 compiled_out = opt_fn(x, scale, zero_point, use_dequant, use_quant)
+                assert same(real_out, compiled_out, equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_dequant_maxpool2d_lowering(self):
+        def fn(x, scale, zero_point):
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, scale, zero_point, 0, 255, torch.uint8
+            )
+            max_pool2d_with_indices_default = (
+                torch.ops.aten.max_pool2d_with_indices.default(
+                    x, [2, 2], [2, 2], [1, 1]
+                )[0]
+            )
+            return max_pool2d_with_indices_default
+
+        use_tensor_overload_list = [False, True]
+        for use_tensor_overload in use_tensor_overload_list:
+            x = (
+                torch.clamp(
+                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100, 0, 255
+                )
+                .to(torch.uint8)
+                .contiguous(memory_format=torch.channels_last)
+            )
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                opt_fn(x, scale, zero_point)
+
+                real_out = fn(x, scale, zero_point)
+                compiled_out = opt_fn(x, scale, zero_point)
                 assert same(real_out, compiled_out, equal_nan=True)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
