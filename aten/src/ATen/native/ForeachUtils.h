@@ -248,7 +248,7 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(const nested_optional_t
         TORCH_CHECK(
           t.has_value(),
           "Tensors of the first list of nested Tensor lists are supposed to be defined but ",
-          tensor_index, "-th Tensor is not.");
+          "the ", tensor_index, "-th Tensor is not.");
         return {t->device(), t->scalar_type()};
     }();
     TORCH_CHECK(
@@ -270,7 +270,7 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(const nested_optional_t
               if (key.first == d) {
                 return key.second == s || s == at::ScalarType::Float;
               } else if (d.is_cpu()) {
-                // note(crcrpar): There are some test casese (e.g. TestOptim::test_adam) where state_steps are on CPU and the others are on CUDA.
+                // note(crcrpar): There are some test cases (e.g. TestOptim::test_adam) where state_steps are on CPU and the others are on CUDA.
                 // Currently a state_step Tensor has the dtype of float.
                 return s == at::ScalarType::Float;
               } else {
