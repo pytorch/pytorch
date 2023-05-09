@@ -255,6 +255,16 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
 
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter_into_tensor_coalesced_cuda(self):
+        tensors = [torch.ones([4], dtype=torch.int64, device="cuda:0"), torch.ones([4], dtype=torch.int64, device="cuda:0") + 1]
+        mesh = dt.DeviceMesh("cuda", torch.arange(4))
+
+        res = ft_c.reduce_scatter_tensor_coalesced(tensors, "sum", [0, 0], mesh)
+        self.assertEqual(2, len(res))
+        self.assertEqual(torch.tensor([4], device="cuda:0"), res[0])
+        self.assertEqual(torch.tensor([8], device="cuda:0"), res[1])
+
 
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
