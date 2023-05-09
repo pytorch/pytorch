@@ -502,6 +502,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=False,
+    )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):

@@ -28,6 +28,12 @@ import torch._ops
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics import infra
 
+from torch.onnx._internal.fx import (
+    decomposition_table,
+    function_dispatcher,
+    registration,
+)
+
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
@@ -102,18 +108,11 @@ class ResolvedExportOptions(ExportOptions):
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
-    from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
-        registration,
-    )
-
     onnx_registry: registration.OnnxRegistry
     """The ONNX registry used to register ATen operators to ONNX functions."""
 
-    from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
-        function_dispatcher,
-    )
-
     onnx_dispatcher: function_dispatcher.OnnxDispatcher
+    """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
 
     fx_tracer: FXGraphExtractor
     """The FXGraphExtractor instance used to extract the FX graph from the model."""
@@ -152,11 +151,6 @@ class ResolvedExportOptions(ExportOptions):
             self.opset_version = resolve(options.opset_version, _DEFAULT_OPSET_VERSION)
             self.dynamic_shapes = resolve(options.dynamic_shapes, False)
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
-            from torch.onnx._internal.fx import (  # TODO: PyTorch does not take dep on onnxscript outside torch.onnx context
-                decomposition_table,
-                function_dispatcher,
-                registration,
-            )
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
             self.onnx_registry = registration.OnnxRegistry()

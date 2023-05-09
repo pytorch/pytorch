@@ -336,6 +336,8 @@ _SCALAR_TYPE_TO_DTYPE = {
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
 
+# NOTE: this is a mapping from torch dtype to a set of compatible onnx types
+# It's used in dispatcher to find the best match overload for the input dtypes
 TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS = {
     torch.bfloat16: {"tensor(bfloat16)"},
     torch.bool: {"tensor(bool)"},

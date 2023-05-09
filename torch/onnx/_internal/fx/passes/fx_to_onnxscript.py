@@ -132,8 +132,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         # so we don't need to specifically process them.
         with evaluator.default_as(tracer):
             output = opset18.Concat(*sequence_mixed_elements, axis=0)
-        # TODO(titaiwang): set shape?
         output.dtype = torch.int64
+        output.shape = [len(sequence_mixed_elements)]
         return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
@@ -182,7 +182,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
 
 
 @_beartype.beartype
-def _fill_tensor_meta(
+def _fill_tensor_shape_type(
     onnxscript_values: Union[
         graph_building.TorchScriptTensor, Tuple[graph_building.TorchScriptTensor, ...]
     ],
@@ -197,14 +197,15 @@ def _fill_tensor_meta(
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
-    # NOTE(titaiwang): Type of expected_values is showing what we support right now.
-    # Currently, we only expect FakeTensor and SymInt in the graph.
-
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
         # ex: aten::split - in onnx_dtype: seq(tensor)
         # onnxscript_values is a single tensor, but expected_values is a list of tensors.
+
+        # NOTE: PyTorch doesn't have a compared dtype to ONNX seq(tensor), so we write
+        #       the dtype as string into TorchScriptTensor.dtype to support dispatcher,
+        #       but it's not written into ONNX graph.
         onnxscript_values.dtype = {
             f"seq({type})"
             for type in _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
@@ -379,6 +380,9 @@ def _export_fx_node_to_onnxscript(
             complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
 
+        # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
+        # function signature in OpSchema, and find the best matched overload.
+        # TODO(titaiwang): Add nearest match (auto cast) into matcher.
         symbolic_fn = options.onnx_dispatcher.dispatch(
             node=node, onnx_args=onnx_args, onnx_kwargs=onnx_kwargs
         )
@@ -392,7 +396,7 @@ def _export_fx_node_to_onnxscript(
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
         # Assign type and shape from fx graph.
-        _fill_tensor_meta(output, node.name, node.meta["val"])
+        _fill_tensor_shape_type(output, node.name, node.meta["val"])
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(

@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Collection,
+    Dict,
     List,
     Mapping,
     Optional,
@@ -28,34 +29,29 @@ from torch.onnx._internal import _beartype
 
 from torch.onnx._internal.fx import registration
 
-_SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: dict[
+_SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
     Union[Callable[..., Any], str], torch._ops.OpOverload
 ] = {
-    operator.mul: torch.ops.aten.mul.default,  # type: ignore[attr-defined]
-    operator.add: torch.ops.aten.add.default,  # type: ignore[attr-defined]
-    operator.pow: torch.ops.aten.pow.int,  # type: ignore[attr-defined]
-    operator.sub: torch.ops.aten.sub.default,  # type: ignore[attr-defined]
+    operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
+    operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
+    operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
+    operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
 }
-
-
-# Enable both TorchScriptTensor and torch.Tensor to be tested
-# for dtype in OpSchemaWrapper.
-@runtime_checkable
-class TensorLike(Protocol):
-    @property
-    def dtype(self) -> torch.dtype:
-        ...
 
 
 class OnnxDispatcher:
     """
-    The Dispatcher class is responsible for finding the best matched function for a given aten op in the FX exporter.
+    The OnnxDispatcher class finds the best matched function for a given aten operation
+    in the FX exporter. It uses the torch.ops name to find the function. If not found,
+    it falls back to default. Then, it finds the best match among all overloaded
+    functions. If the types match, it selects the function. Otherwise, it finds the
+    nearest upcast/downcast: Float to Float / Int to Int, Int to Float.
 
-    Steps for function dispatch:
+    Steps for overloaded function dispatch:
 
     1. Use the torch.ops name to find the function:
-        a. Check if aten:stft.center exists.
-        b. If not found, check aten:stft (Fallback to default).
+        a. Check if the ATen overload exists.
+        b. If not found, check ATen overload=default.
 
     2. Find the best match among all overloaded functions:
         a. If the types match, select the function.
@@ -91,15 +87,18 @@ class OnnxDispatcher:
         onnx_args: Sequence,
         onnx_kwargs: Mapping,
     ) -> Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]:
-        """Dispatch a function based on the given node, arguments, and keyword arguments.
+        """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
 
         Args:
-            node: The torch.fx.Node.
-            onnx_args: The arguments of the function.
-            onnx_kwargs: The keyword arguments of the function.
+            node: The TorchFX node to dispatch the function for.
+            onnx_args: The arguments of the ONNX function.
+            onnx_kwargs: The keyword arguments of the ONNX function.
 
         Returns:
-            The result of the function.
+            Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
+
+        Raises:
+            RuntimeError: If there are no overloaded functions available for the given FX node.
         """
         aten_name = self._get_aten_name(node)
         function_overloads = self._get_function_overloads(node, aten_name)
@@ -226,6 +225,15 @@ class OnnxDispatcher:
         )
 
 
+# Enable both TorchScriptTensor and torch.Tensor to be tested
+# for dtype in OpSchemaWrapper.
+@runtime_checkable
+class _TensorLike(Protocol):
+    @property
+    def dtype(self) -> torch.dtype:
+        ...
+
+
 class OpSchemaWrapper:
     """
     The OpSchemaWrapper class is a wrapper for ONNX OpSchema.
@@ -271,13 +279,13 @@ class OpSchemaWrapper:
         return False
 
     def match_inputs(
-        self, args: Sequence[Union[TensorLike, str, int, float, bool]], kwargs
+        self, args: Sequence[Union[_TensorLike, str, int, float, bool]], kwargs
     ) -> bool:
         """Check if the inputs match the OpSchema requirements.
 
         Args:
             args: The input arguments.
-            kwargs: The input keyword arguments.
+            kwargs: The input keyword arguments. (kept for future usage)
 
         Returns:
             True if the inputs match the requirements, False otherwise.
@@ -297,10 +305,10 @@ class OpSchemaWrapper:
 
 @_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Union[TensorLike, str, int, float, bool, list, tuple]
+    torch_input: Union[_TensorLike, str, int, float, bool, list, tuple]
 ) -> set[str]:
-    """Find the data type of the input."""
-    if isinstance(torch_input, TensorLike):
+    """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
+    if isinstance(torch_input, _TensorLike):
         dtype = torch_input.dtype
         if isinstance(dtype, set):
             # NOTE: dtype is a sequence_dtype_string, eg: seq(tensor(int64))
@@ -315,7 +323,7 @@ def _find_onnx_data_type(
         ]
     if isinstance(torch_input, (list, tuple)) and torch_input:
         set_dtype = _find_onnx_data_type(torch_input[0])
-        if any(isinstance(input, TensorLike) for input in torch_input):
+        if any(isinstance(input, _TensorLike) for input in torch_input):
             # NOTE: Any Tensor involved in a list would make it a seq(tensor(onnx_type))
             return {f"seq({dtype})" for dtype in set_dtype}
         else:

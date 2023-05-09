@@ -1,4 +1,6 @@
-"""Module for handling symbolic function registration."""
+"""Module for handling ATen to ONNX functions registration."""
+
+from __future__ import annotations
 
 import warnings
 from typing import (
@@ -6,38 +8,44 @@ from typing import (
     Collection,
     Dict,
     Generic,
-    Optional,
-    Sequence,
-    Set,
-    TypeVar,
-    Union,
     List,
+    Optional,
+    Set,
+    TYPE_CHECKING,
+    TypeVar,
 )
 
-from torch.onnx import _constants, errors
 from torch.onnx._internal import _beartype
 
-from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-    graph_building,
-    ops,
-    registration,
-)
+# We can only import onnx from this module in a type-checking context to ensure that
+# 'import torch.onnx' continues to work without having 'onnx' installed. We fully
+# 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
+if TYPE_CHECKING:
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
+        registration,
+    )
 
 OpsetVersion = int
 _K = TypeVar("_K")
 _V = TypeVar("_V")
 
-class MergeDict(Generic[_K, _V], Collection[_K]):
-    """A dictionary that merges built-in and custom symbolic functions.
 
-    It supports adding and removing built-in symbolic functions with custom
-    ones.
+class MergeDict(Generic[_K, _V], Collection[_K]):
+    """
+    A dictionary that merges built-in and custom symbolic functions.
+
+    It supports adding and removing built-in symbolic functions with custom ones.
+
+    Attributes:
+        _torchlib (Dict[_K, List[_V]]): A dictionary to hold built-in symbolic functions.
+        _customs (Dict[_K, List[_V]]): A dictionary to hold custom symbolic functions.
+        _merged (Dict[_K, List[_V]]): A dictionary that merges built-in and custom symbolic functions.
     """
 
     def __init__(self):
         self._torchlib: Dict[_K, List[_V]] = {}
-        self._customs: Dict[_K, List[_V]] = {}
         self._merged: Dict[_K, List[_V]] = {}
+        self._customs: Dict[_K, List[_V]] = {}
 
     def set_base(self, key: _K, value: _V) -> None:
         self._torchlib.setdefault(key, []).append(value)
@@ -56,7 +64,7 @@ class MergeDict(Generic[_K, _V], Collection[_K]):
     def remove_custom(self, key: _K) -> None:
         """Remove a key-value pair."""
         # FIXME(titaiwang): How to remove a specific function instead of whole overloads?
-        self._overrides.pop(key, None)  # type: ignore[arg-type]
+        self._customs.pop(key, None)  # type: ignore[arg-type]
         self._merged.pop(key, None)  # type: ignore[arg-type]
         if key in self._torchlib:
             self._merged[key] = self._torchlib[key]
@@ -88,12 +96,16 @@ class MergeDict(Generic[_K, _V], Collection[_K]):
 
 
 class _SymbolicFunctionGroup:
-    """Different versions of symbolic functions registered to the same name.
+    """A group of overloaded functions registered to the same name.
 
-    The registration is delayed until op is used to improve startup time.
+    This class stores a collection of overloaded functions that share the same name.
+    Each function is associated with a specific opset version, and multiple versions
+    of the same function can be registered to support different opset versions.
 
-    Function overloads with different arguments are not allowed.
-    Custom op overrides are supported.
+    Attributes:
+        _name: The name of the function group.
+        _functions: A dictionary of functions, keyed by the opset version.
+
     """
 
     def __init__(self, name: str) -> None:
@@ -150,21 +162,35 @@ class _SymbolicFunctionGroup:
         """Returns a list of supported opset versions."""
         return list(self._functions)
 
+
 class OnnxRegistry:
     """Registry for ONNX functions.
 
-    The registry maintains a mapping from qualified names to symbolic functions.
-    It is used to register new symbolic functions and to dispatch calls to
-    the appropriate function.
+    The registry maintains a mapping from qualified names to symbolic functions,
+    which can be overloaded to support multiple opset versions. It is used to
+    register new symbolic functions and to dispatch calls to the appropriate function.
+
+    Attributes:
+        _registry: A dictionary mapping qualified names to _SymbolicFunctionGroup objects.
     """
 
     def __init__(self) -> None:
         self._registry: Dict[str, _SymbolicFunctionGroup] = {}
+        # FIXME: Avoid importing onnxscript into torch
+        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
+            ops,  # TODO(titaiwang): get rid of this import
+            registration,
+        )
+
         self.initiate_registry_from_torchlib(registration.default_registry)
 
     # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
     def initiate_registry_from_torchlib(self, torchlib_registry: registration.Registry):
-        """Initiate the registry from torchlib registry."""
+        """Populates the registry with ATen functions from torchlib.
+
+        Args:
+            torchlib_registry: The torchlib registry to use for populating the registry.
+        """
         for aten_name, aten_overloads_func in torchlib_registry.items():
             for func in aten_overloads_func.overloads:
                 self.register(
@@ -174,10 +200,11 @@ class OnnxRegistry:
                     custom=False,
                 )
 
+    @_beartype.beartype
     def register(
         self, name: str, opset: OpsetVersion, func: Callable, custom: bool = True
     ) -> None:
-        """Registers a symbolic function.
+        """Registers overloaded functions to an ATen operator (overload).
 
         Args:
             name: The qualified name of the function to register. In the form of 'domain::op'.
@@ -201,8 +228,9 @@ class OnnxRegistry:
         else:
             symbolic_functions.add(func, opset)
 
+    @_beartype.beartype
     def unregister(self, name: str, opset: OpsetVersion) -> None:
-        """Unregisters a symbolic function.
+        """Unregisters overloaded functions to an ATen operator (overload).
 
         Args:
             name: The qualified name of the function to unregister.
@@ -212,12 +240,29 @@ class OnnxRegistry:
             return
         self._registry[name].remove_custom(opset)
 
+    @_beartype.beartype
     def get_function_group(self, name: str) -> Optional[_SymbolicFunctionGroup]:
-        """Returns the function group for the given name."""
+        """Returns the _SymbolicFunctionGroup object for the given name.
+
+        Args:
+            name: The qualified name of the function group to retrieve.
+
+        Returns:
+            The _SymbolicFunctionGroup object corresponding to the given name, or None if the name is not in the registry.
+        """
         return self._registry.get(name)
 
+    @_beartype.beartype
     def is_registered_op(self, name: str, version: int) -> bool:
-        """Returns whether the given op is registered for the given opset version."""
+        """Returns whether the given op is registered for the given opset version.
+
+        Args:
+            name: The qualified name of the function to check.
+            version: The opset version to check.
+
+        Returns:
+            True if the given op is registered for the given opset version, otherwise False.
+        """
         functions = self.get_function_group(name)
         if functions is None:
             return False
