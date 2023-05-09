@@ -85,13 +85,15 @@ class TestPasses(TestCase):
         pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
         self.assertTrue(pass_result.modified)
 
+        print(pass_result.graph_module.graph)
+
         num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
 
         self.assertEqual(num_assert, 3)
         self.assertEqual(num_scalar_tensor, 3)
 
-        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
             pass_result.graph_module(torch.zeros(2, 7, 3))
 
         self.assertEqual(pass_result.graph_module(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -125,10 +127,10 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
             pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input #1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1"):
             pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -160,11 +162,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
             pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input #1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
             pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -201,11 +203,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 7)
         self.assertEqual(num_scalar_tensor, 7)
 
-        with self.assertRaisesRegex(RuntimeError, "Input #0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
             pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input #1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
             pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -279,6 +281,10 @@ class TestPasses(TestCase):
         new_inp = torch.tensor([1, 1, 1, 1])
         self.assertEqual(mod(new_inp), new_gm(new_inp))
 
+    # TODO: ExportPass is broken with
+    # File "/mnt/xarfuse/uid-25457/c21f003f-seed-nspid4026533179_cgpid8299054-ns-4026533176/torch/_export/pass_base.py", line 47, in make_inline_interpreter
+    # class InlineInterpreter(parent):  # type: ignore[valid-type, misc]
+    # TypeError: super() takes at most 2 arguments (3 given)
     @unittest.expectedFailure
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
