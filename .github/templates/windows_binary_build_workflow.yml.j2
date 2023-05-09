@@ -64,16 +64,30 @@ jobs:
       !{{ set_runner_specific_vars() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      {%- if branches != "nightly" %}
+      !{{ common.apply_filter() }}
+      {%- endif %}
       - name: Populate binary env
+        {%- if branches != "nightly" %}
+        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        {%- endif %}
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
+        {%- if branches != "nightly" %}
+        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        {%- endif %}
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
       - uses: !{{ common.upload_artifact_action }}
+        {%- if branches != "nightly" %}
+        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        {%- endif %}
+        {%- if branches == "nightly" %}
         if: always()
+        {%- endif %}
         with:
           name: !{{ config["build_name"] }}
           retention-days: 14
@@ -100,11 +114,20 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      {%- if branches != "nightly" %}
+      !{{ common.apply_filter() }}
+      {%- endif %}
       - name: Populate binary env
+        {%- if branches != "nightly" %}
+        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        {%- endif %}
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
+        {%- if branches != "nightly" %}
+        if: steps.filter.outputs.is-test-matrix-empty == 'False'
+        {%- endif %}
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
