@@ -248,7 +248,58 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.dashboard or self.args.accuracy:
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
+    def install_model(self, model_name):
+        is_training = True
+        try:
+            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
+        except ModuleNotFoundError:
+            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
+        benchmark_cls = getattr(module, "Model", None)
+        if not hasattr(benchmark_cls, "name"):
+            benchmark_cls.name = model_name
 
+        cant_change_batch_size = (
+            not getattr(benchmark_cls, "ALLOW_CUSTOMIZE_BSIZE", True)
+            or model_name in DONT_CHANGE_BATCH_SIZE
+        )
+        if cant_change_batch_size:
+            batch_size = None
+        if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
+            batch_size = USE_SMALL_BATCH_SIZE[model_name]
+
+        # Control the memory footprint for few models
+        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
+            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
+
+        # See https://github.com/pytorch/benchmark/issues/1560
+        if model_name == "speech_transformer":
+            batch_size = 10
+
+        # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
+        torch.backends.__allow_nonbracketed_mutation_flag = True
+        extra_args = []
+        if part:
+            extra_args = ["--part", part]
+        if is_training:
+            benchmark = benchmark_cls(
+                test="train",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
+            )
+        else:
+            benchmark = benchmark_cls(
+                test="eval",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
+            )
+        model, example_inputs = benchmark.get_module()
+        model.example_inputs = example_inputs
+        # save model
+        torch.save(model, f"torchbench_models/{model_name}.pt")
     def load_model(
         self,
         device,
