@@ -17,9 +17,6 @@ class BasePruningMethod(ABC):
     """
     _tensor_name: str
 
-    def __init__(self):
-        pass
-
     def __call__(self, module, inputs):
         r"""Multiplies the mask (stored in ``module[name + '_mask']``)
         into the original tensor (stored in ``module[name + '_orig']``)

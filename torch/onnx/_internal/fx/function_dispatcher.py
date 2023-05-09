@@ -14,12 +14,9 @@ from typing import (
     Protocol,
     runtime_checkable,
     Sequence,
+    TYPE_CHECKING,
     Union,
 )
-
-import onnx
-import onnx.defs  # type: ignore[import]
-import onnxscript  # type: ignore[import]
 
 import torch
 import torch._ops
@@ -28,6 +25,10 @@ from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype
 
 from torch.onnx._internal.fx import registration
+
+if TYPE_CHECKING:
+    import onnx.defs  # type: ignore[import]
+    import onnxscript  # type: ignore[import]
 
 _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
     Union[Callable[..., Any], str], torch._ops.OpOverload
@@ -55,9 +56,6 @@ class OnnxDispatcher:
 
     2. Find the best match among all overloaded functions:
         a. If the types match, select the function.
-        b. If the types don't match, find the nearest upcast/downcast:
-            - Float to Float / Int to Int
-            - Int to Float
     """
 
     def __init__(self, registry: registration.OnnxRegistry, opset_version: int):
@@ -110,9 +108,6 @@ class OnnxDispatcher:
         for overload_func in function_overloads:
             function_opschema = OpSchemaWrapper(overload_func.op_schema)
             if function_opschema.match_inputs(onnx_args, onnx_kwargs):
-                return overload_func
-            # TODO(titaiwang): move this out of the loop.
-            if function_opschema.nearest_match_inputs(onnx_args, onnx_kwargs):
                 return overload_func
         raise RuntimeError(f"There are no overloaded function for {aten_name}")
 
@@ -257,26 +252,6 @@ class OpSchemaWrapper:
             constraint.type_param_str: set(constraint.allowed_type_strs)
             for constraint in op_schema.type_constraints
         }
-
-    def nearest_match_inputs(self, args, kwargs) -> bool:
-        """Check if there is a nearest match for the inputs.
-
-        This method is not implemented yet and always returns False.
-
-        The function should be able to find the nearest matched overload
-        for following cases:
-
-        1. onnx_args with no dtype information
-        2. onnx_args with dtype information but not match the OpSchema (autocast)
-
-        Args:
-            args: The arguments.
-            kwargs: The keyword arguments.
-
-        Returns:
-            False.
-        """
-        return False
 
     def match_inputs(
         self, args: Sequence[Union[_TensorLike, str, int, float, bool]], kwargs
