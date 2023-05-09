@@ -1080,7 +1080,6 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
         // in a python object, this might need a coalesce().
         weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
         weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
-        LOG(INFO) << "RV: successfully did storages";
       } else {
         // A dense/strided tensor contains 1 storage
         weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());
