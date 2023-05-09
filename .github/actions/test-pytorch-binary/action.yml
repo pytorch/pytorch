@@ -34,6 +34,12 @@ runs:
           -w / \
           "${DOCKER_IMAGE}"
         )
+
+        if [[ "${GPU_ARCH_TYPE}" != "rocm" ]]; then
+          # Propagate download.pytorch.org IP to container. This is only needed on Linux runner
+          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" bash -c "/bin/cat >> /etc/hosts"
+        fi
+
         docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
         # Generate test script
         docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"

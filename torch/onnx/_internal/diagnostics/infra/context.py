@@ -1,12 +1,13 @@
-"""A diagnostic engine based on SARIF."""
+"""A diagnostic context based on SARIF."""
 
 from __future__ import annotations
 
 import contextlib
 
 import dataclasses
-
 import gzip
+
+import logging
 
 from typing import Callable, Generator, List, Mapping, Optional, Type, TypeVar
 
@@ -183,6 +184,9 @@ class DiagnosticContext:
     )
     diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
     diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    logger: logging.Logger = dataclasses.field(
+        init=True, default_factory=lambda: logging.getLogger().getChild("diagnostics")
+    )
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
     _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
@@ -193,7 +197,7 @@ class DiagnosticContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        return True
+        return None
 
     def sarif(self) -> sarif.Run:
         """Returns the SARIF Run object."""
@@ -208,6 +212,26 @@ class DiagnosticContext:
             ),
             results=[diagnostic.sarif() for diagnostic in self.diagnostics],
         )
+
+    def sarif_log(self) -> sarif.SarifLog:  # type: ignore[name-defined]
+        """Returns the SARIF Log object."""
+        return sarif.SarifLog(
+            version=sarif_version.SARIF_VERSION,
+            schema_uri=sarif_version.SARIF_SCHEMA_LINK,
+            runs=[self.sarif()],
+        )
+
+    def to_json(self) -> str:
+        return formatter.sarif_to_json(self.sarif_log())
+
+    def dump(self, file_path: str, compress: bool = False) -> None:
+        """Dumps the SARIF log to a file."""
+        if compress:
+            with gzip.open(file_path, "wt") as f:
+                f.write(self.to_json())
+        else:
+            with open(file_path, "w") as f:
+                f.write(self.to_json())
 
     def add_diagnostic(self, diagnostic: Diagnostic) -> None:
         """Adds a diagnostic to the context.
@@ -337,112 +361,3 @@ class DiagnosticContext:
                 "were not printed due to the log level."
             )
         print()
-
-
-class DiagnosticEngine:
-    """A generic diagnostic engine based on SARIF.
-
-    This class is the main interface for diagnostics. It manages the creation of diagnostic contexts.
-    A DiagnosticContext provides the entry point for recording Diagnostics.
-    See infra.DiagnosticContext for more details.
-
-    Examples:
-        Step 1: Create a set of rules.
-        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
-        >>> rules = infra.RuleCollection.custom_collection_from_list(
-        ...     "CustomRuleCollection",
-        ...     [
-        ...         infra.Rule(
-        ...             id="r1",
-        ...             name="rule-1",
-        ...             message_default_template="Mising xxx",
-        ...         ),
-        ...     ],
-        ... )
-
-        Step 2: Create a diagnostic engine.
-        >>> engine = DiagnosticEngine()
-
-        Step 3: Start a new diagnostic context.
-        >>> with engine.create_diagnostic_context("torch.onnx.export", version="1.0") as context:
-        ...     ...
-
-        Step 4: Add diagnostics in your code.
-        ...     context.diagnose(rules.rule1, infra.Level.ERROR)
-
-        Step 5: Afterwards, get the SARIF log.
-        >>> sarif_log = engine.sarif_log()
-    """
-
-    contexts: List[DiagnosticContext]
-
-    def __init__(self) -> None:
-        self.contexts = []
-
-    def sarif_log(self) -> sarif.SarifLog:
-        return sarif.SarifLog(
-            version=sarif_version.SARIF_VERSION,
-            schema_uri=sarif_version.SARIF_SCHEMA_LINK,
-            runs=[context.sarif() for context in self.contexts],
-        )
-
-    def __str__(self) -> str:
-        # TODO: pretty print.
-        return self.to_json()
-
-    def __repr__(self) -> str:
-        return self.to_json()
-
-    def to_json(self) -> str:
-        return formatter.sarif_to_json(self.sarif_log())
-
-    def dump(self, file_path: str, compress: bool = False) -> None:
-        """Dumps the SARIF log to a file."""
-        if compress:
-            with gzip.open(file_path, "wt") as f:
-                f.write(self.to_json())
-        else:
-            with open(file_path, "w") as f:
-                f.write(self.to_json())
-
-    def clear(self) -> None:
-        """Clears all diagnostic contexts."""
-        self.contexts.clear()
-
-    def create_diagnostic_context(
-        self,
-        name: str,
-        version: str,
-        options: Optional[infra.DiagnosticOptions] = None,
-        diagnostic_type: Type[Diagnostic] = Diagnostic,
-    ) -> DiagnosticContext:
-        """Creates a new diagnostic context.
-
-        Args:
-            name: The subject name for the diagnostic context.
-            version: The subject version for the diagnostic context.
-            options: The options for the diagnostic context.
-
-        Returns:
-            A new diagnostic context.
-        """
-        if options is None:
-            options = infra.DiagnosticOptions()
-        context = DiagnosticContext(
-            name, version, options, diagnostic_type=diagnostic_type
-        )
-        self.contexts.append(context)
-        return context
-
-    def pretty_print(
-        self, verbose: bool = False, level: infra.Level = infra.Level.ERROR
-    ) -> None:
-        """Pretty prints all diagnostics in the diagnostic contexts.
-
-        Args:
-            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
-            level: The minimum level of diagnostics to print.
-        """
-        formatter.pretty_print_title(f"{len(self.contexts)} Diagnostic Run")
-        for context in self.contexts:
-            context.pretty_print(verbose, level)
