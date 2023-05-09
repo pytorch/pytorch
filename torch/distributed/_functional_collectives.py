@@ -1,14 +1,10 @@
 import warnings
-
 import weakref
-from typing import cast, List, Tuple, Union
-
 import sys
 import torch
 import torch.distributed as dist
-
 import torch.distributed.distributed_c10d as c10d
-
+from typing import Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
 
 from torch.fx.experimental.proxy_tensor import (
@@ -25,6 +21,13 @@ The new check is a bit more hackish, but that's all we have for now.
 def _is_running_under_torch_deploy():
     return torch._meta_registrations is object
 
+
+if _is_running_under_torch_deploy():
+    def is_torchdynamo_compiling():
+        """Can't import torchdynamo in torchdeploy builds currently."""
+        return False
+else:
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
 
 """
 New traceable, functional collectives.
@@ -96,6 +99,8 @@ def _wait_and_clear_tensor(data_ptr, version):
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
+    # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
+    # Instead, backends must call this themselves when implementing traced collectives.
     version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
     if version is None:
         warnings.warn(
@@ -259,10 +264,31 @@ RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
     # Cannot import on the top level to avoid circular imports
     import torch.distributed._tensor as dt
+
+    # had to define this hack _inside_ expand_group to avoid
+    # graph_break [('torch.* op returned non-Tensor int
+    # caused by 'cast_*` functions being treated as 'torch.*' ops (iiuc)
+    if TYPE_CHECKING:
+        def cast_listlistint(x):
+            return cast(List[List[int]], x)
+
+        def cast_listint(x):
+            return cast(List[int], x)
+
+    else:
+        # fake cast op for use at runtime since dynamo doesn't support real cast
+        # also, dynamo didn't like encountering 'typing' objects ()
+        # NotImplementedError: argument of type: <class 'typing._GenericAlias'>
+        def cast_listlistint(x):
+            return x
+
+        def cast_listint(x):
+            return x
+
     rankset: List[int]
     if isinstance(group, list):
         if isinstance(group[0], list):
-            nested_list = cast(List[List[int]], group)
+            nested_list = cast_listlistint(group)
             rankset = []
             group_size = -1
             for rs in nested_list:
@@ -273,7 +299,7 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
                     )
                 group_size = len(rs)
         else:
-            rankset = cast(List[int], group)
+            rankset = cast_listint(group)
             group_size = len(rankset)
     elif isinstance(group, dist.ProcessGroup):
         rankset = dist.get_process_group_ranks(group)
@@ -302,6 +328,8 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     return (tag, rankset, group_size)
 
 def _are_we_tracing() -> bool:
+    if is_torchdynamo_compiling():
+        return True
     mode = get_innermost_proxy_mode()
     if mode is None:
         return False

@@ -24,7 +24,7 @@ def inner(x):
     x = torch.cos(x)
     return x
 
-inner(torch.randn(20, 20).to("{device}"))
+inner(torch.randn(2, 2).to("{device}"))
 """
         # These must isolate because they crash the process
         self._run_full_test(run_code, "aot", expected_error, isolate=True)

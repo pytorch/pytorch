@@ -50,7 +50,7 @@ class Dataset(Generic[T_co]):
     """
 
     def __getitem__(self, index) -> T_co:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses of Dataset should implement __getitem__.")
 
     def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
         return ConcatDataset([self, other])
@@ -169,7 +169,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 4, 5, 6]
     """
     def __iter__(self) -> Iterator[T_co]:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses of IterableDataset should implement __iter__.")
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])

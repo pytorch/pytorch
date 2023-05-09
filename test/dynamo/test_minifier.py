@@ -143,7 +143,7 @@ class Repro(torch.nn.Module):
         self.G__mod___m_y = Linear(in_features=20, out_features=20, bias=True)
         self.register_buffer('G__mod___b_x', torch.randn([20, 20], dtype=torch.float32).cuda())
         self.register_buffer('G__mod___b_y', torch.randn([20, 20], dtype=torch.float32))
-        self.G__mod___p_x = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32)).cuda()
+        self.G__mod___p_x = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32, device="cuda"))
         self.G__mod___p_y = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32))
 
     def forward(self, L_x1_ : torch.Tensor, L_y1_ : torch.Tensor):
@@ -195,9 +195,9 @@ class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, cos, sin_19):
+    def forward(self, sin_19):
         relu = torch.relu(sin_19);  sin_19 = None
-        return (cos,)""",
+        return (relu,)""",
         )
 
 
