@@ -432,7 +432,7 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code) "cpp")
+        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code), "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
