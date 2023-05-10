@@ -121,7 +121,7 @@ class ShardingPropagator:
 
             # NOTE: This had the assumption we only have one call_function op in the
             # op graph, we need to harden this logic when there're decomposed ops.
-            assert out_node_strategy is not None
+            assert isinstance(out_node_strategy, OpStrategy)
             # we take the first strategy for now
             # TODO: add a min cost selection logic
             output_strategy = out_node_strategy.strategies[0]
