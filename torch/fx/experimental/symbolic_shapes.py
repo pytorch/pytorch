@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 
@@ -1365,26 +1365,42 @@ del func
 try:
     import z3
 
+    # Translates SymPy expressions into Z3 expressions.
+    #
+    # Traverses the SymPy AST recursively, translating from its leaves
+    # to the root of the tree.
+    #
+    # At the time of the translation, all free variables present in the
+    # SymPy expression being translated must be already mapped to a Z3
+    # integer variable.
     class SympyToZ3:
-        def __init__(self, symbols: Dict[sympy.Symbol, z3.BitVecRef]):
+        def __init__(self, symbols: Dict[sympy.Symbol, z3.ArithRef]):
             self._symbols = symbols
 
-        def _div(self, num, divisor):
-            return self._to_real(num) / self._to_real(divisor)
-
-        def _to_real(self, x):
+        # The 2 functions below are used for conditionally casting between
+        # integer and reals.
+        #
+        # Returns a real expression from 'x'.
+        def _to_real(self, x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_real() else z3.ToReal(x)
 
-        def _to_int(self, x):
+        # Returns an integer expression from 'x'.
+        def _to_int(self, x: z3.ArithRef) -> z3.ArithRef:
             return x if x.is_int() else z3.ToInt(x)
 
-        def _int(self, expr: int):
+        # Implements Python division semantics.
+        # This is needed because Z3 integer division does not have the
+        # same semantics as Python true division.
+        def _div(self, num, divisor) -> z3.ArithRef:
+            return self._to_real(num) / self._to_real(divisor)
+
+        def _int(self, expr: int) -> z3.ArithRef:
             return z3.IntVal(expr)
 
-        def _Symbol(self, expr: sympy.Symbol):
+        def _Symbol(self, expr: sympy.Symbol) -> z3.ArithRef:
             return self._symbols[expr]
 
-        def _Rel(self, expr: sympy.Rel):
+        def _Rel(self, expr: sympy.Rel) -> z3.ArithRef:
             opmap = {
                 "==": operator.eq,
                 "!=": operator.ne,
@@ -1394,45 +1410,80 @@ try:
                 "<": operator.lt,
             }
             assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
-            assert expr.rel_op in opmap, (
-                f"sympy relop not supported: {expr.rel_op}"
-            )
             return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
 
-        def _Add(self, expr: sympy.Add):
-            return sum(self(expr.args))
+        def _Add(self, expr: sympy.Add) -> z3.ArithRef:
+            return functools.reduce(operator.add, self(expr.args))
 
-        def _Mod(self, expr: sympy.Mod):
-            p, q = [self._to_int(a) for a in self(expr.args)]
+        def _Mod(self, expr: sympy.Mod) -> z3.ArithRef:
+            p, q = [self._to_int(self(a)) for a in expr.args]
             return p % q
 
-        def _Mul(self, expr: sympy.Mul):
+        # Turns the multiplication into a division, if there is any
+        # appropriate term.
+        #
+        # SymPy expresses division as a term in the multiplication that consists
+        # of a power expression where the exponent is negative.
+        #
+        # Therefore, we separate the whole multiplication into numerator and
+        # denominator. Then, we create a division node if necessary (i.e. there
+        # is any denominator not equal to 1).
+        #
+        # This separation was based on:
+        # sympy.printing.codeprinter.CodePrinter._print_Mul method.
+        def _Mul(self, expr: sympy.Mul) -> z3.ArithRef:
             numerator_list = []
             denominator_list = []
 
             for item in expr.args:
-                if item.is_commutative and isinstance(item, sympy.Pow) and item.exp.is_Rational and item.exp.is_negative:
+                if (
+                        item.is_commutative
+                        and isinstance(item, sympy.Pow)
+                        and item.exp.is_Rational
+                        and item.exp.is_negative
+                ):
                     denominator_list.append(sympy.Pow(item.base, -item.exp))
                 else:
                     numerator_list.append(item)
 
-            numerator = self._int(1) if len(numerator_list) == 0 else math.prod(self(numerator_list))
+            numerator = self._int(1)
+            if len(numerator_list) > 0:
+                numerator = functools.reduce(operator.mul, self(numerator_list))
 
             if len(denominator_list) > 0:
-                denominator = math.prod(self(denominator_list))
+                denominator = functools.reduce(operator.mul, self(denominator_list))
                 return self._div(numerator, denominator)
 
             return numerator
 
-        def _Pow(self, expr: sympy.Pow):
+        def _Pow(self, expr: sympy.Pow) -> z3.ArithRef:
             base, exp = self(expr.args)
             return base ** exp
 
-        def _FloorDiv(self, expr: FloorDiv):
+        def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
             base, divisor = self(expr.args)
-            return base / divisor
+            return z3.If(divisor < 0, (-base) / (-divisor), base / divisor)  # type: ignore
 
-        def __call__(self, expr):
+        # Entry point for the translation process.
+        #
+        # 'expr' can be either a 'sympy.Expr', a tuple, or a list. If the latter,
+        # this method will convert the elements and return a new list (or tuple).
+        #
+        # This function dispatches to another method according to the type of
+        # the expression being translated. In other words, 'expr' shall be dispatched
+        # to '_type(expr)'. e.g. if 'type(expr) == sympy.Add', it shall be dispatched
+        # to '_Add' method.
+        #
+        # A few exceptions are:
+        # - lists and tuples: recursively called with each element
+        #
+        # - sympy.Rel operations: although 'isinstance(expr, sympy.Rel)' is true,
+        #   'type(expr)' returns either 'Eq', 'Ne', 'Lt'... We combine them into
+        #   a single dispatch call: '_Rel'.
+        #
+        # - sympy.Integer and IntegerConstant: are dispatched to '_int' with its
+        #   corresponding value.
+        def __call__(self, expr) -> Any:
             if isinstance(expr, (tuple, list)):
                 return type(expr)(self(e) for e in expr)
             if isinstance(expr, sympy.Rel):
@@ -1457,54 +1508,100 @@ try:
             )
             return getattr(self, method)(expr)
 
+    # Frontend class to Z3 validation.
+    #
+    # Given:
+    # - Input: all the generated SymPy expressions (no optimizations applied)
+    # - Output: optimized SymPy expressions
+    #
+    # Shows whether the transformations applied to the input expressions are
+    # sound. In other words, solves the following soundness problem:
+    #
+    # (for all possible assignments of the free variables)
+    #
+    # "If the conjunction of the output expressions is true, is the conjunctions
+    # of the input expressions also true?"
+    #
+    # In practice: if there is any assignment of the free variables such that
+    # the conjunction of the inputs is FALSE but the conjunction of the outputs
+    # is TRUE, it would mean that an unsound transformation was applied at some
+    # point.
+    #
+    # That is exactly what this class does. Checks whether the following holds
+    # for any assignment of free variables:
+    #
+    # Not(And(Input)) AND And(Output)
+    #
+    # If the above equation is true, it means that there is a case where the
+    # generated guard (using the output expressions) is incorrectly true.
+    # Otherwise, it shows that the optimized output expressions is sound.
     class TranslationValidator:
         def __init__(self) -> None:
             super().__init__()
+
+            # Mapping of SymPy symbols to Z3 integer variables.
             self._symbols = {}
+
+            # Set of Z3 expressions representing all the generated guards.
+            # i.e. without any transformation/skipping.
             self._inputs = set()
+
+            # Set of Z3 expressions representing the actual issued guards.
+            # i.e. those that will actually be used in the guard function.
             self._outputs = set()
+
+            # Translator of SymPy expressions to Z3.
             self._z3 = SympyToZ3(self._symbols)
 
+        # Creates a mapping for each free variable of the expression.
+        #
+        # Make sure to create a mapping for all free variables of the SymPy
+        # expression, before actually trying to translate that into Z3.
         def _add_freesymbols(self, e: sympy.Expr) -> None:
             for s in e.free_symbols:
                 if s not in self._symbols:
-                    assert isinstance(s, sympy.Symbol) and s.is_integer and s.is_positive
+                    assert isinstance(s, sympy.Symbol) and s.is_integer  # type: ignore
                     self._symbols[s] = z3.Int(s.name)
-                    self._outputs.add(self._symbols[s] >= 0)
 
-        def _sympy_to_z3(self, expr: sympy.Expr):
-            z3_expr = self._z3(expr)
-            return z3_expr
+                    # If 's' is positive (SymPy assumption), we have to convey it to
+                    # Z3 as well.
+                    if s.is_positive:  # type: ignore
+                        self._outputs.add(self._symbols[s] > 0)
 
         def add_input(self, e: sympy.Expr) -> None:
             self._add_freesymbols(e)
-            self._inputs.add(self._sympy_to_z3(e))
+            self._inputs.add(self._z3(e))
 
         def add_output(self, e: sympy.Expr) -> None:
             self._add_freesymbols(e)
-            self._outputs.add(self._sympy_to_z3(e))
+            self._outputs.add(self._z3(e))
 
         def validate(self) -> bool:
             from torch._dynamo.utils import dynamo_timed
 
-            if len(self._inputs) == 0 or len(self._outputs) == 0:
-                return True
+            # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
+            # and are potentially non-linear.
+            solver = z3.SolverFor("QF_NRA")
 
-            solver = z3.Solver()
+            # "Is there any case where it's TRUE for the outputs but FALSE for the inputs?"
             solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
 
+            log.debug(f"translation validation: start: {len(self._inputs)} -> {len(self._outputs)}")
             if dynamo_timed()(solver.check)() == z3.sat:
+                # Output expressions are unsound.
+                # Log the found model and input expressions that failed.
                 model = solver.model()
                 model_dict = {sym: model[sym] for sym in model}
 
-                log.info(f"failed with model: {model_dict}")
+                log.debug(f"translation validation: fail: {model_dict}")
                 for inp in self._inputs:
                     if not model.evaluate(inp):
                         log.info(f">> {inp}")
 
                 return False
             else:
-                log.debug("translation validated.")
+                # Output expressions are sound.
+                log.debug("translation validation: success")
                 return True
 except:
     _HAS_Z3 = False
@@ -2751,6 +2848,10 @@ class ShapeEnv:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
+        self._add_output_guard(sympy.Eq(a, expr))
+
+        # When specializing 'a == expr', the equality should be also conveyed to
+        # Z3, in case an expression uses 'a'.
         self._add_output_guard(sympy.Eq(a, expr))
 
     @_lru_cache
