@@ -271,7 +271,7 @@ local.tree_manager_containers = {}
 local.tree_manager_locks = defaultdict(threading.Lock)
 
 
-# only incremented by user call of mark_step_beginning
+# only incremented by user call of mark_step_begin
 mark_step_counter = 0
 
 
@@ -281,10 +281,12 @@ torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_contain
 torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 
-def mark_step_beginning():
+def mark_step_begin():
     "Indicates that a new iteration of inference or training is about to begin."
     global mark_step_counter
-    mark_step_counter += 1
+
+    # iterate down to distinguish from GenerationTracking counter
+    mark_step_counter -= 1
 
 
 def reset_cudagraph_trees():
@@ -1948,7 +1950,7 @@ class CUDAGraphTreeManager:
             self.warned_functions.add(function_id)
             warnings.warn(
                 "Unable to end warm up phase of CUDAGraphs because of pending, uninvoked backwards. "
-                "Consider running with torch.no_grad() or using torch._inductor.cudagraph_trees.mark_step_beginning() "
+                "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
                 "before each model invocation"
             )
 
