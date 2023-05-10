@@ -441,6 +441,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         if not skip_check:
             self.assertEqual(result, expected)
 
+    @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function(self):
         def gn(x, y):
@@ -459,6 +460,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
+    @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_function_with_kwargs(self):
         def gn(x, y):
@@ -502,6 +504,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
+    @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
         def gn(x, y):
@@ -530,6 +533,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
     # Higher order op does not support nn.Modules yet
     @unittest.expectedFailure
+    @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
         class MockModule(torch.nn.Module):
