@@ -888,10 +888,7 @@ class VariableBuilder:
                     curr_size = self.tx.output.frame_state[name]
                     if curr_size != value:
                         curr_size = None
-<<<<<<< HEAD
-=======
 
->>>>>>> 635ce2ee6cc... Enable dynamic shapes by default
                 self.tx.output.frame_state[name] = curr_size
 
                 # TODO: This should be dynamic, as we in general do not
@@ -907,11 +904,6 @@ class VariableBuilder:
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
-<<<<<<< HEAD
-=======
-
-                dynamic_dim = DimDynamic.DYNAMIC
->>>>>>> 635ce2ee6cc... Enable dynamic shapes by default
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
