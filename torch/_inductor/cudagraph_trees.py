@@ -272,7 +272,8 @@ local.tree_manager_locks = defaultdict(threading.Lock)
 
 
 # only incremented by user call of mark_step_begin
-mark_step_counter = 0
+class MarkStepBox:
+    mark_step_counter = 0
 
 
 # We need to register this as an object that will be copied over as TLS when new
@@ -283,10 +284,9 @@ torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
 
 def mark_step_begin():
     "Indicates that a new iteration of inference or training is about to begin."
-    global mark_step_counter
 
     # iterate down to distinguish from GenerationTracking counter
-    mark_step_counter -= 1
+    MarkStepBox.mark_step_counter -= 1
 
 
 def reset_cudagraph_trees():
@@ -305,8 +305,7 @@ def reset_cudagraph_trees():
     _set_cached_tensors_enabled(False)
     container_dict.clear()
 
-    global mark_step_counter
-    mark_step_counter = 0
+    MarkStepBox.mark_step_counter = 0
 
 
 def get_obj(local, attr_name):
@@ -1849,17 +1848,14 @@ class CUDAGraphTreeManager:
 
     @staticmethod
     def get_curr_generation() -> int:
-        global mark_step_counter
-
-        if mark_step_counter != 0:
-            return mark_step_counter
+        if MarkStepBox.mark_step_counter != 0:
+            return MarkStepBox.mark_step_counter
 
         return GenerationTracker.generation
 
     @staticmethod
     def user_invoked_mark_step():
-        global mark_step_counter
-        return mark_step_counter != 0
+        return MarkStepBox.mark_step_counter != 0
 
     def can_start_new_generation(self) -> bool:
         if not self.in_new_torch_compile_invocation():

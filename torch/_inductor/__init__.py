@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile", "list_mode_options", "list_options", "_mark_step_begin"]
+__all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
 def compile(
