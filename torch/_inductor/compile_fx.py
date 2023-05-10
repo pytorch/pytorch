@@ -162,7 +162,7 @@ def compile_fx_inner(
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-def uncached_compile_fx_inner(
+def compile_fx_inner_uncached(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs=None,
@@ -226,7 +226,7 @@ def uncached_compile_fx_inner(
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
             compiled_graph = CompiledFxGraph(
-                compiled_graph=compiled_fn,
+                compiled_artifact=compiled_fn,
                 cache_key=graph.cache_key,
                 artifact_path=graph.cache_path,
                 cache_linemap=graph.cache_linemap,
@@ -264,8 +264,8 @@ def uncached_compile_fx_inner(
             ):
                 boxed_forward_device_index.set(next(iter(graph.device_idxs)))
 
-            compiled_graph = cudagraphify(
-                compiled_graph,
+            compiled_graph.compiled_artifact = cudagraphify(
+                compiled_graph.compiled_artifact,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(graph.device_idxs)),
@@ -281,7 +281,7 @@ def uncached_compile_fx_inner(
             # know we are we running the backward even if we will not run it in cudagraphs
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_inner = compiled_graph
+                compiled_graph_inner = compiled_graph.compiled_artifact
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -289,9 +289,11 @@ def uncached_compile_fx_inner(
                 # should already exist from forward
                 assert manager is not None
 
-                def compiled_graph(new_inputs):
+                def compiled_artifact(new_inputs):
                     manager.set_to_running_backward()
                     return compiled_graph_inner(new_inputs)
+
+                compiled_graph.compiled_artifact = compiled_artifact
 
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -329,7 +331,7 @@ def clone_preserve_strides(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-def align_inputs(model, inputs, static_input_idxs=()):
+def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
     def is_aligned(storage_offset, dtype):
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
@@ -345,15 +347,18 @@ def align_inputs(model, inputs, static_input_idxs=()):
     ]
 
     if len(check_inputs) == 0:
-        return model
+        return compiled_graph
 
+    old_compiled_artifact = compiled_graph.compiled_artifact
+    
     def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        return model(new_inputs)
+        return old_compiled_artifact(new_inputs)
+    compiled_graph.compiled_artifact = run
 
-    return run
+    return compiled_graph
 
 
 @dynamo_utils.dynamo_timed

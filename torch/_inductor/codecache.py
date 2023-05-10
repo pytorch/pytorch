@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, List, Union
 import torch
 
 from torch._inductor import config, cuda_properties, exc
-from torch._inductor.compile_fx import uncached_compile_fx_inner
+from torch._inductor.compile_fx import compile_fx_inner_uncached
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
@@ -270,13 +270,13 @@ class FxGraphCache:
                 _, _, cg_path = get_path(key, "cg", extra="")
                 print("Path from key is ", cg_path)
                 if not os.path.exists(cg_path):
-                    compiled_graph: CompiledFxGraph = uncached_compile_fx_inner(**graph_args)
+                    compiled_graph: CompiledFxGraph = compile_fx_inner_uncached(**graph_args)
                     
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
-                    disk_compiled_graph.compiled_model = None
+                    disk_compiled_graph.compiled_artifact = None
                     # TODO: Figure out if linemaps are important to save, work on pickling if it's the case
-                    disk_compiled_graph.compiled_model_linemap = None
+                    disk_compiled_graph.cache_linemap = None
                     print(disk_compiled_graph)
                     write(pickle.dumps(disk_compiled_graph), key, "cg")
                 else:
@@ -298,14 +298,14 @@ class CompiledFxGraph:
     cache_linemap: List = None
     _boxed_call: bool = None
 
-    def __call__(self, new_inputs) -> Any:
+    def __call__(self, inputs) -> Any:
         # We can't really serialize callables that may be C++/Triton/etc., so we serialize their disk cache location instead
         # TODO: When making an API that can save compiled models e2e to disk this will need to be better
-        if self.compiled_model is None:
+        if self.compiled_artifact is None:
             from .codecache import PyCodeCache
-            self.compiled_model = PyCodeCache.load_by_key_path(self.compiled_model_key, self.compiled_model_path, self.compiled_model_linemap if self.compiled_model_linemap is not None else ()).call
+            self.compiled_artifact = PyCodeCache.load_by_key_path(self.cache_key, self.artifact_path, self.cache_linemap if self.cache_linemap is not None else ()).call
 
-        return self.compiled_model(new_inputs)
+        return self.compiled_artifact(inputs)
 
 
 def cpp_compiler():
@@ -432,7 +432,7 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code), "cpp")
+        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code) "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -679,12 +679,13 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
         key, input_path = write(
             source_code,
-            code_hash(source_code + cpp_command),
+            code_hash(source_code),
             "cpp",
-            code_hash(cpp_command),
+            code_hash(
+                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+            ),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -740,12 +741,11 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         key, input_path = write(
             source_code,
-            code_hash(source_code + cpp_command),
+            code_hash(source_code),
             "cpp",
-            code_hash(cpp_command),
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -776,11 +776,11 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code, extra=""):
-        return write(source_code, code_hash(source_code + extra), "py", extra)
+        return write(source_code, "py", extra)
 
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, code_hash(source_code + extra), "py", extra)
+        key, path = write(source_code, "py", extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
