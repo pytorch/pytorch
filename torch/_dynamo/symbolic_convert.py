@@ -13,6 +13,7 @@ import sys
 import traceback
 import types
 import typing
+import warnings
 import weakref
 from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
@@ -885,12 +886,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif spec is not None:
             return spec.parent
         else:
-            log.warning(
+            warnings.warn(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
                 ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
