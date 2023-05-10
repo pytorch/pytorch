@@ -6,7 +6,6 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as c10d
-import torch.distributed as dist
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
@@ -14,17 +13,14 @@ if not c10d.is_available():
 
 from test_c10d_common import LOOPBACK
 from torch.testing._internal.common_distributed import (
+    create_device,
     MultiProcessTestCase,
-    requires_nccl,
     requires_gloo,
+    requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
-    create_device,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
@@ -65,7 +61,9 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             self.assertTrue("SequenceNumber" in err)
             # Ensure info about how collectives diff is in the error.
             if verify_diff:
-                self.assertTrue("Collectives differ in the following" in err, f"Got error {err}")
+                self.assertTrue(
+                    "Collectives differ in the following" in err, f"Got error {err}"
+                )
 
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
@@ -218,6 +216,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
 # ASAN is not safe since we are spawning processes.
 if not TEST_WITH_DEV_DBG_ASAN:
+
     @requires_gloo()
     @requires_nccl()
     class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
@@ -245,7 +244,10 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 pg = c10d.new_group(backend="nccl", timeout=timedelta(seconds=timeout))
             else:
                 _pg = c10d.ProcessGroupNCCL(
-                    store, self.rank, self.world_size, timeout=timedelta(seconds=timeout)
+                    store,
+                    self.rank,
+                    self.world_size,
+                    timeout=timedelta(seconds=timeout),
                 )
                 pg = c10d._create_process_group_wrapper(
                     _pg,
@@ -320,7 +322,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             device = f"cuda:{self.rank}"
             with self.assertRaisesRegex(RuntimeError, ".*") as cm:
                 output = torch.zeros(4 + self.rank, device=device)
-                input = torch.ones(4 * (self.world_size +1), device=device)
+                input = torch.ones(4 * (self.world_size + 1), device=device)
 
                 wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
