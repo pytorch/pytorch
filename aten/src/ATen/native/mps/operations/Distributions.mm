@@ -62,12 +62,12 @@ Tensor& random_mps_impl(Tensor& self,
       // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
-        if (std::is_same<scalar_t, int64_t>::value)
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
-        else
-          return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        }
+        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
       }();
-      const MPSDataType outputDataType = (std::is_same<scalar_t, bool>::value) ? MPSDataTypeBool : inputDataType;
+      const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
       MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:distribution
                                                                                        dataType:inputDataType];
