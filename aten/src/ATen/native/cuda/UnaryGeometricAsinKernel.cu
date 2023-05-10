@@ -12,7 +12,10 @@
 
 namespace at::native {
 
+#if 0 && AT_USE_JITERATOR()
 CONSTEXPR_EXCEPT_WIN_CUDA char asin_name[] = "asin_impl";
+#endif
+
 void asin_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
