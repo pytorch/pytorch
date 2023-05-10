@@ -1284,6 +1284,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
+        # why don't we print the exception here?
         raise TorchRuntimeError() from e
 
 

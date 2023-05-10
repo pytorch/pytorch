@@ -2,7 +2,10 @@ from torch.fx import GraphModule
 
 from ._pt2e.prepare import prepare
 from ._pt2e._propagate_annotation import propagate_annotation
-from ._pt2e.qat_utils import _fuse_conv_bn_qat
+from ._pt2e.qat_utils import (
+    _fuse_conv_bn_qat,
+    _fold_conv_bn_qat,
+)
 from ._pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
@@ -81,4 +84,6 @@ def prepare_qat_pt2e_quantizer(
 def convert_pt2e(
     model: GraphModule
 ):
-    return _convert_to_reference_decomposed_fx(model)
+    model = _convert_to_reference_decomposed_fx(model)  # type: ignore[assignment]
+    model = _fold_conv_bn_qat(model)
+    return model

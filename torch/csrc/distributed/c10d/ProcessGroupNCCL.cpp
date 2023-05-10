@@ -85,12 +85,15 @@ ncclRedOpRAII unpackPreMulSum(
   ncclRedOp_t preMulSum;
   bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor =
-      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
+  const T* ptr_factor = has_tensor
+      ? preMulSupplement->tensor_factor.const_data_ptr<T>()
+      : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,
-      has_tensor ? ptr_factor : &scalar_factor,
+      // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
+      // tells us that the scalar input is strictly a multiplier.
+      /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
       dataType,
       residence,
       comm);

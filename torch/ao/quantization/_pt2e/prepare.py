@@ -22,14 +22,9 @@ def _maybe_insert_input_and_output_observers_for_node(
 ):
     this_node_dtype_info = node.meta["target_dtype_info"] if "target_dtype_info" in node.meta else None
     if "val" in node.meta:
-        def check_node_meta_val_fake_tensor(node_meta_val):
-            if isinstance(node_meta_val, (tuple, list)):
-                return all(check_node_meta_val_fake_tensor(element) for element in node_meta_val)
-            else:
-                return isinstance(node_meta_val, FakeTensor)
         output_is_a_tensor = (
             this_node_dtype_info is not None and
-            check_node_meta_val_fake_tensor(node.meta["val"])
+            isinstance(node.meta["val"], FakeTensor)
         )
     else:
         output_is_a_tensor = this_node_dtype_info is not None
@@ -37,9 +32,6 @@ def _maybe_insert_input_and_output_observers_for_node(
     skip_inserting_observers = (
         not output_is_a_tensor
     )
-
-    if skip_inserting_observers:
-        return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
 
@@ -53,6 +45,9 @@ def _maybe_insert_input_and_output_observers_for_node(
         PrepareCustomConfig(),
         None,  # backend_config
     )
+
+    if skip_inserting_observers:
+        return
 
     # this returns the new observer node if it was needed
     maybe_output_obs_node = _maybe_insert_output_observer_for_node(node, model, named_modules, model.graph)
