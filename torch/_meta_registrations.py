@@ -404,23 +404,46 @@ def checkInputsSolver(
     )
 
 
-def checkUplo(uplo: str):
-    uplo_uppercase = uplo.upper()
-    assert (
-        len(uplo) == 1 and uplo_uppercase == "U" or uplo_uppercase == "L"
-    ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
+def checkUplo(UPLO: str):
+    UPLO_uppercase = UPLO.upper()
+    check(
+        len(UPLO) == 1 and (UPLO_uppercase == "U" or UPLO_uppercase == "L"),
+        lambda: f"Expected UPLO argument to be 'L' or 'U', but got {UPLO}",
+    )
 
 
-# @register_meta(aten.linalg_eigh.default)
-def meta_linalg_eigh(self, uplo="L"):
-    squareCheckInputs(self, "linalg_eigh")
-    checkUplo(uplo)
-    real_dtype = toRealValueType(self.dtype)
-    assert self.dim() >= 2
-    values = self.new_empty(self.shape, dtype=real_dtype)
-    values.transpose_(-2, -1)
-    vectors = self.new_empty(self.shape[:-1])
-    return (values, vectors)
+@register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
+def meta__linalg_eigh(
+    A: Tensor,
+    UPLO: str = "L",
+    compute_v: bool = True,
+    *,
+    eigenvalues: Tensor = None,
+    eigenvectors: Tensor = None,
+):
+    squareCheckInputs(A, "linalg.eigh")
+    checkUplo(UPLO)
+
+    shape = list(A.shape)
+    if compute_v:
+        vecs = A.new_empty(shape)
+        vecs.as_strided_(shape, make_contiguous_strides_for(shape, row_major=False))
+    else:
+        vecs = A.new_empty([0])
+
+    shape.pop()
+    vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
+
+    if eigenvalues is not None and eigenvectors is not None:
+        assert isinstance(eigenvalues, TensorLike)
+        assert isinstance(eigenvectors, TensorLike)
+        eigenvalues = _maybe_resize_out(eigenvalues, vals.shape)
+        eigenvectors = _maybe_resize_out(eigenvectors, vecs.shape)
+        _safe_copy_out(copy_from=vals, copy_to=eigenvalues)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=vecs, copy_to=eigenvectors)  # type: ignore[arg-type]
+        return eigenvalues, eigenvectors
+
+    return vals, vecs
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
