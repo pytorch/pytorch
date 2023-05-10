@@ -7228,11 +7228,16 @@ class TestNLLLoss(TestCaseMPS):
         self.assertEqual(mps_out, all_ones)
 
         # Check it works for different dtypes
-        for dtype in [torch.float16, torch.int8, torch.int32, torch.int16, torch.int64]:
+        for dtype in [torch.float16, torch.int8, torch.int16, torch.int32, torch.int64]:
             mps_out = torch.zeros(shape, device='mps', dtype=dtype).bernoulli(0.5)
-            self.assertEqual(mps_out.min().item(), 0.)
-            self.assertEqual(mps_out.max().item(), 1.)
-
+            # Check that output is not all zeros or ones
+            if product_version > 13.0:
+                uniq = mps_out.unique()
+                # TODO: remove cast after arange is fixed for integral types
+                self.assertEqual(uniq.to(dtype=torch.float32), torch.arange(2, device='mps', dtype=torch.float32))
+            else:
+                self.assertEqual(mps_out.min().item(), 0.)
+                self.assertEqual(mps_out.max().item(), 1.)
 
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
