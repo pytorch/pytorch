@@ -54,6 +54,7 @@ BUILD_JOB_NAME = "build"
 TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
+EXCLUDED_BRANCHES = ["nightly"]
 
 
 def parse_args() -> Any:
@@ -81,7 +82,15 @@ def parse_args() -> Any:
         help="name of the event that triggered the job (pull, schedule, etc)",
     )
     parser.add_argument(
-        "--schedule", type=str, help="cron schedule that triggered the job"
+        "--schedule",
+        type=str,
+        help="cron schedule that triggered the job",
+    )
+    parser.add_argument(
+        "--branch",
+        type=str,
+        default="main",
+        help="the branch name",
     )
     return parser.parse_args()
 
@@ -214,8 +223,24 @@ def remove_disabled_jobs(
             disabled_job_cfg,
         ) = record
 
-        if disabled_workflow != workflow or disabled_platform != current_platform:
-            # The current workflow or platform is not disabled by this record
+        if disabled_workflow != workflow:
+            # The current workflow is not disabled by this record
+            continue
+
+        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
+        # There is an exception here for binary build workflows in which the platform
+        # names have the build and test suffix. For example, we have a build job called
+        # manywheel-py3-cuda11_8-build / build and its subsequent test job called
+        # manywheel-py3-cuda11_8-test / test. So they are linked, but their suffixes
+        # are different
+        disabled_platform_no_suffix = re.sub(cleanup_regex, "", disabled_platform)
+        current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
+
+        if (
+            disabled_platform != current_platform
+            and disabled_platform_no_suffix != current_platform_no_suffix
+        ):
+            # The current platform is not disabled by this record
             continue
 
         # The logic after this is fairly complicated:
@@ -351,7 +376,7 @@ def main() -> None:
         # periodically scheduled jobs, only the ones at this time
         filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
 
-    if args.workflow and args.job_name:
+    if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
         # is disabled and remove it and all its dependants from the test matrix
         filtered_test_matrix = remove_disabled_jobs(
