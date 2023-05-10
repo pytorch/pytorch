@@ -3991,7 +3991,12 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         assert align_corners is not None
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
-        return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
+        if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+            from torch._decomp.decompositions import upsample_bilinear2d_vec
+            # Use slow decomp whose backward will be in terms of index_put
+            return upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors)
+        else:
+            return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
         return torch._C._nn.upsample_trilinear3d(input, output_size, align_corners, scale_factors)
