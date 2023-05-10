@@ -251,8 +251,8 @@ def default_partition(
                     saved_sym_nodes.append(user)
             else:
                 saved_values.append(node)
-    saved_values = list(set(saved_values))
-    saved_sym_nodes = list(set(saved_sym_nodes))
+    saved_values = list({k: None for k in saved_values}.keys())
+    saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
@@ -559,9 +559,6 @@ def min_cut_rematerialization_partition(
         elif is_sym_node(node):
             weight = math.inf
         elif is_non_tensor_node:
-            weight = math.inf
-        elif "inductor_lookup_seed" in str(node.target):
-            # force all the seeds to be passed in a single variable
             weight = math.inf
         else:
             weight = get_node_weight(node)

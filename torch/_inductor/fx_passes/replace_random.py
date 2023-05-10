@@ -5,7 +5,6 @@ import logging
 import torch
 from ..._dynamo.utils import counters
 from .. import config, inductor_prims
-from ..ir import is_triton
 from ..pattern_matcher import (
     CallFunctionVarArgs,
     inference_graph,
@@ -31,9 +30,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
     lazy_init()
 
     count = patterns.apply(gm)
-
-    if count:
-        fuse_seed_creation_pass(gm.graph)
+    count += fuse_seed_creation_pass(gm.graph)
 
     return count
 
@@ -50,11 +47,15 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
         a = inductor_lookup_seed(seeds, 0)
         b = inductor_lookup_seed(seeds, 1)
 
+    We do this because seed creation is entirely launch overhead bound.
     """
     device_seeds = collections.defaultdict(list)
     for node in graph.nodes:
         if CallFunctionVarArgs(inductor_prims.seed).match(node):
             device_seeds[node.args[0]].append(node)
+
+    if not device_seeds:
+        return 0
 
     for device, seeds in device_seeds.items():
         with graph.inserting_before(seeds[0]):
@@ -72,6 +73,8 @@ def fuse_seed_creation_pass(graph: torch.fx.Graph):
             seed.replace_all_uses_with(new_seed)
             new_seed.meta.update(seed.meta)
             graph.erase_node(seed)
+
+    return len(device_seeds)
 
 
 @init_once_fakemode
@@ -108,12 +111,8 @@ def lazy_init():
     )
 
 
-def should_vectorize(device):
-    return config.triton.vectorize_random and is_triton(device)
-
-
 def default_kwargs(device):
-    return {"vectorize": should_vectorize(device)}
+    return {}
 
 
 def get_device(device):
@@ -128,40 +127,41 @@ def _dropout_pattern(x: torch.Tensor, dropout_p: float):
 
 def _dropout_replacement(x: torch.Tensor, dropout_p: float):
     assert 0 < dropout_p < 1, "should have been handled in decomps"
-    counters["inductor"]["replace_random"] += 1
+    counters["inductor"]["replace_dropout"] += 1
     seed = inductor_prims.seed(x.device)
     scale = float(1.0 / (1.0 - dropout_p))
 
-    def get_bool_mask():
-        return inductor_prims.random(x.size(), seed, "rand", vectorize) > dropout_p
-
-    if config.lowmem_dropout:
-        # vectorize does not guarantee the same values with different tiling
-        vectorize = False
-    else:
-        get_bool_mask = functools.lru_cache(None)(get_bool_mask)
-        vectorize = should_vectorize(x.device)
+    # We could do low memory dropout here by recomputing the bool_mask
+    # in both forward and backward.  Unfortunately, the latest version of
+    # the partitioner doesn't play nice with this.  The CSE pass combines
+    # the randomness calls, and if you fix that it decides to put both
+    # bool_mask computations in the forwards.
+    bool_mask = (
+        inductor_prims.random(x.size(), seed, "rand", **default_kwargs(x.device))
+        > dropout_p
+    )
 
     class Dropout(torch.autograd.Function):
         @staticmethod
         def forward(_, x):
-            return get_bool_mask().to(x.dtype) * x * scale
+            return bool_mask.to(x.dtype) * x * scale
 
         @staticmethod
         def backward(_, grad_output):
-            return get_bool_mask().to(grad_output.dtype) * grad_output * scale
+            return bool_mask.to(grad_output.dtype) * grad_output * scale
 
     return Dropout.apply(x)
 
 
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.default), pass_dict=patterns)
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
-def replace_rand(
+def replace_random(
     match: Match, size, *, dtype=None, device=None, layout=None, pin_memory=None
 ):
     def replacement():
-        seed = inductor_prims.seed(device)
-        result = inductor_prims.random(size, seed, mode, **default_kwargs(device))
+        result = inductor_prims.random(
+            size, inductor_prims.seed(device), mode, **default_kwargs(device)
+        )
         if dtype is not None:
             result = result.to(dtype)
         return result
@@ -170,5 +170,25 @@ def replace_rand(
         aten.rand.default: "rand",
         aten.randn.default: "randn",
     }[match.output_node().target]
+    device = get_device(device)
+    match.replace_by_example(replacement, [])
+
+
+@register_graph_pattern(CallFunctionVarArgs(aten.randint.low), pass_dict=patterns)
+def replace_randint(
+    match: Match,
+    low,
+    high,
+    size,
+    *,
+    dtype=torch.int64,
+    device=None,
+    layout=None,
+    pin_memory=None,
+):
+    def replacement():
+        result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
+        return result.to(dtype)
+
     device = get_device(device)
     match.replace_by_example(replacement, [])

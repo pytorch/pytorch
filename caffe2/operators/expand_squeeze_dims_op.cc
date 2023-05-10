@@ -51,8 +51,8 @@ The *ExpandDims* op inserts single-dimensional entries into the shape of the inp
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/expand_squeeze_dims_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/expand_squeeze_dims_op.cc
 
 
 <details>
@@ -110,8 +110,8 @@ The *Squeeze* op removes single-dimensional entries from the shape of the input 
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/expand_squeeze_dims_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/expand_squeeze_dims_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/expand_squeeze_dims_op.cc
 
 
 <details>

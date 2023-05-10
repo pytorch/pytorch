@@ -7,6 +7,7 @@
 #include <limits>
 #include <omp.h>
 
+#include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
@@ -22,6 +23,22 @@ template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
+template <typename scalar_t>
+inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a > b ? a : b;
+}
+
+template <typename scalar_t>
+inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a < b ? a : b;
+}
+
 constexpr float uint32_to_uniform_float(uint32_t value) {
   // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
   constexpr float scale = 4.6566127342e-10;
@@ -35,6 +52,14 @@ float normalized_rand_cpu(uint32_t seed, uint32_t offset) {
 float randn_cpu(uint32_t seed, uint32_t offset) {
   at::Philox4_32 engine(seed, 0, offset);
   return engine.randn(10);
+}
+
+uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+  auto gen = at::Philox4_32(seed, 0, offset);
+  uint64_t r0 = gen();
+  uint64_t r1 = gen();
+  uint64_t result = r0 | (r1 << 32);
+  return (result % static_cast<uint64_t>(high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };

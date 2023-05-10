@@ -22,7 +22,7 @@ OPERATOR_SCHEMA(Reciprocal)
 Performs element-wise reciprocal ($\1/x$) of input tensor $X$.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reciprocal_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reciprocal_op.cc
 
 <details>
 

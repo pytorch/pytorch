@@ -76,7 +76,8 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph):
         for n in reversed(self.nodes):
-            graph.erase_node(n)
+            if not n._erased:
+                graph.erase_node(n)
 
     def output_nodes(self):
         return [
@@ -318,7 +319,7 @@ class _TargetArgsExpr(_TargetExpr):
             return FailedMatch("function_mismatch")
 
         if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users")
+            return FailedMatch(f"multiple_users {node}")
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -658,7 +659,7 @@ def register_replacement(
         search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
-            ignore_types=(int, float, torch.device, torch.dtype),
+            ignore_types=(int, float, list, torch.device, torch.dtype),
             argnames=argnames,
             scalar_workaround=scalar_workaround,
         )
@@ -748,6 +749,9 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
+    def clear(self):
+        self.patterns.clear()
+
 
 def _not_implemented(*args, **kwargs):
     raise NotImplementedError()
@@ -768,6 +772,8 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
             return KeywordArg(inv_scalar_workaround[x])
         if type(x) in ignore_types:
+            return Ignored()
+        if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
         return x
 
@@ -791,11 +797,16 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
 
         def call_function(self, target, args, kwargs):
             args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            if list in ignore_types:
+                # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
+                args = [process_arg(a) for a in args]
+                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n):
             rv = super().run_node(n)
-            rv.users = len(n.users)
+            if not isinstance(rv, tuple):
+                rv.users = len(n.users)
             return rv
 
     pattern = Converter(gm).run()

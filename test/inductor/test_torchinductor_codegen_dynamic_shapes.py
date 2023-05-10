@@ -101,11 +101,6 @@ def check_codegen(
             if "def triton" in line:
                 triton_kernel_found = True
                 continue
-            if "xnumel =" in line:
-                self.assertTrue(
-                    re.search(r"xnumel = \d+$", line) is None,
-                    msg=f"Found static xnumel\n{code}",
-                )
         self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"
@@ -225,8 +220,8 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_lowmem_dropout1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_lowmem_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dropout3_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_masked_fill_promotion_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -270,6 +265,7 @@ test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
 
 
