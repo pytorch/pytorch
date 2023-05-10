@@ -22,12 +22,6 @@ namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-static void wrapDim(int64_t& dim, const std::vector<int64_t>& sizes) {
-  if (dim < 0) {
-    dim += sizes.size();
-  }
-}
-
 // need_trim_grad_ops contains functions that return multiple outputs in
 // forward, but only the first one requires grad.
 // Example:
