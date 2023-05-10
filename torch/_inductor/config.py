@@ -1,15 +1,7 @@
 """
 The following timm models need follow up:
-- convmixer_768_32 (grouped conv)
-- fbnetc_100 (grouped conv)
-- gernet_l (grouped conv)
-- ghostnet_100 (grouped conv)
-- gluon_xception65 (grouped conv)
 - hrnet_w18 (SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL)
-- mnasnet_100 (grouped conv)
-- pnasnet5large (grouped conv)
 - selecsls42b (SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL)
-- spnasnet_100 (grouped conv)
 
 They get good speedup in shunting-layout-opt, but not latest branch.
 

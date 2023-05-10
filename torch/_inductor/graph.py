@@ -150,11 +150,12 @@ class GraphLowering(torch.fx.Interpreter):
             f.write(gm.print_readable(False))
         GraphLowering.ITER += 1
 
-        if GraphLowering.ITER == -1:
-            from fxana import analyze, print_upstream, print_downstream
+        if GraphLowering.ITER == 1:
+            from fxana import analyze, print_upstream, print_downstream, extract_conv
             # analyze(gm)
             # print_upstream(gm.graph, "gt_142")
-            breakpoint()
+            extract_conv(gm)
+            # breakpoint()
 
         nconv = len([ n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default])
 
@@ -165,23 +166,21 @@ class GraphLowering(torch.fx.Interpreter):
             print("ONLY A FEW CONV, SKIP LAYOUT OPT")
             config.layout_opt = False
 
-        # it's hard to optimize layout for models with both normal conv
-        # and group conv. Normal conv prefers channels last while grouped
-        # conv prefers contiguous. For such model like timm_regnet we can
-        # make inference faster but training will slow down so far.
-        # Simply disable layout optimization for such model for now.
-        #
-        # Follow models are skipped duo to this:
-        # - shufflenet_v2_x1_0
-        # - timm_regnet
-        # - resnext50_32x4d
-        #
-        # Unfortunately, this also exclude the following models which can have good
-        # speedup via layout-opt
-        # - convmixer_768_32 (1x -> 3x)
-        # - fbnetc_100
-        if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 for n in gm.graph.nodes):
-            print("FOUND GROUPED CONVOLUTION!")
+        # Channels last layout can dramatically hurt conv perf. E.g.
+        # Conv with arguments like {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 2}
+        # slows down 31x using channels last..
+
+        # But a lot of timm models use grouped convolution with
+        # in-channel size == 1, for those grouped convolution, channels last
+        # still helps a lot.
+        # E.g.
+        # Conv with arguments {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 58}
+        # get 1.86x speedup with channels last layout.
+        # 
+        # The following heuristics skip using channels-last if the model contains
+        # grouped convolution with in-channels > 1.
+        if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 and n.args[1].meta['val'].size(1) > 1 for n in gm.graph.nodes):
+            print("FOUND GROUPED CONVOLUTION with >1 in_channels!")
             config.layout_opt = False
 
         # Channels last does not help much for convolution whose out channel is smaller than in channels.
