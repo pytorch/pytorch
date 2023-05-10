@@ -4432,7 +4432,7 @@ class TestDifferentiableOptimizer(TestCase):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
+        # `step` `eta` & `mu` are not continuous variables (even though we define them as floats)
         # and so they shouldn't require gradients.
         state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
         state["eta"] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
