@@ -84,7 +84,7 @@ class OnnxDispatcher:
         node: torch.fx.Node,
         onnx_args: Sequence,
         onnx_kwargs: Mapping,
-    ) -> Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]:
+    ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
 
         Args:
