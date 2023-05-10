@@ -118,11 +118,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
-        options = itertools.product([[3, 56, 56]], [True, False])
-        for x_shape, mode_train in options:
-            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
-                mode=mode_train
-            )
+        options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
+        for x_shape, mode_train, padding in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 64, 3, 3, padding=padding)
+            ).train(mode=mode_train)
             v = torch.randn(x_shape, dtype=torch.float32)
 
             with torch.no_grad():
@@ -212,8 +212,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed(self):
-        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
+        options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
+        for x_shape, padding in options:
+            mod = torch.nn.Sequential(
+                torch.nn.ConvTranspose2d(3, 64, 3, 3, padding=padding)
+            ).eval()
             v = torch.randn(x_shape, dtype=torch.float32)
             with torch.no_grad():
                 self.common(
@@ -1567,6 +1570,26 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_to_dtype_bool_float(self):
+        # https://github.com/pytorch/pytorch/issues/100800
+        def f(a):
+            return torch.where(
+                torch.ones_like(a).to(torch.bool),
+                torch.zeros_like(a),
+                torch.ones_like(a) * 2,
+            )
+
+        self.common(f, (torch.ones(16),))
+
+    def test_to_dtype_float_bool(self):
+        # https://github.com/pytorch/pytorch/issues/100466
+        def f(a):
+            a = a * torch.tensor(a >= 0, dtype=torch.float32)
+            return a
+
+        x = torch.rand(16)
+        self.common(f, (x,))
 
 
 if __name__ == "__main__":
