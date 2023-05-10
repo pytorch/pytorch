@@ -570,7 +570,7 @@ part of a real valued function, we have:
         \left( \frac{\partial L}{\partial s} \right)^* = \frac{\partial L}{\partial s^*}
         :label: [2]
 
-i.e., :math:`\frac{\partial L}{\partial s}` can be expressed by :math:`\frac{\partial L}{\partial s^*}` which is the incoming :math:`grad\_output`.
+i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
 
 Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:`\frac{\partial L}{\partial v}`, we get:
 
