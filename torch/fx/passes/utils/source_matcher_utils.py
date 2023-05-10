@@ -92,7 +92,7 @@ def get_source_partitions(
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
-                params.add(node.target)
+                params.add(node)
 
             for user in node.users.keys():
                 if user not in nodes:
