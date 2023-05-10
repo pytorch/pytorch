@@ -320,7 +320,6 @@ def run_ort(
         import onnx.inliner
     except ImportError:
         warnings.warn("Cannot import onnx.inliner. Skip inlining model.")
-        pass
     else:
         if isinstance(ort_model, bytes):
             buffer = io.BytesIO(ort_model)

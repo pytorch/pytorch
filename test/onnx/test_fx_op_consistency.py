@@ -208,10 +208,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
             "ArgMin", "uint8, int8, int16, int64"
         ),
     ),
-    xfail(
+    skip(
         "as_strided",
         variant_name="partial_views",
-        reason="ONNX doesn't have partial view for tensor",
+        reason="ONNX doesn't have partial view for tensor; ORT segfaults after inlining",
     ),
     xfail(
         "asin", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
