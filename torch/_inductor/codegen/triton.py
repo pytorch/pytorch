@@ -4,7 +4,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import operator
 from typing import Iterable, List, Set
 
 import sympy
@@ -43,6 +42,7 @@ from .triton_utils import (
     config_of,
     IterationRangesRoot,
     signature_of,
+    split_iteration_ranges,
     TritonCSEVariable,
     TritonPrinter,
 )
@@ -166,73 +166,6 @@ class TritonKernel(Kernel):
             for length, ranges in zip(lengths, self.range_trees)
         ]
 
-    @staticmethod
-    def _split_iteration_ranges(
-        groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
-    ):
-        sv = V.graph.sizevars
-        new_ranges = [[] for _ in groups]
-        remaining = [sv.simplify(g) for g in groups]
-        var_count = itertools.count()
-
-        def add_range(i, expr):
-            expr = sv.simplify(expr)
-            if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit()
-            # guard on the last item out
-            remaining[i] = ir.FloorDiv(remaining[i], expr)
-            new_ranges[i].append(expr)
-            return next(var_count)
-
-        def make_combined(size, idx1, idx2):
-            def getter(flat_vars):
-                return size * flat_vars[idx1] + flat_vars[idx2]
-
-            return getter
-
-        return_getters_groups = []
-        current_group = 0
-        for length_group in lengths:
-            return_getters = []
-            for size in length_group:
-                if sv.statically_known_equals(size, 1):
-                    return_getters.append(lambda _: sympy.Integer(0))
-                    continue
-
-                while (
-                    current_group < len(remaining)
-                    and sv.size_hint(remaining[current_group]) == 1
-                ):
-                    # scroll to next group with remaining elements
-                    current_group += 1
-
-                if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
-                    # need to break size in two
-                    if not sv.statically_known_multiple_of(
-                        size, remaining[current_group]
-                    ):
-                        raise CantSplit()
-                    size1 = remaining[current_group]
-                    size2 = ir.FloorDiv(size, remaining[current_group])
-                    return_getters.append(
-                        make_combined(
-                            size2,
-                            add_range(current_group, size1),
-                            add_range(current_group + 1, size2),
-                        )
-                    )
-                else:
-                    return_getters.append(
-                        operator.itemgetter(add_range(current_group, size))
-                    )
-            return_getters_groups.append(return_getters)
-
-        assert all(
-            V.graph.sizevars.size_hint(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
-
-        return new_ranges, return_getters_groups
-
     @classmethod
     def is_compatible(cls, groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]):
         try:
@@ -264,9 +197,7 @@ class TritonKernel(Kernel):
         ):
             return self.set_ranges(*lengths)
 
-        new_ranges, return_getters_groups = self._split_iteration_ranges(
-            groups, lengths
-        )
+        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
@@ -1403,17 +1334,14 @@ class TritonScheduling:
 
     def codegen_foreach(self, foreach_node):
         """ """
-        if isinstance(foreach_node.node, ir.ListElemBuffer):
-            return
-
-        node_schedule = foreach_node.get_nodes()
-        kernels = ForeachKernel.create_kernels(foreach_node)
-
-        for kernel in kernels:
+        schedules = ForeachKernel.partition_schedule(foreach_node.get_nodes())
+        for schedule in schedules:
+            kernel = ForeachKernel(len(schedule))
             with kernel:
-                for node in node_schedule:
-                    node.mark_run()
-                    node.codegen()
+                for ind, node in enumerate(schedule):
+                    with kernel.set_index(ind):
+                        node.mark_run()
+                        node.codegen()
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)

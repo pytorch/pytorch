@@ -13,6 +13,7 @@ from .triton_utils import (
     config_of,
     IterationRangesRoot,
     signature_of,
+    split_iteration_ranges,
     TritonCSEVariable,
     TritonPrinter,
 )
@@ -61,87 +62,105 @@ class ForeachKernel(Kernel):
     overrides = TritonOverrides
 
     @staticmethod
-    def create_kernels(foreach_node):
+    def partition_schedule(node_schedule):
         """Creates one or more ForeachKernels if the number of args exceeds CUDA limits."""
-        node_schedule = foreach_node.get_nodes()
         assert len(node_schedule) >= 1
-        layouts = node_schedule[0].node.get_layouts()
-        list_length = len(layouts)
-        num_lists = sum([node.node.list_arg_count() for node in node_schedule])
 
         MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
-        kernels = []
-        max_list_length = MAX_NUM_ARGS // num_lists
-        for i in range(0, list_length, max_list_length):
-            kernels.append(
-                ForeachKernel(
-                    layouts, sublist_indices=(i, min(i + max_list_length, list_length))
-                )
-            )
-        return kernels
+        partitions = []
+        cur_count = 0
+        cur_partition = []
+        for node in node_schedule:
+            read_writes = node.read_writes
+            read_write_count = len(read_writes.reads) + len(read_writes.writes)
+            if cur_count + read_write_count > MAX_NUM_ARGS:
+                partitions.append(cur_partition)
+                cur_partition = [node]
+                cur_count = read_write_count
+            else:
+                cur_count += read_write_count
+                cur_partition.append(node)
 
-    def __init__(self, layouts, sublist_indices=None):
-        sublist_indices = sublist_indices if sublist_indices else (0, len(layouts))
-        if sublist_indices[0] > sublist_indices[1]:
-            raise ValueError(
-                f"Invalid list slice bounds in ForeachKernel: {sublist_indices}"
-            )
+        if cur_partition:
+            partitions.append(cur_partition)
+
+        return partitions
+
+    def __init__(self, num_sub_kernels):
         super().__init__()
-        self.sublist_indices = sublist_indices
-        self.lists = {}
-        self.tensor_elem_counts = [
-            int(sympy_product(layout.size))
-            for layout in layouts[sublist_indices[0] : sublist_indices[1]]
-        ]
         self.block_size = 1024  # Try tuning this value
-        self.grid = (
-            ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
-            1,
-            1,
-        )
+        # self.grid = (
+        #    ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
+        #    1,
+        #    1,
+        # )
         self.num_warps = 8
-        self.range_tree_nodes = {}
-        self.iter_vars_count = itertools.count(0)
+        self.load_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
+        self.compute_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
+        self.store_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
+        self.range_trees = []
 
-    def __enter__(self):
-        class CSEProxy:
-            self.name = "CSEProxy"
+    def set_index(self, index):
+        assert index >= 0 and index < len(self.load_buffers)
+        return self.swap_buffers(
+            self.load_buffers[index],
+            self.compute_buffers[index],
+            self.store_buffers[index],
+        )
 
-            @staticmethod
-            def __getattr__(name):
-                def inner(*args, **kwargs):
-                    csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
-                    )
-                    csevar.update_on_args(name, args, kwargs)
-                    return csevar
+    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+        """
+        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
 
-                return inner
+        To do this we need to split up the iteration space of i0 into something like:
+            for i1 in s0:
+              for i2 in s1:
+                i0 = i1*s1 + i2
+                ....
 
-            @staticmethod
-            def indirect_indexing(index_var, size):
-                raise NotImplementedError()
+        This function matches and resplits lengths to the groups of
+        this kernel to enable tiled + non-tiled fusions.
+        """
+        groups = [rt.numel for rt in self.range_trees]
+        if not self.inside_reduction:
+            groups[-1] = sympy.Integer(1)
 
-            @staticmethod
-            def load(list_name: str, layouts: List[Layout]):
-                store_cache = self.cse.store_cache
-                if list_name in store_cache:
-                    return store_cache[list_name]
-                return self.load_list(list_name, layouts)
+        if len(lengths) == len(self.range_trees) and all(
+            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
+            for x, g in zip(lengths, groups)
+        ):
+            return self.set_ranges(*lengths)
 
-            @staticmethod
-            def store(list_name, layouts, value):
-                self.cse.store_cache[list_name] = value
-                return self.store_list(list_name, layouts, value)
+        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
+        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
+        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
-            @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
-                raise NotImplementedError()
+    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
+        """
+        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
 
-        parent_handler = self.overrides(V.get_ops_handler())
-        self.exit_stack.enter_context(V.set_ops_handler(CSEProxy()))
-        self.exit_stack.enter_context(V.set_kernel_handler(self))
-        return self
+        To do this we need to split up the iteration space of i0 into something like:
+            for i1 in s0:
+              for i2 in s1:
+                i0 = i1*s1 + i2
+                ....
+
+        This function matches and resplits lengths to the groups of
+        this kernel to enable tiled + non-tiled fusions.
+        """
+        groups = [rt.numel for rt in self.range_trees]
+        if not self.inside_reduction:
+            groups[-1] = sympy.Integer(1)
+
+        if len(lengths) == len(self.range_trees) and all(
+            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
+            for x, g in zip(lengths, groups)
+        ):
+            return self.set_ranges(*lengths)
+
+        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
+        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
+        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
