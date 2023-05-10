@@ -432,7 +432,7 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code) "cpp")
+        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code), "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -679,13 +679,12 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
         key, input_path = write(
             source_code,
-            code_hash(source_code),
+            code_hash(source_code + cpp_command),
             "cpp",
-            code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
-            ),
+            code_hash(cpp_command),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -741,11 +740,12 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         key, input_path = write(
             source_code,
-            code_hash(source_code),
+            code_hash(source_code + cpp_command),
             "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+            code_hash(cpp_command),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -776,11 +776,11 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code, extra=""):
-        return write(source_code, "py", extra)
+        return write(source_code, code_hash(source_code + extra), "py", extra)
 
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, "py", extra)
+        key, path = write(source_code, code_hash(source_code + extra), "py", extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
