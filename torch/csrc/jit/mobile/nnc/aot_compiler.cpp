@@ -30,7 +30,7 @@ namespace jit {
 namespace mobile {
 namespace nnc {
 
-static std::vector<int64_t> getConstSizes(const BufPtr b) {
+std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
   for (const auto& dim : b->dims()) {
     LongImmPtr imm_dim = to<LongImm>(dim);
@@ -42,7 +42,7 @@ static std::vector<int64_t> getConstSizes(const BufPtr b) {
 }
 
 // Construct input-specs vector from the inputs of the original graph
-static std::vector<mobile::nnc::InputSpec> toInputSpecs(
+std::vector<mobile::nnc::InputSpec> toInputSpecs(
     const std::shared_ptr<tensorexpr::TensorExprKernel>& kernel) {
   const std::shared_ptr<Graph>& g = kernel->graph();
   std::vector<mobile::nnc::InputSpec> specs;
@@ -89,7 +89,7 @@ static std::vector<mobile::nnc::InputSpec> toInputSpecs(
 // If a symbolic shape can be found in several different positions, we
 // return the first one we find (TODO: maybe we should return all and
 // verify that they all match at runtime).
-static std::vector<SymbolicShapePosition> findSymbolicShapePositions(
+std::vector<SymbolicShapePosition> findSymbolicShapePositions(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel) {
   std::vector<SymbolicShapePosition> res;
   for (int64_t sym_idx : kernel->getSymbolicShapeInputs()) {
@@ -122,7 +122,7 @@ static std::vector<SymbolicShapePosition> findSymbolicShapePositions(
   return res;
 }
 
-static std::unique_ptr<Function> compileMethod(
+std::unique_ptr<Function> compileMethod(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     const std::string& method_name,
     const std::vector<std::vector<int64_t>>& sizes,
@@ -181,9 +181,7 @@ static std::unique_ptr<Function> compileMethod(
   return func;
 }
 
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
-#if 0
-static std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
+std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
     const std::vector<std::vector<int64_t>>& sizes,
@@ -219,7 +217,7 @@ static std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   return std::make_pair(std::move(func), compiled_assembly);
 }
 
-static void writeOutputLlvmAssembly(
+void writeOutputLlvmAssembly(
     const std::string& asm_code,
     const std::string& output_llvm_file_name) {
   std::ofstream output(output_llvm_file_name);
@@ -228,7 +226,7 @@ static void writeOutputLlvmAssembly(
       "The compiled llvm assembly code was saved to ", output_llvm_file_name);
 }
 
-static std::vector<std::string> split(
+std::vector<std::string> split(
     char separator,
     const std::string& string,
     bool ignore_empty = true) {
@@ -243,7 +241,7 @@ static std::vector<std::string> split(
   return pieces;
 }
 
-static std::vector<std::vector<int64_t>> parseInputShapes(
+std::vector<std::vector<int64_t>> parseInputShapes(
     const std::string& input_dims_s) {
   std::vector<std::string> input_dims_list = split(';', input_dims_s);
   std::vector<std::vector<int64_t>> inputs;
@@ -259,7 +257,7 @@ static std::vector<std::vector<int64_t>> parseInputShapes(
   return inputs;
 }
 
-static std::vector<at::ScalarType> parseInputTypes(
+std::vector<at::ScalarType> parseInputTypes(
     const std::string& input_types_str) {
   std::vector<std::string> inputTypes = split(';', input_types_str);
   std::vector<at::ScalarType> scalarTypes;
@@ -279,7 +277,7 @@ static std::vector<at::ScalarType> parseInputTypes(
   return scalarTypes;
 }
 
-static std::vector<at::MemoryFormat> parseInputMemoryFormats(
+std::vector<at::MemoryFormat> parseInputMemoryFormats(
     const std::string& input_memory_format_str) {
   std::vector<std::string> memFormatsStr = split(';', input_memory_format_str);
   std::vector<at::MemoryFormat> memFormats;
@@ -297,7 +295,7 @@ static std::vector<at::MemoryFormat> parseInputMemoryFormats(
   return memFormats;
 }
 
-static std::vector<int64_t> parseInputDynamicShapes(
+std::vector<int64_t> parseInputDynamicShapes(
     const std::string& dynamic_dims_s) {
   std::vector<std::string> dynamic_dims_list = split(',', dynamic_dims_s);
   std::vector<int64_t> dynamic_dims;
@@ -308,7 +306,7 @@ static std::vector<int64_t> parseInputDynamicShapes(
   return dynamic_dims;
 }
 
-static std::string getNncKernelId(
+std::string getNncKernelId(
     const std::string& model_name,
     const std::string& model_version,
     const std::string& method_name) {
@@ -318,7 +316,7 @@ static std::string getNncKernelId(
       version_token;
 }
 
-static std::string getNncKernelFuncName(
+std::string getNncKernelFuncName(
     const std::string& model_name,
     const std::string& model_version,
     const std::string& method_name) {
@@ -327,8 +325,7 @@ static std::string getNncKernelFuncName(
 
 // Preprocess the graph and returns the processed graph and
 // symbolic values if dynamic input shapes are specified
-static std::pair<std::shared_ptr<Graph>, std::vector<int64_t>>
-preprocessGraphPasses(
+std::pair<std::shared_ptr<Graph>, std::vector<int64_t>> preprocessGraphPasses(
     std::shared_ptr<Graph>& graph,
     const std::vector<c10::optional<at::Tensor>>& example_inputs,
     const std::vector<int64_t>& dynamic_sizes) {
@@ -370,7 +367,7 @@ preprocessGraphPasses(
   return std::make_pair(graph, sym_val);
 }
 
-static std::vector<c10::optional<at::Tensor>> generateExampleInputs(
+std::vector<c10::optional<at::Tensor>> generateExampleInputs(
     const std::vector<std::vector<int64_t>>& inputShapes,
     const std::vector<at::ScalarType>& inputTypes,
     const std::vector<at::MemoryFormat>& inputMemoryFormats) {
@@ -385,7 +382,7 @@ static std::vector<c10::optional<at::Tensor>> generateExampleInputs(
   return example_inputs;
 }
 
-static c10::IValue preprocess(
+c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
@@ -442,8 +439,8 @@ static c10::IValue preprocess(
   }
   return cu.serialize();
 }
-#endif
 
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
 } // namespace nnc
