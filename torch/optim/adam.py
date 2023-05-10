@@ -435,7 +435,7 @@ def _multi_tensor_adam(params: List[Tensor],
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
         device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
@@ -485,7 +485,7 @@ def _multi_tensor_adam(params: List[Tensor],
                 torch._foreach_reciprocal_(eps_over_step_size)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
 
-            torch._foreach_addcdiv_(params_, device_exp_avgs, denom)
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom)
         else:
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
             bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
@@ -507,7 +507,7 @@ def _multi_tensor_adam(params: List[Tensor],
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-            torch._foreach_addcdiv_(params_, device_exp_avgs, denom, step_size)
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom, step_size)
 
 
 def _fused_adam(
