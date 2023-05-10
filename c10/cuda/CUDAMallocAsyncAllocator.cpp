@@ -362,7 +362,7 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
     // OOM exception, free some stuff on the script side, and retry the
     // allocation. This aligns with the behavior of alloc_block in
     // CUDACachingAllocator.cpp.
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     size_t device_free;
     size_t device_total;
     C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
@@ -563,7 +563,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         *maxWorkspaceGuess = guess;
         return;
       } else if (err == cudaErrorMemoryAllocation) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
         guess >>= 1; // quick and dirty: try half the size next iteration
       } else {
         C10_CUDA_CHECK(err);

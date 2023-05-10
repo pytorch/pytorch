@@ -284,12 +284,13 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
-    if OptimizationContext.key in V.interpreter.current_node.meta:
-        return V.interpreter.current_node.meta[OptimizationContext.key]
-    else:
-        return None
+    return get_opt_ctx(V.interpreter.current_node)
 
 
 class CppVecOverrides(OpOverrides):
@@ -599,6 +600,16 @@ class CppVecOverrides(OpOverrides):
             torch.bfloat16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        node: torch.fx.Node = V.interpreter.current_node
+        assert node
+        opt_ctx_x = get_opt_ctx(node.args[1])
+        assert opt_ctx_x
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+            return f"vec_convert_to_mask({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+            return f"mask_convert_to_float({x})"
+        # TODO(jgong5): support conversion for other types
+        # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
 
     @staticmethod
