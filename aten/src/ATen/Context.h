@@ -296,7 +296,7 @@ class TORCH_API Context {
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
-  bool benchmark_cudnn = false;
+  bool benchmark_cudnn = true;
 #endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
