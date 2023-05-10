@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
-
-import onnx
+from typing import Tuple, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal import _beartype
+
+if TYPE_CHECKING:
+    import onnx
 
 
 @_beartype.beartype
@@ -106,6 +107,9 @@ def save_model_with_external_data(
             If an input name matches a tensor loaded from "torch_load_paths",
             the tensor will be saved as that input's external initializer.
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     onnx_model_with_initializers = onnx.ModelProto()
     onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = [input.name for input in onnx_model.graph.input]
