@@ -202,8 +202,8 @@ def get_reordered_tests(
     We prioritize running test files that were changed.
     """
     prioritized_tests: List[str] = []
-    prioritized_tests += _get_test_prioritized_due_to_test_file_changes()
     prioritized_tests += _get_previously_failing_tests()
+    prioritized_tests += _get_test_prioritized_due_to_test_file_changes()
 
     bring_to_front = []
     the_rest = []
