@@ -295,7 +295,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
@@ -321,5 +321,5 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA and not TEST_WITH_ROCM:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
