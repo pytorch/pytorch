@@ -12,22 +12,11 @@ namespace at { namespace mps {
 struct MPSHooks : public at::MPSHooksInterface {
   MPSHooks(at::MPSHooksArgs) {}
   void initMPS() const override;
-
-  // MPSDevice interface
   bool hasMPS() const override;
   bool isOnMacOS13orNewer(unsigned minor) const override;
-
-  // MPSGeneratorImpl interface
-  const Generator& getDefaultMPSGenerator() const override;
-
-  // MPSStream interface
-  void deviceSynchronize() const override;
-  void commitStream() const override;
-  void* getCommandBuffer() const override;
-  void* getDispatchQueue() const override;
-
-  // MPSAllocator interface
   Allocator* getMPSDeviceAllocator() const override;
+  const Generator& getDefaultMPSGenerator() const override;
+  void deviceSynchronize() const override;
   void emptyCache() const override;
   size_t getCurrentAllocatedMemory() const override;
   size_t getDriverAllocatedMemory() const override;
