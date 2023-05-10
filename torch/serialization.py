@@ -159,7 +159,10 @@ def _meta_tag(obj):
 def _privateuse1_tag(obj):
     backend_name = torch._C._get_privateuse1_backend_name()
     if obj.device.type == backend_name:
-        return backend_name
+        if obj.device.index is None:
+            return backend_name
+        else:
+            return backend_name + ':' + str(obj.device.index)
 
 
 def _cpu_deserialize(obj, location):
