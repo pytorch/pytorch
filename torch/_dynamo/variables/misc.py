@@ -399,7 +399,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
 
-        breakpoint()
         if not self.inference:
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
@@ -410,7 +409,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
-            breakpoint()
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             ).add_options(self)
