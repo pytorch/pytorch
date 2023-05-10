@@ -719,6 +719,7 @@ def run_functionalized_fw_and_collect_metadata(
         torch._enable_functionalization(reapply_views=True)
         try:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            breakpoint()
             flat_f_outs = f(*flat_f_args)
         finally:
             torch._disable_functionalization()
@@ -2984,6 +2985,7 @@ def create_aot_dispatcher_function(
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
+                print("1")
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
@@ -3000,11 +3002,12 @@ def create_aot_dispatcher_function(
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
+        print("2")
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
-
+        print("3")
         return compiled_fn
 
 
