@@ -4105,7 +4105,7 @@ class LoopBodyBlock:
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
-                    return ops.constant(int(index), dtype)
+                    return self._inner.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
