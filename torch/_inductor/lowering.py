@@ -4,7 +4,6 @@ import logging
 import os
 import warnings
 from collections.abc import Iterable
-from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
 import sympy
@@ -159,8 +158,7 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
 
 
 class OpsWrapperMeta(type):
-
-    def __getattr__(self, name):
+    def __getattr__(cls, name):
         def unwrap(x):
             if isinstance(x, OpsWrapper):
                 return x.value
@@ -2582,7 +2580,7 @@ def upsample_bicubic2d_default(
     def get_cubic_upsample_coefficients(t):
         t = OpsWrapper(t)
         A = -0.75
-        _1 = OpsWrapper.constant(1.0, dtype=torch.float32)
+        _1 = OpsWrapper.constant(1.0, torch.float32)
         c0 = cubic_convolution2(t + _1, A)
         c1 = cubic_convolution1(t, A)
 
