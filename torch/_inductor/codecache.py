@@ -217,6 +217,8 @@ def code_hash(code):
 
 def serialize_fx_arg(arg: Any):
     # Special case for example_inputs, we only need the shape data for the hash
+    if isinstance(arg, torch.fx.GraphModule):
+        return arg.print_readable(print_output=False).encode("utf-8")
     if isinstance(arg, list):
         if len(arg) > 0 and isinstance(arg[0], torch.Tensor):
             return b"".join([pickle.dumps(t.shape) for t in arg])

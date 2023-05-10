@@ -204,8 +204,8 @@ def compile_fx_inner(
             ):
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
-            compiled_graph.compiled_artifact = cudagraphify(
-                compiled_graph.compiled_artifact,
+            compiled_graph.__call__ = cudagraphify(
+                compiled_graph.__call__,
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -221,7 +221,7 @@ def compile_fx_inner(
             # know we are we running the backward even if we will not run it in cudagraphs
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_inner = compiled_graph.compiled_artifact
+                compiled_graph_inner = compiled_graph.__call__
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -233,7 +233,7 @@ def compile_fx_inner(
                     manager.set_to_running_backward()
                     return compiled_graph_inner(new_inputs)
 
-                compiled_graph.compiled_artifact = compiled_artifact
+                compiled_graph.__call__ = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -364,14 +364,14 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
     if len(check_inputs) == 0:
         return compiled_graph
 
-    old_compiled_artifact = compiled_graph.compiled_artifact
+    old_compiled_artifact = compiled_graph.__call__
     
     def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
         return old_compiled_artifact(new_inputs)
-    compiled_graph.compiled_artifact = run
+    compiled_graph.__call__ = run
 
     return compiled_graph
 
