@@ -99,15 +99,13 @@ class TensorCheck {
           << "Tensor device index mismatch. Expected device index to be "
           << device_index_ << ", actual " << v.device().index();
       return fail_reason.str();
-    } else if (
-        requires_grad_ != v.requires_grad()) {
+    } else if (requires_grad_ != v.requires_grad()) {
       // return fmt::format("tensor requires_grad mismatch. expected {}",
       // requires_grad_);
       fail_reason << "requires_grad mismatch. expected requires_grad="
                   << requires_grad_;
       return fail_reason.str();
-    } else if (
-        grad_mode_enabled_ != state.grad_mode_enabled) {
+    } else if (grad_mode_enabled_ != state.grad_mode_enabled) {
       // return fmt::format("grad_mode_enabled mismatch. expected {}",
       // grad_mode_enabled_);
       fail_reason << "grad_mode_enabled mismatch. expected grad_mode_enabled="
