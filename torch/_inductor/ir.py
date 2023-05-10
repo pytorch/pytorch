@@ -4,7 +4,6 @@ import dataclasses
 import functools
 import itertools
 import logging
-import re
 import textwrap
 import traceback
 from contextlib import nullcontext
@@ -3096,35 +3095,6 @@ class DynamicScalar(IRNode):
         return ()
 
 
-def convert_arg_type(python_type):
-    from .codegen.cpp import PYTHON_TO_CPP
-
-    if python_type == "Tensor":
-        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
-        return f"at::{python_type} const&"
-
-    # Convert arg of type Optional[*]
-    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
-    if len(optional_match) == 1:
-        optional_type = optional_match[0]
-        assert (
-            optional_type in PYTHON_TO_CPP
-        ), f"unsupported optional type in convert_arg_type: {optional_type}"
-        cpp_optional_type = PYTHON_TO_CPP[optional_type]
-        return f"c10::optional<{cpp_optional_type}>"
-
-    raise AssertionError(f"unsupport python_type: {python_type}")
-
-
-def convert_return_type(python_type):
-    # TODO: only support Tensor as func return type for now
-    # TODO: support alias
-    assert (
-        python_type == "Tensor"
-    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
-    return f"at::{python_type}"
-
-
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -3169,6 +3139,8 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def get_cpp_op_schema(self, kernel):
+        from .codegen.wrapper import convert_arg_type, convert_return_type
+
         arg_types = [repr(x.type) for x in kernel._schema.arguments]
         arg_names = [x.name for x in kernel._schema.arguments]
         # TODO: only support len(returns) == 1 for now.
@@ -3186,6 +3158,8 @@ class FallbackKernel(ExternKernelAlloc):
         return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
     def set_cpp_kernel(self, kernel):
+        from .codegen.wrapper import get_cpp_op_schema
+
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
@@ -3202,7 +3176,7 @@ class FallbackKernel(ExternKernelAlloc):
             f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
         )
 
-        self.cpp_op_schema = self.get_cpp_op_schema(kernel)
+        self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.cpp_op_num_args = len(kernel._schema.arguments)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
