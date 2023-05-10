@@ -196,7 +196,7 @@ class LambdaLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -282,7 +282,7 @@ class MultiplicativeLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -365,7 +365,7 @@ class StepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -414,7 +414,7 @@ class MultiStepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -463,7 +463,7 @@ class ConstantLR(LRScheduler):
         total_iters (int): The number of steps that the scheduler decays the learning rate.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -525,7 +525,7 @@ class LinearLR(LRScheduler):
         total_iters (int): The number of iterations that multiplicative factor reaches to 1.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -585,7 +585,7 @@ class ExponentialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
     """
 
@@ -725,7 +725,7 @@ class PolynomialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
         power (int): The power of the polynomial. Default: 1.0.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -800,7 +800,7 @@ class CosineAnnealingLR(LRScheduler):
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
@@ -949,7 +949,7 @@ class ReduceLROnPlateau:
         eps (float): Minimal decay applied to lr. If the difference
             between new and old lr is smaller than eps, the update is
             ignored. Default: 1e-8.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -1164,7 +1164,7 @@ class CyclicLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
@@ -1358,7 +1358,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult (int, optional): A factor increases :math:`T_{i}` after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
         last_epoch (int, optional): The index of last epoch. Default: -1.
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
@@ -1543,7 +1543,7 @@ class OneCycleLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, logs a message with level WARNING for
             each update. Default: ``False``.
 
     Example:
