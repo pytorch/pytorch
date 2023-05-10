@@ -1,6 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/native/Histogram.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/sum.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -264,12 +272,9 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
-      id<MTLFunction> stridedIndicesFunction =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset", nil);
       id<MTLComputePipelineState> stridedIndicesPSO =
-          [[device newComputePipelineStateWithFunction:stridedIndicesFunction error:&error] autorelease];
-      TORCH_CHECK(
-          stridedIndicesPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
+          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset");
+
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
@@ -312,7 +317,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
       [computeEncoder endEncoding];
-      mpsStream->commit(true);
+      mpsStream->synchronize(SyncType::COMMIT);
     }
   });
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
