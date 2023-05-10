@@ -1257,6 +1257,8 @@ DEFINE_CLAMP_MAXMIN_FUNCS(int64_t)
 DEFINE_CLAMP_MAXMIN_FUNCS(float)
 DEFINE_CLAMP_MAXMIN_FUNCS(double)
 
+namespace { /* unnamed namespace */
+
 #if !defined(vec_float) || __ARCH__ < 13
 #warning \
     "float->int and int->float conversion is simulated. compile for z15 for improved performance"
@@ -1270,8 +1272,6 @@ inline ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
 #define vec_int_flt vec_float
 #define vec_flt_int vec_signed
 #endif
-
-namespace { /* unnamed namespace */
 
 Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
