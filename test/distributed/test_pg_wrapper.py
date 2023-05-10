@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as c10d
+import torch.distributed as dist
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
@@ -31,9 +32,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def _validate_error(self, exception, op_type, rank, tensor):
+    def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
         err = str(exception)
-        print(f"RV: err {err}")
         self.assertTrue(
             op_type in err, f"Got {err} but expected {op_type} to be in error."
         )
@@ -64,7 +64,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             # Ensure sequence number is logged in error
             self.assertTrue("SequenceNumber" in err)
             # Ensure info about how collectives diff is in the error.
-            self.assertTrue("Collectives differ in the following" in err)
+            if verify_diff:
+                self.assertTrue("Collectives differ in the following" in err, f"Got error {err}")
 
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
@@ -284,7 +285,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
-        def test_collective_shape_mismatch_debug_mode(self):
+        def test_collective_shape_mismatch_debug_mode_detail(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
             self._test_nccl_only_shape_mismatch(pg)
@@ -292,7 +293,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["OFF"])
-        def test_collective_shape_mismatch(self):
+        def test_collective_shape_mismatch_debug_mode_off(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
             self._test_nccl_only_shape_mismatch(pg)
@@ -306,9 +307,11 @@ if not TEST_WITH_DEV_DBG_ASAN:
                     wrapper_pg._allgather_base(output, input).wait()
                 else:
                     wrapper_pg._reduce_scatter_base(output, input).wait()
+
+            op_type = "ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE"
             self._validate_error(
                 exception=cm.exception,
-                op_type="ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE",
+                op_type=op_type,
                 rank=self.rank,
                 tensor=input,
             )
@@ -317,7 +320,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             device = f"cuda:{self.rank}"
             with self.assertRaisesRegex(RuntimeError, ".*") as cm:
                 output = torch.zeros(4 + self.rank, device=device)
-                input = torch.ones(4 * self.world_size, device=device)
+                input = torch.ones(4 * (self.world_size +1), device=device)
 
                 wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
@@ -325,6 +328,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 op_type="REDUCE_SCATTER_BASE",
                 rank=self.rank,
                 tensor=input,
+                verify_diff=False,
             )
             with self.assertRaisesRegex(RuntimeError, ".*") as cm:
                 output = torch.zeros(4, device=device)
@@ -336,6 +340,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 op_type="REDUCE_SCATTER_BASE",
                 rank=self.rank,
                 tensor=input,
+                verify_diff=False,
             )
 
 
@@ -392,7 +397,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         self._test_collective_shape_mismatch(pg)
 
     @with_dist_debug_levels(levels=["OFF"])
-    def test_collective_shape_mismatch(self):
+    def test_collective_shape_mismatch_debug_mode_off(self):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg)
 
