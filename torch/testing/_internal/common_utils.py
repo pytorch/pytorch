@@ -63,6 +63,7 @@ import __main__  # type: ignore[import]
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
@@ -955,6 +956,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
@@ -1143,7 +1145,7 @@ def skipIfRocm(fn):
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if torch.backends.mps.is_available():
+        if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
@@ -3094,7 +3096,7 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
             # empty string matches any string
             expected_regex = ''
 
@@ -4378,8 +4380,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-        if op.name == "cat":
-            self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
 
 def make_lazy_class(cls):
 

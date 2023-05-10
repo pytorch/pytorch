@@ -826,6 +826,10 @@ endif()
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 
+if(USE_MPS OR USE_PYTORCH_METAL)
+  enable_language(OBJC OBJCXX)
+endif()
+
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
@@ -1783,7 +1787,7 @@ if(BUILD_PYTHON)
   # location).  It varies from system to system.
   # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
+  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       import sysconfig

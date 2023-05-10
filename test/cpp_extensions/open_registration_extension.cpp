@@ -14,6 +14,7 @@
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
+static c10::DeviceIndex custom_device_index = 0;
 
 // register guard
 namespace at {
@@ -35,7 +36,7 @@ struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = c10::alloc_cpu(nbytes);
-    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, 0)};
+    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
 
   static void ReportAndDelete(void* ptr) {
@@ -128,6 +129,20 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
   return false;
 }
 
+const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
+                          c10::optional<at::MemoryFormat> optional_memory_format) {
+  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
+  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
+  const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
+  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
+  if (storage_size > storage.nbytes()) {
+    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
+  }
+
+  return self;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -146,6 +161,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
+  m.impl("resize_", &custom_resize_);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -185,6 +201,10 @@ void register_generator() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
+void set_custom_device_index(c10::DeviceIndex device_index) {
+  custom_device_index = device_index;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -193,4 +213,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
 }
