@@ -10,10 +10,9 @@ from typing import List, Any, ClassVar, Optional, Sequence, Tuple, Union, Dict, 
 import unittest
 import os
 import torch
-import torch.backends.mps
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
@@ -62,8 +61,8 @@ except ImportError:
 # class TestClassFoo(TestCase):
 #
 #   # A template test that can be specialized with a device
-#   # NOTE: this test case is not runnably by unittest or pytest because it
-#   #   accepts an extra positional argument, "device", they do not understand
+#   # NOTE: this test case is not runnable by unittest or pytest because it
+#   #   accepts an extra positional argument, "device", that they do not understand
 #   def test_bar(self, device):
 #     pass
 #
@@ -106,7 +105,7 @@ except ImportError:
 #     test_bar(self, 'cuda:0')
 # --------------------------------------------------------
 #
-# These instantiated test classes are discoverable and runnable by both
+# These instantiated test classes ARE discoverable and runnable by both
 #   unittest and pytest. One thing that may be confusing, however, is that
 #   attempting to run "test_bar" will not work, despite it appearing in the
 #   original template code. This is because "test_bar" is no longer discoverable
@@ -532,11 +531,24 @@ class LazyTestBase(DeviceTypeTestBase):
 
 class MPSTestBase(DeviceTypeTestBase):
     device_type = 'mps'
+    primary_device: ClassVar[str]
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        # currently only one device is supported on MPS backend
+        prim_device = cls.get_primary_device()
+        return [prim_device]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.primary_device = 'mps:0'
 
     def _should_stop_test_suite(self):
         return False
-
-    # TODO: Maybe override `_get_dtypes`, `_get_precision_override`
 
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
@@ -613,7 +625,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
-# See note "Generic Device Type Testing."
+# See note "Writing Test Templates"
 def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
@@ -633,10 +645,9 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
-    # MPS backend support is disabled in `get_device_type_test_bases` while support is being ramped
-    # up, so allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
+    # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
     test_bases = device_type_test_bases.copy()
-    if allow_mps and torch.backends.mps.is_available() and MPSTestBase not in test_bases:
+    if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
@@ -903,6 +914,12 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on MPS if the condition is true.
+class skipMPSIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='mps')
+
 # Skips a test on XLA if the condition is true.
 class skipXLAIf(skipIf):
 
@@ -1107,7 +1124,7 @@ class toleranceOverride:
 # Decorator that instantiates a variant of the test for each given dtype.
 # Notes:
 #   (1) Tests that accept the dtype argument MUST use this decorator.
-#   (2) Can be overridden for the CPU or CUDA, respectively, using dtypesIfCPU
+#   (2) Can be overridden for CPU or CUDA, respectively, using dtypesIfCPU
 #       or dtypesIfCUDA.
 #   (3) Can accept an iterable of dtypes or an iterable of tuples
 #       of dtypes.
@@ -1349,6 +1366,9 @@ def skipMeta(fn):
 
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)
+
+def skipMPS(fn):
+    return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
 
 # TODO: the "all" in the name isn't true anymore for quite some time as we have also have for example XLA and MPS now.
 #  This should probably enumerate all available device type test base classes.

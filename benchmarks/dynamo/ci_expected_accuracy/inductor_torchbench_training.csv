@@ -5,7 +5,6 @@ Super_SloMo,pass,9
 alexnet,pass,9
 attention_is_all_you_need_pytorch,pass,9
 dcgan,pass,9
-densenet121,pass,9
 drq,pass,8
 fastNLP_Bert,pass,14
 functorch_dp_cifar10,pass,9
@@ -19,13 +18,13 @@ hf_GPT2,pass,8
 hf_Reformer,pass,67
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,9
+llama,eager_1st_run_fail,0
 maml_omniglot,pass,9
 mnasnet1_0,pass,9
 mobilenet_v2,pass,9
 nvidia_deeprecommender,pass,9
 phlippe_densenet,pass,9
 phlippe_resnet,pass,9
-pyhpc_isoneutral_mixing,pass,0
 pytorch_CycleGAN_and_pix2pix,pass,9
 pytorch_stargan,pass,9
 pytorch_unet,pass,9
