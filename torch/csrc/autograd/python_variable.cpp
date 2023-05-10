@@ -930,12 +930,8 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "'. Please ensure that the gradient and the tensor are on the same device");
   if (grad.layout() != kSparse) {
     TORCH_CHECK(
-        var.layout() == grad.layout(),
-        "attempting to assign a gradient with ",
-        grad.layout(),
-        " layout to a tensor with ",
-        var.layout(),
-        " layout");
+        grad.options().type_equal(var.options()),
+        "attempting to assign a gradient to a tensor that has data of a different type");
   }
   if (var.is_cuda()) {
     TORCH_CHECK(
