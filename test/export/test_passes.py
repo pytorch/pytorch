@@ -9,7 +9,11 @@ from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
-    ReplaceBrokenOpsWithFunctionalOpsPass,
+    ReplaceViewOpsWithViewCopyOpsPass,
+)
+from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
+    is_view_op,
+    get_view_copy_of_view_op,
 )
 from functorch.experimental.control_flow import cond
 
@@ -33,7 +37,7 @@ class TestPasses(TestCase):
 
         gm = export(f, (x,)).find_method("forward")
 
-        new_gm = ReplaceBrokenOpsWithFunctionalOpsPass()(gm)
+        new_gm = ReplaceViewOpsWithViewCopyOpsPass()(gm)
         self.assertIsNotNone(new_gm)
         new_gm = new_gm.graph_module
 
@@ -211,6 +215,43 @@ class TestPasses(TestCase):
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
+
+    def test_view_to_view_copy(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                z = x.view(x.shape)
+                return z.cos().sum()
+
+        x = torch.zeros(4, 2, 3)
+
+        gm = _export(M(), (x,))
+        self.assertEqual(count_call_function(gm.graph, torch.ops.aten.view.default), 1)
+
+        pass_result = ReplaceViewOpsWithViewCopyOpsPass()(gm)
+        self.assertTrue(pass_result.modified)
+        self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
+
+    def test_views_op_having_view_copy(self) -> None:
+        schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
+        aten_schemas = [s[6:] for s in schemas if s.startswith("aten::")]
+
+        for aten_schema in aten_schemas:
+            val = aten_schema.split(".")
+            assert len(val) <= 2
+            name = ""
+            overload = ""
+            if len(val) == 1:
+                name = val[0]
+                overload = "default"
+            else:
+                name, overload = val[0], val[1]
+
+            op_overload = getattr(getattr(torch.ops.aten, name), overload)
+            if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
+                self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
 
 
     def test_runtime_assert_inline_constraints_for_item(self) -> None:

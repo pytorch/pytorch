@@ -454,7 +454,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_16F,
         ldc,
         CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
@@ -552,7 +552,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       ldc,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // !defined(USE_ROCM)
