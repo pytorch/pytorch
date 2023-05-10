@@ -6025,6 +6025,7 @@ class CommonTemplate:
 class TestFailure:
     suffixes: Tuple[str]
     is_skip: bool = False
+    __test__: bool = False
 
 
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
