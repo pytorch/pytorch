@@ -168,9 +168,6 @@ cannot use CUDAFunctorOnSelf on non-binary function""",
             self.assertEqual(
                 DispatchKey.parse(custom_device_name), DispatchKey.PrivateUse1
             )
-            self.assertEqual(
-                DispatchKey.PrivateUse1.get_dispatch_name(), private_use_one_name
-            )
         finally:
             PrivateUse1Name.reset()
             self.assertEqual(str(DispatchKey.PrivateUse1), private_use_one_name)

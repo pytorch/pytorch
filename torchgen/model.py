@@ -189,11 +189,6 @@ class DispatchKey(Enum):
     def __str__(self) -> str:
         return self.name.replace("PrivateUse1", PrivateUse1Name.custom_name)
 
-    # for PrivateUse1, it needs to have two representations of str.Most of the time, it should be the name which user
-    # set, but when the operator is actually registered, it needs to be made PrivateUse1.
-    def get_dispatch_name(self) -> str:
-        return self.name
-
     def lower(self) -> str:
         return str(self).lower()
 
