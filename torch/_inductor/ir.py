@@ -232,7 +232,8 @@ class ModularIndexing(sympy.Function):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
         # This case happens when computing ValueRanges
-        if not base.is_finite and divisor.is_finite and modulus.is_finite:
+        # scipy.Wild.is_finite returns None...
+        if base.is_finite is False and divisor != 0 and modulus != 0:
             return base
 
 
