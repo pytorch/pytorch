@@ -25,21 +25,8 @@ void manual_seed(uint64_t seed) {
 }
 
 void synchronize() {
+  TORCH_CHECK(is_available(), "No MPS devices are available");
   at::detail::getMPSHooks().deviceSynchronize();
-}
-
-void commit() {
-  at::detail::getMPSHooks().commitStream();
-}
-
-MTLCommandBuffer_t get_command_buffer() {
-  return static_cast<MTLCommandBuffer_t>(
-      at::detail::getMPSHooks().getCommandBuffer());
-}
-
-dispatch_queue_t get_dispatch_queue() {
-  return static_cast<dispatch_queue_t>(
-      at::detail::getMPSHooks().getDispatchQueue());
 }
 
 } // namespace mps
