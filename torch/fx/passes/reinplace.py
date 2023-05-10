@@ -153,7 +153,7 @@ def _maybe_get_inplace_op(op):
         for f in inplace_overloads
         if _schemas_match(op._schema, f._schema)
     ]
-    # Just becuase foo() and foo_() are both existing operators,
+    # Just because foo() and foo_() are both existing operators,
     # They aren't guaranteed to have compatible schemas.
     # For example, pow.Scalar(Scalar self, Tensor exponent) has no valid inplace variant,
     # Even though several overloads of pow_ exist.
@@ -280,7 +280,7 @@ def reinplace(gm, *sample_args):
            Because that would require resizing "a".
 
            Similarly, we can't convert torch.ge(a, b) into a.ge_(b),
-           beause that would require changing a's dtype (from e.g. float32 to bool).
+           because that would require changing a's dtype (from e.g. float32 to bool).
            Note that in this specific example, we could technically do better..
 
            If we see the pattern:

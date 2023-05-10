@@ -14,8 +14,8 @@ from itertools import groupby
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_gloo_available():
+    print("c10d GLOO not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -2486,6 +2486,34 @@ class CompilerTest(test_c10d_common.CompilerTest):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return torch.device("cpu")
+
+    @requires_gloo()
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_duplicate_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
 if __name__ == "__main__":
     assert (

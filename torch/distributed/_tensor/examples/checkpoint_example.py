@@ -108,7 +108,9 @@ def gen_model_param_in_submesh(model: nn.Module, sub_mesh: DeviceMesh) -> nn.Mod
                 module.register_parameter(name, dist_param)
         elif isinstance(module, torch.nn.Linear) and name == "net2":
             for name, param in module.named_parameters():
-                dist_spec = cast(List[Placement], [Shard(1)] if name == "weight" else [Replicate()])
+                dist_spec = cast(
+                    List[Placement], [Shard(1)] if name == "weight" else [Replicate()]
+                )
                 dist_param = torch.nn.Parameter(
                     distribute_tensor(param, device_mesh, dist_spec)
                 )

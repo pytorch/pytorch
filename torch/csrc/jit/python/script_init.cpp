@@ -740,7 +740,7 @@ void initJitScriptBindings(PyObject* module) {
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
-          .def("_type", [](Module& m) { return m.type(); })
+          .def("_type", [](Object& o) { return o.type(); })
           .def(
               "_get_method",
               [](Object& self, const std::string& name) -> Method {
@@ -953,7 +953,10 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw NotImplementedError();
+              throw NotImplementedError(
+                  "'%s' is not implemented for %s",
+                  mm_name,
+                  self.type()->str().c_str());
             }
             return invokeScriptMethodFromPython(
                 *method,

@@ -2,6 +2,7 @@
 import copy
 import functools
 from io import StringIO
+from typing import List
 import random
 import unittest
 from unittest.mock import patch
@@ -406,7 +407,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         explain_out = torch._dynamo.explain(ddp_m, inputs)
         break_reasons = explain_out[4]
         self.assertEqual(len(break_reasons), 3)
-        self.assertTrue(all(["DDPOptimizer" in r.reason for r in break_reasons]))
+        self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -587,14 +588,129 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck() \
-                .check("local 'self' TYPE_MATCH") \
-                .check("local 'self' ID_MATCH") \
-                .check(f"{expected_guard_source} 'self.net' TYPE_MATCH") \
-                .check(f"{expected_guard_source} 'self.net' ID_MATCH") \
-                .check(f"{expected_guard_source} 'self.net[0]' TYPE_MATCH") \
-                .check(f"{expected_guard_source} 'self.net[0]' ID_MATCH") \
+                .check("""local "L['self']" TYPE_MATCH""") \
+                .check("""local "L['self']" ID_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net" ID_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH""") \
+                .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
                 .run(GUARDS_FILE.getvalue())
             self.assertTrue(same(correct_outputs, outputs))
+
+    def test_fsdp_dup_tensors_same_source(self):
+        """
+        Tests that FSDP-managed modules' parameters and buffers with the same
+        source are de-duplicated, meaning that they are each only passed once
+        as a graph input.
+        """
+        class DuplicateModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._param = torch.randn((3,), device="cuda")
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Use `_param` and `_buf` each twice in this compiled forward
+                # to exercise if they are de-duplicated by TorchDynamo
+                z = x + self._buf + self._buf
+                z += self._param + self._param
+                return z
+
+        model = DuplicateModule()
+        fsdp_model = FSDP(copy.deepcopy(model), use_orig_params=True)
+        fsdp_model = torch._dynamo.optimize("aot_eager")(fsdp_model)
+        inp = torch.randn((2, 3), device="cuda")
+        local_out = model(inp)
+        fsdp_out = fsdp_model(inp)
+        self.assertEqual(local_out, fsdp_out)
+
+    def test_fsdp_dup_tensors_diff_source(self):
+        """
+        Tests that FSDP-managed modules' parameters and buffers with different
+        source do not result in incorrect AOTAutograd de-dup guards like
+        ``a is b``, where ``a`` and ``b`` are certainly not the same. We check
+        this by checking for per-invocation recompiles.
+        """
+        class BufModule(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self._buf
+
+        class Model(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._param = nn.Parameter(torch.randn((1,), device="cuda"))
+                self._buf_module = BufModule()
+                # Share the buffer, meaning same tensor but different source
+                self.register_buffer("_buf", self._buf_module._buf)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Use the same buffer tensor twice in the compiled forward,
+                # including a data mutation to trigger de-dup logic
+                self._buf.mul_(2)
+                z = x + self._buf
+                z = self._buf_module(z)
+                z += self._param
+                return z
+
+        fsdp_model = FSDP(Model(), use_orig_params=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+        inp = torch.randn((2, 3), device="cuda")
+        for _ in range(3):
+            fsdp_model(inp)
+        # Check for no recompiles (if there were incorrect de-dup guards, then
+        # the frame count would be equal to the number of forward calls)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_fsdp_staticmethod(self):
+        """
+        Tests that Dynamo compiles staticmethods for FSDP-managed modules
+        correctly both when the staticmethod is invoked from the class and from
+        the object itself.
+        """
+        class ModuleWithStaticMethod(nn.Module):
+            def __init__(self, use_self: bool):
+                super().__init__()
+                self._use_self = use_self
+                torch.manual_seed(42)  # force `_param` to be deterministic
+                self._param = nn.Parameter(torch.randn((3,), device="cuda"))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                if self._use_self:
+                    z = self._add(x, self._param)
+                else:
+                    z = ModuleWithStaticMethod._add(x, self._param)
+                z *= 2
+                return z
+
+            @staticmethod
+            def _add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        model = ModuleWithStaticMethod(False)
+        x = torch.randn((2, 3), device="cuda")
+        ref_out = model(x)
+        test_outs: List[torch.Tensor] = []
+
+        for use_self in (False, True):
+            model = ModuleWithStaticMethod(use_self)
+            fsdp_model = FSDP(model, use_orig_params=True)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fsdp_model = torch._dynamo.optimize(cnt)(fsdp_model)
+            test_outs.append(fsdp_model(x))
+            # Check for no recompiles, which could happen if incorrectly
+            # passing args to the staticmethod (e.g. doubly passing `self`)
+            self.assertEqual(cnt.frame_count, 1)
+        for test_out in test_outs:
+            self.assertEqual(test_out, ref_out)
 
 
 if __name__ == "__main__":
