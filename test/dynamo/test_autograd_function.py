@@ -139,22 +139,54 @@ class MaterializingGradModule(torch.nn.Module):
         return MaterializingGradFunction.apply(x)
 
 
-class CustomFuncBwdStride(torch.autograd.Function):
+class CustomFuncBwdPrintGraphBreak(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
         return foo + foo
 
     @staticmethod
     def backward(ctx, grad_output):
-        print("Does this work")
-        if grad_output.stride()[0] < 3:
-            return grad_output.cos()
-        return grad_output.sin()
+        print("graph break!")
+        return grad_output
 
 
-class BwdStrideModule(torch.nn.Module):
+class CustomFuncBwdPrintModule(torch.nn.Module):
     def forward(self, x):
-        return CustomFuncBwdStride.apply(x)
+        return CustomFuncBwdPrintGraphBreak.apply(x)
+
+
+class CustomFuncStrideBwd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        return foo + foo
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.stride()
+
+
+class CustomFuncStrideModule(torch.nn.Module):
+    def forward(self, x):
+        return CustomFuncStrideBwd.apply(x)
+
+
+class CustomFuncSaveForBwd(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, foo):
+        result = foo + foo
+        result = result + foo
+        ctx.save_for_backward(result)
+        return result
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (result,) = ctx.saved_tensors
+        return grad_output * math.sqrt(result.numel())
+
+
+class SaveForBwdModule(torch.nn.Module):
+    def forward(self, foo):
+        return CustomFuncSaveForBwd().apply(foo)
 
 
 class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
@@ -197,8 +229,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
 
+    def test_print_in_bwd(self):
+        model = CustomFuncBwdPrintModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsafe bwd in autograd.function"
+        ):
+            opt_model(x)
+
     def test_stride_in_bwd(self):
-        model = BwdStrideModule()
-        opt_model = torch._dynamo.optimize("eager")(model)
+        model = CustomFuncStrideModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsafe bwd in autograd.function"
+        ):
+            opt_model(x)
+
+    def test_save_for_bwd(self):
+        model = SaveForBwdModule()
+        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)

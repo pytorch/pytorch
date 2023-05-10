@@ -264,12 +264,26 @@ class AutogradFunctionVariable(VariableTracker):
             # TODO(voz): NOTE: This function identity is unguarded, but the odds of someone swapping self.fn_cls from
             # autograd fn to something else is very low.
             # breakpoint()
-            module_source = AttrSource(tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__)
+            module_source = AttrSource(
+                tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
+            )
             trampoline_autograd_fwd._source = AttrSource(module_source, "forward")
             higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd)
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
             )
+
+            from .builder import wrap_fx_proxy
+
+            ctx.saved_tensors = []
+
+            for tensor in ctx.value.saved_tensors:
+                proxy = ctx.as_proxy().saved_tensors
+                # Safe because it came from saving tensors
+                proxy.node.meta["whitelisted"] = True
+                ctx.saved_tensors.append(
+                    wrap_fx_proxy(tx=tx, proxy=proxy, example_value=tensor)
+                )
             # On varying strides of grads
             #
             # A varying stride in speculated_fwd_result can produce potentially unsound code.
@@ -284,7 +298,6 @@ class AutogradFunctionVariable(VariableTracker):
             if not is_fn_safe_to_run(
                 tx, TorchHigherOrderOperator(trampoline_autograd_bwd), bwd_args
             ):
-                breakpoint()
                 unimplemented("Unsafe bwd in autograd.function")
             # breakpoint()
             # If fwd and backward are sound, we want apply in the graph.
@@ -314,23 +327,22 @@ class AutogradFunctionVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
 
-    def call_method(self,
+    def call_method(
+        self,
         tx,
         name,
         args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]"):
-        from .builder import wrap_fx_proxy
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        # breakpoint()
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_function",
-                self.fn_cls.forward if name == "forward" else self.fn_cls.backward,
-                *proxy_args_kwargs(args, kwargs),
-            ),
-            **options,
+        kwargs: "Dict[str, VariableTracker]",
+    ):
+        if name == "backward":
+            with tx.strict_translation_mode():
+                return tx.inline_user_function_return(
+                    UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                )
+        return tx.inline_user_function_return(
+            UserFunctionVariable(self.fn_cls.forward), args, kwargs
         )
+
 
 class SaveSimulatingAutogradFunctionContext(torch.autograd.function.FunctionCtx):
     def __init__(self):
@@ -359,19 +371,23 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             functools.partial(AutogradFunctionContextVariable, inference=True),
             {},
         )
+        torch._dynamo.allow_in_graph(out.value.save_for_backward)
 
-        def lazy_proxy_fn():
-            proxy = tx.output.create_proxy(
-                "call_function", SaveSimulatingAutogradFunctionContext, tuple(), {}
-            )
-            proxy.node.meta["example_value"] = out.value
-            return proxy
+        # def lazy_proxy_fn():
+        proxy = tx.output.create_proxy(
+            "call_function", SaveSimulatingAutogradFunctionContext, tuple(), {}
+        )
+        proxy.node.meta["example_value"] = out.value
+        # return proxy
 
-        out.lazy_proxy_fn = lazy_proxy_fn
+        out.proxy = proxy
         return out
 
+    def unpack_var_sequence(self, tx):
+        return self.saved_tensors
+
     def as_proxy(self):
-        return self.lazy_proxy_fn()
+        return self.proxy
 
     def call_method(
         self,
@@ -383,6 +399,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
 
+        breakpoint()
         if not self.inference:
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
@@ -393,6 +410,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
+            breakpoint()
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             ).add_options(self)

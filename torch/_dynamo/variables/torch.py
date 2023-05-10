@@ -745,7 +745,6 @@ def is_fn_safe_to_run(tx, f, sub_args):
     try:
         f.call_function(tx, sub_args, {})
     except Exception as e:
-        breakpoint()
         return False
     finally:
         tx.output.graph = graph_checkpoint
@@ -1243,7 +1242,9 @@ class TorchHigherOrderOperator(VariableTracker):
             )
             post_guards = tx.output.guards
             if body_lifted_freevars:
-                unimplemented("NYI - freevars in autograd function.")
+                for freevar in body_lifted_freevars:
+                    if "whitelisted" not in freevar.node.meta:
+                        unimplemented("NYI - freevars in autograd function.")
 
             post_side_effects = tx.output.side_effects
             if post_side_effects.diff(pre_side_effects):
@@ -1260,6 +1261,7 @@ class TorchHigherOrderOperator(VariableTracker):
 
             if always_restore:
                 if post_guards - pre_guards:
+                    breakpoint()
                     unimplemented("NYI - New guards discovered in a restoring state")
                 # Nothing left to do here
                 return None

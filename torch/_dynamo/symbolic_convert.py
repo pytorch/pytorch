@@ -86,6 +86,7 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    AutogradFunctionContextVariable,
     ClosureVariable,
     GetAttrVariable,
     NullVariable,
@@ -1417,6 +1418,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             options = VariableTracker.propagate(self)
             val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
+        elif isinstance(seq, GetAttrVariable) and isinstance(
+            seq.obj, AutogradFunctionContextVariable
+        ):
+            # .saved_tensors for autograd
+            val = seq.obj.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval
@@ -1832,6 +1838,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return key
         return None
 
+    @contextlib.contextmanager
+    def strict_translation_mode(self):
+        self.strict_checks_enabled = True
+        try:
+            yield
+        finally:
+            self.strict_checks_enabled = False
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1887,6 +1901,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         self.checkpoint = None
         self.random_calls = []
+
+        self.strict_checks_enabled = False
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2129,10 +2145,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        if "trampoline_autograd" not in func.get_name():
+        if "variables/misc.py" not in func.get_filename():
             if skipfiles.check(
                 func.get_filename()
             ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+                # breakpoint()
                 unimplemented(
                     f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
                 )
@@ -2191,8 +2208,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
+        strict_ctx = contextlib.nullcontext()
+        if parent.strict_checks_enabled:
+            strict_ctx = tracer.strict_translation_mode()
         try:
-            tracer.run()
+            with strict_ctx:
+                tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
