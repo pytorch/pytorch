@@ -591,7 +591,7 @@ void max_pool3d_kernel_impl(
       DimVector indices_sizes(indices.sizes().begin(), indices.sizes().end());
       indices_sizes.insert(indices_sizes.begin(), 1);
       indices.resize_(indices_sizes, at::MemoryFormat::ChannelsLast3d);
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool3d_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "max_pool3d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t, /*is 3d*/true>(output, indices, input_cl_check,
           {kW, kH, kD}, {dW, dH, dD}, {padW, padH, padD}, {dilationW, dilationH, dilationD});
       });
@@ -658,7 +658,7 @@ void max_pool3d_backward_kernel_impl(
       sizes.insert(sizes.begin(), 1);
       grad_input.resize_(sizes, at::MemoryFormat::ChannelsLast3d);
       auto _indices = indices.unsqueeze(0).contiguous(at::MemoryFormat::ChannelsLast3d);
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, grad_output.scalar_type(), "max_pool3d_backward_channels_last", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, grad_output.scalar_type(), "max_pool3d_backward_channels_last", [&] {
         cpu_max_pool_backward_channels_last<scalar_t, /*is_3d*/ true>(grad_input, grad_output_cl_check, _indices);
       });
       grad_input.squeeze_(0);
