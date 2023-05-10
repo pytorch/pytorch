@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -28,7 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -662,7 +663,7 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
+        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
@@ -2181,7 +2182,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
+            (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -2227,7 +2228,7 @@ class ComputedBuffer(Buffer):
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
         """
-        _, args, var_ranges = dependencies.index_vars_squeeze(
+        args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
@@ -2432,6 +2433,7 @@ class InputsKernel(Buffer):
             set(),
             [],
             None,
+            op_counts=collections.Counter(),
         )
 
     @staticmethod
@@ -3198,11 +3200,11 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_op_schema = self.get_cpp_op_schema(kernel)
         self.cpp_op_num_args = len(kernel._schema.arguments)
-        self.kwarg_only = [x.name for x in kernel._schema.arguments if x.kwarg_only]
+        self.ordered_kwargs_for_cpp_kernel = [
+            x.name for x in kernel._schema.arguments if x.kwarg_only
+        ]
 
     def codegen_args(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3210,35 +3212,20 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
-        def gen_kwarg(k, v):
-            return f"{k}={repr(v)}"
-
-        def get_pexpr(x):
-            if isinstance(x, SymTypes):
-                return pexpr(sympy.expand(repr(x)))
-            else:
-                return repr(x)
-
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
-        args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        if self.use_cpp_op_schema:
-            assert all(v in kwargs for v in self.kwarg_only), "kwargs not found"
-            assert (
-                len(args) + len(self.kwarg_only) == self.cpp_op_num_args
-            ), "args number is incorrect"
-            return list(map(repr, args)) + [
-                V.graph.wrapper_code.val_to_str(kwargs[v]) for v in self.kwarg_only
-            ]
-        else:
-            return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
+        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
+        # let self.codegen_kwargs handle kwargs
+        self.kwargs.update(kwargs)
+        return args
 
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_fusion_ops_code(
                 self.get_name(),
                 self.kernel,
-                self.codegen_args(),
+                args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
                 self.cpp_kernel_overlad_name,
