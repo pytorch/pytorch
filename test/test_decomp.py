@@ -711,6 +711,21 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(ref, res)
 
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_batch_norm_unflatten_weight_bias(self, device):
+        # https://github.com/pytorch/pytorch/issues/100970
+        input = torch.randn((1, 3, 2, 2), device=device)
+        weight = torch.randn((3, 1, 1, 1), device=device)
+        bias = torch.randn(3, device=device)
+        mean = torch.randn(3, device=device)
+        var = torch.randn(3, device=device)
+        ref = torch.ops.aten.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
+        res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
+        self.assertEqual(ref[0].shape, res[0].shape)
+
+
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
