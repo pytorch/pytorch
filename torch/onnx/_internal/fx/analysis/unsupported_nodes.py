@@ -14,8 +14,43 @@ class UnsupportedFxNodesAnalysisResult(_pass.AnalysisResult):
 class UnsupportedFxNodesAnalysis(_pass.Analysis):
     """An analysis that detects unsupported FX nodes in the graph."""
 
-    def analyze(self) -> UnsupportedFxNodesAnalysisResult:
-        """Analyze the graph and return a result that contains unsupported FX nodes."""
+    def _lint(
+        self,
+        analysis_result: UnsupportedFxNodesAnalysisResult,
+        diagnostic_level: diagnostics.infra.Level,
+    ):
+        """Lint the graph and emit diagnostics if unsupported FX nodes are found."""
+        if not analysis_result.unsupported_op_to_target_mapping:
+            return
+
+        normalized_op_targets_map = {
+            op: [str(target) for target in targets]
+            for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
+        }
+
+        rule = diagnostics.rules.unsupported_fx_node_analysis
+        diagnostic = diagnostics.Diagnostic(
+            rule,
+            level=diagnostic_level,
+            message=rule.format_message(normalized_op_targets_map),
+        )
+        self.diagnostic_context.log_and_raise_if_error(diagnostic)
+
+    def analyze(
+        self, diagnostic_level: diagnostics.infra.Level
+    ) -> UnsupportedFxNodesAnalysisResult:
+        """Analyze the graph, emit diagnostics and return a result that contains unsupported FX nodes.
+
+        Args:
+            diagnostic_level: The diagnostic level to use when emitting diagnostics.
+
+        Returns:
+            An analysis result that contains unsupported FX nodes.
+
+        Raises:
+            RuntimeErrorWithDiagnostic: If diagnostics are emitted and the diagnostic
+                level is `ERROR`.
+        """
         errors: List[diagnostics.RuntimeErrorWithDiagnostic] = []
         for node in self.module.graph.nodes:
             if node.op == "call_function":
@@ -40,24 +75,6 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                 target = node.target
                 op_to_target_mapping.setdefault(op, set()).add(str(target))
 
-        return UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
-
-    def lint(self) -> None:
-        """Lint the graph and raise an error if unsupported FX nodes are found."""
-        analysis_result = self.analyze()
-
-        if not analysis_result.unsupported_op_to_target_mapping:
-            return
-
-        normalized_op_targets_map = {
-            op: [str(target) for target in targets]
-            for op, targets in analysis_result.unsupported_op_to_target_mapping.items()
-        }
-
-        rule = diagnostics.rules.unsupported_fx_node_analysis
-        diagnostic = diagnostics.Diagnostic(
-            rule,
-            level=diagnostics.levels.ERROR,
-            message=rule.format_message(normalized_op_targets_map),
-        )
-        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+        analysis_result = UnsupportedFxNodesAnalysisResult(op_to_target_mapping)
+        self._lint(analysis_result, diagnostic_level)
+        return analysis_result

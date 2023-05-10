@@ -170,7 +170,6 @@ class Transform(abc.ABC):
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_pass,
-        exception_report_level=diagnostics.levels.ERROR,
         diagnostic_message_formatter=_transform_diagnose_call_message_formatter,
     )
     def run(self, *args, **kwargs) -> torch.fx.GraphModule:
@@ -222,9 +221,5 @@ class Analysis(abc.ABC):
         self.module = module
 
     @abc.abstractmethod
-    def analyze(self) -> AnalysisResult:
-        ...
-
-    @abc.abstractmethod
-    def lint(self) -> None:
+    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:
         ...
