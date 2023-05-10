@@ -1,3 +1,4 @@
+import logging
 import types
 import math
 from torch import inf
@@ -12,6 +13,8 @@ from .optimizer import Optimizer
 __all__ = ['LambdaLR', 'MultiplicativeLR', 'StepLR', 'MultiStepLR', 'ConstantLR', 'LinearLR',
            'ExponentialLR', 'SequentialLR', 'CosineAnnealingLR', 'ChainedScheduler', 'ReduceLROnPlateau',
            'CyclicLR', 'CosineAnnealingWarmRestarts', 'OneCycleLR', 'PolynomialLR', 'LRScheduler']
+
+logger = logging.getLogger(__name__)
 
 EPOCH_DEPRECATION_WARNING = (
     "The epoch parameter in `scheduler.step()` was not necessary and is being "
@@ -115,12 +118,12 @@ class LRScheduler:
         """
         if is_verbose:
             if epoch is None:
-                print('Adjusting learning rate'
+                logger.warning('Adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(group, lr))
             else:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
-                print('Epoch {}: adjusting learning rate'
+                logger.warning('Epoch {}: adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
 
 
@@ -1039,7 +1042,7 @@ class ReduceLROnPlateau:
                 if self.verbose:
                     epoch_str = ("%.2f" if isinstance(epoch, float) else
                                  "%.5d") % epoch
-                    print('Epoch {}: reducing learning rate'
+                    logger.warning('Epoch {}: reducing learning rate'
                           ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
 
     @property
