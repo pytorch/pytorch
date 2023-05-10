@@ -52,7 +52,7 @@ def get_test_stat_aggregates(date: datetime.date) -> Any:
     ]
     api_response = rs.QueryLambdas.execute_query_lambda(
         query_lambda=lambda_function_name,
-        version="3825b0797b6e49bc",
+        version="692684fa5b37177f",
         parameters=query_parameters,
     )
     for i in range(len(api_response["results"])):

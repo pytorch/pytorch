@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._dynamo.utils import counters
-from torch._ops import wrap
+from torch._higher_order_ops.wrap import wrap
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -386,17 +386,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         # np.number are lifted to graph inputs
-        self._test_wrap_simple(f, (x,), 3)
-
-    @torch._dynamo.config.patch(specialize_int=False, dynamic_shapes=True)
-    def test_capture_uncommon_int(self):
-        y = 328
-
-        def f(x):
-            return wrap(lambda x: x + y, x)
-
-        x = torch.randn(3)
-        # Under this specific config, uncommon ints are lifted to graph inputs.
         self._test_wrap_simple(f, (x,), 3)
 
     def test_freevars_as_inputs_to_wrap(self):

@@ -685,14 +685,13 @@ acceptable number of recompilations for some dynamic models.
 
    from torch._dynamo.utils import CompileProfiler
 
-   prof = CompileProfiler()
-
    def my_model():
        ...
 
-   profiler_model = torch.compile(my_model, backend=prof)
-   profiler_model()
-   print(prof.report())
+   with CompileProfiler() as prof:
+       profiler_model = torch.compile(my_model, backend=prof)
+       profiler_model()
+       print(prof.report())
 
 Accuracy Debugging
 ~~~~~~~~~~~~~~~~~~

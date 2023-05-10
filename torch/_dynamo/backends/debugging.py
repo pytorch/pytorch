@@ -1,7 +1,7 @@
 import functools
 from importlib import import_module
 
-from functorch.compile import min_cut_rematerialization_partition, nop
+from functorch.compile import min_cut_rematerialization_partition
 
 import torch
 from torch._functorch.compilers import ts_compile
@@ -37,9 +37,18 @@ def torchscript(gm, fake_tensor_inputs):
     return torch.jit.script(gm)
 
 
+# used boxed call to discard inputs when they are no longer needed
+def boxed_nop(fx_g, example_inputs):
+    def run(args):
+        return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(fw_compiler=nop)
+aot_eager = aot_autograd(fw_compiler=boxed_nop)
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
 
@@ -49,8 +58,8 @@ register_backend(name="aot_eager", compiler_fn=aot_eager)
 # isolate inductor vs aot_eager errors
 aot_eager_decomp_partition = aot_autograd(
     # these are taken from memory_efficient_fusion()
-    fw_compiler=nop,
-    bw_compiler=nop,
+    fw_compiler=boxed_nop,
+    bw_compiler=boxed_nop,
     # NB: lambda here is to delay import of inductor
     decompositions=lambda: import_module(
         "torch._inductor.compile_fx"

@@ -34,7 +34,12 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>

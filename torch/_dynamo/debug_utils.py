@@ -103,6 +103,9 @@ def minifier_dir():
     return path
 
 
+MAX_CONSTANT_NUMEL_INLINE = 4
+
+
 class NNModuleToString:
     safe_reprs = [
         torch.nn.Linear,
@@ -167,7 +170,13 @@ class NNModuleToString:
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
                 continue
-            if torch.is_floating_point(buffer):
+            # Serialize full data for small buffers
+            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                from torch._tensor_str import PRINT_OPTS
+
+                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                tensor_str = repr(buffer)
+            elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
@@ -180,9 +189,10 @@ class NNModuleToString:
         for param_name, param in gm._parameters.items():
             if param is None:
                 continue
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            maybe_device = ""
             if param.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+                maybe_device = ', device="cuda"'
+            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -309,9 +319,22 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=False):
+def same_two_models(
+    gm,
+    opt_gm,
+    example_inputs,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     """
     Check two models have same accuracy.
+
+    require_fp64: if True, raise an error if we unable to calculate the fp64 reference
+    ignore_non_fp: if True, do not compare outputs which are not floating point.  This
+        is mostly useful for the minifier (which wants to avoid quantizing floating point
+        error into integer/boolean error)
     """
     from .eval_frame import OptimizedModule
     from .testing import (
@@ -330,16 +353,17 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
-    try:
-        fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
-        )
-        fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
-    except Exception:
-        if require_fp64:
-            raise RuntimeError("Could not generate fp64 outputs")
-        log.warning("Could not generate fp64 outputs")
-        fp64_ref = None
+    fp64_ref = None
+    if config.same_two_models_use_fp64:
+        try:
+            fp64_model, fp64_examples = cast_to_fp64(
+                copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+            )
+            fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
+        except Exception:
+            if require_fp64:
+                raise RuntimeError("Could not generate fp64 outputs")
+            log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
@@ -355,7 +379,14 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False, *, require_fp64=
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
+    passing = same(
+        ref,
+        res,
+        fp64_ref,
+        tol=config.repro_tolerance,
+        equal_nan=True,
+        ignore_non_fp=ignore_non_fp,
+    )
     return passing
 
 
@@ -396,14 +427,25 @@ def cast_to_fp64(model, inputs):
 
 
 def backend_accuracy_fails(
-    gm, example_inputs, compiler_fn, only_fwd=False, *, require_fp64=False
+    gm,
+    example_inputs,
+    compiler_fn,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
 ):
     try:
         compiled_gm = compiler_fn(
             copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
         )
         return not same_two_models(
-            gm, compiled_gm, example_inputs, only_fwd, require_fp64=require_fp64
+            gm,
+            compiled_gm,
+            example_inputs,
+            only_fwd,
+            require_fp64=require_fp64,
+            ignore_non_fp=ignore_non_fp,
         )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.

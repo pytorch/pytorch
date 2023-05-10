@@ -71,8 +71,13 @@ runs:
         RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}" | tail -n1)
 
         if [ -z "${RESOLVED_IP}" ]; then
-          echo "Couldn't resolve ${PT_DOMAIN}, exiting..."
-          exit 1
+          echo "Couldn't resolve ${PT_DOMAIN}, retrying with Google DNS..."
+          RESOLVED_IP=$(dig -4 +short "${PT_DOMAIN}" @8.8.8.8 | tail -n1)
+
+          if [ -z "${RESOLVED_IP}" ]; then
+            echo "Couldn't resolve ${PT_DOMAIN}, exiting..."
+            exit 1
+          fi
         fi
 
         if grep -r "${PT_DOMAIN}" /etc/hosts; then
