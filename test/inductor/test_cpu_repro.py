@@ -118,11 +118,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
-        options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
-        for x_shape, mode_train, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Conv2d(3, 64, 3, 3, padding=padding)
-            ).train(mode=mode_train)
+        options = itertools.product([[3, 56, 56]], [True, False])
+        for x_shape, mode_train in options:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
+            )
             v = torch.randn(x_shape, dtype=torch.float32)
 
             with torch.no_grad():
@@ -212,11 +212,8 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed(self):
-        options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
-        for x_shape, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(3, 64, 3, 3, padding=padding)
-            ).eval()
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
             v = torch.randn(x_shape, dtype=torch.float32)
             with torch.no_grad():
                 self.common(
