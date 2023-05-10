@@ -3118,6 +3118,7 @@ def convert_arg_type(python_type):
 
 def convert_return_type(python_type):
     # TODO: only support Tensor as func return type for now
+    # TODO: support alias
     assert (
         python_type == "Tensor"
     ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
@@ -3186,11 +3187,14 @@ class FallbackKernel(ExternKernelAlloc):
 
     def set_cpp_kernel(self, kernel):
         assert (
-            not kernel.is_view
-        ), f"view kernel {kernel.__name__} is not supported with cpp_wrapper"
+            not kernel._schema.is_mutable
+        ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
         assert all(
             x.alias_info is None for x in kernel._schema.arguments
         ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
+        assert all(
+            x.alias_info is None for x in kernel._schema.returns
+        ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
