@@ -151,6 +151,16 @@ def clear_cublas_manager():
 
 
 @contextlib.contextmanager
+def disable_conv_cache_emptying():
+    prev = torch._C._cuda_get_conv_benchmark_empty_cache()
+    torch._C._cudnn_set_conv_benchmark_empty_cache(False)
+    try:
+        yield
+    finally:
+        torch._C._cudnn_set_conv_benchmark_empty_cache(prev)
+
+
+@contextlib.contextmanager
 def enable_history_recording():
     "Turns on history recording in the CUDA Caching Allocator"
     enabled = torch._C._cuda_isHistoryEnabled()
@@ -559,7 +569,7 @@ class CUDAWarmupNode:
 
         with torch.cuda.device(
             self.device_index
-        ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
+        ), disable_conv_cache_emptying(), clear_cublas_manager(), _use_cuda_memory_pool_manager(
             self.device_index, self.cuda_graphs_pool, self.stream
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
