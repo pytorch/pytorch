@@ -1,7 +1,18 @@
+import contextlib
 import functools
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, List, no_type_check, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    Iterator,
+    List,
+    no_type_check,
+    Tuple,
+)
 
 import torch
 import torch.distributed as dist
@@ -37,18 +48,8 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import (
-    _ext_chunk_tensor,
-    _ext_pre_load_state_dict_transform,
-    _extensions as _user_extensions,
-)
-from ._unshard_param_utils import (
-    _deregister_orig_params,
-    _register_orig_params,
-    _unshard_fsdp_state_params,
-    FLAT_PARAM,
-)
-from .flat_param import FlatParamHandle
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -533,8 +534,8 @@ def _sharded_post_state_dict_hook(
 def _sharded_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    if fsdp_state._use_orig_params:
-        _register_orig_params(module, fsdp_state)
+    if _has_fsdp_params(fsdp_state, module):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
 
 @no_type_check
@@ -549,7 +550,8 @@ def _sharded_pre_load_state_dict_hook(
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
     _lazy_init(fsdp_state, module)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
     if not _has_fsdp_params(fsdp_state, module):
         return
 
@@ -567,14 +569,14 @@ def _sharded_pre_load_state_dict_hook(
     loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
-        fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        if not _is_composable(fsdp_state):
+            fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        else:
+            fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
-        if fqn in shared_param_fqns:
-            # This shared parameter does not own the storage, so there is no
-            # need to flatten it into the `FlatParameter`
-            continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
+
         loaded_shapes.append(param.size())
         assert len(shards) < 2, (
             "Expects 0 or 1 shard per rank "
@@ -601,38 +603,23 @@ def _sharded_pre_load_state_dict_hook(
             tensor, local_tensor, group=fsdp_state.process_group
         )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        tensors_to_flatten.append(tensor)
+        state_dict[fqn_from_global_root] = tensor
 
-    # Create a new flat_param from the loaded, non-sharded tensors.
-    loaded_flat_param = handle.flatten_tensors_into_flat_param(
-        tensors_to_flatten, handle._aligned_numel, requires_grad=False
-    )
+    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
 
-    # Get the chunk from the loaded flat_param for the local rank.
-    loaded_flat_tensor, num_to_pad = FlatParamHandle._get_shard(
-        loaded_flat_param,
-        fsdp_state.rank,
-        fsdp_state.world_size,
-    )
-    flat_param = handle.flat_param
-    loaded_flat_tensor.to(flat_param.device)
-    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
-        f"The original shapes in FSDP are {expected_shapes}. "
-        f"The loaded shapes are {loaded_shapes}. "
-        f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
-    )
-    assert flat_param.numel() == loaded_flat_tensor.numel(), (
-        f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
-        f"from the local chunk {flat_param.numel()}."
-    )
-    assert flat_param._shard_numel_padded == num_to_pad, (
-        f"The loaded local chunk has different padding({num_to_pad}) "
-        f"from the local chunk {flat_param._shard_numel_padded}."
-    )
-    state_dict[f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"] = loaded_flat_tensor
-    if fsdp_state._use_orig_params:
-        _deregister_orig_params(module, fsdp_state)
+
+@contextlib.contextmanager
+def _replace_with_full_state_dict_type(fsdp_state: _FSDPState) -> Generator:
+    old_state_dict_config = fsdp_state._state_dict_config
+    old_state_dict_type = fsdp_state._state_dict_type
+    try:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        yield
+    except Exception as e:
+        raise e
+    fsdp_state._state_dict_config = old_state_dict_config
+    fsdp_state._state_dict_type = old_state_dict_type
 
 
 @no_type_check
@@ -650,17 +637,23 @@ def _post_state_dict_hook(
     what postprocessing will be done.
     """
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        context = contextlib.nullcontext()
 
-    _post_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_post_state_dict_hook,
-    }
-    processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
-        module, fsdp_state, state_dict, prefix
-    )
+    with context:
+        _post_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_post_state_dict_hook,
+        }
+        processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
+            module, fsdp_state, state_dict, prefix
+        )
     return processed_state_dict
 
 
@@ -678,24 +671,26 @@ def _pre_state_dict_hook(
     be done.
     """
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned."
         )
+    else:
+        context = contextlib.nullcontext()
 
-    _pre_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
-    }
-    _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
-        fsdp_state,
-        module,
-        *args,
-        **kwargs,
-    )
+    with context:
+        _pre_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
+        }
+        _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
+            fsdp_state,
+            module,
+            *args,
+            **kwargs,
+        )
 
 
 @no_type_check
@@ -713,21 +708,27 @@ def _pre_load_state_dict_hook(
     be done.
     """
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        context = contextlib.nullcontext()
 
-    _pre_load_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
-    }
-    # Code that is common for all state_dict impls
-    if fsdp_state._device_handle.is_available():
-        fsdp_state._device_handle.synchronize()
-    # Dispatch into state_dict specific implementation of pre-hook.
-    _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
-        module, fsdp_state, state_dict, prefix
-    )
+    with context:
+        _pre_load_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
+        }
+        # Code that is common for all state_dict impls
+        if fsdp_state._device_handle.is_available():
+            fsdp_state._device_handle.synchronize()
+        # Dispatch into state_dict specific implementation of pre-hook.
+        _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
+            module, fsdp_state, state_dict, prefix
+        )
 
 
 @no_type_check
@@ -738,18 +739,24 @@ def _post_load_state_dict_hook(
     *args: Any,
 ) -> None:
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        context = contextlib.nullcontext()
 
-    _post_load_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_post_load_state_dict_hook,
-    }
-    # Code that is common for all state_dict impls
-    # Dispatch into state_dict type specific implementation of post-hook for
-    # loading state_dict.
-    _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+    with context:
+        _post_load_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_post_load_state_dict_hook,
+        }
+        # Code that is common for all state_dict impls
+        # Dispatch into state_dict type specific implementation of post-hook for
+        # loading state_dict.
+        _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
 
 
 def _register_all_state_dict_hooks(state: _FSDPState):

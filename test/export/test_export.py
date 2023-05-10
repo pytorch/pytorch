@@ -4,7 +4,7 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export, export
+from torch._export import _export, export, dynamic_dim
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size
 from torch._export.graph_module import get_export_meta
@@ -111,15 +111,29 @@ class TestDynamismExpression(TestCase):
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Unable to set min size"):
             _export(invalid_size, inp)
 
-        def invalid_input(x):
+        def invalid_input_conflict_with_inline_constraints(x):
             b = x.item()
             constrain_as_size(b, min=2, max=5)
             return torch.full((b, 1), 1)
 
         inp = (torch.tensor([6]),)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Invalid value 6 for range"):
+            _export(invalid_input_conflict_with_inline_constraints, inp)
 
-        with self.assertRaisesRegex(torch.utils._sympy.value_ranges.ValueRangeError, "Invalid value 6 for range"):
-            _export(invalid_input, inp)
+        def invalid_input_conflict_with_input_constraints(x):
+            return x + 1
+
+        inp = torch.zeros([3])
+        inp_constraints = [
+            dynamic_dim(inp, 0) > 5,
+        ]
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "not in range"):
+            _export(
+                invalid_input_conflict_with_input_constraints,
+                (inp,),
+                constraints=inp_constraints,
+            )
+
 
         def conflicting_constraints(x):
             b = x.item()
@@ -522,6 +536,22 @@ class TestExport(TestCase):
         exported_results = exported_method(*args)
 
         self.assertTrue(torch.allclose(eager_results, exported_results))
+
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+    def test_raise_user_error_when_guard_on_data_dependent_operation(self):
+        def fn_ddo(x):
+            y = x.nonzero()
+            z = y.shape[0]
+            if z > 2:
+                return x.cos()
+            else:
+                return x.sin()
+
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            "trying to get a value out of symbolic int"
+        ):
+            _ = _export(fn_ddo, (torch.tensor([2, 3, 5]),), constraints=None)
 
 
 if __name__ == '__main__':
