@@ -9,14 +9,11 @@ from typing import (
     Callable,
     Dict,
     Final,
-    List,
     Mapping,
     Optional,
     Protocol,
     runtime_checkable,
     Sequence,
-    Tuple,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -25,7 +22,7 @@ from typing import (
 import torch
 import torch._ops
 
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
 # We can only import onnx from this module in a type-checking context to ensure that
@@ -214,129 +211,20 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
-# TODO(bowbao): Add diagnostics for IO adapters.
-@runtime_checkable
-class InputAdaptStep(Protocol):
-    """A protocol that defines a step in the input adapting process.
-
-    The input adapting process is a sequence of steps that are applied to the
-    PyTorch model inputs to transform them into the inputs format expected by the
-    exported ONNX model. Each step takes the PyTorch model inputs as arguments and
-    returns the transformed inputs.
-
-    This serves as a base formalized construct for the transformation done to model
-    input signature by any individual component in the exporter.
-    """
-
-    def apply(
-        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        ...
-
-
-class InputAdapter:
-    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
-
-    _input_adapt_steps: List[InputAdaptStep]
-
-    def __init__(self, input_adapt_steps: Optional[List[InputAdaptStep]] = None):
-        self._input_adapt_steps = input_adapt_steps or []
-
-    @_beartype.beartype
-    def append_step(self, step: InputAdaptStep) -> None:
-        """Appends a step to the input adapt steps.
-
-        Args:
-            step: The step to append.
-        """
-        self._input_adapt_steps.append(step)
-
-    @_beartype.beartype
-    def apply(
-        self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, torch.Tensor]]:
-        """Converts the PyTorch model inputs to exported ONNX model inputs format.
-
-        Args:
-            model_args: The PyTorch model inputs.
-            model_kwargs: The PyTorch model keyword inputs.
-
-        Returns:
-            A sequence of tensors converted from PyTorch model inputs.
-        """
-        args: Sequence[Any] = model_args
-        kwargs: Mapping[str, Any] = model_kwargs
-        for step in self._input_adapt_steps:
-            args, kwargs = step.apply(args, kwargs)
-        assert not kwargs
-        return args
-
-
-@runtime_checkable
-class OutputAdaptStep(Protocol):
-    """A protocol that defines a step in the output adapting process.
-
-    The output adapting process is a sequence of steps that are applied to the
-    PyTorch model outputs to transform them into the outputs format produced by the
-    exported ONNX model. Each step takes the PyTorch model outputs as arguments and
-    returns the transformed outputs.
-
-    This serves as a base formalized construct for the transformation done to model
-    output signature by any individual component in the exporter.
-    """
-
-    def apply(self, model_outputs: Any) -> Any:
-        ...
-
-
-class OutputAdapter:
-    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
-
-    _output_adapt_steps: List[OutputAdaptStep]
-
-    def __init__(self, output_adapt_steps: Optional[List[OutputAdaptStep]] = None):
-        self._output_adapt_steps = output_adapt_steps or []
-
-    @_beartype.beartype
-    def append_step(self, step: OutputAdaptStep) -> None:
-        """Appends a step to the output format steps.
-
-        Args:
-            step: The step to append.
-        """
-        self._output_adapt_steps.append(step)
-
-    @_beartype.beartype
-    def apply(
-        self, model_outputs: Any
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
-        """Converts the PyTorch model outputs to exported ONNX model outputs format.
-
-        Args:
-            model_outputs: The PyTorch model outputs.
-
-        Returns:
-            PyTorch model outputs in exported ONNX model outputs format.
-        """
-        for step in self._output_adapt_steps:
-            model_outputs = step.apply(model_outputs)
-        return model_outputs
-
-
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
     _model_proto: Final[onnx.ModelProto]
-    _input_adapter: Final[InputAdapter]
-    _output_adapter: Final[OutputAdapter]
+    _input_adapter: Final[io_adapter.InputAdapter]
+    _output_adapter: Final[io_adapter.OutputAdapter]
     _diagnostic_context: Final[infra.DiagnosticContext]
 
     @_beartype.beartype
     def __init__(
         self,
         model_proto: onnx.ModelProto,
-        input_adapter: InputAdapter,
-        output_adapter: OutputAdapter,
+        input_adapter: io_adapter.InputAdapter,
+        output_adapter: io_adapter.OutputAdapter,
         diagnostic_context: infra.DiagnosticContext,
     ):
         self._model_proto = model_proto
@@ -490,8 +378,8 @@ class FXGraphExtractor(abc.ABC):
 
     def __init__(self) -> None:
         super().__init__()
-        self.input_adapter: InputAdapter = InputAdapter()
-        self.output_adapter: OutputAdapter = OutputAdapter()
+        self.input_adapter: io_adapter.InputAdapter = io_adapter.InputAdapter()
+        self.output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
 
     @_beartype.beartype
     def _export_fx_to_onnx(
@@ -501,7 +389,6 @@ class FXGraphExtractor(abc.ABC):
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
         # TODO: Import here to prevent circular dependency
-        import torch.onnx._internal.fx.fx_exporter as fx_exporter
         import torch.onnx._internal.fx.passes as passes
 
         diagnostic_context = options.diagnostic_context
@@ -544,13 +431,15 @@ class FXGraphExtractor(abc.ABC):
             )
             # ONNX does not support None inputs. During graph building, all None inputs
             # are removed. Here we register this step to input adapter.
-            self.adapt_input(fx_exporter.RemoveNoneInputStep, fx_module_args, {})
+            self.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
+
             # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
             # Dynamo doesn't support non-tensor inputs.
-            self.adapt_input(fx_exporter.RemoveNonTensorInputStep, fx_module_args, {})
+            self.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
+
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            self.output_adapter.append_step(fx_exporter.FlattenOutputStep())
+            self.output_adapter.append_step(io_adapter.FlattenOutputStep())
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(options.opset_version)
@@ -561,50 +450,6 @@ class FXGraphExtractor(abc.ABC):
             options.diagnostic_context,
         )
 
-    def adapt_input(
-        self,
-        adapt_step_cls: Type[InputAdaptStep],
-        model_args: Sequence[Any],
-        model_kwargs: Mapping[str, Any],
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        """Apply an input adapt step to the model args and kwargs.
-        An input adapt step object is initialized, applied and recorded as part of
-        ``self.input_adapter`.
-        Args:
-            adapt_step_cls: The input adapt step class.
-            model_args: The model args.
-            model_kwargs: The model kwargs.
-            step_init_args: The input adapt step initialization arguments.
-        Returns:
-            The adapted model args and kwargs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self.input_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_args, model_kwargs)
-
-    def adapt_output(
-        self,
-        adapt_step_cls: Type[OutputAdaptStep],
-        model_outputs: Any,
-        step_init_args: Optional[Sequence[Any]] = None,
-    ) -> Any:
-        """Apply an output adapt step to the model outputs.
-        An output adapt step object is initialized, applied and recorded as part of
-        ``self._output_adapter`.
-        Args:
-            adapt_step_cls: The output adapt step class.
-            model_outputs: The model outputs.
-            step_init_args: The input adapt step initialization arguments.
-        Returns:
-            The adapted model outputs.
-        """
-        step_init_args = step_init_args or ()
-        adapt_step = adapt_step_cls(*step_init_args)
-        self.output_adapter.append_step(adapt_step)
-        return adapt_step.apply(model_outputs)
-
     @abc.abstractmethod
     def generate_fx(
         self,
@@ -612,7 +457,7 @@ class FXGraphExtractor(abc.ABC):
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+    ) -> torch.fx.GraphModule:
         """Analyzes user ``model`` and generates a FX graph.
         Args:
             options: The export options.
@@ -620,12 +465,8 @@ class FXGraphExtractor(abc.ABC):
             model_args: The model's positional input arguments.
             model_kwargs: The model's keyword input arguments.
         Returns:
-            The generated FX Graph, and the model's adapted input arguments.
+            The generated FX Graph.
         """
-        # By design, only torch.fx.GraphModule is needed
-        # But FXSymbolicTracer modifies model data, which will be needed
-        # to produce the ONNX proto in the next layer.
-        # TODO: Refactor after https://github.com/pytorch/pytorch/pull/98421
         ...
 
 
@@ -646,8 +487,12 @@ class Exporter:
         self.model_kwargs = model_kwargs
 
     def export(self) -> ExportOutput:
-        graph_module, updated_model_args = self.options.fx_tracer.generate_fx(
+        graph_module = self.options.fx_tracer.generate_fx(
             self.options, self.model, self.model_args, self.model_kwargs
+        )
+
+        updated_model_args = self.options.fx_tracer.input_adapter.apply(
+            *self.model_args, **self.model_kwargs
         )
 
         # Export FX graph to ONNX ModelProto.
