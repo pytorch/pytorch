@@ -1374,6 +1374,7 @@ make_fx_failures = {
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
+    skip('item'),
     xfail('cov'),
     xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
@@ -1458,7 +1459,6 @@ symbolic_tensor_failures = {
     xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.solve_triangular', ''),  # aten.linalg_solve_triangular.default - couldn't find symbolic meta function/de...
     xfail('linalg.tensorinv', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.tensorsolve', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.vander', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
