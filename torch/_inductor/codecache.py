@@ -17,6 +17,7 @@ import sysconfig
 import tempfile
 import types
 from copy import copy, deepcopy
+from dataclasses import field
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
@@ -214,8 +215,16 @@ def code_hash(code):
     )
 
 
+def serialize_fx_arg(arg: Any):
+    # Special case for example_inputs, we only need the shape data for the hash
+    if isinstance(arg, list):
+        if len(arg) > 0 and isinstance(arg[0], torch.Tensor):
+            return b"".join([pickle.dumps(t.shape) for t in arg])
+    return pickle.dumps(arg)
+
+
 def compiled_fx_graph_hash(fx_args: List[Any]):
-    serialized_fx_args = b"".join([pickle.dumps(arg) for arg in fx_args])
+    serialized_fx_args = b"".join([serialize_fx_arg(arg) for arg in fx_args])
     hashed_fx_args = base64.b32encode(hashlib.sha256(serialized_fx_args).digest())[:51]
     return (
         "f"
@@ -255,9 +264,10 @@ class FxGraphCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, compile_fx_fn, fx_args):
-        key = compiled_fx_graph_hash(fx_args)
-        print("CG cache key is ", key)
+    def load(cls, compile_fx_fn, fx_args, fx_kwargs):
+        fx_args_for_hashing = copy(fx_args)
+        fx_args_for_hashing.extend(list(fx_kwargs.values()))
+        key = compiled_fx_graph_hash(fx_args_for_hashing)
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -265,9 +275,8 @@ class FxGraphCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 _, _, cg_path = get_path(key, "cg")
-                print("Path from key is ", cg_path)
                 if not os.path.exists(cg_path):
-                    compiled_graph: CompiledFxGraph = compile_fx_fn(**fx_args)
+                    compiled_graph: CompiledFxGraph = compile_fx_fn(*fx_args, **fx_kwargs)
                     
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
@@ -293,9 +302,9 @@ class CompiledFxGraph:
     cache_key: str = None
     artifact_path: str = None
     cache_linemap: List = None
-    device_types: Set[str] = set()
-    device_idxs: Set[int] = set()
-    mutated_inputs: Set[str] = set()
+    device_types: Set[str] = field(default_factory=set)
+    device_idxs: Set[int] = field(default_factory=set)
+    mutated_inputs: Set[str] = field(default_factory=set)
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:

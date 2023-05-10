@@ -145,6 +145,8 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     return make_boxed_func(gm.forward)
 
 
+@DebugContext.wrap
+@torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -157,8 +159,17 @@ def compile_fx_inner(
     is_inference=False,
     boxed_forward_device_index=None,
 ):
-    graph_args = [gm, example_inputs, cudagraphs, num_fixed, is_backward, graph_id, cpp_wrapper, aot_mode] # Inputs to fx_codegen_and_compile
-    compiled_graph: CompiledFxGraph = FxGraphCache.load(fx_codegen_and_compile, graph_args)
+    # Inputs to fx_codegen_and_compile
+    graph_args = [gm, example_inputs]
+    graph_kwargs = {
+        "cudagraphs": cudagraphs,
+        "num_fixed": num_fixed,
+        "is_backward": is_backward,
+        "graph_id": graph_id,
+        "cpp_wrapper": cpp_wrapper,
+        "aot_mode": aot_mode,
+    }
+    compiled_graph: CompiledFxGraph = FxGraphCache.load(fx_codegen_and_compile, graph_args, graph_kwargs)
 
     if aot_mode:
         return compiled_graph
