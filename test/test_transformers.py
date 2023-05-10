@@ -650,8 +650,9 @@ class TestTransformers(NNTestCase):
         d_model = 3
         layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
         layer.eval()
-        x = torch.randn(1, 5, d_model)
+        x = torch.randn(1, 5, d_model) # float
         unmasked_output = layer(x)
+        # double
         mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
         is_causal_output = layer(x, src_mask=mask, is_causal=True)
         masked_output = layer(x, src_mask=mask)

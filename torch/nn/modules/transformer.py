@@ -12,6 +12,13 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from torch.types import _dtype as DType
+else:
+    # The JIT doesn't understand Union, nor torch.dtype here
+    DType = int
+
 __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'TransformerEncoderLayer', 'TransformerDecoderLayer']
 
 class Transformer(Module):
@@ -149,11 +156,16 @@ class Transformer(Module):
         return output
 
     @staticmethod
-    def generate_square_subsequent_mask(sz: int, device='cpu') -> Tensor:
+    def generate_square_subsequent_mask(
+            sz: int,
+            **kwargs
+    ) -> Tensor:
         r"""Generate a square mask for the sequence. The masked positions are filled with float('-inf').
             Unmasked positions are filled with float(0.0).
         """
-        return torch.triu(torch.full((sz, sz), float('-inf'), device=device), diagonal=1)
+        # torch.full factory kwargs parameters do not work with torchscript
+        factory_kwargs = nn.factory_kwargs(kwargs)
+        return torch.triu(torch.full((sz, sz), float('-inf'), **factory_kwargs), diagonal=1)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
@@ -203,10 +215,14 @@ class TransformerEncoder(Module):
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as mask (optional)
-                and ignores attn_mask for computing scaled dot product attention.
-                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as mask.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -296,20 +312,7 @@ class TransformerEncoder(Module):
                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
-        # Prevent type refinement
-        make_causal = (is_causal is True)
-
-        if is_causal is None:
-            if mask is not None:
-                sz = mask.size(0)
-                causal_comparison = torch.triu(
-                    torch.ones(sz, sz, device=mask.device) * float('-inf'), diagonal=1
-                ).to(mask.dtype)
-
-                if torch.equal(mask, causal_comparison):
-                    make_causal = True
-
-        is_causal = make_causal
+        is_causal = _detect_is_causal_mask(mask, is_causal)
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
@@ -349,7 +352,7 @@ class TransformerDecoder(Module):
 
     def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, tgt_key_padding_mask: Optional[Tensor] = None,
-                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: bool = False,
+                memory_key_padding_mask: Optional[Tensor] = None, tgt_is_causal: Optional[bool] = None,
                 memory_is_causal: bool = False) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
@@ -361,14 +364,27 @@ class TransformerDecoder(Module):
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                memory mask.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
 
         Shape:
             see the docs in Transformer class.
         """
         output = tgt
+
+        tgt_is_causal = _detect_is_causal_mask(tgt_mask, tgt_is_causal)
 
         for mod in self.layers:
             output = mod(output, memory, tgt_mask=tgt_mask,
@@ -493,9 +509,14 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as src_mask.
-              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as src mask.
+                Default: ``False``.
+                Warning:
+                ``is_causal`` provides a hint that ``src_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -706,9 +727,21 @@ class TransformerDecoderLayer(Module):
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+                Default: ``False``.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                memory mask.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
+
         Shape:
             see the docs in Transformer class.
         """
@@ -764,3 +797,29 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
         return F.gelu
 
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
+
+
+def _detect_is_causal_mask(
+        mask: Optional[Tensor],
+        is_causal: Optional[bool],
+) -> bool:
+    """Return whether the given attention mask is causal.
+
+    Warning:
+    If ``is_causal`` is not ``None``, its value will be returned as is and may be incorrect.
+    """
+    # Prevent type refinement
+    make_causal = (is_causal is True)
+
+    if is_causal is None and mask is not None:
+        # Handles mask being 3-D or 4-D; since mask should be square,
+        # this returns the correct sequence length in any case.
+        sz = mask.size(-2)
+        causal_comparison = Transformer.generate_square_subsequent_mask(
+            sz, device=mask.device, dtype=mask.dtype)
+
+        # Do not use `torch.equal` so we handle batched masks by
+        # broadcasting the comparison.
+        make_causal = bool((mask == causal_comparison).all())
+
+    return make_causal

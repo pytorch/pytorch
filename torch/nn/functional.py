@@ -5210,12 +5210,19 @@ def multi_head_attention_forward(
         target_type=query.dtype
     )
 
-    if is_causal and attn_mask is None:
-        raise RuntimeError(
-            "Need attn_mask if specifying the is_causal hint. "
-            "You may use the Transformer module method "
-            "`generate_square_subsequent_mask` to create this mask."
-        )
+    if is_causal:
+        if attn_mask is None:
+            raise RuntimeError(
+                "Need attn_mask if specifying the is_causal hint. "
+                "You may use the Transformer module method "
+                "`generate_square_subsequent_mask` to create this mask."
+            )
+        else:
+            print(f"attn_mask size {attn_mask.size()}")
+            print(f"src len {src_len}")
+            print(f"tgt len {tgt_len}")
+            print(f"emd_dim {embed_dim}")
+            # check attn_mask vs input size
 
     if is_causal and key_padding_mask is None and not need_weights:
         # when we have a kpm or need weights, we need attn_mask
