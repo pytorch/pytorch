@@ -51,13 +51,6 @@ test_failures = {
 }
 
 
-test_failures_cpp_wrapper = {
-    "test_conv2d_binary_dynamic_shapes": TestFailure(
-        ("cpp_wrapper",), is_skip=True
-    ),  # conv2d_binary will fallback for dynamic shapes; the fallback path is not yet supported
-}
-
-
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
         cls,
@@ -86,7 +79,6 @@ if HAS_CPU:
         DynamicShapesCppWrapperTemplate,
         DynamicShapesCppWrapperCpuTests,
         "cpp_wrapper",
-        test_failures_cpp_wrapper,
     )
 
 
