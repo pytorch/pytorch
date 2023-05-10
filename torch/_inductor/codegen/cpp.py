@@ -643,7 +643,7 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
-        elif other == float("nan"):
+        elif math.isnan(other):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
             )
