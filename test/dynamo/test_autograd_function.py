@@ -179,7 +179,6 @@ class CustomFuncSaveForBwd(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        # breakpoint()
         (result,) = ctx.saved_tensors
         return grad_output * math.sqrt(result.numel())
 

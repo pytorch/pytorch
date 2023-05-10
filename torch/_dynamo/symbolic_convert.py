@@ -86,7 +86,6 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
-    AutogradFunctionContextVariable,
     ClosureVariable,
     GetAttrVariable,
     NullVariable,
@@ -591,7 +590,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
             self.output.guards.update(fn.guards)
             return result
-        except Exception as e:
+        except Exception:
             self.restore_graphstate(state)
             raise
 
@@ -1417,11 +1416,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             proxy = getattr(seq.obj.as_proxy(), seq.name)
             options = VariableTracker.propagate(self)
             val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
-        elif isinstance(seq, GetAttrVariable) and isinstance(
-            seq.obj, AutogradFunctionContextVariable
-        ):
-            # .saved_tensors for autograd
-            val = seq.obj.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval

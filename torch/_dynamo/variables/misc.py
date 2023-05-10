@@ -398,7 +398,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         if not hasattr(self, "_saved_tensors"):
             self._saved_tensors = []
         for arg in args:
-            arg.as_proxy().node.meta["whitelisted"] = True
+            # as_proxy can return constant values or other non proxy values
+            if isinstance(arg.as_proxy(), torch.fx.Proxy):
+                arg.as_proxy().node.meta["whitelisted"] = True
             self._saved_tensors.append(arg)
         return variables.ConstantVariable(None, **options)
 

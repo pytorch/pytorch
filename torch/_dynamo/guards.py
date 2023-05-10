@@ -173,10 +173,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        try:
-            return eval(name, self.scope, CLOSURE_VARS)
-        except Exception as e:
-            breakpoint()
+        return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important

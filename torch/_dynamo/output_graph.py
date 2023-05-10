@@ -1146,8 +1146,9 @@ class SubgraphTracer(fx.Tracer):
     def lift_tracked_freevar_to_input(self, proxy):
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
-        assert self.parent is not None, breakpoint()
-        "lift_tracked_freevar_to_input on root SubgraphTracer"
+        assert (
+            self.parent is not None
+        ), "lift_tracked_freevar_to_input on root SubgraphTracer"
         self.create_graph_input(proxy.node.name)
         self.lifted_freevars.add(proxy)
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
