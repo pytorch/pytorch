@@ -50,6 +50,15 @@ class SerializationInterop(FileSetup):
 
         torch.save(value, self.path, _use_new_zipfile_serialization=True)
 
+class SaveStateDict(FileSetup):
+    path = 'state_dict.pt'
+
+    def setup(self):
+        model = torch.nn.Linear(10, 10)
+        torch.nn.init.constant_(model.weight, 2.0)
+        torch.nn.init.constant_(model.bias, 3.0)
+
+        torch.save(model.state_dict(), self.path, _use_new_zipfile_serialization=True)
 
 # See testTorchSaveError in test/cpp/jit/tests.h for usage
 class TorchSaveError(FileSetup):
@@ -93,6 +102,7 @@ tests = [
     EvalModeForLoadedModule(),
     SerializationInterop(),
     TorchSaveError(),
+    SaveStateDict(),
     TorchSaveJitStream_CUDA()
 ]
 
