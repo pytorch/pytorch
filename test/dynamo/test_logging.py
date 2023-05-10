@@ -200,6 +200,20 @@ class LoggingTests(LoggingTestCase):
         logger.info("hi")
         self.assertEqual(len(records), 1)
 
+    @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
+    def test_all(self, _):
+        registry = torch._logging._internal.log_registry
+        state = torch._logging._internal.log_state
+
+        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
+            logger = logging.getLogger(logger_qname)
+
+            if logger_qname == dynamo_qname:
+                self.assertEqual(logger.level, logging.INFO)
+            else:
+                self.assertEqual(logger.level, logging.DEBUG)
+
 
 # single record tests
 exclusions = {
