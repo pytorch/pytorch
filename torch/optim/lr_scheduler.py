@@ -118,13 +118,11 @@ class LRScheduler:
         """
         if is_verbose:
             if epoch is None:
-                logger.warning('Adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(group, lr))
+                logger.warning('Adjusting learning rate of group %d to %.4e.', group, lr)
             else:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
-                logger.warning('Epoch {}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
+                logger.warning('Epoch %s: adjusting learning rate of group %d to %.4e.', epoch_str, group, lr)
 
 
     def step(self, epoch=None):
@@ -1042,8 +1040,7 @@ class ReduceLROnPlateau:
                 if self.verbose:
                     epoch_str = ("%.2f" if isinstance(epoch, float) else
                                  "%.5d") % epoch
-                    logger.warning('Epoch {}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
+                    logger.warning('Epoch %s: reducing learning rate of group %d to %.4e.', epoch_str, i, new_lr)
 
     @property
     def in_cooldown(self):
