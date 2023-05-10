@@ -1015,6 +1015,7 @@ class TestTorchDeviceType(TestCase):
         x = torch.rand([1, 64, 8, 128, 172]).to(device)
         y = conv(x)
 
+    @skipIfTorchDynamo("<resume in test_is_set_to> Meaning graph breaks in set_")
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)

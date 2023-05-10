@@ -6257,6 +6257,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
+        @patch.object(torch._dynamo.config, "dynamic_shapes", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")

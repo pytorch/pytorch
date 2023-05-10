@@ -362,6 +362,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(counter.op_count, 2)
         assert same(out, correct)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
         def func(inp, *, tag, ranks, group_size):
