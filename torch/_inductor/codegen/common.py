@@ -730,6 +730,9 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
+    def vectorized_random(self, seed: str, mode: str):
+        raise NotImplementedError()
+
     def __enter__(self):
         class CSEProxy:
             self.name = "CSEProxy"
@@ -779,6 +782,10 @@ class Kernel(CodeGen):
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, index, value
                 )
+
+            @staticmethod
+            def vectorized_random(seed, mode):
+                return self.vectorized_random(seed, mode)  # bypass CSE
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

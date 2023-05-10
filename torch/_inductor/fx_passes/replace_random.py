@@ -5,6 +5,7 @@ import logging
 import torch
 from ..._dynamo.utils import counters
 from .. import config, inductor_prims
+from ..ir import is_triton
 from ..pattern_matcher import (
     CallFunctionVarArgs,
     inference_graph,
@@ -111,8 +112,12 @@ def lazy_init():
     )
 
 
+def should_vectorize(device):
+    return config.triton.vectorize_random and is_triton(device)
+
+
 def default_kwargs(device):
-    return {}
+    return {"vectorize": should_vectorize(device)}
 
 
 def get_device(device):

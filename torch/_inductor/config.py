@@ -304,6 +304,9 @@ class triton:
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
 
+    # Vectorize random number generation in a schedule-dependent way
+    vectorize_random = False
+
 
 # create a directory containing lots of debug information
 class trace:

@@ -42,8 +42,8 @@ lookup_seed = make_prim(
     doc="Extract a single seed from the result of inductor_seeds()",
 )
 random = make_prim(
-    "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
-    lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
+    "inductor_random(SymInt[] size, Tensor seed, str mode, bool vectorize) -> Tensor",
+    lambda size, seed, mode, vectorize: getattr(torch, mode)(size, device=seed.device),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
 )
 randint = make_prim(

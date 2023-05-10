@@ -1283,8 +1283,11 @@ def inductor_lookup_seed(seeds, index):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(
+    size: List[int], seed: TensorBox, mode: str, vectorize: bool, *, offset: int = 0
+):
     assert not config.fallback_random
+    assert not vectorize or config.triton.vectorize_random
     assert mode in ("rand", "randn")
     size = [*size]
     dtype = torch.float32
@@ -1295,10 +1298,13 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     seed_loader = seed.make_loader()
 
     def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+        if vectorize:
+            return ops.vectorized_random(seed_loader([]), mode)
+        else:
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,
@@ -1306,6 +1312,8 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
+    if vectorize:
+        result.realize()
     return result
 
 
