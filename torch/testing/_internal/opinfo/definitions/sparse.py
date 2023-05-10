@@ -1,7 +1,11 @@
+import os
+
 import torch
 from torch.testing import make_tensor  # noqa: F401
 from torch.testing._internal.opinfo.core import (  # noqa: F401
+    BinaryUfuncInfo,
     ErrorInput,
+    generate_elementwise_binary_tensors,
     ReductionOpInfo,
     sample_inputs_reduction,
     SampleInput,
@@ -52,7 +56,9 @@ def _sample_inputs_sparse(
     *args,
     **kwargs,
 ):
-    check_validate = False
+    check_validate = (
+        os.environ.get("PYTORCH_TEST_CHECK_VALIDATE_SPARSE_SAMPLES", "0") == "1"
+    )
     for sample in sample_inputs(op_info, *args, **kwargs):
         sample = validate_sample_input(op_info, sample, check_validate=check_validate)
         if isinstance(sample, SampleInput):
@@ -68,12 +74,45 @@ def _sample_inputs_sparse(
 def _error_inputs_sparse(
     maybe_failing_sample_inputs, validate_sample_input, op_info, *args, **kwargs
 ):
-    check_validate = False
+    check_validate = (
+        os.environ.get("PYTORCH_TEST_CHECK_VALIDATE_SPARSE_SAMPLES", "0") == "1"
+    )
     for sample in maybe_failing_sample_inputs(op_info, *args, **kwargs):
         sample = validate_sample_input(op_info, sample, check_validate=check_validate)
         if isinstance(sample, ErrorInput):
             yield sample
         # Sample inputs are handled in sample_inputs_sparse
+
+
+def _apply_requires_grad_to_samples(sample_inputs):
+    """Decorator to _maybe_failing_sample_inputs_... generator functions
+    that clones and sets requires_grad argument to tensors in sample
+    input arguments. This is needed when the generated samples share
+    tensor instances.
+    """
+
+    def wrapper(op_info, device, dtype, requires_grad, layout, **kwargs):
+        def apply_requires_grad(x):
+            if (
+                not isinstance(x, torch.Tensor)
+                or x.requires_grad
+                or not requires_grad
+                or not (x.is_floating_point() or x.is_complex())
+            ):
+                return x
+            return x.detach().clone().requires_grad_(requires_grad)
+
+        if requires_grad:
+            for sample_input in sample_inputs(
+                op_info, device, dtype, requires_grad, layout, **kwargs
+            ):
+                yield sample_input.transform(apply_requires_grad)
+        else:
+            yield from sample_inputs(
+                op_info, device, dtype, requires_grad, layout, **kwargs
+            )
+
+    return wrapper
 
 
 def sample_inputs_sparse_reduction(
@@ -447,6 +486,291 @@ def error_inputs_sparse_reduction_sum(op_info, device, layout, **kwargs):
     )
 
 
+def sample_inputs_sparse_elementwise_binary_operation(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    """Sample inputs for elementwise binary operations on sparse tensors.
+
+    The samples include regular, zero-sized, batched, and hybrid
+    sparse tensors as well as rhs scalars. All tensors are full tensors.
+    """
+
+    def _to_sparse(tensor, **kwargs):
+        return tensor.detach().to_sparse(**kwargs).requires_grad_(requires_grad)
+
+    for sample_input in generate_elementwise_binary_tensors(
+        op_info,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        **kwargs,
+    ):
+        lhs, rhs = sample_input.input, sample_input.args[0]
+        min_dense_dim = 0
+        max_dense_dim = lhs.ndim - 1
+        if layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if lhs.ndim < 2:
+                # sparse compressed tensors sparse_dim must be 2
+                continue
+            max_dense_dim = lhs.ndim - 2
+
+        for dense_dim in range(min_dense_dim, max_dense_dim + 1):
+            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                blocksizes = [(1, 1)]
+                if lhs.numel() > 0:
+                    blocksizes.append(
+                        (
+                            lhs.shape[lhs.ndim - 2 - dense_dim],
+                            lhs.shape[lhs.ndim - 1 - dense_dim],
+                        )
+                    )
+            else:
+                blocksizes = [None]
+            for blocksize in blocksizes:
+                to_sparse_kwargs = dict(
+                    layout=layout, dense_dim=dense_dim, blocksize=blocksize
+                )
+                lhs_sparse = _to_sparse(lhs, **to_sparse_kwargs)
+                rhs_sparse = _to_sparse(rhs, **to_sparse_kwargs)
+                # op(sparse, sparse)
+                yield SampleInput(
+                    lhs_sparse,
+                    args=(rhs_sparse, *sample_input.args[1:]),
+                    kwargs=sample_input.kwargs,
+                )
+                # op(sparse, scalar)
+                yield SampleInput(
+                    lhs_sparse,
+                    args=(
+                        make_tensor(
+                            (), dtype=dtype, device=device, requires_grad=requires_grad
+                        ),
+                        *sample_input.args[1:],
+                    ),
+                    kwargs=sample_input.kwargs,
+                )
+
+
+def _validate_sample_input_elementwise_binary_sparse_mul(sample):
+    # NOTE: When fixing a failing sample case, remove the
+    #       corresponding if-block
+    t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+    batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
+    layout = t_inp.layout
+    dtype = t_inp.dtype
+    if layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
+        return ErrorInput(
+            sample,
+            error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor",
+        )
+    elif (
+        layout is torch.sparse_csr
+        and t_inp.dense_dim() > 0
+        and t_inp._nnz() == 0
+        and t_args[0].ndim > 0
+    ):
+        return ErrorInput(
+            sample,
+            error_regex=(
+                "Only tensors with two sparse dimensions can be converted to the SparseCsr layout"
+                ", got self with 3 sparse dimensions."
+            ),
+        )
+    elif layout is torch.sparse_csc and t_args[0].ndim > 0:
+        return ErrorInput(
+            sample, error_regex="Expected result Tensor to be of format CSR"
+        )
+    elif layout is torch.sparse_bsr and t_args[0].ndim > 0:
+        return ErrorInput(
+            sample,
+            error_regex="empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsr",
+        )
+    elif layout is torch.sparse_bsc and t_args[0].ndim > 0:
+        return ErrorInput(
+            sample,
+            error_regex="empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor layout but got SparseBsc",
+        )
+    elif (
+        layout is torch.sparse_coo
+        and dtype is torch.complex32
+        and t_inp.numel() > 0
+        and t_args[0].numel() > 0
+        and t_args[0].ndim > 0
+    ):
+        return ErrorInput(
+            sample,
+            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
+        )
+    elif (
+        layout is torch.sparse_csr
+        and dtype is torch.complex32
+        and t_inp.numel() > 0
+        and t_args[0].numel() > 0
+        and t_args[0].ndim > 0
+    ):
+        return ErrorInput(
+            sample,
+            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
+        )
+    elif (
+        layout is torch.sparse_coo
+        and dtype in {torch.bool, torch.float16}
+        and t_args[0].ndim > 0
+        and t_inp.is_cpu
+        and t_inp.numel() > 0
+        and t_inp.dense_dim() > 0
+    ):
+        return ErrorInput(
+            sample, error_regex="\"addcmul_cpu_out\" not implemented for '(Bool|Half)'"
+        )
+    elif (
+        layout in {torch.sparse_coo, torch.sparse_csr}
+        and dtype is torch.bool
+        and t_args[0].ndim > 0
+        and t_inp.is_cpu
+        and t_inp.numel() > 0
+    ):
+        return ErrorInput(
+            sample, error_regex="\"mul_out_sparse\" not implemented for 'Bool'"
+        )
+    elif (
+        layout is torch.sparse_csr
+        and t_args[0].layout is torch.strided
+        and 0 < t_args[0].ndim
+        and t_args[0].ndim < t_inp.ndim
+    ):
+        return ErrorInput(
+            sample, error_regex="sparse_mask_sparse_csr expects self to be 2D"
+        )
+    elif layout is torch.sparse_csr and (
+        (t_args[0].layout is torch.strided and 0 < t_args[0].ndim)
+        or (t_args[0].layout is layout and t_inp.shape != t_args[0].shape)
+    ):
+        return ErrorInput(
+            sample,
+            error_regex=(
+                "expects sparse inputs with equal dimensionality, number of sparse dimensions,"
+                " and shape of sparse dimensions"
+            ),
+        )
+    elif (
+        layout is torch.sparse_csr
+        and t_inp.dense_dim() > 0
+        and t_inp.is_cpu
+        and dtype is torch.float16
+        and t_args[0].ndim > 0
+    ):
+        return ErrorInput(
+            sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Half'"
+        )
+
+    return sample
+
+
+@_apply_requires_grad_to_samples
+def _maybe_failing_sample_inputs_sparse_elementwise_binary_mul(
+    op_info, device, dtype, requires_grad, layout, **kwargs
+):
+    """Generator of samples that are known to fail or that were failing in past."""
+    # NOTE: When fixing a failing case, remove the Exception comment
+    #       but keep the `yield sample` statement.
+
+    blocksize = (1, 1) if layout in {torch.sparse_bsr, torch.sparse_bsc} else None
+    regular = torch.tensor([[1, 2], [3, 4]], device=device, dtype=dtype).to_sparse(
+        layout=layout, dense_dim=0, blocksize=blocksize
+    )
+    batch = torch.tensor(
+        [[[1, 2], [3, 4]], [[4, 5], [6, 7]]], device=device, dtype=dtype
+    ).to_sparse(layout=layout, dense_dim=0, blocksize=blocksize)
+    hybrid = torch.tensor(
+        [[[1], [2]], [[3], [4]]], device=device, dtype=dtype
+    ).to_sparse(layout=layout, dense_dim=1, blocksize=blocksize)
+
+    if layout is torch.sparse_csr:
+        # RuntimeError: crow_indices is supposed to be a vector, but got 2 dimensional tensor
+        yield SampleInput(batch, args=(batch,))
+        # RuntimeError: Only tensors with two sparse dimensions can be
+        # converted to the SparseCsr layout, got self with 3 sparse
+        # dimensions.
+        yield SampleInput(
+            torch.zeros_like(hybrid).requires_grad_(requires_grad),
+            args=(torch.zeros_like(hybrid).requires_grad_(requires_grad),),
+        )
+        if dtype is torch.complex32:
+            # RuntimeError: "mul_out_sparse" not implemented for 'ComplexHalf'
+            yield SampleInput(regular, args=(regular,))
+        if dtype is torch.bool and regular.is_cpu:
+            # RuntimeError: "mul_out_sparse" not implemented for 'Bool'
+            yield SampleInput(regular, args=(regular,))
+    if layout is torch.sparse_csc:
+        # RuntimeError: Expected result Tensor to be of format CSR
+        yield SampleInput(regular, args=(regular,))
+    if layout is torch.sparse_bsr:
+        # RuntimeError: empty_sparse_compressed expected sparse compressed (non-block) tensor layout but got SparseBsr
+        yield SampleInput(regular, args=(regular,))
+    if layout is torch.sparse_bsc:
+        # RuntimeError: empty_sparse_compressed expected sparse compressed (non-block) tensor layout but got SparseBsc
+        yield SampleInput(regular, args=(regular,))
+    if layout is torch.sparse_coo:
+        if dtype is torch.complex32:
+            # RuntimeError: "mul_out_sparse" not implemented for 'ComplexHalf'
+            yield SampleInput(regular, args=(regular,))
+        if dtype is torch.bool and regular.is_cpu:
+            # RuntimeError: "mul_out_sparse" not implemented for 'Bool'
+            yield SampleInput(regular, args=(regular,))
+        if dtype in {torch.bool, torch.float16} and regular.is_cpu:
+            # RuntimeError: "addcmul_cpu_out" not implemented for '(Bool|Half)'
+            yield SampleInput(hybrid, args=(hybrid,))
+
+
+def _validate_sample_input_sparse_elementwise_binary_operation(
+    op_info, sample, check_validate=False
+):
+    if op_info.name == "mul":
+        sample = _validate_sample_input_elementwise_binary_sparse_mul(sample)
+
+    if check_validate:
+        _check_validate(op_info, sample)
+    return sample
+
+
+def sample_inputs_sparse_mul(op_info, device, dtype, requires_grad, layout, **kwargs):
+    """Sample inputs for mul operation on sparse tensors."""
+    yield from _sample_inputs_sparse(
+        sample_inputs_sparse_elementwise_binary_operation,
+        _maybe_failing_sample_inputs_sparse_elementwise_binary_mul,
+        _validate_sample_input_sparse_elementwise_binary_operation,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
+def error_inputs_sparse_mul(op_info, device, layout, **kwargs):
+    """Error inputs for mul operation on sparse tensors."""
+    dtype = torch.float64
+    requires_grad = False
+    yield from _error_inputs_sparse(
+        _maybe_failing_sample_inputs_sparse_elementwise_binary_mul,
+        _validate_sample_input_sparse_elementwise_binary_operation,
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        layout,
+        **kwargs,
+    )
+
+
 def _validate_sample_input_sparse_default(op_info, sample, check_validate=False):
     if op_info.name == "to_sparse":
         if (
@@ -475,6 +799,10 @@ def validate_sample_input_sparse(op_info, sample, check_validate=False):
     """
     if isinstance(op_info, ReductionOpInfo):
         return _validate_sample_input_sparse_reduction(
+            op_info, sample, check_validate=check_validate
+        )
+    elif isinstance(op_info, BinaryUfuncInfo):
+        return _validate_sample_input_sparse_elementwise_binary_operation(
             op_info, sample, check_validate=check_validate
         )
     else:

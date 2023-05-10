@@ -953,7 +953,10 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw NotImplementedError();
+              throw NotImplementedError(
+                  "'%s' is not implemented for %s",
+                  mm_name,
+                  self.type()->str().c_str());
             }
             return invokeScriptMethodFromPython(
                 *method,
