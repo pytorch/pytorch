@@ -305,7 +305,7 @@ class triton:
     inject_relu_bug_TESTING_ONLY = None
 
     # Vectorize random number generation in a schedule-dependent way
-    vectorize_random = False
+    vectorize_random = True
 
 
 # create a directory containing lots of debug information
