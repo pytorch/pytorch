@@ -343,9 +343,9 @@ void index_func_meta_impl(
     auto source_sizes = source.sizes().vec();
     self_sizes.erase(self_sizes.begin() + dim);
     source_sizes.erase(source_sizes.begin() + dim);
-    auto self_sizes_arr = at::IntArrayRef(self_sizes);
-    auto source_sizes_arr = source_sizes.empty() ? at::IntArrayRef(0): at::IntArrayRef(source_sizes);
-    TORCH_CHECK(at::is_expandable_to(source_sizes_arr, self_sizes_arr),
+    auto self_sizes_tensor = at::tensor(self_sizes, self.options());
+    auto source_sizes_tensor = at::tensor(source_sizes, source.options());
+    TORCH_CHECK(at::is_expandable_to(source_sizes_tensor.sizes(), self_sizes_tensor.sizes()),
     "source tensor shape must match self tensor shape (excluding the specified dimension)");
   }
 
