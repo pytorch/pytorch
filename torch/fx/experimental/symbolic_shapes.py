@@ -1362,6 +1362,160 @@ for method, func in magic_methods.items():
 del method
 del func
 
+try:
+    import z3
+
+    class SympyToZ3:
+        def __init__(self, symbols: Dict[sympy.Symbol, z3.BitVecRef]):
+            self._symbols = symbols
+
+        def _div(self, num, divisor):
+            return self._to_real(num) / self._to_real(divisor)
+
+        def _to_real(self, x):
+            return x if x.is_real() else z3.ToReal(x)
+
+        def _to_int(self, x):
+            return x if x.is_int() else z3.ToInt(x)
+
+        def _int(self, expr: int):
+            return z3.IntVal(expr)
+
+        def _Symbol(self, expr: sympy.Symbol):
+            return self._symbols[expr]
+
+        def _Rel(self, expr: sympy.Rel):
+            opmap = {
+                "==": operator.eq,
+                "!=": operator.ne,
+                ">=": operator.ge,
+                ">": operator.gt,
+                "<=": operator.le,
+                "<": operator.lt,
+            }
+            assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
+            assert expr.rel_op in opmap, (
+                f"sympy relop not supported: {expr.rel_op}"
+            )
+            return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
+
+        def _Add(self, expr: sympy.Add):
+            return sum(self(expr.args))
+
+        def _Mod(self, expr: sympy.Mod):
+            p, q = [self._to_int(a) for a in self(expr.args)]
+            return p % q
+
+        def _Mul(self, expr: sympy.Mul):
+            numerator_list = []
+            denominator_list = []
+
+            for item in expr.args:
+                if item.is_commutative and isinstance(item, sympy.Pow) and item.exp.is_Rational and item.exp.is_negative:
+                    denominator_list.append(sympy.Pow(item.base, -item.exp))
+                else:
+                    numerator_list.append(item)
+
+            numerator = self._int(1) if len(numerator_list) == 0 else math.prod(self(numerator_list))
+
+            if len(denominator_list) > 0:
+                denominator = math.prod(self(denominator_list))
+                return self._div(numerator, denominator)
+
+            return numerator
+
+        def _Pow(self, expr: sympy.Pow):
+            base, exp = self(expr.args)
+            return base ** exp
+
+        def _FloorDiv(self, expr: FloorDiv):
+            base, divisor = self(expr.args)
+            return base / divisor
+
+        def __call__(self, expr):
+            if isinstance(expr, (tuple, list)):
+                return type(expr)(self(e) for e in expr)
+            if isinstance(expr, sympy.Rel):
+                typename = "Rel"
+            elif isinstance(expr, sympy.Integer):
+                typename = "int"
+                expr = int(expr)
+            elif isinstance(expr, sympy.core.numbers.IntegerConstant):
+                constantmap = {
+                    sympy.S.Zero: 0,
+                    sympy.S.One: 1,
+                    sympy.S.NegativeOne: -1,
+                }
+                typename = "int"
+                expr = constantmap[expr]
+            else:
+                typename = type(expr).__name__
+
+            method = f"_{typename}"
+            assert hasattr(self, method), (
+                f"unsupported sympy operation: {expr} ({method})"
+            )
+            return getattr(self, method)(expr)
+
+    class TranslationValidator:
+        def __init__(self) -> None:
+            super().__init__()
+            self._symbols = {}
+            self._inputs = set()
+            self._outputs = set()
+            self._z3 = SympyToZ3(self._symbols)
+
+        def _add_freesymbols(self, e: sympy.Expr) -> None:
+            for s in e.free_symbols:
+                if s not in self._symbols:
+                    assert isinstance(s, sympy.Symbol) and s.is_integer and s.is_positive
+                    self._symbols[s] = z3.Int(s.name)
+                    self._outputs.add(self._symbols[s] >= 0)
+
+        def _sympy_to_z3(self, expr: sympy.Expr):
+            z3_expr = self._z3(expr)
+            return z3_expr
+
+        def add_input(self, e: sympy.Expr) -> None:
+            self._add_freesymbols(e)
+            self._inputs.add(self._sympy_to_z3(e))
+
+        def add_output(self, e: sympy.Expr) -> None:
+            self._add_freesymbols(e)
+            self._outputs.add(self._sympy_to_z3(e))
+
+        def validate(self) -> bool:
+            from torch._dynamo.utils import dynamo_timed
+
+            if len(self._inputs) == 0 or len(self._outputs) == 0:
+                return True
+
+            solver = z3.Solver()
+            solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
+
+            if dynamo_timed()(solver.check)() == z3.sat:
+                model = solver.model()
+                model_dict = {sym: model[sym] for sym in model}
+
+                log.info(f"failed with model: {model_dict}")
+                for inp in self._inputs:
+                    if not model.evaluate(inp):
+                        log.info(f">> {inp}")
+
+                return False
+            else:
+                log.debug("translation validated.")
+                return True
+except:
+    _HAS_Z3 = False
+else:
+    _HAS_Z3 = True
+
+
+def _translation_validator_enabled() -> bool:
+    return _HAS_Z3 and torch._dynamo.config.translation_validation
+
+
 def _lru_cache(fn, maxsize=None):
     """
     Wrapper around lru_cache that clears when new info about shapes has been
@@ -1785,8 +1939,23 @@ class ShapeEnv:
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
 
+        if _translation_validator_enabled():
+            self.validator = TranslationValidator()
+
     def freeze(self):
         self.frozen = True
+
+    def _add_input_guard(self, expr: sympy.Expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_input(expr)
+
+    def _add_output_guard(self, expr: sympy.Expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_output(expr)
+
+    def _check_translation_validate(self) -> None:
+        if _translation_validator_enabled():
+            assert self.validator.validate(), "translation validation failed."
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -2256,6 +2425,7 @@ class ShapeEnv:
                     self.dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
+                self._add_output_guard(g)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -2317,6 +2487,7 @@ class ShapeEnv:
                     if any(is_dim(source) for source in sources):
                         self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                     bounds.append(str(r.lower))
+                    self._add_output_guard(sympy.Le(r.lower, symbol))
                 bounds.append(source_ref(sources[0]))
                 # NB: This looks like an off-by-one error but it's not: the
                 # upper bound may be sys.maxsize - 1 because we intentionally
@@ -2329,6 +2500,8 @@ class ShapeEnv:
                     if any(is_dim(source) for source in sources):
                         self.dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
+                if r.upper != sympy.oo:
+                    self._add_output_guard(sympy.Le(symbol, r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
 
@@ -2348,6 +2521,7 @@ class ShapeEnv:
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
+        self._check_translation_validate()
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
@@ -2577,6 +2751,7 @@ class ShapeEnv:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
+        self._add_output_guard(sympy.Eq(a, expr))
 
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
@@ -2679,6 +2854,20 @@ class ShapeEnv:
 
         expr = orig_expr
 
+        if hint is None:
+            concrete_val = self.size_hint(expr)
+        else:
+            concrete_val = sympy.sympify(hint)
+
+        if concrete_val is sympy.true:
+            g = expr
+        elif concrete_val is sympy.false:
+            g = sympy.Not(expr)
+        else:
+            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+        self._add_input_guard(g)
+
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -2691,11 +2880,6 @@ class ShapeEnv:
             if not (new_expr.free_symbols <= self.var_to_val.keys()):
                 raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
             expr = new_expr
-
-        if hint is None:
-            concrete_val = self.size_hint(expr)
-        else:
-            concrete_val = sympy.sympify(hint)
 
         if self.frozen:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
@@ -2715,13 +2899,6 @@ class ShapeEnv:
             # simplifications are error prone anyway, so be sure not to
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
-
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
-        else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
         if not self._suppress_guards_tls():
             tb = traceback.extract_stack()[:-1]
