@@ -28,7 +28,7 @@ def _maybe_insert_input_and_output_observers_for_node(
         )
     else:
         output_is_a_tensor = this_node_dtype_info is not None
-    
+
     skip_inserting_input_observers = (
         this_node_dtype_info is None
     )
