@@ -280,11 +280,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
             cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
             self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned(123))
             self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
-            with self.assertRaisesRegex(RuntimeError, "expects an string as input"):
-                cpu_untyped_storage_pinned.is_pinned("foo", "foo2")
-            with self.assertRaisesRegex(RuntimeError, "expects an string as input"):
-                cpu_untyped_storage_pinned.is_pinned(111)
+            with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
+                cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
 
         def test_open_device_serialization():
             self.module.set_custom_device_index(-1)
