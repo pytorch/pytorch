@@ -4,7 +4,6 @@ import sys
 import unittest
 
 import torch
-
 import torch._dynamo
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
@@ -13,7 +12,11 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import DeterministicGuard, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    IS_FBCODE,
+    TEST_WITH_ASAN,
+)
 
 try:
     try:
@@ -111,6 +114,9 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @unittest.skipIf(
+        IS_FBCODE, "RuntimeError: Triton Error [CUDA]: invalid device context"
+    )
     def test_backward_context(self):
         def fn(x):
             return x * 3
@@ -663,6 +669,36 @@ class CudaReproTests(TestCase):
         mod = Model().cuda().eval()
         with torch.no_grad():
             self.common(mod, (torch.randn(4, 4),))
+
+    def test_issue100806(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear1 = torch.nn.Linear(10, 20)
+                self.linear2 = torch.nn.Linear(20, 30)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = torch.cat((x, x), dim=1)
+                x = x.view(-1, 2, 30)
+                x = x[:, 1, :]
+                x = self.relu(x)
+                return x
+
+        device = "cuda"
+        batch_size = 2
+        x = torch.randn(batch_size, 10).to(device)
+        func = Model().to(device)
+
+        with torch.no_grad():
+            func.train(False)
+            jit_func = torch.compile(func)
+
+            res1 = func(x)
+            res2 = jit_func(x)
+            self.assertEqual(res1, res2)
 
 
 if __name__ == "__main__":
