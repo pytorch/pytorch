@@ -263,9 +263,3 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             seen_frames[0].line,
             "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
         )
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

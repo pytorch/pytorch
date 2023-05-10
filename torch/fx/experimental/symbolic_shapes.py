@@ -2035,7 +2035,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:

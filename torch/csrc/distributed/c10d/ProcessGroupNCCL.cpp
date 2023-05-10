@@ -85,12 +85,15 @@ ncclRedOpRAII unpackPreMulSum(
   ncclRedOp_t preMulSum;
   bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  T* ptr_factor =
-      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
+  const T* ptr_factor = has_tensor
+      ? preMulSupplement->tensor_factor.const_data_ptr<T>()
+      : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,
-      has_tensor ? ptr_factor : &scalar_factor,
+      // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
+      // tells us that the scalar input is strictly a multiplier.
+      /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
       dataType,
       residence,
       comm);
@@ -432,12 +435,14 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
+bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
+    c10::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
+  auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < opTimeout_)
+  if (timeElapsed < workTimeout)
     return false;
 
   // Timed out
@@ -508,7 +513,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout();
+      bool timedOut = checkTimeout(
+          timeout == kNoTimeout ? c10::nullopt : c10::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
       // If throwing timed out excepiton without aborting nccl communicators
