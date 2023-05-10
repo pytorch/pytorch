@@ -222,6 +222,7 @@ def _replace_pattern(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+    ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
@@ -243,7 +244,7 @@ def _replace_pattern(
         replacement_graph = symbolic_trace(replacement).graph
 
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
-                              remove_overlapping_matches=True)
+                              remove_overlapping_matches=True, ignore_literals=ignore_literals)
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
