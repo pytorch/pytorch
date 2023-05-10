@@ -570,7 +570,6 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # import pdb; pdb.set_trace()
         if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
             unimplemented(f"numpy.{self.value}()")
         import torch_np

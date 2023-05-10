@@ -125,13 +125,7 @@ class PyCodegen:
             else:
                 graph_outputs[graph_outputs_key].merge(value)
             if isinstance(value, NumpyNdarrayVariable):
-                output.extend(
-                    [
-                        *AttrSource(
-                            self.tx.import_source(utils.__name__), "to_torch_np_ndarray"
-                        ).reconstruct(self)
-                    ]
-                )
+                self.load_import_from(utils.__name__, "to_numpy_helper")
             output.append(self.create_load(self.graph_output_var))
             output.append(
                 self._create_load_const(graph_outputs[graph_outputs_key].index)

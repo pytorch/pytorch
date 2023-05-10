@@ -730,9 +730,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.add_output_instructions(output + pass2.get_instructions())
             codegen = pass2
 
-        if config.numpy_ndarray_as_tensor and (
-            reason is None or not reason.graph_break
-        ):
+        if config.numpy_ndarray_as_tensor:
             from .variables.tensor import NumpyNdarrayVariable
 
             self.add_output_instructions(
