@@ -257,7 +257,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
       MTLSize gridSize = MTLSizeMake(stridedIndicesNumThreads, 1, 1);
