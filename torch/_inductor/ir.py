@@ -3138,25 +3138,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.kwargs = {} if kwargs is None else kwargs
         V.graph.warn_fallback(self.kernel)
 
-    def get_cpp_op_schema(self, kernel):
-        from .codegen.wrapper import convert_arg_type, convert_return_type
-
-        arg_types = [repr(x.type) for x in kernel._schema.arguments]
-        arg_names = [x.name for x in kernel._schema.arguments]
-        # TODO: only support len(returns) == 1 for now.
-        returns = [repr(x.type) for x in kernel._schema.returns]
-        assert (
-            len(returns) == 1
-        ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
-        return_value = returns[0]
-        cpp_return_value = convert_return_type(return_value)
-
-        cpp_arg_type = [
-            f"{convert_arg_type(arg_type)} {arg_name}"
-            for arg_type, arg_name in zip(arg_types, arg_names)
-        ]
-        return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
-
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
