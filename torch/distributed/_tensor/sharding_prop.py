@@ -47,7 +47,7 @@ class ShardingPropagator:
     def register_op_strategy(
         self,
         op_overload: OpOverload,
-        rule_func: Callable[[Node, DeviceMesh], StrategyType],
+        rule_func: Callable[[Node, DeviceMesh, Dict[Node, StrategyType]], StrategyType],
     ):
         """
         Register a sharding strategy generator for an operator.
@@ -89,7 +89,7 @@ class ShardingPropagator:
             flat_args_sharding, _ = tree_flatten(
                 [op_schema.args_schema, op_schema.kwargs_schema]
             )
-            node_to_strategy = {}
+            node_to_strategy: Dict[Node, StrategyType] = {}
             output_node = None
             out_node_strategy = None
             mesh = flat_args_sharding[0].mesh
