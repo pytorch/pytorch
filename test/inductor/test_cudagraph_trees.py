@@ -1008,6 +1008,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(len(w) == 1)
             self.assertTrue("x * x * x" in str(w[0]))
 
+        @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+        def test_conv_benchmark(self):
+            with torch.backends.cudnn.flags(
+                enabled=True, benchmark=True, deterministic=False
+            ):
+                m = torch.nn.Conv2d(5, 6, [3, 3]).cuda()
+                inp = torch.randn([2, 5, 16, 16]).cuda()
+
+                @torch.compile()
+                def foo(m, inp):
+                    return m(inp)
+
+                foo(m, inp)
+
         def test_single_stream_use(self):
             @torch.compile()
             def foo(x):
