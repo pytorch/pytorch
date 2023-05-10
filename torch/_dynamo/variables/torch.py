@@ -813,10 +813,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         )
         from .builder import wrap_fx_proxy
 
-        if kwargs and len(kwargs):
-            for value in kwargs.values():
-                if not isinstance(value, ConstantVariable):
-                    assert "not constant kwargs are not supported yet"
+        assert (
+            all(isinstance(value, ConstantVariable) for value in kwargs.values())
+            or not kwargs
+        ), "only constant kwargs are supported"
 
         def make_attr(name):
             node = tx.output.create_proxy(
@@ -1245,7 +1245,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
-        p_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
+
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,

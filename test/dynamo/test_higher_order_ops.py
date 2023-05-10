@@ -432,14 +432,20 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
+        cloned_args = []
+        for arg in args:
+            cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
+
         expected = fn(*args)
         expected.sum().backward()
 
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*args)
+        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
             self.assertEqual(result, expected)
+            for arg, cloned_arg in zip(args, cloned_args):
+                self.assertEqual(arg.grad, cloned_arg.grad)
 
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
@@ -530,6 +536,25 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
+
+    def test_without_functionalization_turned_on(self):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        args = (x, y)
+
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = fn(*args)
+        result = torch.compile(fn, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
 
     # Higher order op does not support nn.Modules yet
     @unittest.expectedFailure
