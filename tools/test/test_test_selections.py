@@ -9,7 +9,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
-    from tools.testing.test_selections import calculate_shards, ShardedTest, THRESHOLD
+    from tools.testing.test_selections import (
+        _parse_prev_failing_test_files,
+        calculate_shards,
+        ShardedTest,
+        THRESHOLD,
+    )
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     exit(1)
@@ -326,6 +331,33 @@ class TestCalculateShards(unittest.TestCase):
                 )
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
+
+
+class TestParsePrevTests(unittest.TestCase):
+    def test_empty_cache(self) -> None:
+        last_failed_file_contents = {
+            "": True,
+        }
+
+        expected_failing_test_files = []
+
+        found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
+
+        self.assertListEqual(expected_failing_test_files, found_tests)
+
+    def test_dedupes_failing_test_files(self) -> None:
+        last_failed_file_contents = {
+            "test_car.py::TestCar::test_num[17]": True,
+            "test_car.py::TestBar::test_num[25]": True,
+            "test_far.py::TestFar::test_fun_copy[17]": True,
+            "test_bar.py::TestBar::test_fun_copy[25]": True,
+        }
+
+        expected_failing_test_files = ["test_car", "test_bar", "test_far"]
+
+        found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
+
+        self.assertListEqual(expected_failing_test_files, found_tests)
 
 
 if __name__ == "__main__":

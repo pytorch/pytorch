@@ -1,10 +1,12 @@
+import json
 import math
 import os
-import subprocess
 import pathlib
-import json
+import subprocess
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+
+from tools.shared.logging_utils import pluralize
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
@@ -136,34 +138,60 @@ def _query_changed_test_files() -> List[str]:
 
 
 def _get_previously_failing_tests() -> List[str]:
-    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = pathlib.Path(".pytorch_cache/v/cache/lastfailed")
+    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = pathlib.Path(
+        ".pytorch_cache/v/cache/lastfailed"
+    )
 
     if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
         return []
-    
+
     with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
         last_failed_tests = json.load(f)
-    
-    return _parse_prev_failing_tests(last_failed_tests)
 
-def _parse_prev_failing_tests(last_failed_tests: Dict[str, bool]) -> List[str]:
-    tests_to_prioritize = set()
-    
+    prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
+
+    print(
+        f"Prioritized {pluralize(len(prioritized_tests), 'test')} from test file changes."
+    )
+
+    return prioritized_tests
+
+
+def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> List[str]:
+    prioritized_tests = set()
+
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
-    # We just need the test_file.py part
+    # We just need the test_file part, without the extension
     for test in last_failed_tests:
-        test = test.split("::")[0]
-        tests_to_prioritize.add(test)
+        parts = test.split(".py::")  # For now, only support reordering python tests.
+        if len(parts) > 1:
+            test_file = parts[0]
+            print(f"Adding part: {test_file}. Parts had len {len(parts)}")
+            prioritized_tests.add(test_file)
 
-    return list(tests_to_prioritize)
+    return list(prioritized_tests)
 
-# Sample last_failed_tests date
-last_failed_tests = {
-    "tools/tests/zzztest_fun.py::test_num[17]": True,
-    "tools/tests/zzztest_fun.py::test_num[25]": True,
-    "tools/tests/ssstest_fun copy.py::test_fun_copy[17]": True,
-    "tools/tests/test_fun copy.py::test_fun_copy[25]": True
-}
+
+def _get_test_prioritized_due_to_test_file_changes() -> List[str]:
+    try:
+        changed_files = _query_changed_test_files()
+    except Exception:
+        # If unable to get changed files from git, quit without doing any sorting
+        return []
+
+    prefix = f"test{os.path.sep}"
+    # TODO: Make prioritization work with C++ test as well
+    prioritized_tests = [
+        f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
+    ]
+    prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
+    prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
+
+    print(
+        f"Prioritized {pluralize(len(prioritized_tests), 'test')} from test file changes."
+    )
+
+    return prioritized_tests
 
 
 def get_reordered_tests(
@@ -174,20 +202,8 @@ def get_reordered_tests(
     We prioritize running test files that were changed.
     """
     prioritized_tests: List[str] = []
-    if len(prioritized_tests) == 0:
-        try:
-            changed_files = _query_changed_test_files()
-        except Exception:
-            # If unable to get changed files from git, quit without doing any sorting
-            return ([], tests)
-
-        prefix = f"test{os.path.sep}"
-        prioritized_tests = [
-            f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
-        ]
-        prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
-        prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
-        print("Prioritized test from test file changes.")
+    prioritized_tests += _get_test_prioritized_due_to_test_file_changes()
+    prioritized_tests += _get_previously_failing_tests()
 
     bring_to_front = []
     the_rest = []
