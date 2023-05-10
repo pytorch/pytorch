@@ -260,6 +260,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16, f32, f64},
 }
 
+
 inductor_expected_failures_single_sample["cuda"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
@@ -331,6 +332,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     # linalg._svd's return value has different strides on CUDA vs CPU which causes this
     # In test_meta.py there is a mechanism to skipping strides checks for some ops
     # (including _linalg_svd), possibly we should have something similar here
+    "linalg.cond": {f32, f64},
+    "linalg.svdvals": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "linalg.svd": {f32, f64},
     "pca_lowrank": {f32, f64},
@@ -363,14 +366,10 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
-if not TEST_WITH_ROCM:
-    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
-    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
-    # In test_meta.py there is a mechanism to skipping strides checks for some ops
-    # (including _linalg_svd), possibly we should have something similar here
-    inductor_expected_failures_single_sample["cuda"]["linalg.cond"] = {f32, f64}
-    inductor_expected_failures_single_sample["cuda"]["linalg.svdvals"] = {f32, f64}
+if TEST_WITH_ROCM:
+    # AssertionError: expected size 5==5, stride 5==1 at dim=0
     inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
+
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 

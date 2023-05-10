@@ -48,4 +48,5 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

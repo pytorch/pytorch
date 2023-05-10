@@ -1574,7 +1574,6 @@ if torch.version.hip is not None and torch.cuda.is_available():
     make_fallback(aten.prod, warn=False)
 
 
- 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
     # TODO(jansel): memory format
