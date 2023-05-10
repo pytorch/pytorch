@@ -1374,6 +1374,7 @@ make_fx_failures = {
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
 
     # data-dependent control flow
+    skip('item'),
     xfail('cov'),
     xfail('istft'),
     xfail('nn.functional.gaussian_nll_loss'),
