@@ -1571,13 +1571,8 @@ class TestOptim(TestCase):
 
     def test_duplicate_params_in_one_param_group(self):
         param = Parameter(torch.randn(1))
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            optim.SGD([param, param], lr=0.01)
-            self.assertEqual(len(w), 1)
-            self.assertIn(
-                "a parameter group with duplicate parameters", str(w[0].message)
-            )
+        with self.assertWarnsOnceRegex(UserWarning, '.*a parameter group with duplicate parameters.*'):
+            optim.Adamax([param, param], lr=0.01)
 
     def test_duplicate_params_across_param_groups(self):
         param = Parameter(torch.randn(1))
@@ -4438,7 +4433,7 @@ class TestDifferentiableOptimizer(TestCase):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
         # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
-        # and so it shouldn't require gradients.
+        # and so they shouldn't require gradients.
         state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
         state["eta"] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
         state["mu"] = torch.tensor(1.0, requires_grad=False, dtype=torch.float64)
