@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import sys
+import traceback
 import typing
 import unittest
 import unittest.mock as mock
@@ -3521,7 +3522,7 @@ def fn():
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
-            def read(self):
+            def read(self):  # noqa: B027
                 pass
 
         class Bar(Foo):
@@ -4721,6 +4722,60 @@ def fn():
         self.assertEquals(tab[0].end, 4)
         self.assertEquals(tab[0].target, 6)
 
+    def test_unhandled_exception_in_dynamo(self):
+        # traceback.format_exc() approximates an unhandled exception
+        def f(a):
+            a += 1
+            raise RuntimeError("smoge")
+            return a
+
+        opt_fn = torch._dynamo.optimize("eager")(f)
+        try:
+            opt_fn(torch.ones(2))
+        except RuntimeError as e:
+            self.assertIn("smoge", traceback.format_exc())
+
+    def test_unhandled_exception_in_dynamo2(self):
+        # segfaults in python 3.11 if shadow frame is freed improperly
+        from torch.testing import make_tensor
+
+        def fn():
+            # test that the errors are the same for dense and sparse versions
+            def test1(*, is_sparse):
+                # shapes must be compatible for matrix multiplication
+                a = make_tensor((2, 3), dtype=torch.float32, device="cpu")
+                if is_sparse:
+                    a_sparse = a.to_sparse_csr()
+                    return torch.addmm(a, a_sparse, a)
+                else:
+                    return torch.addmm(a, a, a)
+
+            try:
+                test1(is_sparse=False)
+            except RuntimeError as msg:
+                try:
+                    test1(is_sparse=True)
+                except RuntimeError as msg2:
+                    raise RuntimeError("smoge")
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn()
+        except RuntimeError:
+            self.assertIn("smoge", traceback.format_exc())
+
+    def test_variable_access_in_exception(self):
+        def fn():
+            x = torch.ones(3, 3)
+            try:
+                raise RuntimeError("bad")
+            except RuntimeError:
+                x += 1
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch.allclose(opt_fn(), torch.tensor([3.0]))
+
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 
@@ -5008,45 +5063,45 @@ def fn():
                 return input + input
 
         model = Model()
-        prof = CompileProfiler()
-        compiled = torch.compile(model, backend=prof)
-        base_checker = (
-            lambda: FileCheck()
-            .check("Torchdynamo Profiler Report")
-            .check("Graph Breaks")
-            .check("No graph breaks detected.")
-            .check("Recompilation")
-        )
-        input = torch.rand((2, 3, 4))
-        _ = compiled(input)
-        base_checker().check("No recompilation detected.").run(prof.report())
-
-        new_shape_input = torch.rand((3, 3, 4))
-        _ = compiled(new_shape_input)
-
-        # Not an exhaustive test of dynamic shapes behavior, but some sanity
-        if (
-            not torch._dynamo.config.dynamic_shapes
-            or torch._dynamo.config.assume_static_by_default
-        ):
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
-        else:
+        with CompileProfiler() as prof:
+            compiled = torch.compile(model, backend=prof)
+            base_checker = (
+                lambda: FileCheck()
+                .check("Torchdynamo Profiler Report")
+                .check("Graph Breaks")
+                .check("No graph breaks detected.")
+                .check("Recompilation")
+            )
+            input = torch.rand((2, 3, 4))
+            _ = compiled(input)
             base_checker().check("No recompilation detected.").run(prof.report())
 
-        # Ensure correct guard fail message is selected to show to user
-        if not torch._dynamo.config.dynamic_shapes:
-            new_shape_input = torch.rand((4, 3, 4))
+            new_shape_input = torch.rand((3, 3, 4))
             _ = compiled(new_shape_input)
 
-            base_checker().check("Recompile Reasons").check("'forward'").check(
-                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-            ).check(
-                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-            ).run(
-                prof.report()
-            )
+            # Not an exhaustive test of dynamic shapes behavior, but some sanity
+            if (
+                not torch._dynamo.config.dynamic_shapes
+                or torch._dynamo.config.assume_static_by_default
+            ):
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "cache_size_limit to 1"
+                ).run(prof.report())
+            else:
+                base_checker().check("No recompilation detected.").run(prof.report())
+
+            # Ensure correct guard fail message is selected to show to user
+            if not torch._dynamo.config.dynamic_shapes:
+                new_shape_input = torch.rand((4, 3, 4))
+                _ = compiled(new_shape_input)
+
+                base_checker().check("Recompile Reasons").check("'forward'").check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+                ).check(
+                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+                ).run(
+                    prof.report()
+                )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call

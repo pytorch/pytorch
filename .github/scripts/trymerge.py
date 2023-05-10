@@ -1682,7 +1682,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     )
     if response["total_count"] != 0:
         for item in response["items"]:
-            if "merge blocking" in item["body"].lower():
+            if "MERGE BLOCKING" in item["body"]:
                 raise RuntimeError(
                     "Not merging any PRs at the moment because there is a "
                     + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
