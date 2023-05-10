@@ -14,6 +14,7 @@
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
+static c10::DeviceIndex custom_device_index = 0;
 
 // register guard
 namespace at {
@@ -35,7 +36,7 @@ struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = c10::alloc_cpu(nbytes);
-    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, 0)};
+    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
 
   static void ReportAndDelete(void* ptr) {
@@ -200,6 +201,10 @@ void register_generator() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
+void set_custom_device_index(c10::DeviceIndex device_index) {
+  custom_device_index = device_index;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -208,4 +213,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
 }
