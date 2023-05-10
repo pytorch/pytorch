@@ -283,7 +283,7 @@ _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
 
 @_beartype.beartype
 def _create_onnx_friendly_decomposition_table() -> (
-    Mapping[torch._ops.OpOverload, Callable]
+    Dict[torch._ops.OpOverload, Callable]
 ):
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
     for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
@@ -302,5 +302,7 @@ def _create_onnx_friendly_decomposition_table() -> (
 
 # This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
 # op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
-# function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
-_ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
+# function in the DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE.
+DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
+    torch._ops.OpOverload, Callable
+] = _create_onnx_friendly_decomposition_table()

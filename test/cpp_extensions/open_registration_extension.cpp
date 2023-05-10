@@ -128,6 +128,20 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
   return false;
 }
 
+const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
+                          c10::optional<at::MemoryFormat> optional_memory_format) {
+  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
+  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
+  const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
+  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
+  if (storage_size > storage.nbytes()) {
+    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
+  }
+
+  return self;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -146,6 +160,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
+  m.impl("resize_", &custom_resize_);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
