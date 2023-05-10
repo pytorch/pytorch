@@ -25,7 +25,7 @@ gmlp_s16_224,pass,9
 hrnet_w18,pass,6
 inception_v3,pass,9
 jx_nest_base,pass,9
-lcnet_050,pass,11
+lcnet_050,pass,9
 mixer_b16_224,pass,9
 mixnet_l,pass,11
 mnasnet_100,pass,11
