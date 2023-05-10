@@ -15,6 +15,12 @@ COPY .devcontainer/environment.yml .devcontainer/noop.txt /tmp/conda-tmp/
 RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/conda env update -n base -f /tmp/conda-tmp/environment.yml; fi \
     && sudo rm -rf /tmp/conda-tmp
 
+# Install the full llvm sweet
+# Tools needed for llvm
+RUN sudo apt-get -y update
+RUN sudo apt install -y lsb-release wget software-properties-common gnupg
+# This installs llvm toolchain
+# RUN sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
