@@ -21,6 +21,7 @@ from torch.ao.quantization._pt2e.quantizer import (
 )
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
+    _convert_to_reference_decomposed_fx,
     prepare_pt2e_quantizer,
     prepare_qat_pt2e_quantizer,
 )
@@ -32,9 +33,9 @@ from torch.ao.quantization.qconfig import (
     default_symmetric_qnnpack_qat_qconfig,
 )
 from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
+    convert_to_reference_fx,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -43,9 +44,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-
-
-from torch.ao.quantization.quantize_fx import _convert_to_reference_decomposed_fx
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -434,38 +432,71 @@ class TestQuantizePT2E(QuantizationTestCase):
                 x = self.bn(x)
                 return x
 
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=False)
+        self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=False)
+
+    def test_prepare_qat_conv_bn_relu_fusion(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=True)
+        self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=True)
+
+    def _verify_symmetric_qnnpack_qat_graph(
+        self,
+        m: torch.fx.GraphModule,
+        example_inputs: Tuple[Any, ...],
+        is_per_channel: bool,
+        has_relu: bool,
+    ):
+        """
+        Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
+        with fake quantizes inserted into the correct places.
+        # TODO: also verify that metadata is copied over to the new nodes.
+        """
         import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
         quantizer = QNNPackQuantizer()
-        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=True, is_qat=True))
-        m = M()
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-
-        # program capture
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel, is_qat=True))
         m, guards = torchdynamo.export(
             m,
             *copy.deepcopy(example_inputs),
             aten_graph=True,
             tracing_mode="real",
         )
-
         m = prepare_qat_pt2e_quantizer(m, quantizer)
         m(*example_inputs)
 
-        # TODO: also verify that metadata is copied over to the new nodes
-
         # Verify: getitem output activation fake quantize
         output_node = list(m.graph.nodes)[-1]
-        getitem_fq_node = output_node.args[0][0]
-        self.assertTrue(getitem_fq_node.target.startswith("activation_post_process_"))
-        getitem_fq_mod = getattr(m, getitem_fq_node.target)
-        self.assertEqual(type(getitem_fq_mod), FusedMovingAvgObsFakeQuantize)
-        self.assertEqual(type(getitem_fq_mod.activation_post_process), MovingAverageMinMaxObserver)
-        self.assertEqual(getitem_fq_mod.dtype, torch.qint8)
-        self.assertEqual(getitem_fq_mod.quant_min, -128)
-        self.assertEqual(getitem_fq_mod.quant_max, 127)
+        output_fq_node = output_node.args[0][0]
+        self.assertTrue(output_fq_node.target.startswith("activation_post_process_"))
+        output_fq_mod = getattr(m, output_fq_node.target)
+        self.assertEqual(type(output_fq_mod), FusedMovingAvgObsFakeQuantize)
+        self.assertEqual(type(output_fq_mod.activation_post_process), MovingAverageMinMaxObserver)
+        self.assertEqual(output_fq_mod.dtype, torch.qint8)
+        self.assertEqual(output_fq_mod.quant_min, -128)
+        self.assertEqual(output_fq_mod.quant_max, 127)
 
-        # Verify: getitem(bn, 0)
-        getitem_node = getitem_fq_node.args[0]
+        # Verify: getitem(bn, 0) or relu(getitem(bn, 0))
+        if has_relu:
+            relu_node = output_fq_node.args[0]
+            getitem_node = relu_node.args[0]
+            self.assertEqual(relu_node.target, torch.ops.aten.relu.default)
+        else:
+            relu_node = None
+            getitem_node = output_fq_node.args[0]
         bn_node = getitem_node.args[0]
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, torch.ops.aten._native_batch_norm_legit.default)
@@ -496,8 +527,12 @@ class TestQuantizePT2E(QuantizationTestCase):
         conv_weight_fq_node = conv_node.args[1]
         self.assertTrue(conv_weight_fq_node.target.startswith("activation_post_process_"))
         conv_weight_fq_mod = getattr(m, conv_weight_fq_node.target)
+        if is_per_channel:
+            expected_weight_observer_type = MovingAveragePerChannelMinMaxObserver
+        else:
+            expected_weight_observer_type = MovingAverageMinMaxObserver
         self.assertEqual(type(conv_weight_fq_mod), FusedMovingAvgObsFakeQuantize)
-        self.assertEqual(type(conv_weight_fq_mod.activation_post_process), MovingAveragePerChannelMinMaxObserver)
+        self.assertEqual(type(conv_weight_fq_mod.activation_post_process), expected_weight_observer_type)
         self.assertEqual(conv_weight_fq_mod.dtype, torch.qint8)
         self.assertEqual(conv_weight_fq_mod.quant_min, -127)
         self.assertEqual(conv_weight_fq_mod.quant_max, 127)
@@ -539,11 +574,30 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
+    def test_prepare_qat_conv_bn_relu_numerics(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
+
     def _verify_symmetric_qnnpack_qat_numerics(
         self,
         model: torch.nn.Module,
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
+        verify_convert: bool = False,
     ):
         """
         Helper method to verify that the QAT numerics for PT2E quantization match those of
@@ -560,7 +614,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
-        result_pt2e = model_pt2e(*example_inputs)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
 
         # FX
         # Note: In order to match the PT2E numerics exactly, we need to feed the
@@ -577,11 +631,36 @@ class TestQuantizePT2E(QuantizationTestCase):
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         backend_config = get_qnnpack_backend_config()
         model_fx = prepare_qat_fx(model_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
-        result_fx = model_fx(*example_inputs)
+        after_prepare_result_fx = model_fx(*example_inputs)
 
         # Verify that numerics match
-        self.assertEqual(result_pt2e, result_fx)
+        self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
+        if verify_convert:
+            model_pt2e = convert_pt2e(model_pt2e)
+            quant_result_pt2e = model_pt2e(*example_inputs)
+
+            model_fx = _convert_to_reference_decomposed_fx(model_fx, backend_config=backend_config)
+            quant_result_fx = model_fx(*example_inputs)
+            self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
+
+
+    def test_convert_qat_conv_bn_numerics(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        # TODO: enable in a separate PR
+        # self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
