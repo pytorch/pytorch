@@ -3,3 +3,4 @@ name: PyTorch
 dependencies:
   - cmake
   - ninja
+  - libopenblas
