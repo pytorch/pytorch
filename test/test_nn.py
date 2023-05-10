@@ -7952,6 +7952,7 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_GroupNorm_cpu_mixed_dtype(self):
         def helper(self, size, groups, memory_format, dtype):
+            print(dtype)
             channels = size[1]
             input = torch.randn(size).cpu().to(dtype=dtype)
             input_bf1 = input.contiguous(memory_format=memory_format).detach().requires_grad_(True)
@@ -7981,7 +7982,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(m_f.weight.grad, m_f2.weight.grad, atol=1e-5, rtol=1e-5)
             self.assertEqual(m_f.bias.grad, m_f2.bias.grad, atol=1e-5, rtol=1e-5)
             self.assertEqual(input_bf2.grad.float(), input_f.grad, atol=5e-5, rtol=5e-3)
-            # Full bf16 has lower precision compared with mixed bf16 and fp32.
+            # Full bf16/half has lower precision compared with mixed bf16/half and fp32.
             # Use Amp to keep module parameters in acc dtype, i.e. float, for better numerical stability
             atol = None
             rtol = None
@@ -7989,23 +7990,24 @@ class TestNNDeviceType(NNTestCase):
                 atol = 1e-2
                 rtol = 1.2e-1
             else:
-                atol = 1e-4
-                rtol = 1e-2
+                assert dtype == torch.half
+                atol = 5e-3
+                rtol = 1.5e-2
             self.assertEqual(m_bf.weight.grad, m_f.weight.grad.to(dtype=dtype), atol=atol, rtol=rtol)
             self.assertEqual(m_bf.bias.grad, m_f.bias.grad.to(dtype=dtype), atol=atol, rtol=rtol)
             self.assertEqual(input_bf1.grad, input_bf2.grad, atol=atol, rtol=rtol)
 
         cl_formats = {4: torch.channels_last, 5: torch.channels_last_3d}
-        for shape, g in [((1, 8, 4, 3), 2), ((1, 8, 3, 4), 4),
-                         ((4, 40, 40, 40), 2), ((4, 8, 40, 40), 4),
-                         ((1, 8, 40, 40), 4), ((1, 8, 40, 40), 2),
-                         ((1, 8, 50, 50), 2), ((1, 8, 50, 50), 4),
-                         ((1, 40, 50, 50), 2), ((1, 9, 3, 4, 5), 3),
-                         ((1, 60, 10, 10, 10), 3), ((1, 9, 10, 50, 50), 3),
-                         ((1, 60, 10, 50, 50), 3), ((1, 8, 65, 55), 2),
-                         ((1, 3, 65, 55), 1), ((1, 3, 20, 20), 1)]:
-            for is_cl in [False, True]:
-                for dtype in [torch.half]:
+        for dtype in [torch.bfloat16, torch.half]:
+            for shape, g in [((1, 8, 4, 3), 2), ((1, 8, 3, 4), 4),
+                            ((4, 40, 40, 40), 2), ((4, 8, 40, 40), 4),
+                            ((1, 8, 40, 40), 4), ((1, 8, 40, 40), 2),
+                            ((1, 8, 50, 50), 2), ((1, 8, 50, 50), 4),
+                            ((1, 40, 50, 50), 2), ((1, 9, 3, 4, 5), 3),
+                            ((1, 60, 10, 10, 10), 3), ((1, 9, 10, 50, 50), 3),
+                            ((1, 60, 10, 50, 50), 3), ((1, 8, 65, 55), 2),
+                            ((1, 3, 65, 55), 1), ((1, 3, 20, 20), 1)]:
+                for is_cl in [False, True]:
                     format = cl_formats[len(shape)] if is_cl else torch.contiguous_format
                     helper(self, shape, g, format, dtype)
 
@@ -10431,6 +10433,40 @@ class TestNNDeviceType(NNTestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
+
+    @skipMeta
+    @dtypes(torch.float32, torch.bfloat16)
+    @onlyCPU
+    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+        batch = 10
+        seq_len = 12
+        input = 3
+        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        import copy
+        Net_clone = copy.deepcopy(Net)
+        x = torch.rand(batch, seq_len, input)
+        x1 = x.clone().requires_grad_(True)
+        x2 = x.clone().requires_grad_(True)
+
+        torch._C._set_mkldnn_enabled(False)
+        out1, _ = Net(x1)
+        der_out1 = torch.autograd.grad(out1, x1,
+                                       grad_outputs=torch.ones_like(out1),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss1 = der_out1.sum()
+        loss1.backward(retain_graph=True)
+
+        torch._C._set_mkldnn_enabled(True)
+        out2, _ = Net(x2)
+        der_out2 = torch.autograd.grad(out2, x2,
+                                       grad_outputs=torch.ones_like(out2),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss2 = der_out2.sum()
+        loss2.backward(retain_graph=True)
+        assert torch.allclose(der_out1, der_out2)
+        assert torch.allclose(x1.grad, x2.grad)
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):

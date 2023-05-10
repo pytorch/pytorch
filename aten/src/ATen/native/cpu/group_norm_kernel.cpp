@@ -1566,10 +1566,11 @@ void GroupNormBackwardKernelImpl(
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
-  // In training, using Amp to enable BFloat16 is recommended.
-  // It will keep module parameters in acc dtype i.e. float
-  // while input/output will be in BFloat16.
-  // Using parameters in BFloat16 will cause high precision loss.
+  // In training, using Amp to enable lower precision data type,
+  // i.e., BFloat16 or Half, is recommended.
+  // It will keep module parameters in opmath dtype i.e. float
+  // while input/output will be in lower precision data type.
+  // Using parameters in BFloat16 or Half may cause high precision loss.
   const bool mixed_type = is_mixed_type(dY, mean);
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {

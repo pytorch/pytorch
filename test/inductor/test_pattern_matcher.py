@@ -13,17 +13,40 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
 
-        args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+        args_list = [
+            (
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            # https://github.com/pytorch/pytorch/issues/100670.
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+            ),
+            (
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
+        for args in args_list:
+            counters.clear()
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_addmm(self):
         def fn(a, b, c):
@@ -116,6 +139,24 @@ class TestPaternMatcher(TestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+        counters.clear()
+        args = [
+            torch.randn(2, 8, device="cuda"),
+            torch.randn(2, 16, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
+        # Verify we fallback to non-optimal path for negative `end`.
+        def fn(a, b):
+            cat_1 = torch.ops.aten.cat.default([a, b], 1)
+            slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
+            slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, -1)
+            return torch.ops.aten.cat.default([cat_1, slice_2], 1)
 
         counters.clear()
         args = [
