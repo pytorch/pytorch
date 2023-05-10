@@ -385,7 +385,7 @@ def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape))
 
 def error_inputs_item(op, device, **kwargs):
-    make_arg = partial(make_tensor, dtype=torch.float64, device=device, requires_grad=False)
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
 
     cases = (
         (M),
