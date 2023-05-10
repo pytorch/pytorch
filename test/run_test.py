@@ -85,6 +85,18 @@ def strtobool(s):
     return True
 
 
+def parse_test_module(test):
+    return test.split(".")[0]
+
+
+class TestChoices(list):
+    def __init__(self, *args, **kwargs):
+        super().__init__(args[0])
+
+    def __contains__(self, item):
+        return list.__contains__(self, parse_test_module(item))
+
+
 def discover_tests(
     base_dir: Optional[pathlib.Path] = None,
     cpp_tests_dir: Optional[pathlib.Path] = None,
@@ -125,7 +137,7 @@ def discover_tests(
     # Add the cpp prefix for C++ tests so that we can tell them apart
     rc.extend(
         [
-            f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+            parse_test_module(f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}")
             for fname in all_cpp_files
         ]
     )
@@ -139,7 +151,9 @@ def discover_tests(
     return sorted(rc)
 
 
+CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
 TESTS = discover_tests(
+    cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
         "ao",
         "bottleneck_test",
@@ -524,13 +538,21 @@ def run_test(
         return 0
 
     if test_file.startswith(CPP_TEST_PREFIX):
-        # C++ tests are in CPP_TEST_PATH, not the regular test directory
-        argv = [
-            os.path.join(
+        # C++ tests are not the regular test directory
+        if CPP_TESTS_DIR:
+            cpp_test = os.path.join(
+                CPP_TESTS_DIR,
+                test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
+            )
+        else:
+            cpp_test = os.path.join(
                 pathlib.Path(test_directory).parent,
                 CPP_TEST_PATH,
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
+
+        argv = [
+            cpp_test if sys.platform != "win32" else cpp_test + ".exe"
         ] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
@@ -921,14 +943,14 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.append("--use-pytest")
-    else:
-        # NB: Use --junit-xml to generate the C++ test report for now in
-        # pytest format. Note that this format is different than the one
-        # used by unittest via --junit-xml-reruns. But this is ok as we
-        # only need to deal with this later to support disable flaky and
-        # slow C++ tests
+    elif IS_CI:
+        # Add the option to generate XML test report here as C++ tests
+        # won't go into common_utils
         test_report_path = get_report_path(pytest=True)
-        pytest_args.extend(["--junit-xml", test_report_path])
+        pytest_args.extend(["--junit-xml-reruns", test_report_path])
+
+    if options.pytest_k_expr:
+        pytest_args.extend(["-k", options.pytest_k_expr])
 
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -962,18 +984,6 @@ CUSTOM_HANDLERS = {
 PYTEST_SKIP_RETRIES = {"test_public_bindings"}
 
 
-def parse_test_module(test):
-    return test.split(".")[0]
-
-
-class TestChoices(list):
-    def __init__(self, *args, **kwargs):
-        super().__init__(args[0])
-
-    def __contains__(self, item):
-        return list.__contains__(self, parse_test_module(item))
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run the PyTorch unit test suite",
@@ -986,14 +996,14 @@ def parse_args():
         "--verbose",
         action="count",
         default=0,
-        help="print verbose information and test-by-test results",
+        help="Print verbose information and test-by-test results",
     )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
         "--distributed-tests",
         action="store_true",
-        help="run all distributed tests",
+        help="Run all distributed tests",
     )
     parser.add_argument(
         "--functorch",
@@ -1040,6 +1050,12 @@ def parse_args():
         help="If true, use `pytest` to execute the tests. E.g., this runs "
         "TestTorch with pytest in verbose and coverage mode: "
         "python run_test.py -vci torch -pt",
+    )
+    parser.add_argument(
+        "-k",
+        "--pytest-k-expr",
+        default="",
+        help="Pass to pytest as its -k expr argument",
     )
     parser.add_argument(
         "-c",
@@ -1265,7 +1281,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
-        selected_tests = ["test_mps", "test_metal"]
+        selected_tests = ["test_mps", "test_metal", "test_modules"]
     else:
         # Exclude all mps tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
@@ -1408,34 +1424,14 @@ def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional
     return message
 
 
-def main():
-    options = parse_args()
-
-    test_directory = str(REPO_ROOT / "test")
-    selected_tests = get_selected_tests(options)
-
-    if options.verbose:
-        print_to_stderr(
-            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
-        )
-
-    if options.dry_run:
-        return
-
-    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
-        shell(["coverage", "erase"])
-
-    if IS_CI:
-        selected_tests = get_reordered_tests(selected_tests)
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-
-    if options.dynamo:
-        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
-    elif options.inductor:
-        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
-
+def run_tests(
+    selected_tests: List[ShardedTest], test_directory: str, options, group_name: str
+) -> None:
     failure_messages = []
+
+    if len(selected_tests) == 0:
+        print_to_stderr(f"No tests in group `{group_name}`")
+        return failure_messages
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
@@ -1443,9 +1439,10 @@ def main():
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
+    print(f"TEST GROUP: {group_name}")
     print_to_stderr(
-        "parallel (file granularity) tests:\n {}".format(
-            "\n ".join(str(x) for x in selected_tests_parallel)
+        "parallel (file granularity) tests :\n {}".format(
+            "\n".join(str(x) for x in selected_tests_parallel)
         )
     )
     print_to_stderr(
@@ -1458,7 +1455,18 @@ def main():
     pool = get_context("spawn").Pool(
         NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
     )
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
+    # NB: This is a hack to make conftest.py available on CPP_TESTS_DIR. We should
+    # see if the file could be turned into a full-fledge ptest plugin instead
+    cpp_conftest_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
+    if (
+        options.cpp
+        and os.path.exists(CPP_TESTS_DIR)
+        and os.path.isdir(CPP_TESTS_DIR)
+        and not os.path.exists(cpp_conftest_file)
+    ):
+        # Take the conftest file from the test directory
+        shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
 
     def handle_error_messages(err_message):
         if err_message is None:
@@ -1504,10 +1512,58 @@ def main():
             test_failed = handle_error_messages(err_message)
             if test_failed and not options.continue_through_error:
                 raise RuntimeError(err_message)
+
     finally:
         pool.terminate()
         pool.join()
 
+    return failure_messages
+
+
+def main():
+    options = parse_args()
+
+    test_directory = str(REPO_ROOT / "test")
+    selected_tests = get_selected_tests(options)
+
+    if options.verbose:
+        print_to_stderr(
+            "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
+        )
+
+    if options.dry_run:
+        return
+
+    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
+        shell(["coverage", "erase"])
+
+    prioritized_tests = []
+    remaining_tests = selected_tests
+    if IS_CI:
+        (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        # downloading test cases configuration to local environment
+        get_test_case_configs(dirpath=test_directory)
+
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
+    failure_messages = []
+
+    # First run the prioritized tests, then the remaining tests.
+    try:
+        failure_messages = run_tests(
+            prioritized_tests, test_directory, options, "Prioritized tests"
+        )
+
+        failure_messages += run_tests(
+            remaining_tests, test_directory, options, "General tests"
+        )
+
+    finally:
         if options.coverage:
             from coverage import Coverage
 

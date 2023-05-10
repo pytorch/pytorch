@@ -1,6 +1,6 @@
-from typing import Any, Dict, List, Tuple, Callable, Union, Set, OrderedDict
 import dataclasses
 import traceback
+from typing import Any, Callable, Dict, List, OrderedDict, Set, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -11,6 +11,7 @@ from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
 from torch.nn.utils.rnn import PackedSequence
 
 __all__ = []  # type: ignore[var-annotated]
+
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
     """
@@ -40,14 +41,19 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
     return tuple(flat_args), tuple(kwarg_keys)
 
 
-def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+def _unpack_kwargs(
+    flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
+) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
-    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    assert len(kwarg_keys) <= len(
+        flat_args
+    ), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]
     kwargs = dict(zip(kwarg_keys, flat_args[-len(kwarg_keys) :]))
     return args, kwargs
+
 
 def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
     r"""
@@ -100,6 +106,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
         to_map = None  # type: ignore[assignment]
     return res
 
+
 def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
@@ -108,6 +115,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
         traceback.print_stack()
         if raise_assertion_error:
             raise AssertionError(s)
+
 
 def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
     """
@@ -150,6 +158,7 @@ def _free_storage(tensor: torch.Tensor) -> bool:
             tensor._typed_storage()._resize_(0)
         return not already_freed
 
+
 def _apply_to_tensors(
     fn: Callable,
     container: Union[torch.Tensor, Dict, List, Tuple, Set, OrderedDict, PackedSequence],
@@ -187,6 +196,7 @@ def _apply_to_tensors(
 
     return apply(container)
 
+
 def _to_kwargs(inputs, kwargs, target_device, use_side_stream_for_tensor_copies):
     inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
@@ -206,8 +216,10 @@ def _to_kwargs(inputs, kwargs, target_device, use_side_stream_for_tensor_copies)
     kwargs = tuple(kwargs)
     return inputs, kwargs
 
+
 def _verify_param_shape_across_processes(process_group, tensors, logger=None):
     return dist._verify_params_across_processes(process_group, tensors, logger)
+
 
 def _sync_module_states(
     module,
@@ -215,6 +227,7 @@ def _sync_module_states(
     broadcast_bucket_size,
     src,
     params_and_buffers_to_ignore,
+    broadcast_buffers=True,
 ):
     """
     Syncs ``module``'s parameters and buffers state so that all ranks contain
@@ -227,16 +240,13 @@ def _sync_module_states(
         if name not in params_and_buffers_to_ignore:
             module_states.append(param.detach())
 
-    for name, buffer in module.named_buffers():
-        if name not in params_and_buffers_to_ignore:
-            module_states.append(buffer.detach())
+    if broadcast_buffers:
+        for name, buffer in module.named_buffers():
+            if name not in params_and_buffers_to_ignore:
+                module_states.append(buffer.detach())
 
-    _sync_params_and_buffers(
-        process_group,
-        module_states,
-        broadcast_bucket_size,
-        src
-    )
+    _sync_params_and_buffers(process_group, module_states, broadcast_bucket_size, src)
+
 
 def _sync_params_and_buffers(
     process_group: dist.ProcessGroup,
@@ -252,6 +262,7 @@ def _sync_params_and_buffers(
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
         )
+
 
 def _replace_by_prefix(
     state_dict: Dict[str, Any],

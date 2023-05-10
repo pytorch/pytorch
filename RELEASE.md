@@ -60,7 +60,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 Following Requirements needs to be met prior to final RC Cut:
 
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
-``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
+``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
@@ -152,7 +152,7 @@ Pushing a release candidate should trigger the `binary_builds` workflow within C
 
 This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/main/.github/pytorch-circleci-labels.yml)
 
-To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
+To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). And make sure all binary builds are successful.
 ### Release Candidate Storage
 
 Release candidates are currently stored in the following places:
@@ -175,7 +175,7 @@ Validate that the documentation build has completed and generated entry correspo
 
 ### Cherry Picking Fixes
 
-Typically within a release cycle fixes are necessary for regressions, test fixes, etc.
+Typically, within a release cycle fixes are necessary for regressions, test fixes, etc.
 
 For fixes that are to go into a release after the release branch has been cut we typically employ the use of a cherry pick tracker.
 
@@ -208,11 +208,11 @@ The following should be prepared for the release day
 
 Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
 
-After modifying published_versions.json you will need to regenerate regenerate the quick-start-module.js file run following command
+After modifying published_versions.json you will need to regenerate the quick-start-module.js file run following command
 ```
 python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
 ```
-Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
+Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
 
 ### Open Google Colab issue
 
@@ -220,7 +220,7 @@ This is normally done right after the release is completed. We would need to cre
 
 # Patch Releases
 
-A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`
+A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`)
 
 ## Patch Release Criteria
 
@@ -246,7 +246,7 @@ Patch releases should follow these high-level phases. This process starts immedi
 Minor release process takes around 6-7 weeks to complete.
 
 1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
-2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed and following decisions are made:
+2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
   * Should the new patch Release be created ?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
@@ -260,7 +260,7 @@ Minor release process takes around 6-7 weeks to complete.
 1. Tag issues / pull requests that are candidates for a potential patch release with `triage review`
     * ![adding triage review label](https://user-images.githubusercontent.com/1700823/132589089-a9210a14-6159-409d-95e5-f79067f6fa38.png)
 2. Triage reviewers will then check if the regression / fix identified fits within above mentioned [Patch Release Criteria](#patch-release-criteria)
-3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions if found to be within the [Patch Release Criteria](#patch-release-criteria)
+3. Triage reviewers will then add the issue / pull request to the related milestone (i.e. `1.9.1`) if the regressions is found to be within the [Patch Release Criteria](#patch-release-criteria)
     * ![adding to milestone](https://user-images.githubusercontent.com/1700823/131175980-148ff38d-44c3-4611-8a1f-cd2fd1f4c49d.png)
 
 ### Issue Tracker for Patch releases
@@ -282,7 +282,7 @@ Only following issues are accepted:
 1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
     * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
-    * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. if cherry pick is not posted the issue will not be included in the release.
+    * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. If cherry pick is not posted the issue will not be included in the release.
 3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact.
 
 ### Building Binaries / Promotion to Stable
@@ -322,7 +322,7 @@ need to support these particular versions of software.
 
 ## Updating submodules for a release
 
-In the event a submodule cannot be fast forwarded and a patch must be applied we can take two different approaches:
+In the event a submodule cannot be fast forwarded, and a patch must be applied we can take two different approaches:
 
 * (preferred) Fork the said repository under the pytorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us

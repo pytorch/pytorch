@@ -387,7 +387,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       break;
     } catch (c10::OutOfMemoryError &e) {
       max_workspace_size /= 2;
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
       remove_invalid = true;
     }
   }
@@ -494,7 +494,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -508,7 +508,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -529,7 +529,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -550,7 +550,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -570,7 +570,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
       run_conv_plan(handle, x, y, w, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -615,7 +615,7 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
