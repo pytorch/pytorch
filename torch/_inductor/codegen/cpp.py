@@ -21,7 +21,7 @@ from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..scheduler import SchedulerNode
+from ..scheduler import FusedSchedulerNode, SchedulerNode
 from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
@@ -2225,7 +2225,9 @@ class CppKernelProxy(CppKernel):
             def is_fused_schedulernode(node: SchedulerNode):
                 scheduler = node.scheduler
                 name = node.get_name()
-                return name in scheduler.name_to_fused_node
+                return isinstance(
+                    scheduler.name_to_fused_node[name], FusedSchedulerNode
+                )
 
             should_add_to_dtype = True
             if is_memory_copy_schedulernode(node):
