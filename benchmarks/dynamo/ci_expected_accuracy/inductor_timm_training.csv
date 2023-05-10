@@ -46,7 +46,7 @@ resmlp_12_224,pass,9
 resnest101e,pass,9
 rexnet_100,pass,11
 sebotnet33ts_256,pass,11
-selecsls42b,pass,9
+SelecSls42b,pass,9
 spnasnet_100,pass,11
 swin_base_patch4_window7_224,pass,9
 swsl_resnext101_32x16d,pass,9
