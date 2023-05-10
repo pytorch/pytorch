@@ -7514,6 +7514,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.ones(300)
         b = torch.ones(300)
         check_correctness(torch.dot, a, b)
+    
+    @dtypes(*itertools.product(floating_and_complex_types(), floating_and_complex_types()))
+    def test_baddbmm_mixed_dtypes_backward(self, device, dtypes):
+        # test that baddbmm can backward successfully when input tensors have different dtypes
+        m = torch.rand([5, 3, 5], dtype=dtypes[0], requires_grad=True, device=device)
+        a = torch.rand([5, 3, 4], dtype=dtypes[1], requires_grad=True, device=device)
+        b = torch.rand([5, 4, 5], dtype=dtypes[1], requires_grad=True, device=device)
+        res = torch.baddbmm(m, a, b)
+        res.sum().abs().backward()
+    
+    @dtypes(*itertools.product(floating_and_complex_types(), floating_and_complex_types()))
+    def test_dist_mixed_dtypes_backward(self, device, dtypes):
+        # test that dist can backward successfully when input tensors have different dtypes
+        m = torch.rand([5, 3], dtype=dtypes[0], requires_grad=True, device=device)
+        a = torch.rand([5, 3], dtype=dtypes[1], requires_grad=True, device=device)
+        res = torch.dist(m, a)
+        res.sum().abs().backward()
+    
+    @dtypes(*itertools.product(floating_and_complex_types(), floating_and_complex_types()))
+    def test_addmv_mixed_dtypes_backward(self, device, dtypes):
+        m = torch.rand([3], dtype=dtypes[0], requires_grad=True, device=device)
+        a = torch.rand([3, 2], dtype=dtypes[1], requires_grad=True, device=device)
+        b = torch.rand([2], dtype=dtypes[1], requires_grad=True, device=device)
+        res = torch.Tensor.addmv(m, a, b)
+        res.sum().abs().backward()
 
 instantiate_device_type_tests(TestLinalg, globals())
 
