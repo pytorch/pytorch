@@ -11,11 +11,12 @@
 
 #include <internal/pycore_frame.h>
 
-static int _PyFrame_OpAlreadyRan(
-    _PyInterpreterFrame* frame,
-    int opcode,
-    int oparg);
-
 int THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame* frame);
+
+PyFunctionObject* _PyFunction_CopyWithNewCode(
+    PyFunctionObject* o,
+    PyCodeObject* code);
+
+void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 
 #endif
