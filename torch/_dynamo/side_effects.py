@@ -438,3 +438,7 @@ class SideEffects:
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.save_for_backward
         )
+
+    def clear(self):
+        self.keepalive.clear()
+        self.id_to_variable.clear()

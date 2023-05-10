@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 from collections import namedtuple, OrderedDict
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
@@ -1559,7 +1559,7 @@ class DistributedTest:
             torch.cuda.set_device(device_id)
 
             tensor = _build_tensor(rank + 1, device_id=device_id)
-            profiler_cls = profiler_ctx if profiler_ctx is not None else suppress()
+            profiler_cls = profiler_ctx if profiler_ctx is not None else nullcontext()
             with profiler_cls as prof:
                 for src in range(0, world_size):
                     if src == rank:
@@ -1629,7 +1629,7 @@ class DistributedTest:
             rank = dist.get_rank()
             send_size = rank + 1
             tensor = _build_tensor(send_size)
-            ctx = profiler_ctx if profiler_ctx is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 for src in range(0, dist.get_world_size()):
                     if src == rank:
@@ -1697,7 +1697,7 @@ class DistributedTest:
             recv_ranks = list()
             irecv_ranks = list()
 
-            ctx = profiler_ctx if profiler_ctx is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 for dst in range(0, dist.get_world_size()):
                     if dst == rank:
@@ -1801,7 +1801,7 @@ class DistributedTest:
             world_size = dist.get_world_size()
             send_recv_size = 10
             tensor = _build_tensor(send_recv_size, value=rank)
-            ctx = profiler_ctx if profiler_ctx is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 for dst in range(0, world_size):
                     if dst == rank:
@@ -1859,7 +1859,7 @@ class DistributedTest:
         def _test_isend(self, profiler_ctx):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
-            ctx = profiler_ctx if profiler_ctx is not None else suppress()
+            ctx = profiler_ctx if profiler_ctx is not None else nullcontext()
             with ctx as prof:
                 if rank == 0:
                     requests = [
@@ -7262,7 +7262,7 @@ class DistributedTest:
                         "Detected at least one rank that exhausted inputs.",
                     )
             else:
-                exception_ctx = suppress()
+                exception_ctx = nullcontext()
             with exception_ctx:
                 with net.join(
                     throw_on_early_termination=test_case.throw_on_early_termination
@@ -7273,7 +7273,7 @@ class DistributedTest:
                         if i % sync_interval != 0:
                             context = net.no_sync()
                         else:
-                            context = suppress()
+                            context = nullcontext()
                         with context:
                             if isinstance(inp, tuple):
                                 loss = net(*inp).sum()

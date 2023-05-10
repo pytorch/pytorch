@@ -524,6 +524,19 @@ class KernelArgs:
             name, self.inplace_buffers
         )
 
+    # Includes inplace buffers, excludes removed buffers.  Essentially,
+    # after you do a call into this kernel, which buffers actually contain
+    # updated data?  Modeled off of python_argdefs.
+    def live_output_buffers(self):
+        live_outs = set()
+        for inplaced in unique(self.inplace_buffers.values()):
+            live_outs.add(inplaced.other_names[-1])
+        for outer, inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or inner == "REMOVED":
+                continue
+            live_outs.add(outer)
+        return live_outs
+
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.

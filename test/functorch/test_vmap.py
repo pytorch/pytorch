@@ -3659,7 +3659,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
-        xfail('bucketize'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('allclose'),
@@ -4103,6 +4102,19 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.assertEqual(vmap(f, in_dims=(0, (None, None), 0))(tensor, idxs[1:], value), expected)
         self.assertEqual(vmap(f, in_dims=(0, (None, None), None))(tensor, idxs[1:], value[0]), expected)
 
+        # boolean mask
+        B = 2
+        x = torch.randn(1, 3, 3)
+        gy = torch.randn(B, 1, 3, 3)
+
+        def f(x, gy):
+            mask = x < 1e-09
+            zeros = torch.zeros([])
+            index_put = torch.ops.aten.index_put.default(gy, [mask], zeros)
+            return index_put
+
+        self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
+
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])
     @parametrize('affine', [True, False])
@@ -4346,6 +4358,22 @@ class TestVmapOperatorsOpInfo(TestCase):
             err_msg = "Function 'SqrtBackward0' returned nan values in its 0th output."
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 vmap(grad(bad_fn))(x)
+
+    def test_searchsorted_bucketize(self, device):
+        # OpInfo generates test with repeated samples in batch dim.
+        # Thus we test explicitily with different samples across a batch.
+
+        def test():
+            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 6, 8, 10]], device=device)
+            v = torch.tensor(3, device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, None))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (None, 0))
+            boundaries = torch.tensor([[1, 4, 5, 7, 9], [1, 2, 4, 8, 9]], device=device)
+            v = torch.tensor([3, 4], device=device)
+            self.vmap_outplace_test(torch.searchsorted, (boundaries, v), {}, (0, 0))
+            self.vmap_outplace_test(torch.bucketize, (v, boundaries), {}, (0, 0))
+
+        test()
 
 class TestRandomness(TestCase):
     def _reset_random(self, generator, orig_state, use_generator, seed):
@@ -5023,7 +5051,7 @@ class TestTransformFailure(TestCase):
         def f(x):
             return Test.apply(x)
 
-        if transform == grad or transform == grad_and_value:
+        if transform in (grad, grad_and_value):
             input = torch.tensor(4.)
         else:
             input = torch.randn(5)

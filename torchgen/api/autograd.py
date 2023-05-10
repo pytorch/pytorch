@@ -329,12 +329,14 @@ def is_reference_for_foreach(
     )
 
 
+# TODO(crcrpar): Avoid hard coding "Default" ideally.
 def gen_foreach_derivativeinfo(
     foreach_function: NativeFunction,
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     functional_info_by_signature: Dict[
         FunctionSchema, Dict[str, DifferentiabilityInfo]
     ],
+    dispatch_key: str = "Default",
 ) -> Tuple[Optional[DifferentiabilityInfo], bool]:
     """Generate DifferentiabilityInfo for out-place foreach function, return the existing one for in-place.
 
@@ -344,16 +346,15 @@ def gen_foreach_derivativeinfo(
     for function_schema in functional_info_by_signature:
         if not is_reference_for_foreach(foreach_function, function_schema):
             continue
-        # TODO(crcrpar): Avoid hard coding "Default" ideally.
         if function_schema in differentiability_infos:
-            ref_diff_info = differentiability_infos[function_schema]["Default"]
+            ref_diff_info = differentiability_infos[function_schema][dispatch_key]
         elif (
             function_schema.signature(strip_default=True)
             in functional_info_by_signature
         ):
             ref_diff_info = functional_info_by_signature[
                 function_schema.signature(strip_default=True)
-            ]["Default"]
+            ][dispatch_key]
         else:
             raise RuntimeError(
                 "Reference `DifferentiabilityInfo` for {} not found".format(
