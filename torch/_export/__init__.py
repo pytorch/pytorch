@@ -13,16 +13,19 @@ from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch._export.pass_base import PassType
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    GuardOnDataDependentSymNode,
+    StrictMinMaxConstraint,
+)
+from torch._dynamo.exc import UserError, UserErrorType
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
-from torch.fx.passes.infra.pass_base import PassResult
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
 Value = Any
 
-# TODO(angelayi): Move this to PassBase
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 ExportGraphModule = torch.fx.GraphModule
 EXPORT_METADATA = "_export_metadata_key"
 
@@ -101,15 +104,22 @@ def _export(
         constraints = []
 
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
-        gm, _ = torch._dynamo.export(
-            f,
-            *args,
-            aten_graph=True,
-            tracing_mode="symbolic",
-            decomposition_table=DECOMP_TABLE,
-            constraints=constraints,
-            assume_static_by_default=True,
-        )
+        try:
+            gm, _ = torch._dynamo.export(
+                f,
+                *args,
+                aten_graph=True,
+                tracing_mode="symbolic",
+                decomposition_table=DECOMP_TABLE,
+                constraints=constraints,
+                assume_static_by_default=True,
+            )
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
+        except GuardOnDataDependentSymNode as e:
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
     flat_args, in_spec = pytree.tree_flatten(args)
     out_spec = (
