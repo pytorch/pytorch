@@ -32,7 +32,8 @@ class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: Dict[
-            OpOverload, Callable[[Node, DeviceMesh], StrategyType]
+            OpOverload,
+            Callable[[Node, DeviceMesh, Dict[Node, StrategyType]], StrategyType],
         ] = {}
 
     def register_sharding_prop_rule(
@@ -82,6 +83,9 @@ class ShardingPropagator:
             # generate op strategy for the op, this is done by propagating
             # the sharding in the graph.
             op_gm = self._prepare_op_graph(op_overload, op_schema)
+            if op_gm is None:
+                return OutputSharding(None, [op_schema])
+
             flat_args_sharding, _ = tree_flatten(
                 [op_schema.args_schema, op_schema.kwargs_schema]
             )
@@ -186,7 +190,7 @@ class ShardingPropagator:
                     output_node = node.args[0]
 
         # then we propagate the sharding
-        sharding_prop_func = self.op_to_rules.get(op_overload, None)
+        sharding_prop_func = self.op_to_rules[op_overload]
 
         # step 1. there's sharding propagation rule, run
         # sharding propagation to get the output sharding
