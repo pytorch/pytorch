@@ -76,6 +76,8 @@ class MapAutogradOp(torch.autograd.Function):
         fw_mapped_args = fw_args[:ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args:]
         mapped_grads = [grad for grad in flat_grads if grad is not None]
+        # pytree.tree_map(lambda t: t.requires_grad_(), mapped_grads)
+        # print("force requiring grad:", [grad.requires_grad for grad in mapped_grads])
 
         grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(mapped_grads), *fw_mapped_args, *mapped_grads, *pos_args)
         return None, None, None, *grads
@@ -176,12 +178,13 @@ def map_autograd(f, num_mapped_args, *args):
             t = t.detach()
             return t if not requires_grad else t.requires_grad_()
 
-        example_xs = [from_fun(detach(xs, xs.requires_grad)) for xs in _unstack_pytree(mapped_xs)[0]]
-        example_pos_args = [from_fun(detach(arg, arg.requires_grad)) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
+        example_xs = [detach(from_fun(xs), mapped_xs[i].requires_grad) for i, xs in enumerate(_unstack_pytree(mapped_xs)[0])]
+        example_pos_args = [detach(from_fun(arg), arg.requires_grad) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
         example_flat_out = pytree.tree_map(from_fun, f(*example_xs, *example_pos_args))
-        example_grad = [from_fun(detach(torch.ones_like(out), out.requires_grad)) for out in example_flat_out if out is not None and out.requires_grad]
+        example_grad = [detach(from_fun(torch.ones_like(out)), out.requires_grad) for out in example_flat_out if out is not None and out.requires_grad]
 
     fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+    fw_graph = make_fx(functionalize(fw_graph, remove="mutations_and_views"))(*example_xs, *example_pos_args)
     print("create forward graph")
     fw_graph.print_readable()
 
@@ -202,6 +205,7 @@ def map_autograd(f, num_mapped_args, *args):
 
     joint_num_mapped = len(example_grad) + len(example_xs)
     joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
+    joint_graph = make_fx(functionalize(joint_graph, remove="mutations_and_views"))(*example_xs, *example_grad, *example_pos_args)
     print("corresponding backward graph")
     joint_graph.print_readable()
     flat_out = MapAutogradOp.apply(fw_graph, joint_graph, num_mapped_args, *args)
@@ -236,19 +240,20 @@ def map_func(f, num_mapped, *args):
     guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
     try:
         functional_map_fn = functionalize(f, remove=mode)
-        inputs = (*unwrapped_xs, *unwrapped_args)
+        with disable_proxy_modes_tracing():
+            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
 
-        if _has_potential_branch_input_mutation(f, inputs):
+        if _has_potential_branch_input_mutation(f, example_inputs):
             raise UnsupportedAliasMutationException(
                 "torch.map is mutating the input!"
             )
 
-        if _has_potential_branch_input_alias(f, inputs):
-            raise UnsupportedAliasMutationException(
-                "torch.map is aliasing the input!"
-            )
+        #if _has_potential_branch_input_alias(f, inputs):
+        #    raise UnsupportedAliasMutationException(
+        #        "torch.map is aliasing the input!"
+        #    )
 
-        map_return = map_impl(functional_map_fn, num_mapped, *inputs)
+        map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=0)
     finally:
         del guard
@@ -271,18 +276,19 @@ def map_functionalize(interpreter, f, num_mapped, *args):
     functional_map_fn = functionalize(f, remove=mode)
 
     with interpreter.lower():
-        inputs = (*unwrapped_xs, *unwrapped_args)
-        if _has_potential_branch_input_mutation(functional_map_fn, inputs):
+        with disable_proxy_modes_tracing():
+            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        if _has_potential_branch_input_mutation(functional_map_fn, example_inputs):
             raise UnsupportedAliasMutationException(
                 "torch.map is mutating the input!"
             )
 
-        if _has_potential_branch_input_alias(functional_map_fn, inputs):
-            raise UnsupportedAliasMutationException(
-                "torch.map is aliasing the input!"
-            )
+        #if _has_potential_branch_input_alias(functional_map_fn, example_inputs):
+        #    raise UnsupportedAliasMutationException(
+        #        "torch.map is aliasing the input!"
+        #    )
 
-        map_return = map_impl(functional_map_fn, num_mapped, *inputs)
+        map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm

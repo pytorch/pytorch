@@ -223,7 +223,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                 input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
             if node.op == "output":
                 def check_alias(out):
-                    if "val" in out.meta:
+                    if out is not None and "val" in out.meta:
                         out_storage = StorageWeakRef(out.meta['val']._typed_storage())
                         return out_storage in input_storages
                     return False
