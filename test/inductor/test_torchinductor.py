@@ -1058,6 +1058,20 @@ class CommonTemplate:
             (torch.randn(4, 4, 4, 4),),
         )
 
+    def test_views6(self):
+        def forward(x):
+            x = torch.ops.aten.relu(x)
+            s = torch.ops.aten.slice(x, 0, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 1, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 3, 0, 0)
+            y = torch.ops.aten.view(s, [4, 2, -1])
+            return y
+
+        self.common(
+            forward,
+            (torch.randn(4, 2, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
