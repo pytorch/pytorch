@@ -6,7 +6,7 @@ import subprocess
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
-from tools.shared.logging_utils import pluralize
+from tools.shared.logging_utils import pluralize, to_time_str
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
@@ -208,23 +208,33 @@ def get_reordered_tests(
     bring_to_front = []
     the_rest = []
 
+    test_time_for_regular_tests_so_far = 0.0
+    # how much sooner did we run prioritized tests compared to a naive ordering
+    time_savings = 0.0
+
     for test in tests:
         if test.name in prioritized_tests:
             bring_to_front.append(test)
+            # Calculate approx time saved by reordering
+            time_savings = test_time_for_regular_tests_so_far
         else:
             the_rest.append(test)
-    if len(tests) == len(bring_to_front) + len(the_rest):
-        print(
-            f"reordering tests for PR:\n"
-            f"prioritized: {bring_to_front}\nthe rest: {the_rest}\n"
-        )
-        return (bring_to_front, the_rest)
-    else:
+            test_time_for_regular_tests_so_far += test.time
+
+    if len(tests) != len(bring_to_front) + len(the_rest):
         print(
             f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
             f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n"
         )
         return ([], tests)
+
+    test_cnt_str = pluralize(len(tests), "test")
+    print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
+    print(f"Prioritized tests will run up to {to_time_str(time_savings)} faster")
+    print(f"Prioritized: {bring_to_front}")
+    print(f"The rest: {the_rest}")
+
+    return (bring_to_front, the_rest)
 
 
 def get_test_case_configs(dirpath: str) -> None:
