@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -28,7 +29,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
+from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -40,6 +41,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    pad_listlike,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -662,7 +664,7 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
+        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
@@ -2181,7 +2183,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
+            (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -2227,7 +2229,7 @@ class ComputedBuffer(Buffer):
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
         """
-        _, args, var_ranges = dependencies.index_vars_squeeze(
+        args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
@@ -2432,6 +2434,7 @@ class InputsKernel(Buffer):
             set(),
             [],
             None,
+            op_counts=collections.Counter(),
         )
 
     @staticmethod
@@ -3128,8 +3131,6 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3137,19 +3138,12 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
-        def gen_kwarg(k, v):
-            return f"{k}={repr(v)}"
-
-        def get_pexpr(x):
-            if isinstance(x, SymTypes):
-                return pexpr(sympy.expand(repr(x)))
-            else:
-                return repr(x)
-
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
-        args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
+        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
+        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
+        # let self.codegen_kwargs handle kwargs
+        self.kwargs.update(kwargs)
+        return args
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -3259,12 +3253,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding_: List[int],
-    stride_: List[int],
-    dilation_: List[int],
+    padding: List[int],
+    stride: List[int],
+    dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding_: List[int] = None,
+    output_padding: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3319,16 +3313,24 @@ def _prepare_convolution_fusion_create(
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
 
-    stride = tuple(stride_)
-    padding = tuple(padding_)
-    dilation = tuple(dilation_)
-    assert isinstance(groups, int)
-    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     x.realize()
     weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        dims = len(x_fake.size()) - 2
+        assert 0 < len(padding) <= dims
+        assert 0 < len(dilation) <= dims
+        assert 0 < len(stride) <= dims
+        padding = pad_listlike(padding, dims)
+        dilation = pad_listlike(dilation, dims)
+        stride = pad_listlike(stride, dims)
+        if output_padding is None:
+            output_padding = pad_listlike([0], dims)
+        else:
+            assert 0 < len(output_padding) <= dims
+            output_padding = pad_listlike(output_padding, dims)
+        assert isinstance(groups, int)
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -3893,7 +3895,11 @@ class StorageBox(MutableBox):
         """
         Called on buffers we expect to be forced to realize later.
         """
-        if isinstance(self.data, (Pointwise, Reduction)) and self.num_reads() > 1:
+        if (
+            isinstance(self.data, (Pointwise, Reduction))
+            and self.num_reads() > 1
+            and self.is_pointwise_non_scalar_tensor_num_reads_larger_than_one()
+        ):
             self.realize()
 
     def has_exceeded_max_reads(self):
@@ -3946,6 +3952,15 @@ class StorageBox(MutableBox):
                 data=data,
             ).get_read_writes()
         return len(read_writes.reads)
+
+    @cache_on_self
+    def is_pointwise_non_scalar_tensor_num_reads_larger_than_one(self):
+        # Skip the check for non Pointwise instances
+        return (
+            (sum(read.index != 0 for read in self.data.get_reads()) > 1)
+            if isinstance(self.data, Pointwise)
+            else True
+        )
 
 
 class InterpreterShim(torch.fx.Interpreter):
@@ -4266,7 +4281,7 @@ class MultiOutputNoSizeAssert(MultiOutput):
         )
 
 
-class ForceInPlace(ExternKernel):
+class InPlaceHint(ExternKernel):
     """
     Helper OP to encode an in/out argument that tries to make it inplace whenever possible.
     Wrap the input of your inplace op to enable this behavior.
@@ -4315,7 +4330,7 @@ class AllReduceCoalesced(ExternKernel):
 
         def wrap_input(var):
             nonlocal res
-            op = ForceInPlace(
+            op = InPlaceHint(
                 FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
             )
             res.append(op)
@@ -4372,7 +4387,7 @@ class AllReduceCoalesced(ExternKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
-        wrapper.writeline(f"_register_tensor_work({inputs[0]}, {output_name}_work)")
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):
