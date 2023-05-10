@@ -2087,30 +2087,17 @@ class CppKernelProxy(CppKernel):
             data_type_propagation(_node)
 
     def legalize_bf16(self, nodes):
-        def add_to_dtype(sub_graph: torch.fx.Graph):
-            def is_bf16_mem_copy(node: torch.fx.Node):
-                if node.target in ["load", "constant"]:
-                    bf16_mem_copy = all(
-                        usr.target == "store"
-                        and V.graph.get_dtype(usr.args[1]) == torch.bfloat16
-                        for usr in node.users
-                    )
-                elif node.target == "store":
-                    stored_node = node.args[3]
-                    bf16_mem_copy = is_bf16_mem_copy(stored_node)
-                else:
-                    bf16_mem_copy = False
-                if bf16_mem_copy:
-                    opt_ctx = OptimizationContext()
-                    opt_ctx.is_bf16_mem_copy = bf16_mem_copy
-                    node.meta[OptimizationContext.key] = opt_ctx
-                return bf16_mem_copy
-
+        def add_to_dtype_or_mark_memcopy(
+            sub_graph: torch.fx.Graph, should_add_to_dtype: bool
+        ):
             for node in sub_graph.nodes:
                 _node: torch.fx.Node = node
                 if _node.target in ["load", "constant"]:
                     assert len(_node.args) == 3
-                    if is_bf16_mem_copy(node):
+                    if not should_add_to_dtype:
+                        opt_ctx = OptimizationContext()
+                        opt_ctx.is_bf16_mem_copy = True
+                        node.meta[OptimizationContext.key] = opt_ctx
                         continue
                     ops = _node.args[0]
                     # If the node is constant, the last arg is dtype
@@ -2130,7 +2117,10 @@ class CppKernelProxy(CppKernel):
                             to_type_node.args = to_type_node_args
                             metrics.cpp_to_dtype_count += 1
                 elif _node.target == "store":
-                    if is_bf16_mem_copy(_node):
+                    if not should_add_to_dtype:
+                        opt_ctx = OptimizationContext()
+                        opt_ctx.is_bf16_mem_copy = True
+                        node.meta[OptimizationContext.key] = opt_ctx
                         continue
                     ops, store_var, _, value_var, _ = _node.args
                     store_dtype = V.graph.get_dtype(store_var)
@@ -2217,17 +2207,33 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_bf16(loop_body: ir.LoopBody):
+        def _legalize_bf16(loop_body: ir.LoopBody, should_add_to_dtype: bool):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
-                add_to_dtype(sub_block.graph)
+                add_to_dtype_or_mark_memcopy(sub_block.graph, should_add_to_dtype)
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             node: SchedulerNode = _node
+
+            def is_memory_copy_schedulernode(node: SchedulerNode):
+                op_counts = node.read_writes.op_counts
+                return (
+                    len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
+                )
+
+            def is_fused_schedulernode(node: SchedulerNode):
+                scheduler = node.scheduler
+                name = node.get_name()
+                return name in scheduler.name_to_fused_node
+
+            should_add_to_dtype = True
+            if is_memory_copy_schedulernode(node):
+                should_add_to_dtype = is_fused_schedulernode(node)
+
             if isinstance(node._body, ir.LoopBody):
                 body: ir.LoopBody = node._body
-                _legalize_bf16(body)
+                _legalize_bf16(body, should_add_to_dtype=should_add_to_dtype)
 
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
