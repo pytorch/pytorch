@@ -6,9 +6,10 @@ import torch
 from torch.fx import GraphModule, Node
 from torch.fx.subgraph_rewriter import _replace_pattern
 import torch.nn.functional as F
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+from .utils import _fold_bn_weights_into_conv_node
 
-
-# Example inputs for both `_conv2d_bn_pattern` and `_fused_qat_conv2d_bn_pattern`
+# Example inputs for both `_conv2d_bn_pattern` and `_qat_conv2d_bn_pattern`
 _conv2d_bn_pattern_example_inputs = (
     torch.randn(1, 1, 3, 3),  # x
     torch.randn(1, 1, 1, 1),  # conv_weight
@@ -17,6 +18,23 @@ _conv2d_bn_pattern_example_inputs = (
     torch.randn(1),           # bn_bias
     torch.randn(1),           # bn_running_mean
     torch.randn(1),           # bn_running_var
+)
+
+# Example inputs for both `_quantized_qat_conv2d_bn_pattern` and `_folded_quantized_qat_conv2d_bn_pattern`
+_quantized_conv2d_bn_pattern_example_inputs = (
+    torch.randn(1, 1, 3, 3).to(torch.int8),  # x
+    torch.randn(1, 1, 1, 1),  # conv_weight
+    torch.randn(1),           # conv_bias
+    torch.randn(1),           # bn_weight
+    torch.randn(1),           # bn_bias
+    torch.randn(1),           # bn_running_mean
+    torch.randn(1),           # bn_running_var
+    torch.tensor([1], dtype=torch.float),  # input_scale
+    torch.tensor([0], dtype=torch.int),    # input_zero_point
+    torch.tensor([1], dtype=torch.float),  # weight_scale
+    torch.tensor([0], dtype=torch.int),    # weight_zero_point
+    torch.tensor([1], dtype=torch.float),  # output_scale
+    torch.tensor([0], dtype=torch.int),    # output_zero_point
 )
 
 def _conv2d_bn_pattern(
@@ -32,7 +50,7 @@ def _conv2d_bn_pattern(
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
     return x
 
-def _fused_qat_conv2d_bn_pattern(
+def _qat_conv2d_bn_pattern(
     x: torch.Tensor,
     conv_weight: torch.Tensor,
     conv_bias: torch.Tensor,
@@ -60,6 +78,96 @@ def _fused_qat_conv2d_bn_pattern(
     x = x / scale_factor.reshape(bias_shape)
     x = x + conv_bias.reshape(bias_shape)
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+    return x
+
+def _quantized_qat_conv2d_bn_pattern(
+    x: torch.Tensor,
+    conv_weight: torch.Tensor,
+    conv_bias: torch.Tensor,
+    bn_weight: torch.Tensor,
+    bn_bias: torch.Tensor,
+    bn_running_mean: torch.Tensor,
+    bn_running_var: torch.Tensor,
+    input_scale: torch.Tensor,
+    input_zero_point: torch.Tensor,
+    weight_scale: torch.Tensor,
+    weight_zero_point: torch.Tensor,
+    output_scale: torch.Tensor,
+    output_zero_point: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Quantized version of qat conv bn pattern,
+    This is based on `nniqat.ConvBn2d._forward_approximate`.
+    used in qat convert, we first match this pattern and then replace it with
+    normal conv - bn pattern and then fold the weights of bn into conv
+    """
+    # TODO: allow setting eps
+    bn_eps = 1e-5
+    weight_quant_min = -127
+    weight_quant_max = 127
+    input_quant_min = -128
+    input_quant_max = 127
+    output_quant_min = -128
+    output_quant_max = 127
+
+    running_std = torch.sqrt(bn_running_var + bn_eps)
+    scale_factor = bn_weight / running_std
+    weight_shape = [1] * len(conv_weight.shape)
+    weight_shape[0] = -1
+    bias_shape = [1] * len(conv_weight.shape)
+    bias_shape[1] = -1
+    scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
+    x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        x, input_scale, input_zero_point, input_quant_min, input_quant_max, torch.int8)
+    zero_bias = torch.zeros_like(conv_bias, dtype=x.dtype)
+    scaled_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
+        scaled_weight, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    scaled_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        scaled_weight, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    x = F.conv2d(x, scaled_weight, zero_bias)
+    x = x / scale_factor.reshape(bias_shape)
+    x = x + conv_bias.reshape(bias_shape)
+    x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+    x = torch.ops.quantized_decomposed.quantize_per_tensor(
+        x, output_scale, output_zero_point, output_quant_min, output_quant_max, torch.int8)
+    return x
+
+def _folded_quantized_qat_conv2d_bn_pattern(
+    x: torch.Tensor,
+    conv_weight: torch.Tensor,
+    conv_bias: torch.Tensor,
+    bn_weight: torch.Tensor,
+    bn_bias: torch.Tensor,
+    bn_running_mean: torch.Tensor,
+    bn_running_var: torch.Tensor,
+    input_scale: torch.Tensor,
+    input_zero_point: torch.Tensor,
+    weight_scale: torch.Tensor,
+    weight_zero_point: torch.Tensor,
+    output_scale: torch.Tensor,
+    output_zero_point: torch.Tensor,
+) -> torch.Tensor:
+    """ Quantized QAT conv - bn pattern with bn weights being folded into conv
+    """
+    # TODO: allow setting eps
+    bn_eps = 1e-5
+    weight_quant_min = -127
+    weight_quant_max = 127
+    input_quant_min = -128
+    input_quant_max = 127
+    output_quant_min = -128
+    output_quant_max = 127
+
+    x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        x, input_scale, input_zero_point, input_quant_min, input_quant_max, torch.int8)
+    conv_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
+        conv_weight, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    conv_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        conv_weight, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    x = F.conv2d(x, conv_weight, conv_bias)
+    x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+    x = torch.ops.quantized_decomposed.quantize_per_tensor(
+        x, output_scale, output_zero_point, output_quant_min, output_quant_max, torch.int8)
     return x
 
 def _get_aten_graph_module(
@@ -94,7 +202,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     m.recompile()
     example_inputs = _conv2d_bn_pattern_example_inputs
     match_pattern = _get_aten_graph_module(_conv2d_bn_pattern, example_inputs)
-    replacement_pattern = _get_aten_graph_module(_fused_qat_conv2d_bn_pattern, example_inputs)
+    replacement_pattern = _get_aten_graph_module(_qat_conv2d_bn_pattern, example_inputs)
     # TODO: use the public replace_pattern API once it also returns replacement nodes
     match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)
     m.recompile()
@@ -126,4 +234,61 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
                 replacement_bn_node.meta = original_node.meta
             if original_node.target == operator.getitem:
                 replacement_getitem_node.meta = original_node.meta
+    return m
+
+def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
+    """
+    Replace the quantized (conv + bn) pattern with conv with bn weights folded into the weights of conv.
+    """
+    m.graph.eliminate_dead_code()
+    m.recompile()
+    example_inputs = _quantized_conv2d_bn_pattern_example_inputs
+    match_pattern = _get_aten_graph_module(_quantized_qat_conv2d_bn_pattern, example_inputs)
+
+    # Workaround: current convert does not produce q/dq ops with a specific overload
+    # we'll remove the overload from the pattern here as a workaround since we do not want to break BC
+    for n in match_pattern.graph.nodes:
+        if n.op == "call_function" and n.target == torch.ops.quantized_decomposed.quantize_per_tensor.tensor:
+            n.target = torch.ops.quantized_decomposed.quantize_per_tensor
+        if n.op == "call_function" and n.target == torch.ops.quantized_decomposed.dequantize_per_tensor.tensor:
+            n.target = torch.ops.quantized_decomposed.dequantize_per_tensor
+
+    replacement_pattern = _get_aten_graph_module(_folded_quantized_qat_conv2d_bn_pattern, example_inputs)
+
+    # TODO: use the public replace_pattern API once it also returns replacement nodes
+    match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern, ignore_literals=True)
+    m.recompile()
+
+    for mr in match_and_replacement:
+        # Find replacement conv and bn nodes by climbing upwards from anchor node
+        assert len(mr.replacements) == 1, "expected only one replacement node"
+
+        # find conv, bn, weight, bias nodes in the graph
+        replacement_quantize_node = mr.replacements[0]
+        assert replacement_quantize_node.target == torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+        n = replacement_quantize_node
+        conv_node = None
+        bn_node = None
+        while conv_node is None or bn_node is None:
+            if n.target == torch.ops.aten.convolution.default:
+                conv_node = n
+            if n.target == torch.ops.aten._native_batch_norm_legit.default:
+                bn_node = n
+            assert isinstance(n.args[0], Node)
+            n = n.args[0]
+        assert conv_node is not None and bn_node is not None
+
+        conv_weight_dq = conv_node.args[1]
+        assert conv_weight_dq.target == torch.ops.quantized_decomposed.dequantize_per_tensor.tensor
+        conv_weight_q = conv_weight_dq.args[0]
+        assert conv_weight_q.target == torch.ops.quantized_decomposed.quantize_per_tensor.tensor
+        conv_weight = conv_weight_q.args[0]
+        assert conv_weight.op == "get_attr"
+        conv_bias = conv_node.args[2]
+
+        # fold bn weights into conv
+        _fold_bn_weights_into_conv_node(conv_node, conv_weight, conv_bias, bn_node, m)
+
+    m.graph.eliminate_dead_code()
+    m.recompile()
     return m
