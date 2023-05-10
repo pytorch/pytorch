@@ -143,29 +143,39 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
     """
-    if not V.graph.sizevars.maybe_guard_list_equals(
+    m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
+    # Optimization is optional, because we can always just not do the fusion
+    if not V.graph.sizevars.statically_known_list_equals(
         mat1.get_size(), mat3.get_size()
-    ) or not V.graph.sizevars.maybe_guard_list_equals(mat2.get_size(), mat4.get_size()):
+    ) or not V.graph.sizevars.statically_known_list_equals(
+        mat2.get_size(), mat4.get_size()
+    ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
-        return lowerings[aten.addmm](lowerings[aten.mm](mat1, mat2), mat3, mat4)
+        if m1 == m2 and n1 == n2:
+            V.graph.sizevars.guard_equals(m1, m2)
+            V.graph.sizevars.guard_equals(n1, n2)
+            return lowerings[aten.addmm](lowerings[aten.mm](mat3, mat4), mat1, mat2)
+        return lowerings[aten.add](
+            lowerings[aten.mm](mat1, mat2), lowerings[aten.mm](mat3, mat4)
+        )
 
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
-    m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
-
+    assert layout1 == layout2
     # options to tune from
-    choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout)]
-    if use_triton_template(layout):
+    choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+    if use_triton_template(layout1):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if config.kwargs["BLOCK_K"] < k:
-                choices.append(
-                    mm_plus_mm_template.generate(
-                        (mat1, mat2, mat3, mat4),
-                        layout,
-                        **mm_options(config, k, layout),
-                    )
+            if config.kwargs["BLOCK_K"] < k1:
+                mm_plus_mm_template.maybe_append_choice(
+                    choices,
+                    (mat1, mat2, mat3, mat4),
+                    layout1,
+                    **mm_options(config, k1, layout1),
                 )
 
-    return autotune_select_algorithm(choices, [mat1, mat2, mat3, mat4], layout)
+    return autotune_select_algorithm(
+        "mm_plus_mm", choices, [mat1, mat2, mat3, mat4], layout1
+    )

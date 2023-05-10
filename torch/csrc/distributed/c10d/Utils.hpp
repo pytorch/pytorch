@@ -98,6 +98,14 @@ inline int parseEnvVarInt(const char* envVarName) {
   return C10D_ENV_NOT_SET;
 }
 
+inline const char* parseEnvVarString(const char* envVarName, const char* default_val) {
+  const char* val = std::getenv(envVarName);
+  if (val == nullptr) {
+    val = default_val;
+  }
+  return val;
+}
+
 inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
     int val = parseEnvVarInt(envVarName);
     if (val == C10D_ENV_NOT_SET)
@@ -460,12 +468,9 @@ size_t computeLengthsAndOffsets(
   }
   for(const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
+    // TODO: see if we should add overflow protection for offset
     offset += length;
   }
   return offset;
@@ -480,10 +485,6 @@ size_t computeLengthsAndOffsets(
   size_t offset = 0;
   for(const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
-    TORCH_INTERNAL_ASSERT(
-        length <= std::numeric_limits<int>::max() &&
-            offset <= std::numeric_limits<int>::max(),
-        "Length or offset larger than INT_MAX not supported");
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
     offset += length;

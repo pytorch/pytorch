@@ -149,12 +149,7 @@ def main(argv: List[Any]) -> None:
                     model_dict = yaml.safe_load(model_file)
                     model_dicts.append(model_dict)
 
-    selective_builders = list(
-        map(
-            lambda m: SelectiveBuilder.from_yaml_dict(m),
-            model_dicts,
-        )
-    )
+    selective_builders = [SelectiveBuilder.from_yaml_dict(m) for m in model_dicts]
 
     # While we have the model_dicts generate the supported mobile models api
     gen_supported_mobile_models(model_dicts, options.output_dir)

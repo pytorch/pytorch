@@ -129,11 +129,11 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
  * Each thread processes a single inner row at a time.
  */
 template<typename scalar_t, class BinaryFunction>
-__global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scalar_t *values_, int64_t *indices_,
+__global__ void tensor_kernel_scan_outer_dim_with_indices(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
                   const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size, scalar_t init, BinaryFunction binary_op) {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      scalar_t *self = self_ + orow * row_size * num_irows + irow;
+      const scalar_t *self = self_ + orow * row_size * num_irows + irow;
       scalar_t *values = values_ + orow * row_size * num_irows + irow;
       int64_t *indices = indices_ + orow * row_size * num_irows + irow;
       scalar_t out = init;
@@ -185,7 +185,7 @@ __host__ void scan_outer_dim_with_indices(
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, ceil_div(num_irows, int64_t{threads.x})));
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
+    self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
     num_orows, num_irows, row_size, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -203,7 +203,7 @@ __host__ void scan_innermost_dim_with_indices(
   dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], ceil_div(num_rows, int(threads.y))));
 
   tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
+    self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
     num_rows, row_size, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -239,13 +239,13 @@ void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, con
  * Each thread processes a single inner row at a time.
  */
 template<typename scalar_t, class BinaryOp>
-__global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
+__global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src_,
                                               const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
                                               const scalar_t init, BinaryOp binary_op)
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      scalar_t *src = src_ + orow * row_size * num_irows + irow;
+      const scalar_t *src = src_ + orow * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
@@ -271,7 +271,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, scalar_t *src_,
  * per thread block is quicker than processing a single row, especially for short rows).
  */
 template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
-__device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *src_,
+__device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const T *src_,
                                       const uint32_t num_rows, const uint32_t row_size,
                                       T init, BinaryFunction binary_op){
   for (uint32_t block_row = blockIdx.x * blockDim.y;
@@ -280,7 +280,7 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, T *sr
     uint32_t row = block_row + threadIdx.y;
     T block_total = init;
 
-    T *row_src = src_ + row * row_size;
+    const T *row_src = src_ + row * row_size;
     T *row_tgt = tgt_ + row * row_size;
 
     // Perform scan on one block at a time, keeping track of the total value of
@@ -346,7 +346,7 @@ template <
 __global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
-    T* src_,
+    const T* src_,
     const uint32_t num_rows,
     const uint32_t row_size,
     T init,
@@ -366,7 +366,7 @@ template <
 __global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
-    T* src_,
+    const T* src_,
     const uint32_t num_rows,
     const uint32_t row_size,
     T init,
@@ -407,7 +407,7 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(row_size, "row_size");
 
   tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
+    result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -428,7 +428,7 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(row_size, "row_size");
 
   tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-    result.data_ptr<scalar_t>(), self.data_ptr<scalar_t>(),
+    result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_rows, row_size, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -441,7 +441,7 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   if (self.numel() == self.size(dim)) {
-    cuda::cub::inclusive_scan(self_->data_ptr<scalar_t>(), result.data_ptr<scalar_t>(), binary_op, self.numel());
+    cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
   } else if (dim == ndim - 1) {
     scan_innermost_dim<scalar_t>(*self_, result, init, binary_op);
   } else {

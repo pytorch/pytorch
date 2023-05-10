@@ -2,7 +2,7 @@ name: Upload torch dynamo performance stats
 
 on:
   workflow_run:
-    workflows: [inductor-A100-perf-nightly]
+    workflows: [inductor-A100-perf-nightly, inductor-A100-max-autotune-weekly]
     types:
       - completed
 
@@ -28,7 +28,7 @@ jobs:
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: 1

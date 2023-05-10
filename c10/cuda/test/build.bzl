@@ -14,11 +14,11 @@ def define_targets(rules):
         srcs = [
             "impl/CUDATest.cpp",
         ],
-        deps = [
-            "@com_google_googletest//:gtest_main",
-            "//c10/cuda:cuda",
-        ],
         target_compatible_with = rules.requires_cuda_enabled(),
+        deps = [
+            "//c10/cuda",
+            "@com_google_googletest//:gtest_main",
+        ],
     )
 
     for src in dsa_tests:
@@ -28,11 +28,11 @@ def define_targets(rules):
             srcs = [
                 src,
             ],
-            deps = [
-                "@com_google_googletest//:gtest_main",
-                "//c10/cuda:cuda",
-            ],
             target_compatible_with = rules.requires_cuda_enabled(),
+            deps = [
+                "//c10/cuda",
+                "@com_google_googletest//:gtest_main",
+            ],
         )
         rules.cc_test(
             name = "test_" + name,
