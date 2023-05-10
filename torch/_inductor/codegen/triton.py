@@ -1105,7 +1105,9 @@ class TritonKernel(Kernel):
             )
         else:
             last_use = name in self.current_node.last_usage
-        ep = "" if last_use else ", eviction_policy='evict_last'"
+        broadcasting = "rmask" in mask and "xmask" not in mask and not self.persistent_reduction
+        evict_last = not last_use or broadcasting
+        ep = ", eviction_policy='evict_last'" if evict_last else ""
 
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
