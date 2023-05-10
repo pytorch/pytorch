@@ -165,10 +165,21 @@ def map_autograd(f, num_mapped_args, *args):
     with disable_proxy_modes_tracing():
         # By constructing the example inputs with detach then requires_grad_, we
         # make them leaves of autograd graph so that grad_fn is not required.
-        example_xs = [xs.detach().requires_grad_() if xs.requires_grad else xs.detach() for xs in _unstack_pytree(mapped_xs)[0]]
-        example_pos_args = [arg.detach().requires_grad_() if arg.requires_grad else arg.detach() for arg in pos_args]
-        example_flat_out, _ = pytree.tree_flatten(f(*example_xs, *example_pos_args))
-        example_grad = [torch.ones_like(out) for out in example_flat_out if out is not None and out.requires_grad]
+
+        def from_fun(t):
+            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
+                return t
+            torch._sync(t)
+            return torch._from_functional_tensor(t)
+
+        def detach(t, requires_grad):
+            t = t.detach()
+            return t if not requires_grad else t.requires_grad_()
+
+        example_xs = [from_fun(detach(xs, xs.requires_grad)) for xs in _unstack_pytree(mapped_xs)[0]]
+        example_pos_args = [from_fun(detach(arg, arg.requires_grad)) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
+        example_flat_out = pytree.tree_map(from_fun, f(*example_xs, *example_pos_args))
+        example_grad = [from_fun(detach(torch.ones_like(out), out.requires_grad)) for out in example_flat_out if out is not None and out.requires_grad]
 
     fw_graph = make_fx(f)(*example_xs, *example_pos_args)
     print("create forward graph")
