@@ -136,6 +136,14 @@ def _quantized_qat_conv2d_bn_pattern(
     input_quant_max = 127
     output_quant_min = -128
     output_quant_max = 127
+
+    running_std = torch.sqrt(bn_running_var + bn_eps)
+    scale_factor = bn_weight / running_std
+    weight_shape = [1] * len(conv_weight.shape)
+    weight_shape[0] = -1
+    bias_shape = [1] * len(conv_weight.shape)
+    bias_shape[1] = -1
+    scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
     x = torch.ops.quantized_decomposed.dequantize_per_tensor(
         x, input_scale, input_zero_point, input_quant_min, input_quant_max, torch.int8)
     zero_bias = torch.zeros_like(conv_bias, dtype=x.dtype)
