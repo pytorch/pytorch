@@ -49,7 +49,7 @@ pattern_matcher = True
 split_cat_fx_passes = True
 
 # enable reordering pass
-reordering = True
+reordering = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
