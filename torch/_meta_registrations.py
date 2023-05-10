@@ -2699,9 +2699,6 @@ def meta__scaled_dot_product_flash_backward(
     num_heads = query.size(1)
     head_dim = query.size(3)
 
-    Nnz_q = batch_size * max_q
-    Nnz_kv = batch_size * max_k
-
     grad_q = torch.empty_permuted(
         (batch_size, num_heads, max_q, head_dim),
         (0, 2, 1, 3),
