@@ -628,7 +628,7 @@ Tensor slow_conv_dilated3d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -687,7 +687,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
