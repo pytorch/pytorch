@@ -81,7 +81,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <ATen/cuda/CUDAContext.h>
 
 namespace torch {
 namespace jit {
@@ -2403,7 +2402,8 @@ TEST(FuturesTest, Basic) {
 // Sparse CUDA tensor test
 TEST(FutureTest, SparseTensor) {
   // Skip test if CUDA is not available.
-  if (!at::cuda::is_available()) {
+  bool has_cuda = at::globalContext().hasCUDA();
+  if (!has_cuda) {
     LOG(INFO) << "CUDA not available, skipping test";
   }
   auto f = c10::make_intrusive<Future>(TensorType::get());
