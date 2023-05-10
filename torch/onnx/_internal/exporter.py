@@ -425,7 +425,7 @@ class FXGraphExtractor(abc.ABC):
         # Note: Reason it needs to be last pass is other fx passes (some are from
         # outside of exporter) may not be aware of `call_module`. There may be the
         # assumption that all nodes are flattened. Otherwise, this pass should be free
-        # to moved to anywhere earlier in the pipeline.
+        # to move to anywhere earlier in the pipeline.
         module = passes.Modularize(diagnostic_context, module).run(*fx_module_args)
 
         # We want to pass list of ints and floats to TorchScript graph correctly
@@ -493,17 +493,6 @@ class Exporter:
         self.model = model
         self.model_args = model_args
         self.model_kwargs = model_kwargs
-
-    # This is the appropriate place.
-    # def _export_fx_to_onnx(
-    #     self,
-    #     options,
-    #     fx_module,
-    #     fx_args,
-    # ):
-    #     return options.fx_tracer._export_fx_to_onnx(
-    #         self.options, fx_module, fx_args
-    #     )
 
     def export(self) -> ExportOutput:
         graph_module = self.options.fx_tracer.generate_fx(

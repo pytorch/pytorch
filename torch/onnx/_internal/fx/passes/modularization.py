@@ -65,6 +65,9 @@ class ModuleMeta:
             and self._module_class == __value._module_class
         )
 
+    def __hash__(self) -> int:
+        return hash((self._module_name, self._module_class))
+
 
 class ModuleStackMeta:
     """Meta information about the module stack.
@@ -149,6 +152,20 @@ class ModuleStackMeta:
                 return False
 
         return True
+
+    def immediate_child(
+        self, module_stack: ModuleStackMeta
+    ) -> Optional[ModuleStackMeta]:
+        if not self.is_child_of(module_stack):
+            return None
+
+        raw_meta_clone = copy.copy(self._raw_meta)
+        assert (
+            raw_meta_clone is not None
+        ), f"`_raw_meta` must not be None since `self` is child of {module_stack}."
+        for _ in range(len(self) - len(module_stack) - 1):
+            raw_meta_clone.popitem()
+        return ModuleStackMeta(raw_meta_clone)
 
     @_beartype.beartype
     def is_same(
@@ -244,7 +261,7 @@ def create_call_module_node(
     original_inputs: Sequence[torch.fx.Node],
     original_outputs: Sequence[torch.fx.Node],
     stack_trace: Optional[str] = None,
-) -> torch.fx.Node:
+) -> Tuple[torch.fx.Node, Sequence[torch.fx.Node]]:
     """Create a call_module node and insert into root_module at the current insert point.
 
     This function will insert a call_module node and replace all uses of the old outputs
@@ -271,6 +288,7 @@ def create_call_module_node(
 
     # Copy meta data from old outputs.
     # Replace usage of old outputs with new module output.
+    extra_nodes = []
     if len(original_outputs) == 1:
         old_output = original_outputs[0]
         old_output.replace_all_uses_with(module_node)
@@ -292,19 +310,22 @@ def create_call_module_node(
                 old_output.meta["nn_module_stack"]
             )
             module_output.meta["nn_module_stack"].pop(module_name)
+            extra_nodes.append(module_output)
 
-    # Update stack info for new node.
+    # Update meta for new node.
+    if stack_trace is not None:
+        module_node.meta["stack_trace"] = stack_trace
     raw_module_stack_meta = module_stack_meta.raw_meta
     assert raw_module_stack_meta is not None
     module_node.meta["nn_module_stack"] = copy.copy(raw_module_stack_meta)
     module_node.meta["nn_module_stack"].pop(module_name)
 
-    return module_node
+    return module_node, extra_nodes
 
 
 def create_sub_fx_graph_module(
     root_module: torch.fx.GraphModule, nodes: Sequence[torch.fx.Node]
-) -> Tuple[Optional[torch.fx.GraphModule], torch.fx.Node]:
+) -> Tuple[torch.fx.GraphModule, torch.fx.Node, Sequence[torch.fx.Node]]:
     """Create a sub fx graph module from a sequence of nodes.
 
     This function will replace the nodes with a call_module node that calls the new
@@ -336,10 +357,12 @@ def create_sub_fx_graph_module(
 
     if len(outputs) == 0:
         # TODO: Replace with diagnostic w/ warning.
-        # Function with no outputs is invalid. Abort creating this function.
+        # Function with no outputs is invalid.
         # It is either ill model code that the computed output is unused, or something
         # is wrong with the fx graph.
-        return None, nodes[-1]
+        raise AssertionError(
+            "Cannot create sub fx graph module from nodes with no outputs."
+        )
 
     # Create a new fx graph for the new sub module.
     sub_graph = torch.fx.Graph(root_module)
@@ -370,7 +393,7 @@ def create_sub_fx_graph_module(
     # submodule code, not the location of the module call.
     stack_trace = nodes[0].meta.get("stack_trace", None)
     with root_module.graph.inserting_before(nodes[0]):
-        module_node = create_call_module_node(
+        module_node, extra_output_nodes = create_call_module_node(
             root_module,
             module_name,
             module_node_module_stack_meta,
@@ -382,66 +405,65 @@ def create_sub_fx_graph_module(
     for node in reversed(nodes):
         root_module.graph.erase_node(node)
 
-    return sub_module, module_node
+    return sub_module, module_node, extra_output_nodes
 
 
-def try_create_sub_fx_graph_module_starting_from_node(
-    root_module: torch.fx.GraphModule, start_node: torch.fx.Node
-) -> torch.fx.Node:
-    """Try to create a sub fx graph module starting from a node.
+class SubModuleBuilder:
+    def __init__(self, root: torch.fx.GraphModule, stack_meta: ModuleStackMeta):
+        self._root = root
+        self._nodes: List[Union[torch.fx.Node, SubModuleBuilder]] = []
+        self._submodules: Dict[ModuleMeta, SubModuleBuilder] = {}
+        self._stack_meta: ModuleStackMeta = stack_meta
 
-    If the start node does not belong to a module, or is on root module level, this
-    function will return the start node.
+    @property
+    def stack_meta(self) -> ModuleStackMeta:
+        return self._stack_meta
 
-    Otherwise, this function will try to find a sequence of nodes that belongs to the
-    same module of the start node, and create a sub fx graph module from them. These
-    nodes will be removed and replaced with a call_module node that represents the new
-    sub fx graph module. The call_module node will be returned.
+    def add_fx_node(self, fx_node: torch.fx.Node):
+        node_stack_meta = module_stack_meta_from_node(fx_node)
 
-    If this function finds a sequence of nodes that belongs to the child module of the
-    start node, it will recursively call this function to create a sub fx graph module
-    for the child module first.
-
-    Args:
-        root_module: The root module.
-        start_node: The start node to try to create a sub fx graph module from. It is
-            expected that all nodes after this node are in flattened form. It is also
-            expected that if this node belongs to a module, all nodes after this node
-            that belong to the same module should be consecutive.
-    Returns:
-        The call_module node that represents the new sub fx graph module, or the start
-        node if no sub fx graph module is created.
-    """
-    iter_node = start_node
-    current_module_stack_meta = module_stack_meta_from_node(start_node)
-    if current_module_stack_meta.is_empty_or_root():
-        return iter_node
-    nodes_to_form_module: List[torch.fx.Node] = []
-
-    while iter_node:
-        module_stack_meta = module_stack_meta_from_node(iter_node)
-
-        if module_stack_meta == current_module_stack_meta:
-            nodes_to_form_module.append(iter_node)
-            iter_node = iter_node.next
-            continue
-        elif module_stack_meta.is_child_of(current_module_stack_meta):
-            # Need to find nodes for child module and create child module first.
-            child_module_node = try_create_sub_fx_graph_module_starting_from_node(
-                root_module, iter_node
-            )
-            # Continue from the new child module node.
-            iter_node = child_module_node
-            continue
+        if node_stack_meta == self.stack_meta:
+            self._nodes.append(fx_node)
+        elif node_stack_meta.is_child_of(self.stack_meta):
+            child_stack_meta = node_stack_meta.immediate_child(self.stack_meta)
+            assert child_stack_meta is not None
+            child_meta = child_stack_meta.current()
+            assert child_meta is not None
+            if child_meta not in self._submodules:
+                self._submodules[child_meta] = SubModuleBuilder(
+                    self._root, child_stack_meta
+                )
+                self._nodes.append(self._submodules[child_meta])
+            self._submodules[child_meta].add_fx_node(fx_node)
         else:
-            # iter_node belongs to another module. And it is not a child module.
-            # All nodes for current module are collected.
-            _, call_module_node = create_sub_fx_graph_module(
-                root_module, nodes_to_form_module
+            raise AssertionError(
+                f"Node {fx_node} ({node_stack_meta}) does not belong to module "
+                f"{self._stack_meta}."
             )
-            return call_module_node
 
-    raise AssertionError(f"Should not reach here. Node {start_node}")
+    def build_submodules(self) -> Sequence[torch.fx.Node]:
+        fx_nodes: List[torch.fx.Node] = []
+
+        for node in self._nodes:
+            if isinstance(node, SubModuleBuilder):
+                _, module_node, extra_output_nodes = node.build()
+                fx_nodes.extend([module_node, *extra_output_nodes])
+            else:
+                fx_nodes.append(node)
+
+        return fx_nodes
+
+    def build(
+        self,
+    ) -> Tuple[torch.fx.GraphModule, torch.fx.Node, Sequence[torch.fx.Node]]:
+        if self._stack_meta.is_empty_or_root():
+            raise RuntimeError(
+                "`build` should not be called on root module. "
+                "Call `build_submodules` instead."
+            )
+        fx_nodes = self.build_submodules()
+
+        return create_sub_fx_graph_module(self._root, fx_nodes)
 
 
 class Modularize(_pass.Transform):
@@ -458,16 +480,8 @@ class Modularize(_pass.Transform):
         Returns:
             The modularized fx graph module.
         """
-        iter_node: torch.fx.Node = next(iter(self.module.graph.nodes))
-        while iter_node and iter_node != self.module.graph._root:
-            maybe_new_module_node = try_create_sub_fx_graph_module_starting_from_node(
-                self.module, iter_node
-            )
-            if maybe_new_module_node == iter_node:
-                # No sub fx graph module is created. Continue to next node.
-                iter_node = iter_node.next
-            else:
-                # A sub fx graph module is created. Continue from the new module node,
-                # because it may belong to another module higher in the stack.
-                iter_node = maybe_new_module_node
+        builder = SubModuleBuilder(self.module, ModuleStackMeta(None))
+        for node in self.module.graph.nodes:
+            builder.add_fx_node(node)
+        builder.build_submodules()
         return self.module
