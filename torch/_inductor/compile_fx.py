@@ -157,12 +157,104 @@ def compile_fx_inner(
     is_inference=False,
     boxed_forward_device_index=None,
 ):
-    graph_args = locals() # List of all parameters passed to function
-    return FxGraphCache.load(compile_fx_inner_uncached, graph_args)
+    graph_args = [gm, example_inputs, cudagraphs, num_fixed, is_backward, graph_id, cpp_wrapper, aot_mode] # Inputs to fx_codegen_and_compile
+    compiled_graph: CompiledFxGraph = FxGraphCache.load(fx_codegen_and_compile, graph_args)
+
+    if aot_mode:
+        return compiled_graph
+
+    if cudagraphs:
+        # output args are tuple of first argument
+        output = list(gm.graph.nodes)[-1]
+        assert len(output.args) == 1
+        stack_traces = [
+            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+            for arg in output.args[0]
+        ]
+
+        complex_memory_overlap_inputs = any(
+            complex_memory_overlap(t)
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
+        )
+
+        if (
+            set(compiled_graph.device_types) == {"cuda"}
+            and not compiled_graph.mutated_inputs
+            and not has_incompatible_cudagraph_ops(gm)
+            and not complex_memory_overlap_inputs
+            and all(isinstance(t, torch.Tensor) for t in example_inputs)
+            and (len(compiled_graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
+        ):
+            if (
+                boxed_forward_device_index is not None
+                and not is_inference
+                and not is_backward
+            ):
+                boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
+
+            compiled_graph.compiled_artifact = cudagraphify(
+                compiled_graph.compiled_artifact,
+                example_inputs,
+                static_input_idxs=range(num_fixed),
+                device_index=next(iter(compiled_graph.device_idxs)),
+                stack_traces=stack_traces,
+                is_backward=is_backward,
+                is_inference=is_inference,
+            )
+        else:
+            BoxedBool.disable(cudagraphs)
+
+            # See [Backward Generation Handling]
+            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+            # know we are we running the backward even if we will not run it in cudagraphs
+            if is_backward and config.triton.cudagraph_trees:
+                assert boxed_forward_device_index.value is not None
+                compiled_graph_inner = compiled_graph.compiled_artifact
+
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    boxed_forward_device_index.value, create_if_none_exists=False
+                )
+                # should already exist from forward
+                assert manager is not None
+
+                def compiled_artifact(new_inputs):
+                    manager.set_to_running_backward()
+                    return compiled_graph_inner(new_inputs)
+
+                compiled_graph.compiled_artifact = compiled_artifact
+
+            if len(set(compiled_graph.device_types)) > 1:
+                developer_warning("skipping cudagraphs due to multiple devices")
+            elif set(compiled_graph.device_types) == {"cuda"}:
+                if compiled_graph.mutated_inputs:
+                    developer_warning("skipping cudagraphs due to input mutation")
+                elif complex_memory_overlap_inputs:
+                    developer_warning(
+                        "skipping cudagraphs due to complex input striding"
+                    )
+                elif len(compiled_graph.device_idxs) > 1 and config.triton.cudagraph_trees:
+                    developer_warning(
+                        "skipping cudagraphs due to multiple device indexes"
+                    )
+
+    result = align_inputs(compiled_graph, example_inputs, range(num_fixed))
+
+    _step_logger()(
+        logging.INFO,
+        "torchinductor done compiling "
+        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
+        f"graph {graph_id}",
+    )
+
+    # aot autograd needs to know to pass in inputs as a list
+    result._boxed_call = True
+    return result
+
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-def compile_fx_inner_uncached(
+def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs=None,
@@ -171,8 +263,6 @@ def compile_fx_inner_uncached(
     graph_id=None,
     cpp_wrapper=False,
     aot_mode=False,
-    is_inference=False,
-    boxed_forward_device_index=None,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -230,97 +320,11 @@ def compile_fx_inner_uncached(
                 cache_key=graph.cache_key,
                 artifact_path=graph.cache_path,
                 cache_linemap=graph.cache_linemap,
+                device_types=graph.device_types,
+                device_idxs=graph.device_idxs,
+                mutated_inputs=graph.mutated_inputs,
             )
-            if aot_mode:
-                return compiled_graph
-
-    if cudagraphs:
-        # output args are tuple of first argument
-        output = list(gm.graph.nodes)[-1]
-        assert len(output.args) == 1
-        stack_traces = [
-            (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-            for arg in output.args[0]
-        ]
-
-        complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t)
-            for t in example_inputs
-            if isinstance(t, torch.Tensor)
-        )
-
-        if (
-            set(graph.device_types) == {"cuda"}
-            and not graph.mutated_inputs
-            and not has_incompatible_cudagraph_ops(gm)
-            and not complex_memory_overlap_inputs
-            and all(isinstance(t, torch.Tensor) for t in example_inputs)
-            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
-        ):
-            if (
-                boxed_forward_device_index is not None
-                and not is_inference
-                and not is_backward
-            ):
-                boxed_forward_device_index.set(next(iter(graph.device_idxs)))
-
-            compiled_graph.compiled_artifact = cudagraphify(
-                compiled_graph.compiled_artifact,
-                example_inputs,
-                static_input_idxs=range(num_fixed),
-                device_index=next(iter(graph.device_idxs)),
-                stack_traces=stack_traces,
-                is_backward=is_backward,
-                is_inference=is_inference,
-            )
-        else:
-            BoxedBool.disable(cudagraphs)
-
-            # See [Backward Generation Handling]
-            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
-            # know we are we running the backward even if we will not run it in cudagraphs
-            if is_backward and config.triton.cudagraph_trees:
-                assert boxed_forward_device_index.value is not None
-                compiled_graph_inner = compiled_graph.compiled_artifact
-
-                manager = torch._inductor.cudagraph_trees.get_manager(
-                    boxed_forward_device_index.value, create_if_none_exists=False
-                )
-                # should already exist from forward
-                assert manager is not None
-
-                def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()
-                    return compiled_graph_inner(new_inputs)
-
-                compiled_graph.compiled_artifact = compiled_artifact
-
-            if len(set(graph.device_types)) > 1:
-                developer_warning("skipping cudagraphs due to multiple devices")
-            elif set(graph.device_types) == {"cuda"}:
-                if graph.mutated_inputs:
-                    developer_warning("skipping cudagraphs due to input mutation")
-                elif complex_memory_overlap_inputs:
-                    developer_warning(
-                        "skipping cudagraphs due to complex input striding"
-                    )
-                elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
-                    developer_warning(
-                        "skipping cudagraphs due to multiple device indexes"
-                    )
-
-    result = align_inputs(compiled_graph, example_inputs, range(num_fixed))
-
-    _step_logger()(
-        logging.INFO,
-        "torchinductor done compiling "
-        f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
-        f"graph {graph_id}",
-    )
-
-    # aot autograd needs to know to pass in inputs as a list
-    result._boxed_call = True
-    return result
+    return compiled_graph
 
 
 def clone_preserve_strides(x):

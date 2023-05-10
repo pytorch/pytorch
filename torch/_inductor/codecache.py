@@ -23,7 +23,7 @@ from ctypes import cdll
 from functools import partial
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 
@@ -293,6 +293,9 @@ class CompiledFxGraph:
     cache_key: str = None
     artifact_path: str = None
     cache_linemap: List = None
+    device_types: Set[str] = set()
+    device_idxs: Set[int] = set()
+    mutated_inputs: Set[str] = set()
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
