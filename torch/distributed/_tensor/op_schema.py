@@ -210,18 +210,18 @@ class OpSchema:
             DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
         )
 
-    def _inplace_rewrap_schema_suggestion(self, target_schema: "OpSchema") -> None:
+    def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
         suggestion_args_spec = self.args_spec
         new_arg_schema: List[object] = []
         idx_of_args_spec = 0
-        for arg in target_schema.args_schema:
+        for arg in origin_schema.args_schema:
             if isinstance(arg, DTensorSpec):
                 new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
                 idx_of_args_spec += 1
             else:
                 new_arg_schema.append(arg)
         self.args_schema = tuple(new_arg_schema)
-        self.kwargs_schema = target_schema.kwargs_schema
+        self.kwargs_schema = origin_schema.kwargs_schema
 
 
 @dataclass

@@ -105,13 +105,14 @@ class Override(ABC):
     """
 
     @abstractmethod
-    def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+    def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
         r"""
         Implement this method to return a new :class:`nn.Module` instance to
         replace the ``orig_submodule`` argument in the model. This helps if
         ``orig_submodule`` is not traceable or should not be traced.
 
         Args:
+            fqn (str): fully quantified name of the submodule.
             orig_submodule (class:`nn.Module`): original submodule instance to replace.
 
         Returns:
@@ -407,14 +408,14 @@ def _compile(
 
         # FIXME(@mrshenli): type might overlap with fqns
         for typ_or_fqn, override in module_override.items():
-            for name, submodule in mod.named_modules():
+            for fqn, submodule in mod.named_modules():
                 if (
                     isinstance(typ_or_fqn, str)
-                    and typ_or_fqn == name
+                    and typ_or_fqn == fqn
                     or isinstance(typ_or_fqn, type)
                     and isinstance(submodule, typ_or_fqn)
                 ):
-                    accessor.swap_submodule(name, override.replacement(submodule))
+                    accessor.swap_submodule(fqn, override.replacement(fqn, submodule))
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))

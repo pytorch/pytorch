@@ -10,6 +10,7 @@ from torch.distributed._tensor.op_schema import (
     OpSchema,
     OpStrategy,
     OutputSharding,
+    OutputSpecType,
     PlacementStrategy,
     StrategyType,
 )
@@ -76,8 +77,8 @@ class ShardingPropagator:
 
         return op_schema
 
-    def propagate(self, op_overload: OpOverload, op_schema: OpSchema):
-        if self.op_strategy_funcs.get(op_overload, None) is not None:
+    def propagate(self, op_overload: OpOverload, op_schema: OpSchema) -> OutputSharding:
+        if op_overload in self.op_strategy_funcs:
             # generate op strategy for the op, this is done by propagating
             # the sharding in the graph.
             op_gm = self._prepare_op_graph(op_overload, op_schema)
@@ -96,7 +97,7 @@ class ShardingPropagator:
                         strategy = PlacementStrategy(
                             flat_args_sharding[placeholder_idx]
                         )
-                        # for eager execution, inputs only have one possible sharding
+                        # for eager execution, inputs only have one fixed sharding
                         node_to_strategy[node] = OpStrategy([strategy])
                     placeholder_idx += 1
                 elif node.op == "call_function":
@@ -109,8 +110,8 @@ class ShardingPropagator:
                             f"Unsupported function: {node.target}"
                         )
                 elif node.op == "output":
-                    output_node = node
-                    out_node_strategy = node_to_strategy[node.args[0][0]]
+                    output_node = node.args[0]
+                    out_node_strategy = node_to_strategy[output_node[0]]
                 else:
                     raise NotImplementedError(f"Unsupported node type: {node.op}")
 
@@ -148,7 +149,7 @@ class ShardingPropagator:
                 self._wrap_output_spec_meta(output_sharding.output_spec, output_node)
             return output_sharding
 
-        elif self.op_to_rules.get(op_overload, None) is not None:
+        elif op_overload in self.op_to_rules:
             return self.propagate_op_sharding(op_overload, op_schema)
         else:
             raise NotImplementedError(
@@ -156,12 +157,11 @@ class ShardingPropagator:
             )
 
     def _wrap_output_spec_meta(
-        self, output_spec: DTensorSpec, output_node: Node
-    ) -> DTensorSpec:
+        self, output_spec: OutputSpecType, output_nodes: Node
+    ) -> None:
         """
         Wrap the output_spec with the metadata from the output node.
         """
-        output_nodes = output_node.args[0]
         if output_spec is not None:
             assert isinstance(output_nodes, (tuple, list))
             if isinstance(output_spec, DTensorSpec):
@@ -183,19 +183,12 @@ class ShardingPropagator:
         if op_gm is not None:
             for node in op_gm.graph.nodes:
                 if node.op == "output":
-                    output_node = node
+                    output_node = node.args[0]
 
         # then we propagate the sharding
         sharding_prop_func = self.op_to_rules.get(op_overload, None)
 
-        if sharding_prop_func is None:
-            # step 1. If there's not even one sharding rule
-            # implemented for the operator, we error out.
-            raise NotImplementedError(
-                f"Operator {op_overload} does not have a DistributedTensor rule registered."
-            )
-
-        # step 2. there's sharding propagation rule, run
+        # step 1. there's sharding propagation rule, run
         # sharding propagation to get the output sharding
         try:
             output_sharding = sharding_prop_func(op_schema)
@@ -208,7 +201,7 @@ class ShardingPropagator:
                 f"Error: {e}"
             ) from e
 
-        # step 3. if can't get output_spec from sharding
+        # step 2. if can't get output_spec from sharding
         # propagation (i.e. no rules apply for input
         # placements), we return the output sharding
         # with schema suggestions, which can be used to
@@ -232,8 +225,6 @@ class ShardingPropagator:
                 # to get an eligible input, which we will pick a
                 # schema suggestion base on the redistribute cost.
                 # For now we simply pick the first suggestion.
-                # TODO: implement full auto distribute with a
-                # simple cost estimation model
                 suggested_input_schema = output_sharding.schema_suggestions[0]
                 # run sharding propagation again with suggested schema
                 propagation_res = sharding_prop_func(suggested_input_schema)
@@ -285,18 +276,16 @@ class _CachingPropagator(ShardingPropagator):
     This is currently experimental for Tensor Parallel usage.
     """
 
-    def __init__(self, op_to_rules=None) -> None:
+    def __init__(self, propagator: ShardingPropagator) -> None:
         super().__init__()
-        if op_to_rules is not None:
-            self.op_to_rules = op_to_rules
+        self.op_to_rules = propagator.op_to_rules
+        self.op_strategy_funcs = propagator.op_strategy_funcs
 
         # cache table for sharding propagation results, we might need to
         # limit the size of the cache table in the future
         self.cached_prop_results: Dict[OpSchema, OutputSharding] = {}
 
-    def propagate_op_sharding(
-        self, op_overload: OpOverload, op_schema: OpSchema
-    ) -> OutputSharding:
+    def propagate(self, op_overload: OpOverload, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         Cache the propagation results to avoid running propagation again.
@@ -305,7 +294,7 @@ class _CachingPropagator(ShardingPropagator):
             return self.cached_prop_results[op_schema]
         else:
             # call DTensor's propagate_op_sharding to get the prop result
-            output_sharding = super().propagate_op_sharding(op_overload, op_schema)
+            output_sharding = super().propagate(op_overload, op_schema)
             # update cached table
             self.cached_prop_results[op_schema] = output_sharding
             return output_sharding
