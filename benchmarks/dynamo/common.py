@@ -77,7 +77,6 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "llama",  # does not support complex32
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -157,15 +156,11 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "lcnet_050",  # Accuracy (blocks.1.0.bn2.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM,
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "llama",  # does not support complex32
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
     "demucs",  # OOM
@@ -217,7 +212,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "hf_Bert_large",  # OOM
     "hf_GPT2_large",  # Intermittent failure on CI
     "hf_T5_base",  # OOM
-    "llama",  # does not support complex32
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",

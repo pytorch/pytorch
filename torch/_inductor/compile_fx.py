@@ -15,12 +15,11 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.utils import detect_fake_mode
+from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
@@ -142,6 +141,56 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
         metrics.num_bytes_accessed += num_bytes
         metrics.nodes_num_elem += nodes_num_elem
     return make_boxed_func(gm.forward)
+
+
+def inner_compile_with_cpp_wrapper(inner_compile):
+    @functools.wraps(inner_compile)
+    def wrapper(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], **kwargs):
+        """
+        Compile into cpp wrapper:
+        For CPU, this is currently done in one pass.
+        For GPU, this is done in two passes: JIT-compile the model with python wrapper code
+        and run it to generate autotuned kernel binaries in the first pass; and then generate
+        cpp wrapper code and compile it to a dynamic library in the second pass.
+        """
+        devices = (
+            {t.device.type for t in gm.parameters()}
+            | {t.device.type for t in gm.buffers()}
+            | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
+        )
+
+        if "cuda" not in devices:
+            kwargs_patched = {**kwargs, "cpp_wrapper": True}
+            return inner_compile(gm, example_inputs, **kwargs_patched)
+        else:
+            with config.patch(
+                {
+                    "triton.store_cubin": True,
+                }
+            ):
+                # first pass with regular python wrapper code
+                kwargs_patched = {
+                    **kwargs,
+                    "aot_mode": False,
+                    "cpp_wrapper": False,
+                    "cudagraphs": False,
+                }
+                compiled = inner_compile(gm, example_inputs, **kwargs_patched)
+                if detect_fake_mode(example_inputs):
+                    with torch.utils._python_dispatch._disable_current_modes():
+                        inputs_real = [defake(t) for t in example_inputs]
+                else:
+                    inputs_real = deepcopy(example_inputs)
+
+                with torch.utils._python_dispatch._disable_current_modes():
+                    compiled(inputs_real)
+                del inputs_real
+
+                # second pass
+                kwargs_patched = {**kwargs, "cpp_wrapper": True, "cudagraphs": False}
+                return inner_compile(gm, example_inputs, **kwargs_patched)
+
+    return wrapper
 
 
 @DebugContext.wrap
@@ -506,100 +555,22 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-def compile_fx_with_cpp_wrapper(
-    module: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    inner_compile,
-    decompositions: Optional[Dict[OpOverload, Callable]] = None,
-    aot_mode=False,
-):
-    """
-    Compile into cpp wrapper:
-    For CPU, this is currently done in one pass.
-    For GPU, this is done in two passes: JIT-compile the model with python wrapper code
-    and run it to generate autotuned kernel binaries in the first pass; and then generate
-    cpp wrapper code and compile it to a dynamic library in the second pass.
-    """
-    # Turns off cpp_wrapper before calling back into compile_fx
-    config_patches = {"cpp_wrapper": False}
-    devices = (
-        {t.device.type for t in module.parameters()}
-        | {t.device.type for t in module.buffers()}
-        | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
-    )
-
-    if "cuda" not in devices:
-        with config.patch(config_patches):
-            return compile_fx(
-                module,
-                example_inputs,
-                inner_compile=functools.partial(
-                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
-                ),
-                decompositions=decompositions,
-            )
-    else:
-        config_patches.update(
-            {
-                "triton.cudagraphs": False,
-                "triton.store_cubin": True,
-            }
-        )
-        with config.patch(config_patches):
-            # first pass
-            compiled = compile_fx(
-                module,
-                example_inputs,
-                inner_compile=functools.partial(
-                    inner_compile, cpp_wrapper=False, aot_mode=False
-                ),
-                decompositions=decompositions,
-            )
-            if detect_fake_mode(example_inputs):
-                with no_dispatch():
-
-                    def to_real_tensor(e):
-                        if isinstance(e, FakeTensor):
-                            out = torch.zeros_like(e, device=e.fake_device)
-                            return out
-                        return e
-
-                    inputs_real = [to_real_tensor(t) for t in example_inputs]
-            else:
-                inputs_real = deepcopy(example_inputs)
-
-            compiled(*inputs_real)
-            del inputs_real
-
-            # second pass
-            return compile_fx(
-                module,
-                example_inputs,
-                inner_compile=functools.partial(
-                    inner_compile, cpp_wrapper=True, aot_mode=aot_mode
-                ),
-                decompositions=decompositions,
-            )
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
-    decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
-    if config_patches:
-        with config.patch(config_patches):
-            return compile_fx_aot(
-                model_,
-                example_inputs_,
-                # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),
-                decompositions=decompositions,
-            )
-    return compile_fx_with_cpp_wrapper(
-        model_, example_inputs_, inner_compile, decompositions, aot_mode=True
+    config_patches = (
+        {"cpp_wrapper": True}
+        if config_patches is None
+        else {**config_patches, "cpp_wrapper": True}
+    )
+    return compile_fx(
+        model_,
+        example_inputs_,
+        inner_compile=functools.partial(inner_compile, aot_mode=True),
+        config_patches=config_patches,
     )
 
 
@@ -625,12 +596,13 @@ def compile_fx(
             )
 
     if config.cpp_wrapper:
-        return compile_fx_with_cpp_wrapper(
-            model_,
-            example_inputs_,
-            inner_compile=inner_compile,
-            decompositions=decompositions,
-        )
+        with config.patch({"cpp_wrapper": False}):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
+                decompositions=decompositions,
+            )
 
     recursive_compile_fx = functools.partial(
         compile_fx,
