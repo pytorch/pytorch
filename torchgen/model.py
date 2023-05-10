@@ -249,31 +249,6 @@ dispatch_keys = [
 ]
 
 
-def rename_dispatch_key_privateuse1(custom_device: str) -> None:
-    """
-    User can rename DispatchKey.PrivateUse1 to custom device rather than 'PrivateUse1'.
-    For example:
-    >>>from torchgen.model import DispatchKey, rename_dispatch_key_privateuse1
-    >>>rename_dispatch_key_privateuse1("FOO")
-    >>>str(DispatchKey.PrivateUse1) # "FOO"
-    >>>DispatchKey.parse("FOO") # DispatchKey.PrivateUse1
-    """
-
-    def rename_privateuse1(self: DispatchKey) -> str:
-        return self.name.replace("PrivateUse1", custom_device)
-
-    @staticmethod  # type: ignore[misc]
-    def parse_custom_device(value: str) -> "DispatchKey":
-        for k, v in DispatchKey.__members__.items():
-            if k == value.replace(custom_device, "PrivateUse1"):
-                return v
-        raise AssertionError(f"unknown dispatch key {value}")
-
-    DispatchKey.__str__ = rename_privateuse1  # type: ignore[assignment]
-    DispatchKey.parse = parse_custom_device  # type: ignore[assignment]
-    dispatch_keys.append(DispatchKey.PrivateUse1)
-
-
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
@@ -968,7 +943,12 @@ class NativeFunction:
         if (
             "rand" in str(self.func.name)
             or (
-                "dropout" in str(self.func.name)
+                (
+                    "dropout" in str(self.func.name)
+                    or any(
+                        "dropout" in arg.name for arg in self.func.arguments.flat_all
+                    )
+                )
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
                 and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
