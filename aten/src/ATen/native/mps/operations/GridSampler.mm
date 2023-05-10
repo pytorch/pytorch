@@ -19,7 +19,6 @@ void grid_sampler_2d_mps_impl(Tensor& output,
                               int64_t padding_mode,
                               bool align_corners) {
 // Grid Sampler support has been added in macOS 13.1
-#if defined(__MAC_13_2)
   using namespace mps;
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
@@ -121,7 +120,6 @@ void grid_sampler_2d_mps_impl(Tensor& output,
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-#endif // defined(__MAC_13_2)
 }
 } // namespace mps
 
@@ -130,13 +128,7 @@ Tensor grid_sampler_2d_mps(const Tensor& input,
                            int64_t interpolation_mode,
                            int64_t padding_mode,
                            bool align_corners) {
-#if defined(__MAC_13_2)
-  bool xcode_sdk_13_2_or_higher = true;
-#else
-  bool xcode_sdk_13_2_or_higher = false;
-#endif
-
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) || !xcode_sdk_13_2_or_higher) {
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS)) {
     TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.1. ",
                     "Falling back on CPU. This may have performance implications.");
 
