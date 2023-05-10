@@ -150,7 +150,7 @@ class GraphLowering(torch.fx.Interpreter):
             f.write(gm.print_readable(False))
         GraphLowering.ITER += 1
 
-        if GraphLowering.ITER == 1:
+        if GraphLowering.ITER == -1:
             from fxana import analyze, print_upstream, print_downstream, extract_conv
             # analyze(gm)
             # print_upstream(gm.graph, "gt_142")
@@ -183,17 +183,14 @@ class GraphLowering(torch.fx.Interpreter):
             print("FOUND GROUPED CONVOLUTION with >1 in_channels!")
             config.layout_opt = False
 
-        # Channels last does not help much for convolution whose out channel is smaller than in channels.
-        # Even worse, channels last may hurt perf in that case.
-        # We skip the layout optimizations if the model contains such convolution.
+        # For some models that contain convolution with larger in-channel than out-channel, applying
+        # channels last hurts performance.
         # Following models are skipped due to this:
         # - pytorch_unet
-        # - phlippe_densenet
-        # - Background_Matting
-        #
-        # TODO: revisit this. Previous benchmark is get using fp32, but with fp16,
-        # channels last actually still helps in this case.
-        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) < n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes):
+        # - phlippe_densenet (roughly neutral)
+        # - Background_Matting (1.22x -> 0.821x)
+        # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
+        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) * 2 <= n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes):
             print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
             config.layout_opt = False
 

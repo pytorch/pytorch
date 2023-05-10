@@ -1,12 +1,3 @@
-"""
-The following timm models need follow up:
-- hrnet_w18 (SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL)
-- selecsls42b (SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL)
-
-They get good speedup in shunting-layout-opt, but not latest branch.
-
-"""
-
 import os
 import sys
 
@@ -245,7 +236,8 @@ class triton:
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     # cudagraph_trees = not is_fbcode()
-    cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "1") == "1"
+    # cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "1") == "1"
+    cudagraph_trees = False
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
