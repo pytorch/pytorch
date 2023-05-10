@@ -156,6 +156,7 @@ class TorchVariable(VariableTracker):
         elif isinstance(self_should_be_none, torch_special_class_types):
             pass
         else:
+            breakpoint()
             raise AssertionError(f"{value} found with __self__ set")
 
     def __repr__(self):
@@ -738,18 +739,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-def is_fn_safe_to_run(tx, f, sub_args):
+def safe_or_raise_always_restore(tx, f, sub_args):
     # Snapshot state
     graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
     # Will raise if not sound
     try:
         f.call_function(tx, sub_args, {})
     except Exception as e:
-        return False
+        raise
     finally:
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
-    return True
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -764,6 +764,8 @@ def speculate_subgraph(
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
+                if a is None:
+                    a = ConstantVariable(None)
                 assert not isinstance(
                     a, torch.Tensor
                 ), "Tensors should already be tracked?"
@@ -1218,7 +1220,10 @@ class TorchHigherOrderOperator(VariableTracker):
 
             pre_side_effects = tx.output.side_effects.clone()
             always_restore = self.value.__name__ == "trampoline_autograd_bwd"
-            if always_restore:
+            if (
+                self.value.__name__ == "trampoline_autograd_bwd"
+                or self.value.__name__ == "trampoline_autograd_fwd"
+            ):
                 fn = UserFunctionVariable(self.value, source=self.value._source)
             else:
                 fn = TorchVariable(self.value)

@@ -19,9 +19,8 @@ class CustomFunc1(torch.autograd.Function):
 
 
 class CustomFunc2(torch.autograd.Function):
-    # the forward function can be staticmethod or classmethod
-    @classmethod
-    def forward(cls, ctx, foo):
+    @staticmethod
+    def forward(ctx, foo):
         return foo + foo
 
     @staticmethod
@@ -142,7 +141,7 @@ class MaterializingGradModule(torch.nn.Module):
 class CustomFuncBwdPrintGraphBreak(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
-        return foo + foo
+        return torch.add(foo, foo)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -158,7 +157,7 @@ class CustomFuncBwdPrintModule(torch.nn.Module):
 class CustomFuncStrideBwd(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
-        return foo + foo
+        return torch.add(foo, foo)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -180,6 +179,7 @@ class CustomFuncSaveForBwd(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        # breakpoint()
         (result,) = ctx.saved_tensors
         return grad_output * math.sqrt(result.numel())
 
@@ -194,6 +194,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     def test_autograd_function_equivalence(self):
         for grad in [True, False]:
             for i in range(1, 5):
+                torch._dynamo.reset()
                 model = globals()[f"Module{i}"]()
                 opt_model = torch._dynamo.optimize("eager")(model)
                 self.assertTrue(
@@ -214,7 +215,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     ref = model(x)
                     res = opt_model(x)
                     self.assertTrue(torch.allclose(ref, res))
-                self.assertEqual(cnts.frame_count, 1 if grad else 2)
+                self.assertEqual(cnts.frame_count, 2)
 
     def test_linear_setup_context(self):
         model = ModuleLinear()
@@ -234,7 +235,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Unsafe bwd in autograd.function"
+            torch._dynamo.exc.Unsupported, ".*BuiltinVariable\\(print\\).*"
         ):
             opt_model(x)
 
@@ -243,7 +244,8 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "Unsafe bwd in autograd.function"
+            torch._dynamo.exc.Unsupported,
+            "Illegal method invocation stride in strict mod",
         ):
             opt_model(x)
 

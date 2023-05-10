@@ -592,7 +592,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.output.guards.update(fn.guards)
             return result
         except Exception as e:
-            # breakpoint()
             self.restore_graphstate(state)
             raise
 
@@ -2149,7 +2148,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if skipfiles.check(
                 func.get_filename()
             ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
-                # breakpoint()
                 unimplemented(
                     f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
                 )
@@ -2168,7 +2166,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
-        ), breakpoint()
+        )
         InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)

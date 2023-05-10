@@ -203,10 +203,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     source=source,
                 )
             else:
-                # if 'trampoline_autograd' in self.fn.__name__:
-                #     # Nothing to do here - the __closure__ is known safe because its internal,
-                #     # and inlining will handle the nested __closure__.
-                #     continue
                 var = tx.match_nested_cell(name, cell)
                 if var is not None:
                     # optimization for cleaner codegen
