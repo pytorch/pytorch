@@ -7816,6 +7816,29 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     yield from samples
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    q_shape = (2, 3)
+    k_shape = (2, 3)
+    v_shape = (2, 4)
+
+    yield SampleInput(make(q_shape), make(k_shape), make(v_shape))
+
+def error_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    q_shape = (2, 3)
+    k_shape = (2, 4)
+    v_shape = (2, 4)
+
+    # This input should catch error in q and k dimension mismatch
+    yield ErrorInput(SampleInput(make(q_shape), make(k_shape), make(v_shape)))
+
+    q_shape = (2, 3, 5)
+    # This input should catch error as attn is designed to work only with 2D tensors
+    yield ErrorInput(SampleInput(make(q_shape), make(k_shape), make(v_shape)))
+
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -15091,6 +15114,13 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_atleast1d2d3d,
            ),
+    OpInfo('attn',
+           aten_name=None,
+           dtypes=floating_types_and(torch.bfloat16),
+           supports_out=False,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_attn,
+           error_inputs_func=error_inputs_attn),
     OpInfo('flatten',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            ref=reference_flatten,
