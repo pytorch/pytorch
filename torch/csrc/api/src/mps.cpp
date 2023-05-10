@@ -1,9 +1,5 @@
-#include <torch/mps.h>
-
 #include <ATen/Context.h>
-#include <c10/util/irange.h>
-
-#include <cstddef>
+#include <torch/mps.h>
 
 namespace torch {
 namespace mps {
@@ -37,8 +33,8 @@ MTLCommandBuffer_t get_command_buffer() {
       at::detail::getMPSHooks().getCommandBuffer());
 }
 
-dispatch_queue_t get_dispatch_queue() {
-  return static_cast<dispatch_queue_t>(
+DispatchQueue_t get_dispatch_queue() {
+  return static_cast<DispatchQueue_t>(
       at::detail::getMPSHooks().getDispatchQueue());
 }
 
