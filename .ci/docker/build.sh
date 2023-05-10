@@ -107,6 +107,8 @@ case "$image" in
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=10
+    # Set GLIBCXX_USE_CXX11_ABI to 0 to make sure FBGEMM can work
+    GLIBCXX_USE_CXX11_ABI=0
     PROTOBUF=yes
     DB=yes
     VISION=yes
