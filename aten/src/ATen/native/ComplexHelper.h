@@ -39,7 +39,7 @@ inline SymDimVector computeStrideForViewAsReal(SymIntArrayRef oldstride) {
   return res;
 }
 
-Tensor _view_as_real_physical(const Tensor& self) {
+inline Tensor _view_as_real_physical(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto old_sizes = self.sym_sizes();
   SymDimVector new_sizes(old_sizes.size() + 1);

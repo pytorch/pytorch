@@ -2,21 +2,37 @@
 
 from __future__ import annotations
 
-import copy
+import contextlib
 
+import copy
 import dataclasses
 import io
 import os
+import unittest
 import warnings
-from typing import Any, Callable, List, Mapping, Optional, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 import numpy as np
 
 import onnxruntime
+import pytest
 import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
@@ -161,10 +177,11 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
-        rtol: float = 1e-3,
-        atol: float = 1e-7,
+        rtol: Optional[float] = 1e-3,
+        atol: Optional[float] = 1e-7,
         opset_version: int = 18,
         has_mutation: bool = False,
+        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -186,6 +203,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
+            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
+                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
@@ -223,6 +242,15 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
+
+        if verbose:
+            export_output.diagnostic_context.dump(
+                f"test_report_{self._testMethodName}"
+                f"_op_level_debug_{self.op_level_debug}"
+                f"_dynamic_axes_{self.dynamic_shapes}"
+                ".sarif",
+                compress=False,
+            )
 
         _compare_pytorch_onnx_with_ort(
             export_output,
@@ -287,10 +315,12 @@ def run_ort(
         ort_model, providers=["CPUExecutionProvider"]
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
+
     return session.run(
         None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
     )
@@ -321,8 +351,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: float,
-    rtol: float,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
     has_mutation: bool = False,
 ):
     if has_mutation:
@@ -350,3 +380,295 @@ def _compare_pytorch_onnx_with_ort(
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
         )
+
+
+# The min onnx opset version to test for
+MIN_ONNX_OPSET_VERSION = 9
+# The max onnx opset version to test for
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
+
+# TODO(titaiwang): Change this when more versions are supported
+# The min onnx opset version to test for
+FX_MIN_ONNX_OPSET_VERSION = 18
+# The max onnx opset version to test for
+FX_MAX_ONNX_OPSET_VERSION = 18
+FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 1)
+
+BOOL_TYPES = (torch.bool,)
+
+INT_TYPES = (
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+)
+
+QINT_TYPES = (
+    torch.qint8,
+    torch.quint8,
+)
+
+FLOAT_TYPES = (
+    torch.float16,
+    torch.float32,
+    # torch.float64,  ORT doesn't support
+)
+
+COMPLEX_TYPES = (
+    torch.complex32,
+    torch.complex64,
+    torch.complex128,
+)
+
+TESTED_DTYPES = (
+    # Boolean
+    torch.bool,
+    # Integers
+    *INT_TYPES,
+    # Floating types
+    *FLOAT_TYPES,
+)
+
+
+@dataclasses.dataclass
+class DecorateMeta:
+    """Information about a test case to skip or xfail.
+
+    Adapted from functorch: functorch/test/common_utils.py
+
+    Attributes:
+        op_name: The name of the operator.
+        variant_name: The name of the OpInfo variant.
+        decorator: The decorator to apply to the test case.
+        opsets: The opsets to apply the decorator to.
+        dtypes: The dtypes to apply the decorator to.
+        reason: The reason for skipping.
+        test_behavior: The behavior of the test case. [skip or xfail]
+        matcher: The matcher to apply to the test case.
+        enabled_if: Whether to enable test behavior. Usually used on onnx/ort version control
+    """
+
+    op_name: str
+    variant_name: str
+    decorator: Callable
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
+    dtypes: Optional[Collection[torch.dtype]]
+    reason: str
+    test_behavior: str
+    matcher: Optional[Callable[[Any], bool]] = None
+    enabled_if: bool = True
+
+    def contains_opset(self, opset: int) -> bool:
+        if self.opsets is None:
+            return True
+        return any(
+            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
+            for opset_spec in self.opsets
+        )
+
+
+def xfail(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], bool]] = None,
+    enabled_if: bool = True,
+):
+    """Expects a OpInfo test to fail.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            xfail is in the SKIP_XFAIL_SUBTESTS list.
+        enabled_if: Whether to enable xfail. Usually used on onnx/ort version control
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.expectedFailure,
+        opsets=opsets,
+        dtypes=dtypes,
+        enabled_if=enabled_if,
+        matcher=matcher,
+        reason=reason,
+        test_behavior="xfail",
+    )
+
+
+def skip(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+    enabled_if: bool = True,
+):
+    """Skips a test case in OpInfo that we don't care about.
+
+    Likely because ONNX does not support the use case or it is by design.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            skip is in the SKIP_XFAIL_SUBTESTS list.
+        enabled_if: Whether to enable skip. Usually used on onnx/ort version control
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.skip(f"Skip: {reason}"),
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+        matcher=matcher,
+        enabled_if=enabled_if,
+        test_behavior="skip",
+    )
+
+
+def add_decorate_info(
+    all_opinfos: Sequence[opinfo_core.OpInfo],
+    test_class_name: str,
+    base_test_name: str,
+    opset: int,
+    skip_or_xfails: Iterable[DecorateMeta],
+):
+    """Decorates OpInfo tests with decorators based on the skip_or_xfails list.
+
+    Args:
+        all_opinfos: All OpInfos.
+        test_class_name: The name of the test class.
+        base_test_name: The name of the test method.
+        opset: The opset to decorate for.
+        skip_or_xfails: DecorateMeta's.
+    """
+    ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
+    for decorate_meta in skip_or_xfails:
+        if not decorate_meta.contains_opset(opset):
+            # Skip does not apply to this opset
+            continue
+        opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
+        assert (
+            opinfo is not None
+        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        decorators = list(opinfo.decorators)
+        new_decorator = opinfo_core.DecorateInfo(
+            decorate_meta.decorator,
+            test_class_name,
+            base_test_name,
+            dtypes=decorate_meta.dtypes,
+            active_if=decorate_meta.enabled_if,
+        )
+        decorators.append(new_decorator)
+        opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+
+    return wrapped
+
+
+def opsets_before(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is before the specified."""
+
+    def compare(other_opset: int):
+        return other_opset < opset
+
+    return compare
+
+
+def opsets_after(opset: int) -> Callable[[int], bool]:
+    """Returns a comparison function that decides if the given opset is after the specified."""
+
+    def compare(other_opset: int):
+        return other_opset > opset
+
+    return compare
+
+
+def reason_onnx_script_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX script doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
+
+
+def reason_onnx_runtime_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
+
+
+def reason_onnx_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
+
+
+def reason_dynamo_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: Dynamo doesn't support the given dtypes."""
+    return (
+        f"{operator} on {dtypes or 'certain dtypes'} not supported by the Dynamo Spec"
+    )
+
+
+def reason_jit_tracer_error(info: str) -> str:
+    """Formats the reason: JIT tracer errors."""
+    return f"JIT tracer error on {info}"
+
+
+def reason_flaky() -> str:
+    """Formats the reason: test is flaky."""
+    return "flaky test"
+
+
+@contextlib.contextmanager
+def normal_xfail_skip_test_behaviors(
+    test_behavior: Optional[str] = None, reason: Optional[str] = None
+):
+    """This context manager is used to handle the different behaviors of xfail and skip.
+
+    Args:
+        test_behavior (optional[str]): From DecorateMeta name, can be 'skip', 'xfail', or None.
+        reason (optional[str]): The reason for the failure or skip.
+
+    Raises:
+        e: Any exception raised by the test case if it's not an expected failure.
+    """
+
+    # We need to skip as soon as possible, as SegFault might also be a case.
+    if test_behavior == "skip":
+        pytest.skip(reason=reason)
+
+    try:
+        yield
+    # We could use `except (AssertionError, RuntimeError, ...) as e:`, but it needs
+    # to go over all test cases to find the right exception type.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        if test_behavior is None:
+            raise e
+        if test_behavior == "xfail":
+            pytest.xfail(reason=reason)
+    else:
+        if test_behavior == "xfail":
+            pytest.fail("Test unexpectedly passed")

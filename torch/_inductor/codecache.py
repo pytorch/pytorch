@@ -28,7 +28,6 @@ import torch
 from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
-from torch.utils import cpp_extension
 
 if config.is_fbcode():
     from torch._inductor.fb.logging import global_cache_log
@@ -65,10 +64,9 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def cache_dir():
-    cache_dir = os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR",
-        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
-    )
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -358,6 +356,9 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -495,6 +496,8 @@ def use_custom_generated_macros():
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    from torch.utils import cpp_extension
+
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -751,35 +754,27 @@ class PyCodeCache:
 
 
 class TritonCodeCache:
-    @staticmethod
-    def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
-        return name
-
     @classmethod
-    def load(cls, source_code):
+    def load(cls, kernel_name, source_code):
         mod = PyCodeCache.load(source_code)
-        return getattr(mod, cls.get_name(mod))
+        return getattr(mod, kernel_name)
 
 
-def _worker_compile(source_code, cc, device):
+def _worker_compile(kernel_name, source_code, cc, device):
     cuda_properties.set_compiler_worker_current_device(device)
-    kernel = TritonCodeCache.load(source_code)
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
 
-def _load_kernel(source_code):
-    kernel = TritonCodeCache.load(source_code)
+def _load_kernel(kernel_name, source_code):
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
     return kernel
 
 
-def _load_kernel_name(source_code):
-    return TritonCodeCache.get_name(PyCodeCache.load(source_code))
-
-
 class TritonFuture:
-    def __init__(self, source_code, future):
+    def __init__(self, kernel_name, source_code, future):
+        self.kernel_name = kernel_name
         self.source_code = source_code
         self.future = future
 
@@ -790,15 +785,14 @@ class TritonFuture:
             return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
-        kernel = self.kernel = _load_kernel(self.source_code)
+        kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
         latency = time() - t0
         if latency > 50:
-            name = _load_kernel_name(self.source_code)
             developer_warning(
-                f"Detected long compilation time of {latency} seconds for kernel name {name}"
+                f"Detected long compilation time of {latency} seconds for kernel name {self.kernel_name}"
             )
             developer_warning(self.source_code)
-        del self.source_code, self.future
+        del self.kernel_name, self.source_code, self.future
         return kernel
 
 
@@ -892,7 +886,7 @@ class AsyncCompile:
             return list(map(fn, seq))
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
-    def triton(self, source_code):
+    def triton(self, kernel_name, source_code):
         _compile_start()
 
         if config.compile_threads > 1:
@@ -900,11 +894,11 @@ class AsyncCompile:
             device = torch.cuda.current_device()
             cc = major * 10 + minor
             future = self.process_pool().submit(
-                _worker_compile, source_code, cc, device
+                _worker_compile, kernel_name, source_code, cc, device
             )
-            return TritonFuture(source_code, future)
+            return TritonFuture(kernel_name, source_code, future)
         else:
-            return _load_kernel(source_code)
+            return _load_kernel(kernel_name, source_code)
 
     def cpp(self, source_code):
         def task():

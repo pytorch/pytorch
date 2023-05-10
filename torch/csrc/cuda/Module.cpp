@@ -913,6 +913,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
             alloc_trace_max_entries,
             alloc_trace_record_context);
       });
+
+  m.def("_cuda_isHistoryEnabled", []() {
+    return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
 }
 
 // We choose to ignore certain blocks that are currently allocated
@@ -1147,6 +1151,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
   });
+
+  m.def(
+      "_cuda_checkPoolLiveAllocations",
+      [](int device,
+         at::cuda::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
 
   m.def(
       "_cuda_setCheckpointPoolState",

@@ -39,10 +39,10 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
-import gc
 import itertools
 import sys
 import threading
+import traceback
 import warnings
 import weakref
 from collections import defaultdict
@@ -144,6 +144,26 @@ def clear_cublas_manager():
         yield
     finally:
         clear_cublass_cache()
+
+
+@contextlib.contextmanager
+def enable_history_recording():
+    "Turns on history recording in the CUDA Caching Allocator"
+    enabled = torch._C._cuda_isHistoryEnabled()
+    try:
+        if not enabled:
+            torch.cuda.memory._record_memory_history()
+        yield
+    finally:
+        if not enabled:
+            torch.cuda.memory._record_memory_history(None)
+
+
+def get_history_recording():
+    # TODO - remove, prevents cleanup
+    if not config.triton.cudagraph_trees_history_recording:
+        return contextlib.nullcontext()
+    return enable_history_recording()
 
 
 class TreeManagerContainer:
@@ -516,13 +536,13 @@ class CUDAWarmupNode:
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
-            check_memory_pool(self.cuda_graphs_pool, refs)
+            check_memory_pool(self.device_index, self.cuda_graphs_pool, refs)
 
         with torch.cuda.device(
             self.device_index
         ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
             self.device_index, self.cuda_graphs_pool, self.stream
-        ):
+        ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
 
         # sync up stream used in `_use_cuda_memory_pool_manager` - TODO - wait stream instead ?
@@ -544,7 +564,7 @@ class CUDAWarmupNode:
             new_storages = [
                 t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
             ]
-            check_memory_pool(self.cuda_graphs_pool, new_storages)
+            check_memory_pool(self.device_index, self.cuda_graphs_pool, new_storages)
 
         return out
 
@@ -959,13 +979,13 @@ class CUDAGraphNode:
                 for i, elem in enumerate(inputs)
                 if i not in self.wrapped_function.static_input_idxs
             ]
-            check_memory_pool(self.cuda_graphs_pool, memory)
+            check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
         with preserve_rng_state(), torch.cuda.device(
             self.device
         ), clear_cublas_manager(), torch.cuda.graph(
             self.graph, stream=self.stream, pool=self.cuda_graphs_pool
-        ):
+        ), get_history_recording():
             static_outputs = model(inputs)
 
         # running model should reclaim memory
@@ -1056,7 +1076,9 @@ class CUDAGraphNode:
 
         self.debug_check_invariants_after_invocation()
         if config.triton.slow_path_cudagraph_asserts:
-            check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
+            check_memory_pool(
+                self.device, self.cuda_graphs_pool, list(self.path_live_weakrefs())
+            )
 
     def _mark_prior_graph_output_as_aliased(self, index: PathOutputIndex):
         "Remove a graph output from the unaliased, cached tensors in an ancestor node"
@@ -1413,21 +1435,40 @@ def get_block_addrs(pool_id, live_only=True):
     return blocks
 
 
-def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
-    assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)
-    gc.collect()
+def format_tb(caching_allocator_trace):
+    formatted_traceback = []
 
+    MAX_LENGTH = 20
+
+    for entry in caching_allocator_trace["frames"][0:MAX_LENGTH]:
+        formatted_traceback.append(
+            traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
+        )
+
+    return "".join(traceback.format_list(formatted_traceback))
+
+
+def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
+    assert all(
+        isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
+    )  # noqa: C419
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
+
+    # check if there is a divergence first, then do the expensive snapshot call after
+    # we know it will error
+    if torch._C._cuda_checkPoolLiveAllocations(device, pool_id, unique_storages):
+        return
+
     segments = get_cudagraph_segments(pool_id)
 
-    allocated_not_in_live_storages = []
+    allocated_not_in_live_storages = {}
 
     for segment in segments:
         addr = segment["address"]
         for block in segment["blocks"]:
             if block["state"] == "active_allocated":
                 if addr not in unique_storages:
-                    allocated_not_in_live_storages.append(addr)
+                    allocated_not_in_live_storages[addr] = block
                 else:
                     unique_storages.remove(addr)
 
@@ -1438,11 +1479,19 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )
 
-    check(
-        len(allocated_not_in_live_storages) == 0,
-        lambda: f"These live storage data ptrs are in the cudagraph pool but not "
-        f"accounted for as an output of cudagraph trees {allocated_not_in_live_storages}",
-    )
+    if allocated_not_in_live_storages != 0:
+        formatted = []
+        for dp, block in allocated_not_in_live_storages.items():
+            trace = (
+                format_tb(block["history"][-1]) if block.get("history", None) else None
+            )
+            formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
+        formatted_s = "\n".join(formatted)
+        msg = (
+            f"These live storage data ptrs are in the cudagraph pool but not "
+            f"accounted for as an output of cudagraph trees: \n\n{formatted_s}"
+        )
+        raise RuntimeError(msg)
 
 
 class ExecutionState(Enum):
@@ -1876,7 +1925,9 @@ class CUDAGraphTreeManager:
 
         # Now the live blocks should be exactly equal to the live storages in private pool
         if config.triton.slow_path_cudagraph_asserts:
-            check_memory_pool(self.cuda_graphs_thread_pool, live_storages_wrappers)
+            check_memory_pool(
+                self.device_index, self.cuda_graphs_thread_pool, live_storages_wrappers
+            )
             for wrapper in live_storages_wrappers:
                 assert wrapper()
                 assert torch._C._has_Standard_Deleter(wrapper())
