@@ -158,7 +158,7 @@ def compile_fx_inner(
     boxed_forward_device_index=None,
 ):
     graph_args = locals() # List of all parameters passed to function
-    return FxGraphCache.load(graph_args)
+    return FxGraphCache.load(compile_fx_inner_uncached, graph_args)
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()

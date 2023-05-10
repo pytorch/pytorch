@@ -28,7 +28,6 @@ from typing import Any, Callable, Dict, List, Union
 import torch
 
 from torch._inductor import config, cuda_properties, exc
-from torch._inductor.compile_fx import compile_fx_inner_uncached
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
@@ -215,27 +214,25 @@ def code_hash(code):
     )
 
 
-def compiled_fx_graph_hash(
-        compiled_graph_args: List[Any]
-    ):
-    serialized_graph_args = b"".join([pickle.dumps(arg) for arg in compiled_graph_args])
-    hashed_graph_args = base64.b32encode(hashlib.sha256(serialized_graph_args).digest())[:51]
+def compiled_fx_graph_hash(fx_args: List[Any]):
+    serialized_fx_args = b"".join([pickle.dumps(arg) for arg in fx_args])
+    hashed_fx_args = base64.b32encode(hashlib.sha256(serialized_fx_args).digest())[:51]
     return (
         "f"
-        + hashed_graph_args
+        + hashed_fx_args
         .decode("utf-8")
         .lower()
     )
 
 
-def get_path(basename, ext, extra):
+def get_path(basename, ext):
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
-    return extra + basename, subdir, path
+    return basename, subdir, path
 
 
-def write(content, key, ext, extra=""):
-    basename, subdir, path = get_path(key, ext, extra)
+def write(content, key, ext):
+    basename, subdir, path = get_path(key, ext)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -258,8 +255,8 @@ class FxGraphCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, graph_args):
-        key = compiled_fx_graph_hash(graph_args)
+    def load(cls, compile_fx_fn, fx_args):
+        key = compiled_fx_graph_hash(fx_args)
         print("CG cache key is ", key)
         if key not in cls.cache:
             from filelock import FileLock
@@ -267,10 +264,10 @@ class FxGraphCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                _, _, cg_path = get_path(key, "cg", extra="")
+                _, _, cg_path = get_path(key, "cg")
                 print("Path from key is ", cg_path)
                 if not os.path.exists(cg_path):
-                    compiled_graph: CompiledFxGraph = compile_fx_inner_uncached(**graph_args)
+                    compiled_graph: CompiledFxGraph = compile_fx_fn(**fx_args)
                     
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
@@ -679,13 +676,11 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
         key, input_path = write(
             source_code,
-            code_hash(source_code),
+            code_hash(source_code + cpp_command),
             "cpp",
-            code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
-            ),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -741,11 +736,11 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         key, input_path = write(
             source_code,
-            code_hash(source_code),
+            code_hash(source_code + cpp_command),
             "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -776,11 +771,11 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code, extra=""):
-        return write(source_code, "py", extra)
+        return write(source_code, code_hash(source_code + extra), "py")
 
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, "py", extra)
+        key, path = write(source_code, code_hash(source_code + extra), "py")
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
