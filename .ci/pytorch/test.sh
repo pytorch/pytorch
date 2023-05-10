@@ -304,7 +304,7 @@ if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
 fi
 
 export TORCHINDUCTOR_MAX_AUTOTUNE=1
-export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+# export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
 
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
