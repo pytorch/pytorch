@@ -1133,27 +1133,6 @@ static bool containsAll(
   return not_found.empty();
 }
 
-static BlockPtr findParentBlock(StmtPtr s) {
-  while (s) {
-    if (auto b = to<Block>(s)) {
-      return b;
-    }
-    s = s->get_parent();
-  }
-  return nullptr;
-}
-
-static BlockPtr findLowestContainingBlock(
-    const std::vector<BufLoadOrStoreUse>& uses) {
-  // TODO: we're not using the most efficient algorithm here for simplicity.
-  // Replace with something more performant in case it becomes a bottleneck.
-  BlockPtr b = findParentBlock(uses[0].s);
-  while (b && !containsAll(uses, b)) {
-    b = findParentBlock(b->get_parent());
-  }
-  return b;
-}
-
 class StmtDeleter : public IRMutator {
  public:
   StmtDeleter(const std::unordered_set<StmtPtr>& targets) : targets_(targets) {}
