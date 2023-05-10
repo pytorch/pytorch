@@ -346,7 +346,7 @@ void index_func_meta_impl(
     auto self_sizes_tensor = at::tensor(self_sizes, index.options());
     auto source_sizes_tensor = at::tensor(source_sizes, index.options());
     TORCH_CHECK(at::is_expandable_to(source_sizes_tensor.sizes(), self_sizes_tensor.sizes()),
-    "source tensor shape must match self tensor shape (excluding the specified dimension)");
+    "source tensor shape must match self tensor shape, excluding the specified dimension");
   }
 
   auto& result = meta.maybe_get_output(0);
