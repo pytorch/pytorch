@@ -143,6 +143,32 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
+    def test_unsupported_conv_transpose(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    3, 6, 3, stride=1, padding=1, output_padding=1
+                )
+
+            def forward(self, input_tensor):
+                x = self.conv_transpose(input_tensor)
+                output = torch.tanh(x)
+                return output
+
+        input = torch.randn(1, 3, 28, 28)
+        m = Model().eval()
+
+        with torch.no_grad():
+            compiled_m = torch.compile(m)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "output padding must be smaller than either stride or dilation",
+            ):
+                compiled_m(input)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
         class M(torch.nn.Module):
             def __init__(self, conv_in_channel, conv_out_channel) -> None:
