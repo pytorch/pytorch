@@ -7,6 +7,7 @@ import json
 import logging
 import multiprocessing
 import os
+import pickle
 import re
 import shutil
 import signal
@@ -15,17 +16,19 @@ import sys
 import sysconfig
 import tempfile
 import types
+from copy import copy, deepcopy
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Union
 
 import torch
 
 from torch._inductor import config, cuda_properties, exc
+from torch._inductor.compile_fx import uncached_compile_fx_inner
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
@@ -212,28 +215,97 @@ def code_hash(code):
     )
 
 
-def get_code_path(source_code, ext, extra):
-    basename = code_hash(source_code + extra)
+def compiled_fx_graph_hash(
+        compiled_graph_args: List[Any]
+    ):
+    serialized_graph_args = b"".join([pickle.dumps(arg) for arg in compiled_graph_args])
+    hashed_graph_args = base64.b32encode(hashlib.sha256(serialized_graph_args).digest())[:51]
+    return (
+        "f"
+        + hashed_graph_args
+        .decode("utf-8")
+        .lower()
+    )
+
+
+def get_path(basename, ext, extra):
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
     return extra + basename, subdir, path
 
 
-def write(source_code, ext, extra=""):
-    basename, subdir, path = get_code_path(source_code, ext, extra)
+def write(content, key, ext, extra=""):
+    basename, subdir, path = get_path(key, ext, extra)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, source_code)
+        write_atomic(path, content)
     return basename, path
 
 
-def write_atomic(path: str, source_code: str):
+def write_atomic(path: str, content: Union[str, bytes]):
+    assert isinstance(content, str) or isinstance(content, bytes), "Only strings and byte arrays can be saved in the cache"
     # use a temp file for thread safety
     fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w") as f:
-        f.write(source_code)
+    write_mode = "w" if isinstance(content, str) else "wb"
+    with os.fdopen(fd, write_mode) as f:
+        f.write(content)
     os.rename(tmp_path, path)
+
+
+class FxGraphCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def load(cls, graph_args):
+        key = compiled_fx_graph_hash(graph_args)
+        print("CG cache key is ", key)
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                _, _, cg_path = get_path(key, "cg", extra="")
+                print("Path from key is ", cg_path)
+                if not os.path.exists(cg_path):
+                    compiled_graph: CompiledFxGraph = uncached_compile_fx_inner(**graph_args)
+                    
+                    disk_compiled_graph = copy(compiled_graph)
+                    # Important as compiled models are not pickeable
+                    disk_compiled_graph.compiled_model = None
+                    # TODO: Figure out if linemaps are important to save, work on pickling if it's the case
+                    disk_compiled_graph.compiled_model_linemap = None
+                    print(disk_compiled_graph)
+                    write(pickle.dumps(disk_compiled_graph), key, "cg")
+                else:
+                    # Load required info from disk, recreation of compiled model will be on first run
+                    with open(cg_path, "rb") as f:
+                        compiled_graph = pickle.load(f)
+
+                cls.cache[key] = compiled_graph
+
+        return cls.cache[key]
+
+
+@dataclasses.dataclass
+class CompiledFxGraph:
+    """Class holding a compiled FX graph"""
+    compiled_artifact: Callable = None
+    cache_key: str = None
+    artifact_path: str = None
+    cache_linemap: List = None
+    _boxed_call: bool = None
+
+    def __call__(self, new_inputs) -> Any:
+        # We can't really serialize callables that may be C++/Triton/etc., so we serialize their disk cache location instead
+        # TODO: When making an API that can save compiled models e2e to disk this will need to be better
+        if self.compiled_model is None:
+            from .codecache import PyCodeCache
+            self.compiled_model = PyCodeCache.load_by_key_path(self.compiled_model_key, self.compiled_model_path, self.compiled_model_linemap if self.compiled_model_linemap is not None else ()).call
+
+        return self.compiled_model(new_inputs)
 
 
 def cpp_compiler():
@@ -360,7 +432,7 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, "cpp")
+        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code) "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -609,6 +681,7 @@ class AotCodeCache:
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         key, input_path = write(
             source_code,
+            code_hash(source_code),
             "cpp",
             code_hash(
                 repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
@@ -670,6 +743,7 @@ class CppCodeCache:
         picked_vec_isa = pick_vec_isa()
         key, input_path = write(
             source_code,
+            code_hash(source_code),
             "cpp",
             code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
