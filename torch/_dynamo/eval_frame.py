@@ -781,8 +781,6 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
-    call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-    original_signature = inspect.signature(call_to_inspect)
 
     if functionalize and not aten_graph:
         raise UserError(
@@ -831,7 +829,6 @@ def export(
 
     fake_mode = None
     example_inputs = []
-    var_to_range_map = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -842,11 +839,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs, var_to_range_map
+        nonlocal fake_mode, example_inputs
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
-        if fake_mode and fake_mode.shape_env:
-            var_to_range_map = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -889,7 +884,7 @@ def export(
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
-        msg = dim_constraints.prettify_results(original_signature)
+        msg = dim_constraints.prettify_results(inspect.signature(f))
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
@@ -1014,13 +1009,22 @@ def export(
         if constraints
         else None
     )
-    new_graph.meta["inline_constraints"] = {
-        node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
-        for node in new_graph.graph.nodes
-        if node.op != "placeholder" and "val" in node.meta
-        # Find constraints frome unbacked symints
-        and re.match(r"^i\d+$", str(node.meta["val"]))
-    }
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        log.warning(
+            "Summary of dimension constraints:%s",
+            dim_constraints.prettify_results(inspect.signature(f)),
+        )
+
+        # Inline constraints added by users correspond to unbacked symbols in shape_env,
+        new_graph.meta["inline_constraints"] = {
+            k: v
+            for k, v in shape_env.var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
@@ -1064,7 +1068,10 @@ def export(
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
-        fullargspec = signature_to_fullargspec(original_signature)
+        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+
+        sig = inspect.signature(call_to_inspect)
+        fullargspec = signature_to_fullargspec(sig)
 
         # 1. Map `args` 1-to-1 to positional arguments in original signature.
         input_strs = fullargspec.args[: len(args)]
