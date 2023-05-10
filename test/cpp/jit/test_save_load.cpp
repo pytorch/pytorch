@@ -156,8 +156,20 @@ TEST(SerializationTest, SaveStateDict) {
   // Requires the state_dict that should have been written in tests_setup.py
   // Refer: SaveStateDict in test/cpp/jit/tests_setup.py
   std::ifstream file("state_dict.pt", std::ios::binary);
-  std::vector<char> data(
-      (std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  // a. You need this line, otherwise istream_iterator will skip all the
+  // whitespace in the file
+  //     which will skip characters when reading "ivalue.pt"
+  // b. try std::istreambuf_iterator instead, it seems to me that it doesn't
+  // skip any characters.
+  // see:
+  // https://discuss.pytorch.org/t/reading-tensors-in-c-saved-with-torch-save/93130/2?u=dfalbel
+  file >> std::noskipws;
+
+  std::vector<char> data;
+  data.insert(
+      data.begin(),
+      std::istream_iterator<char>(file),
+      std::istream_iterator<char>());
   auto dict = torch::pickle_load(data).toGenericDict();
 
   for (auto& el : dict) {
