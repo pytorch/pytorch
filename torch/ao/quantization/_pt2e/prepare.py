@@ -28,10 +28,13 @@ def _maybe_insert_input_and_output_observers_for_node(
         )
     else:
         output_is_a_tensor = this_node_dtype_info is not None
-
-    skip_inserting_observers = (
-        not output_is_a_tensor
+    
+    skip_inserting_input_observers = (
+        this_node_dtype_info is None
     )
+
+    if skip_inserting_input_observers:
+        return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
 
@@ -46,7 +49,11 @@ def _maybe_insert_input_and_output_observers_for_node(
         None,  # backend_config
     )
 
-    if skip_inserting_observers:
+    skip_inserting_output_observers = (
+        not output_is_a_tensor
+    )
+
+    if skip_inserting_output_observers:
         return
 
     # this returns the new observer node if it was needed
