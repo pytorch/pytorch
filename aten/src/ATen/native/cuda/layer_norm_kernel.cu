@@ -784,9 +784,9 @@ void LayerNormKernelImplInternal(
   // assumes all tensors are contiguous
   TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
   file a support request to support bigger batches");
-  const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();

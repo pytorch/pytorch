@@ -20,7 +20,12 @@ import weakref
 import operator
 from torch.utils._stats import count
 
-from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
+from torch.utils._python_dispatch import (
+    TorchDispatchMode,
+    _pop_mode_temporarily,
+    _get_current_dispatch_mode,
+)
+
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
@@ -111,24 +116,15 @@ def unwrap_proxy(proxy_mode, e):
     else:
         return e
 
-# What invariants do we have for the 'val' set on the FX node?  It has accurate
-# metadata... but only for metadata that exists "below" all other subsystems
-# (most notably autograd, but also vmap, functorch transforms, etc).  This means
-# you can get the dtype, shape, stride, storage, but you CANNOT get requires_grad,
-# grad_fn, _base (_base actually may be set due to recursive call to
-# ADInplaceOrView, but you shouldn't rely on it.)
-def set_meta(proxy, val):
+def extract_val(val):
     if isinstance(val, FakeTensor):
-        proxy.node.meta['val'] = snapshot_fake(val)
-        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+        return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
-        proxy.node.meta['val'] = val
+        return val
     elif isinstance(val, (list, tuple)):
-        if all(isinstance(x, FakeTensor) for x in val):
-            proxy.node.meta['val'] = [snapshot_fake(x) for x in val]
+        return val.__class__([extract_val(x) for x in val])
     elif isinstance(val, torch.Tensor):
         if not val.is_sparse:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
             # NB: Kinda hacky, but we should try to get val as the metadata
             # everywhere
             # TODO: This doesn't properly track storages.  A more robust
@@ -137,7 +133,23 @@ def set_meta(proxy, val):
             # snapshot_fake)
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
-                proxy.node.meta['val'] = torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
+                return torch.empty_strided(val.shape, val.stride(), device=val.device, dtype=val.dtype)
+        else:
+            return None
+
+# What invariants do we have for the 'val' set on the FX node?  It has accurate
+# metadata... but only for metadata that exists "below" all other subsystems
+# (most notably autograd, but also vmap, functorch transforms, etc).  This means
+# you can get the dtype, shape, stride, storage, but you CANNOT get requires_grad,
+# grad_fn, _base (_base actually may be set due to recursive call to
+# ADInplaceOrView, but you shouldn't rely on it.)
+def set_meta(proxy, val):
+    proxy.node.meta['val'] = extract_val(val)
+    # Best effort tensor_meta setting; prefer using val!
+    if isinstance(val, FakeTensor):
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
+    elif isinstance(val, torch.Tensor) and not val.is_sparse:
+        proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
 def thunkify(f, *args, **kwargs):
@@ -178,10 +190,14 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e.node, tracer, lambda: proxy)
-        elif isinstance(e, list):
+        elif isinstance(e, (tuple, list)):
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
+
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
+
 
     def get_constant(idx):
         if constant is None:
@@ -189,16 +205,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
         else:
             return constant[idx]
 
-    # Unfortunately, tree_map cannot directly be used here. As the resulting
-    # object may be a proxy that represents a tuple, we may need to
-    # explicitly unwrap the proxy by simulating the flattening operations.
-    if isinstance(inner_res, (tuple, list)):
-        if isinstance(proxy_res, fx.Proxy):
-            set_meta(proxy_res, inner_res)
-        for idx, e in enumerate(inner_res):
-            wrap_with_proxy(e, proxy_res[idx], get_constant(idx))
-    elif isinstance(inner_res, py_sym_types + (torch.Tensor,)):
-        wrap_with_proxy(inner_res, proxy_res, constant)
+    wrap_with_proxy(inner_res, proxy_res, constant)
 
     return inner_res
 
@@ -409,7 +416,12 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
+    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
+    # then we only want it to trace out proxies the first time that we hit an op.
+    # In particular, track_tensor_tree can call detach().
+    with inside_mode(proxy_mode):
+        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 
@@ -559,7 +571,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         self.tracer = tracer
         # When false, we don't trace operations.  If you do this, you MUST
         # call track_tensor/track_tensor_tree on all results of the operation
-        # to ensure we can adeduately track the results
+        # to ensure we can adequately track the results
         self.enable_tracing = True
 
     @contextmanager
@@ -693,15 +705,25 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
+            import torch._dynamo
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=True,
+                    allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=_allow_non_fake_inputs,
-                shape_env=shape_env)
+            import torch._dynamo
+            fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
+            if fake_tensor_mode is None:
+                shape_env = ShapeEnv()
+                fake_tensor_mode = FakeTensorMode(
+                    allow_fallback_kernels=False,
+                    allow_non_fake_inputs=_allow_non_fake_inputs,
+                    shape_env=shape_env)
+            else:
+                shape_env = fake_tensor_mode.shape_env
+                assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
+
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 

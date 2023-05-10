@@ -11,7 +11,7 @@ on real world models for both training and inference with a single line of code.
 .. note::
     The :func:`~torch.compile` API is experimental and subject to change.
 
-The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html>`__
+The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/main/compile/get-started.html>`__
 showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we
 co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>`__
 
@@ -40,6 +40,8 @@ Optimizations can be passed in :func:`~torch.compile` with either a backend mode
 
 The default backend is `inductor` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.
+
+There is some nuance involved in benchmarking ``torch.compile`` so we've provided a utility to make this simpler with :func:`~torch.utils.benchmark.utils.compile.bench_all`
 
 You can get the full list of community backends by running :func:`~torch._dynamo.list_backends`
 
@@ -78,3 +80,5 @@ please check out the references below.
 
    get-started
    technical-overview
+   nn-module
+   transformations

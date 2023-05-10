@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -274,14 +274,11 @@ class TestLinalg(TestCase):
                     return np.linalg.lstsq(a, b, rcond=rcond)
                 check_correctness_ref(a, b, res, numpy_ref)
 
-        version = torch.testing._internal.common_cuda._get_torch_cuda_version()
-        cusolver_available = (version >= (10, 2))
-
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (cusolver_available or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -2250,6 +2247,7 @@ class TestLinalg(TestCase):
                     a_norm_fro = torch.norm(a, p='fro', dim=dim, keepdim=keepdim)
                     self.assertEqual(a_norm_fro, a_norm_2)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_nuclear_norm_axes_small_brute_force_old(self, device):
@@ -4048,7 +4046,6 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
-    @skipCUDAVersionIn([(11, 3), (11, 6), (11, 7)])  # Tracked in https://github.com/pytorch/pytorch/issues/70111
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -5836,6 +5833,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(torch.bmm(t_b(Ab_conj), Bb_, out=out_b), torch.bmm(t_b(Ab_conj_physical), Bb_, out=out_b))
 
     @onlyNativeDeviceTypes
+    def test_mm_empty_inputs_mixed_dtype_errors(self, device):
+        a = torch.randint(0, 10, [1, 10], dtype=torch.int16, device=device)
+        b = torch.randn(10, 20, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* and .* to have the same dtype, but got:"):
+            torch.mm(a, b)
+
+    @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     def test_strided_mm_bmm(self, device, dtype):
         # Tests strided view case with stride smaller than corresponding dimension size
@@ -6793,7 +6797,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
-                for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
+                for full_idx in itertools.product(*(list(range(x)) for x in batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
                 if fn == torch.slogdet or fn == torch.linalg.slogdet:

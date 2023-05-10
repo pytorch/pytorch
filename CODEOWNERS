@@ -17,9 +17,9 @@
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD @anjali411
+/test/allowlist_for_publicAPI.json @albanD
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @anjali411
+/aten/src/ATen/native/tags.yaml @ezyang
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
@@ -65,6 +65,7 @@ nn/qat/ @jerryzh168
 
 # Docker
 /.ci/docker/ @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel @bertmaher
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -117,3 +118,6 @@ torch/profiler/ @robieta
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @NivekT @ejguan

@@ -10,7 +10,7 @@ on:
       use_s3:
         type: boolean
         default: true
-        description: If true, will download artifacts from s3. Otherwise will use the default github artifact download action
+        description: If true, will download artifacts from s3. Otherwise will use the default GitHub artifact download action
       PYTORCH_ROOT:
         required: false
         type: string
@@ -26,7 +26,7 @@ on:
       DESIRED_CUDA:
         required: true
         type: string
-        description: Desired Cuda version
+        description: Desired CUDA version
       GPU_ARCH_VERSION:
         required: false
         type: string
@@ -96,7 +96,7 @@ jobs:
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 

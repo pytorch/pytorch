@@ -17,6 +17,7 @@ import threading
 import unittest
 import warnings
 import subprocess
+import random
 from random import randint
 
 import torch
@@ -99,11 +100,13 @@ class TestCuda(TestCase):
         expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
 
         for segment in snapshot:
+            expandable = segment["is_expandable"]
             expected = expected_each_device[segment["device"]]
             pool_str = segment["segment_type"] + "_pool"
 
-            expected["segment.all.current"] += 1
-            expected["segment." + pool_str + ".current"] += 1
+            if not expandable:
+                expected["segment.all.current"] += 1
+                expected["segment." + pool_str + ".current"] += 1
 
             expected["allocated_bytes.all.current"] += segment["allocated_size"]
             expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
@@ -129,7 +132,7 @@ class TestCuda(TestCase):
                     expected["active.all.current"] += 1
                     expected["active." + pool_str + ".current"] += 1
 
-                if block["state"] == "inactive" and is_split:
+                if block["state"] == "inactive" and is_split and not expandable:
                     expected["inactive_split.all.current"] += 1
                     expected["inactive_split." + pool_str + ".current"] += 1
                     expected["inactive_split_bytes.all.current"] += block["size"]
@@ -1622,7 +1625,7 @@ except RuntimeError as e:
             'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
             'Device-side assertion'  # ROCm
         ]
-        self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
+        self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
@@ -1698,6 +1701,14 @@ except RuntimeError as e:
         after1 = torch.cuda.FloatTensor(100, device=1).normal_()
         self.assertEqual(before0, after0, atol=0, rtol=0)
         self.assertEqual(before1, after1, atol=0, rtol=0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_rng_state_offset(self):
+        before = torch.cuda.get_rng_state()
+        torch.cuda._set_rng_state_offset(100)
+        offset = torch.cuda._get_rng_state_offset()
+        torch.cuda.set_rng_state(before)
+        self.assertEqual(offset, 100)
 
     def test_nvtx(self):
         # Just making sure we can see the symbols
@@ -2521,7 +2532,9 @@ torch.cuda.synchronize()
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
 
-    def test_grads_invalidated_between_unscale_and_step(self):
+    # Make sure that the parameters become nonsense when scaled gradients are finite
+    # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self):
         for optimizer_ctor, optimizer_kwargs in product(
             (torch.optim.Adam, torch.optim.AdamW),
             (
@@ -2539,9 +2552,7 @@ torch.cuda.synchronize()
         )
         scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
 
-        orig_params = [p.clone().detach() for p in model.parameters()]
-
-        for i, (input, target) in enumerate(data):
+        for input, target in data:
             optimizer.zero_grad()
             with torch.autocast('cuda', enabled=True):
                 output = model(input)
@@ -2556,7 +2567,20 @@ torch.cuda.synchronize()
             scaler.step(optimizer)
             scaler.update()
 
-        self.assertEqual(orig_params, list(model.parameters()))
+        self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
+
+    def test_grad_scale_will_not_overflow(self):
+        model = torch.nn.Linear(5, 1).cuda()
+        optimizer = torch.optim.Adam(model.parameters())
+        scaler = torch.cuda.amp.GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
+        optimizer.zero_grad()
+        x = torch.randn(1, 5).cuda()
+        y = 1e-30 * torch.randn(1, 1).cuda()
+        l = ((model(x) - y)**2).mean()
+        scaler.scale(l).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -4978,7 +5002,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True)
+            torch.cuda.memory._record_memory_history("state", stacks="python")
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -5013,10 +5037,10 @@ class TestCudaComm(TestCase):
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
-            self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
+            self.assertTrue(ss['device_traces'][0][-1]['action'] in ('segment_free', 'segment_unmap'))
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
     def test_direct_traceback(self):
@@ -5032,7 +5056,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, record_context_cpp=True)
+            torch.cuda.memory._record_memory_history("state", stacks="all")
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -5047,7 +5071,7 @@ class TestCudaComm(TestCase):
             self.assertTrue(found_it)
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
 
     @skipIfRocm
@@ -5067,21 +5091,18 @@ class TestCudaComm(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
-        for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
+        for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
                 torch.cuda.memory.empty_cache()
-                torch.cuda.memory._record_memory_history(
-                    True,
-                    record_context=record_context,
-                    trace_alloc_max_entries=1000000,
-                    trace_alloc_record_context=True,
-                    record_context_cpp=cpp)
+                torch.cuda.memory._record_memory_history("all", context=context, stacks=stacks)
 
                 def run():
                     x = torch.rand(128, 128, device='cuda')
                     x * x + x * x
 
                 run()
+                cpp = stacks == "all"
+                record_context = context is not None
                 ss = torch.cuda.memory._snapshot()
                 tplot = trace_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in tplot))
@@ -5092,15 +5113,15 @@ class TestCudaComm(TestCase):
                 self.assertTrue(record_context == ("test_memory_plots" in splot))
                 self.assertTrue(str(128 * 128 * 4) in splot)
                 self.assertTrue(cpp == ("::rand" in splot))
-                torch.cuda.memory._record_memory_history(False)
+                torch.cuda.memory._record_memory_history(None)
             finally:
-                torch.cuda.memory._record_memory_history(False)
+                torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True)
+            torch.cuda.memory._record_memory_history("state", stacks="python")
 
             @torch.jit.script
             def foo():
@@ -5120,7 +5141,7 @@ class TestCudaComm(TestCase):
             self.assertTrue(found_it)
 
         finally:
-            torch.cuda.memory._record_memory_history(False)
+            torch.cuda.memory._record_memory_history(None)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -5270,6 +5291,39 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+
+    def test_allocator_fuzz(self):
+        # fuzz
+        state = random.getstate()
+        random.seed(123)
+        N = 10000
+        try:
+            mem = []
+            total = 0
+            c = 0
+
+            def alloc():
+                nonlocal total, c
+                b = random.randrange(2 * 1024 * 1024 // 4, 200 * 1024 * 1024 // 4)
+                mem.append((c, torch.full((b,), c, dtype=torch.int32, device='cuda')))
+                c += 1
+                total += b
+
+            def free():
+                nonlocal total
+                idx = random.randrange(0, len(mem))
+                v, x = mem.pop(idx)
+                assert torch.all(v == x)
+                total -= x.numel()
+
+            choices = [alloc, free, torch.cuda.memory.empty_cache]
+            for i in range(N):
+                while total >= 1024 * 1024 * 1024 / 4:
+                    free()
+                action, = random.choices(choices, weights=[1, 1 if mem else 0, .1])
+                action()
+        finally:
+            random.setstate(state)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_nvml_get_handler(self):
@@ -5576,6 +5630,27 @@ class TestBlockStateAbsorption(TestCase):
 
         inp = torch.rand([1, 3, 255, 255], device="cuda")
         self.checkFunction(m, [inp])
+
+    def test_check_pool_live_allocations(self):
+
+        def foo():
+            return torch.ones([4], device="cuda")
+
+        pool = torch.cuda.graph_pool_handle()
+        graph, outputs = cudagraphify(foo, [], pool=pool)
+
+        index = outputs[0].device.index
+
+        def check(live_dps):
+            return torch._C._cuda_checkPoolLiveAllocations(index, pool, live_dps)
+
+        self.assertTrue(check({outputs[0].data_ptr()}))
+
+        self.assertFalse(check({outputs[0].data_ptr(), 0}))
+        self.assertFalse(check(set()))
+
+        del outputs
+        self.assertTrue(check(set()))
 
 
     def test_allocate_in_thread_to_pool(self):

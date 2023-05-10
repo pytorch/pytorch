@@ -1115,7 +1115,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         Nbins: int,
     ) -> torch.Tensor:
         # First up-sample the histogram with new data by a factor of L
-        # This creates an approximate probability density thats piecwise constant
+        # This creates an approximate probability density thats piecewise constant
         upsampled_histogram = new_hist.repeat_interleave(upsample_rate)
         # Now insert the upsampled histogram into the output
         # histogram, which is initialized with zeros.
@@ -1362,6 +1362,10 @@ class PlaceholderObserver(ObserverBase):
 
     def forward(self, x):
         return x
+
+    @torch.jit.export
+    def extra_repr(self):
+        return "dtype={}, is_dynamic={}".format(self.dtype, self.is_dynamic)
 
     @torch.jit.export
     def calculate_qparams(self):

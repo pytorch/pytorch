@@ -13,7 +13,7 @@ architectures:
 from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.7", "11.8"]
+CUDA_ARCHES = ["11.7", "11.8", "12.1"]
 
 
 ROCM_ARCHES = ["5.3", "5.4.2"]
@@ -183,6 +183,7 @@ def generate_wheels_matrix(
     os: str,
     arches: Optional[List[str]] = None,
     python_versions: Optional[List[str]] = None,
+    gen_special_an_non_special_wheel: bool = True,
 ) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux":
@@ -209,9 +210,6 @@ def generate_wheels_matrix(
                 if arch_version == "cpu" or arch_version == "cpu-cxx11-abi"
                 else arch_version
             )
-            # Skip rocm 3.11 binaries for now as the docker image are not correct
-            if python_version == "3.11" and gpu_arch_type == "rocm":
-                continue
 
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install
@@ -243,6 +241,8 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                if not gen_special_an_non_special_wheel:
+                    continue
 
             ret.append(
                 {

@@ -1089,7 +1089,7 @@ class TORCH_API ForkedSubgraphSRLauncher {
 /*
   helper function to create a future on return type
   of the graph outputs. This function is utilized by
-  prim::fork and aten::wait oprations for async
+  prim::fork and aten::wait operations for async
   execution of subgraphs
 */
 c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(

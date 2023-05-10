@@ -49,27 +49,31 @@ def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> T
     kwargs = dict(zip(kwarg_keys, flat_args[-len(kwarg_keys) :]))
     return args, kwargs
 
-def _recursive_to(inputs, target_gpu, use_side_stream_for_tensor_copies):
+def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
     r"""
-    Recursively moves input to the target_gpu.
+    Recursively moves input to the target_device.
     """
 
     def to_map(obj):
         if isinstance(obj, (torch.Tensor, PackedSequence)):
             device = obj.data.device if isinstance(obj, PackedSequence) else obj.device
-            if device == torch.device("cuda", target_gpu):
+            if device == target_device:
                 return (obj,)
             if not use_side_stream_for_tensor_copies:
-                return (obj.to(target_gpu),)
+                return (obj.to(target_device),)
             else:
-                # Perform CPU -> GPU copies in a background stream. This code is
+                # If the custom module is not registered to torch, stream is not used for acceleration
+                device_mod = getattr(torch, device.type, None)
+                if device.type == "cpu" or device_mod is None:
+                    return (obj.to(target_device),)
+                # Perform CPU -> target_device copies in a background stream. This code is
                 # motivated from similar logic in torch/nn/parallel/_functions.py
-                stream = _get_stream(target_gpu)
-                with torch.cuda.stream(stream):
-                    output = obj.to(target_gpu)
+                stream = _get_stream(target_device)
+                with device_mod.stream(stream):
+                    output = obj.to(target_device)
                 # synchronize with the copy stream
-                with torch.cuda.device(target_gpu):
-                    current_stream = torch.cuda.current_stream()
+                with torch.cuda.device(target_device.index):
+                    current_stream = device_mod.current_stream()
                     # Sync the current stream with the copy stream
                     current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
@@ -183,14 +187,14 @@ def _apply_to_tensors(
 
     return apply(container)
 
-def _to_kwargs(inputs, kwargs, device_id, use_side_stream_for_tensor_copies):
+def _to_kwargs(inputs, kwargs, target_device, use_side_stream_for_tensor_copies):
     inputs = (
-        _recursive_to(inputs, device_id, use_side_stream_for_tensor_copies)
+        _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
         else []
     )
     kwargs = (
-        _recursive_to(kwargs, device_id, use_side_stream_for_tensor_copies)
+        _recursive_to(kwargs, target_device, use_side_stream_for_tensor_copies)
         if kwargs
         else []
     )

@@ -119,7 +119,7 @@ def get_valid_userbenchmarks(torchbench_path: str) -> List[str]:
             [os.path.join(ub_path, ubdir) for ubdir in os.listdir(ub_path)],
         )
     )
-    valid_ubs = list(map(lambda x: os.path.basename(x), ubs))
+    valid_ubs = [os.path.basename(x) for x in ubs]
     return valid_ubs
 
 
@@ -130,13 +130,13 @@ def extract_models_from_pr(
     userbenchmark_list = []
     pr_list = []
     with open(prbody_file, "r") as pf:
-        lines = map(lambda x: x.strip(), pf.read().splitlines())
+        lines = (x.strip() for x in pf.read().splitlines())
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_PREFIX), lines))
         if magic_lines:
             # Only the first magic line will be recognized.
-            pr_list = list(
-                map(lambda x: x.strip(), magic_lines[0][len(MAGIC_PREFIX) :].split(","))
-            )
+            pr_list = [
+                x.strip() for x in magic_lines[0][len(MAGIC_PREFIX) :].split(",")
+            ]
     valid_models = get_valid_models(torchbench_path)
     valid_ubs = get_valid_userbenchmarks(torchbench_path)
     for pr_bm in pr_list:
@@ -158,7 +158,7 @@ def extract_models_from_pr(
 def find_torchbench_branch(prbody_file: str) -> str:
     branch_name: str = ""
     with open(prbody_file, "r") as pf:
-        lines = map(lambda x: x.strip(), pf.read().splitlines())
+        lines = (x.strip() for x in pf.read().splitlines())
         magic_lines = list(
             filter(lambda x: x.startswith(MAGIC_TORCHBENCH_PREFIX), lines)
         )

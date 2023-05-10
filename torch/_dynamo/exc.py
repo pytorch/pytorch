@@ -1,11 +1,20 @@
 import os
 import textwrap
+from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
 from . import config
+from .config import is_fbcode
 
 from .utils import counters, format_bytecode
+
+if is_fbcode():
+    from torch.fb.exportdb.logging import exportdb_error_message
+else:
+
+    def exportdb_error_message(case_name):
+        return ""
 
 
 class TorchDynamoException(RuntimeError):
@@ -73,6 +82,53 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
+class RecompileError(TorchDynamoException):
+    pass
+
+
+class ArgsMismatchError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
+class CondOpArgsMismatchError(ArgsMismatchError):
+    """
+    Internal error from cond() due to arguments mismatch.
+    """
+
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
+class UserErrorType(Enum):
+    DYNAMIC_CONTROL_FLOW = auto()
+    ANTI_PATTERN = auto()
+    STANDARD_LIBRARY = auto()
+    CONSTRAIN_VIOLATION = auto()
+
+
+class UserError(Unsupported):
+    def __init__(self, error_type: UserErrorType, msg, case_name=None):
+        """
+        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
+        The error message should tell user about next actions.
+
+        error_type: Type of user error
+        msg: Actionable error message
+        case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
+        """
+        if case_name is not None:
+            assert isinstance(case_name, str)
+            msg += exportdb_error_message(case_name)
+        super().__init__(msg)
+        self.error_type = error_type
+        self.message = msg
+
+
+class IncorrectUsage(Exception):
+    pass
+
+
 def unimplemented(msg: str):
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
@@ -132,10 +188,11 @@ def augment_exc_message(exc, msg="\n"):
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
+            "    import torch._dynamo\n"
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]

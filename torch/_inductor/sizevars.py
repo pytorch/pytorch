@@ -1,8 +1,7 @@
-import dataclasses
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Union
 
 import sympy
 from sympy import Expr
@@ -15,16 +14,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class PositiveGuard:
-    """
-    An expression we should check for > 0
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
 class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
@@ -32,7 +21,6 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
         # maps of dynamic sizes that have to be precomputed on the host to the kernel args
         self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
@@ -109,7 +97,7 @@ class SizeVarAllocator:
                     if m and v not in m[rest].free_symbols:
                         gcd = sympy.gcd(m[rest], divisor)
                         if gcd == divisor:
-                            if self.maybe_guard_leq(var_ranges[v], divisor):
+                            if self.statically_known_leq(var_ranges[v], divisor):
                                 base = m[rest]
             return base
 
@@ -118,6 +106,7 @@ class SizeVarAllocator:
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
+            base_pos = True
             if isinstance(base, ModularIndexing):
                 # for modular indexing, biggest values from the ranges don't necessarily result in
                 # the biggest result, the biggest result is modulus - 1
@@ -126,14 +115,16 @@ class SizeVarAllocator:
                 # actual iteration range is to size-1
                 iter_ranges_zero = {k: 0 for k, v in var_ranges.items()}
                 base_lowest = sympy_subs(base, iter_ranges_zero)
-                if self.maybe_guard_lt(base_lowest, 0):
+                if self.statically_known_leq(0, base_lowest):
                     # can't replace with indexing div if base can be negative
-                    return ModularIndexing(base, divisor, modulus)
+                    base_pos = True
+                else:
+                    base_pos = False
                 iter_ranges = {k: v - 1 for k, v in var_ranges.items()}
                 base_s = sympy_subs(base, iter_ranges)
             else:
                 base_s = base
-            if self.maybe_guard_lt(base_s, modulus * divisor):
+            if self.statically_known_lt(base_s, modulus * divisor) and base_pos:
                 return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
@@ -231,42 +222,90 @@ class SizeVarAllocator:
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
-    def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
-        """if left==right, guard on that fact and return true"""
+    # Note - [On Statically Known]
+    #
+    # The statically_known_* family of functions below replaces a prior system, called maybe_guard_*. The prior system
+    # operated by providing esentially a question, where the size hinted values were evaluted. If the condition was
+    # true, we add a guard and return True, otherwise, False.
+    #
+    # def maybe_guard_foo(args):
+    #   if size_hinted_check(args):
+    #       return False # No guard, no optim
+    #   guard(args) # Make a guard
+    #   return True # Safe to apply optimization
+    #
+    # The prior system incurred a guard, and green lit an optimization.
+    #
+    # The new system works in reverse - in the new system, if we know that the inputs are static, and evaluate the
+    # condition as true, we green light the optimization, and we do not incur a guard. If we cannot prove that, we
+    # return False.
+    #
+    # def maybe_guard_foo(args):
+    #   if all_static(args):
+    #       return True # Safe to apply optimization
+    #   else:
+    #       return False # No guard, no optim
+
+    # See Note - [On Statically Known]
+
+    def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
+        if expr in (True, False):
+            return expr
+
+        try:
+            simplified = self.shape_env._maybe_evaluate_static(expr)
+            if simplified is not None:
+                return bool(simplified)
+        except Exception:
+            log.debug("Could not simplify %s", expr)
+
+        return False
+
+    def statically_known_equals(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left and right are equal.
+        """
         if left == right:
             return True
-        if self.size_hint(left - right) == 0:
-            self.guard_equals(left, right)
-            return True
-        return False
+        return self.is_expr_static_and_true(sympy.Eq(left, right))
 
-    def maybe_guard_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
-        """if left==right, guard on that fact and return true"""
+    # See Note - [On Statically Known]
+    def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left and right lists are equal.
+        """
         if len(left) != len(right):
             return False
-        if all(self.size_hint(a - b) == 0 for a, b in zip(left, right)):
-            for a, b in zip(left, right):
-                self.guard_equals(a, b)
+        if all(self.statically_known_equals(l, r) for l, r in zip(left, right)):
             return True
         return False
 
-    def maybe_guard_leq(self, left: Expr, right: Expr) -> bool:
-        try:
-            if self.size_hint(left) > self.size_hint(right):
-                return False
-        except TypeError:
-            return False
-        self.guard_leq(left, right)
-        return True
+    # See Note - [On Statically Known]
+    def statically_known_leq(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is less than or equal to right.
+        """
+        expr = left <= right
+        return self.is_expr_static_and_true(expr)
 
-    def maybe_guard_lt(self, left: Expr, right: Expr) -> bool:
-        try:
-            if self.size_hint(left) >= self.size_hint(right):
-                return False
-        except TypeError:
-            return False
-        self.guard_lt(left, right)
-        return True
+    # See Note - [On Statically Known]
+    def statically_known_lt(self, left: Expr, right: Expr) -> bool:
+        """
+        Returns a bool indicating if it is sound to optimize as if left is less than right.
+        """
+        expr = left < right
+        return self.is_expr_static_and_true(expr)
+
+    # See Note - [On Statically Known]
+    def statically_known_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
+        """
+        Return a bool indicating if it is sound to optimize for the numerator being a multiple of the denominator.
+        """
+        if sympy.gcd(numerator, denominator) == denominator:
+            # can prove it symbolically
+            return True
+        expr = sympy.Eq(numerator % denominator, 0)
+        return self.is_expr_static_and_true(expr)
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
@@ -276,9 +315,7 @@ class SizeVarAllocator:
         assert self.size_hint(expr) > 0
         if len(expr.free_symbols) == 0:
             return
-        if "-" in str(expr):
-            # all vars are positive, so needs a minus sign to get negative values
-            self.guards.append(PositiveGuard(expr))
+        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     def guard_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
@@ -296,16 +333,6 @@ class SizeVarAllocator:
     def guard_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
         return -self.guard_min(-left, -right)
-
-    def maybe_guard_multiple_of(self, numerator: Expr, denominator: Expr) -> bool:
-        """if denominator divides numerator, return True and guard on that fact"""
-        if sympy.gcd(numerator, denominator) == denominator:
-            # can prove it symbolically
-            return True
-        if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            self.guard_equals(numerator % denominator, 0)
-            return True
-        return False
 
     def guard_static_shape(self, left: Expr) -> int:
         right = self.size_hint(left)
@@ -328,7 +355,11 @@ class SizeVarAllocator:
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
         out = sympy_subs(expr, self.var_to_val)
-        return int(out)
+        try:
+            return int(out)
+        except Exception:
+            log.debug("failed on: %s", out)
+            raise
 
     def size_hints(self, exprs: List[Expr]) -> int:
         return tuple(self.size_hint(x) for x in exprs)
@@ -354,12 +385,20 @@ class SizeVarAllocator:
     def make_stride_vars_cache(self):
         cache = self._lru_cache(self._stride_vars)
 
-        def stride_vars(index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
-            return cache(index, tuple(vars))
+        def stride_vars(
+            index: Expr,
+            vars: List[sympy.Symbol],
+            support_vars: List[sympy.Symbol] = None,
+        ) -> List[Expr]:
+            if not support_vars:
+                support_vars = vars
+            return cache(index, tuple(vars), tuple(support_vars))
 
         return stride_vars
 
-    def _stride_vars(self, index: Expr, vars: List[sympy.Symbol]) -> List[Expr]:
+    def _stride_vars(
+        self, index: Expr, vars: List[sympy.Symbol], support_vars: List[sympy.Symbol]
+    ) -> List[Expr]:
         """Convert an indexing expression back into strides
 
         NOTE: This is only valid if the index is a standard strided offset
@@ -370,15 +409,17 @@ class SizeVarAllocator:
         strides = []
         index = self.simplify(index)
         # remove any offset
-        index = index - sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
+        index = index - sympy_subs(
+            index, {v: sympy.Integer(0) for v in support_vars if v != 0}
+        )
         for i in range(len(vars)):
             # drop all the other dims
             index_dim = sympy_subs(
                 index,
                 {
-                    vars[j]: sympy.Integer(0)
-                    for j in range(len(vars))
-                    if i != j and vars[j] != 0
+                    support_vars[j]: sympy.Integer(0)
+                    for j in range(len(support_vars))
+                    if vars[i] != support_vars[j] and support_vars[j] != 0
                 },
             )
             v = vars[i]
@@ -397,12 +438,17 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
 
-    def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
+    def stride_hints(
+        self,
+        index: Expr,
+        vars: List[sympy.Symbol],
+        support_vars: List[sympy.Symbol] = None,
+    ) -> List[int]:
         for v in index.free_symbols:
             if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
-        for s in self.stride_vars(index, vars):
+        for s in self.stride_vars(index, vars, support_vars):
             try:
                 result.append(self.size_hint(s))
             except TypeError:
@@ -411,7 +457,7 @@ class SizeVarAllocator:
 
     def stride_order(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         strides = tuple(
-            map(lambda x: abs(x), self.stride_hints(index, vars))
+            map(abs, self.stride_hints(index, vars))
         )  # lambda to placate mypy
         order = list(range(len(strides)))
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))

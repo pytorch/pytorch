@@ -72,7 +72,7 @@ are sorted by the corresponding KEY.
         "min_observation",
         "The number of observations needed before deciding that the ratio of "
         "mismatched ranges is alarming, also determines whether an info "
-        "sumarizing the empty and mismatch ratio will be printed at the end.")
+        "summarizing the empty and mismatch ratio will be printed at the end.")
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")

@@ -200,7 +200,6 @@ CUDA was not found on the system, please set the CUDA_HOME or the CUDA_PATH
 environment variable or add NVCC to your system PATH. The extension compilation will fail.
 '''
 ROCM_HOME = _find_rocm_home()
-MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
 IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 ROCM_VERSION = None
@@ -554,7 +553,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
+                and not any(flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags)
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -1142,10 +1141,6 @@ def include_paths(cuda: bool = False) -> List[str]:
     if cuda and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
-        if MIOPEN_HOME is not None:
-            paths.append(os.path.join(MIOPEN_HOME, 'include'))
-        if HIP_HOME is not None:
-            paths.append(os.path.join(HIP_HOME, 'include'))
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -1467,7 +1462,7 @@ def _jit_compile(name,
 
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
-    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
+    with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -1804,7 +1799,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # (from `extra_compile_args`)
     if cflags is not None:
         for flag in cflags:
-            if 'amdgpu-target' in flag:
+            if 'amdgpu-target' in flag or 'offload-arch' in flag:
                 return ['-fno-gpu-rdc']
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
@@ -1817,7 +1812,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             archs = []
     else:
         archs = _archs.replace(' ', ';').split(';')
-    flags = ['--amdgpu-target=%s' % arch for arch in archs]
+    flags = ['--offload-arch=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 
@@ -2016,6 +2011,7 @@ def _write_ninja_file_to_build_library(path,
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
+            cuda_flags = cuda_flags + ['-std=c++17']
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:

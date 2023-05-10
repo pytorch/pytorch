@@ -40,6 +40,10 @@ C10_DIAGNOSTIC_POP()
 #include <ATen/ops/empty.h>
 #endif
 
+#ifdef __linux__
+#include <dlfcn.h>
+#endif
+
 namespace at { namespace native {
 
 namespace {
@@ -62,6 +66,22 @@ uint8_t getAlignment(const Tensor &t) {
 }
 
 cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const at::MemoryFormat memory_format, const bool _virtual) {
+#if defined(__linux__) && !defined(FBCODE_CAFFE2) && CUDNN_MAJOR == 8 && CUDNN_MINOR > 5
+  // Workaround for cudnn error handling deficiency, that results in a crash on Ubuntu-22+
+  // if `libnvrtc.so` is not found on the system, which strictly speaking is not necessary
+  // for usecases below
+  // See https://github.com/pytorch/pytorch/issues/97041
+  static C10_UNUSED auto cudnn_cnn_infer_handler = [] {
+    void *handle = dlopen("libcudnn_cnn_infer.so.8", RTLD_LAZY);
+    char *err = dlerror();
+    if (!handle) {
+      TORCH_WARN("Attempt to open cnn_infer failed: handle=", handle, " error: ", err);
+    } else if (err) {
+      TORCH_WARN("Applied workaround for CuDNN issue, install nvrtc.so");
+    }
+    return handle;
+  }();
+#endif
   auto sizes = t.sizes();
   auto strides = t.strides();
   bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
@@ -153,8 +173,9 @@ cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   return &(it->second);
 }
 
-void emplace(const KeyType& key, T& results) {
+void update(const KeyType& key, T& results) {
   std::lock_guard<std::mutex> guard(mutex);
+  engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
@@ -325,7 +346,7 @@ auto get_generator_sources(const cudnnBackendDescriptorType_t& desc, const Tenso
 
 int64_t get_available_workspace() {
   int device;
-  C10_CUDA_CHECK(cudaGetDevice(&device));
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   size_t max_block_size = 0;
   c10::cuda::CUDACachingAllocator::cacheInfo(device, &max_block_size);
   return static_cast<int64_t>(max_block_size);
@@ -381,87 +402,6 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   }
 }
 
-// TODO: This is a hacked version of a cuDNN frontend function to allow us to
-// limit the number of benchmarked plans to save time. Once upstream cuDNN
-// frontend adds this functionality, remove this duplicate function definition.
-template <cudnn_frontend::CudnnFindSamplingTechnique samplingTechnique>
-auto
-temp_cudnn_time_sorted_plan_hack(cudnnHandle_t handle, cudnn_frontend::executionPlans_t plans, cudnn_frontend::VariantPack const &variantPack, const unsigned int benchmark_limit) -> cudnn_frontend::executionPlans_t {
-    cudnn_frontend::executionPlans_t time_sorted_plans;
-
-    auto plan_cmp = [](const cudnn_frontend::ExecutionPlan& a, const cudnn_frontend::ExecutionPlan& b) {return a.getExecutionTime() < b.getExecutionTime();};
-    std::set<std::reference_wrapper<cudnn_frontend::ExecutionPlan>, decltype(plan_cmp)> timed_execution_plans(plan_cmp);
-
-    const int maxIterCount =
-        (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE)
-            ? 1
-            : (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_MEDIAN_OF_THREE) ? 3 : 100;
-    const float threshhold = 0.95f;
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaDeviceSynchronize();
-
-    cudaStream_t stream = nullptr;
-    cudnnGetStream(handle, &stream);
-
-    unsigned int count = 0;
-
-    for (auto &plan : plans) {
-        float time_ms       = 0.0f;
-        float final_time_ms = 0.0f;
-        float min_time_ms   = std::numeric_limits<float>::max();
-
-        // Warm-up run
-        auto warmup_status = ::cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc());
-        if (warmup_status != CUDNN_STATUS_SUCCESS) {
-            continue;
-        }
-
-        cudaDeviceSynchronize();
-
-        for (int i = 0; i < maxIterCount; i++) {
-            cudaEventRecord(start, stream);
-
-            cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc());
-
-            cudaEventRecord(stop, stream);
-            cudaEventSynchronize(stop);
-            cudaEventElapsedTime(&time_ms, start, stop);
-
-            if (samplingTechnique == cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE) {
-                final_time_ms = std::min(min_time_ms, time_ms);
-                if (time_ms / min_time_ms < threshhold) {
-                    min_time_ms = final_time_ms;
-                } else {
-                    break;
-                }
-            } else {
-                final_time_ms = i == (maxIterCount / 2) ? time_ms : final_time_ms;
-            }
-        }
-        plan.setExecutionTime(final_time_ms);
-        timed_execution_plans.insert(plan);
-
-        count += 1;
-        if (benchmark_limit && count >= benchmark_limit) {
-          break;
-        }
-    }
-
-    for (cudnn_frontend::ExecutionPlan &plan : timed_execution_plans) {
-        time_sorted_plans.emplace_back(std::move(plan));
-    }
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-
-
-    return time_sorted_plans;
-}
-
-
 auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
@@ -480,7 +420,8 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
       .build();
 
   auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  auto plans = temp_cudnn_time_sorted_plan_hack<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
+  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
+  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
@@ -511,7 +452,8 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
       .build();
 
   auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  auto plans = temp_cudnn_time_sorted_plan_hack<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
+  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
+  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack, benchmark_limit);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
@@ -548,7 +490,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
   for (auto & plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -562,7 +504,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
   for (auto & plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -583,7 +525,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
         continue;
       }
       run_conv_plan(handle, x, y, w, plan);
-      benchmark_cache.emplace(key, plan);
+      benchmark_cache.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
@@ -604,7 +546,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.emplace(key, plan);
+      benchmark_cache_fused.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {

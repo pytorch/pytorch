@@ -42,6 +42,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--repo-name", type=str)
     parser.add_argument("--branch", type=str)
+    parser.add_argument("--pin-folder", type=str)
     return parser.parse_args()
 
 
@@ -49,8 +50,8 @@ def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
-        "base": "master",
-        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
+        "base": "main",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/main/"
         + f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, type="post")
@@ -135,7 +136,7 @@ def main() -> None:
         .stdout.decode("utf-8")
         .strip()
     )
-    with open(f".github/ci_commit_pins/{args.repo_name}.txt", "r+") as f:
+    with open(f"{args.pin_folder}/{args.repo_name}.txt", "r+") as f:
         old_hash = f.read().strip()
         subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name)
         f.seek(0)
@@ -144,7 +145,7 @@ def main() -> None:
     if is_newer_hash(hash, old_hash, args.repo_name):
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add .github/ci_commit_pins/{args.repo_name}.txt".split())
+        subprocess.run(f"git add {args.pin_folder}/{args.repo_name}.txt".split())
         subprocess.run(
             "git commit -m".split() + [f"update {args.repo_name} commit hash"]
         )

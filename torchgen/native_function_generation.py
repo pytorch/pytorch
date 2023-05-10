@@ -49,6 +49,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 # All of these operators don't have any tensor like returns
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
+    "_assert_async.msg",  # no return
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
