@@ -181,6 +181,8 @@ static std::unique_ptr<Function> compileMethod(
   return func;
 }
 
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
+#if 0
 static std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
@@ -383,8 +385,6 @@ static std::vector<c10::optional<at::Tensor>> generateExampleInputs(
   return example_inputs;
 }
 
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
-/*
 static c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
@@ -442,7 +442,7 @@ static c10::IValue preprocess(
   }
   return cu.serialize();
 }
-*/
+#endif
 
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
