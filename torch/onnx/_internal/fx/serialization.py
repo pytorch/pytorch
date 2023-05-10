@@ -33,6 +33,9 @@ def _create_tensor_proto_with_external_data(
         How to set ONNX fields?
         https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L88
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     tensor_proto = onnx.TensorProto()
     tensor_proto.name = name
     tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]

@@ -101,15 +101,19 @@ class OnnxDispatcher:
         aten_name = self._get_aten_name(node)
         function_overloads = self._get_function_overloads(node, aten_name)
 
-        # TODO(titaiwang): OrderedDict to record function matching score.
-        if len(function_overloads) == 1:
-            return function_overloads[0]
+        overload_match_ranking: Dict[
+            Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction], int
+        ] = {}
         # TODO: Cache the OpSchemaWrapper so we don't need to run the init logic everytime
         for overload_func in function_overloads:
             function_opschema = OpSchemaWrapper(overload_func.op_schema)
             if function_opschema.match_inputs(onnx_args, onnx_kwargs):
+                # If the perfect match is found, return the function
                 return overload_func
-        raise RuntimeError(f"There are no overloaded function for {aten_name}")
+            # put the function into candidate list with its match score
+            overload_match_ranking[overload_func] = function_opschema.match_score
+        # TODO(titaiwang): Add diagnostic message saying not perfect match get the best match
+        return max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
 
     def dispatch_opset_version(
         self, target: int, registered_opsets: Collection[int]
@@ -225,7 +229,7 @@ class OnnxDispatcher:
 @runtime_checkable
 class _TensorLike(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
+    def dtype(self) -> Optional[torch.dtype]:
         ...
 
 
@@ -252,6 +256,16 @@ class OpSchemaWrapper:
             constraint.type_param_str: set(constraint.allowed_type_strs)
             for constraint in op_schema.type_constraints
         }
+        self._matching_score: int = 0
+
+    @property
+    def match_score(self) -> int:
+        """The matching score of the OpSchemaWrapper.
+
+        Returns:
+            The matching score of the OpSchemaWrapper.
+        """
+        return self._matching_score
 
     def match_inputs(
         self, args: Sequence[Union[_TensorLike, str, int, float, bool]], kwargs
@@ -265,30 +279,26 @@ class OpSchemaWrapper:
         Returns:
             True if the inputs match the requirements, False otherwise.
         """
+
         # TODO: Refine the logic for it to be more robust
         # TODO: Handle attributes
         for schema_input, torch_input in zip(self.schema.inputs, args):
             torch_input_compatible_types = _find_onnx_data_type(torch_input)
             allowed_types = self.type_constraints[schema_input.type_str]
-            if not allowed_types.intersection(torch_input_compatible_types):
-                # If none of the types in torch_input_compatible_types is in
-                # allowed_types of this input defined in the OpSchema, we know
-                # the function and the input are not compatible
-                return False
-        return True
+            if allowed_types.intersection(torch_input_compatible_types):
+                # If torch_input_compatible_types is in allowed_types
+                # of this input defined in the OpSchema, we know the function
+                # and the input are not compatible
+                self._matching_score += 1
+        return self._matching_score == len(self.schema.inputs)
 
 
 @_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Union[_TensorLike, str, int, float, bool, list, tuple]
+    torch_input: Optional[Union[_TensorLike, str, int, float, bool, list, tuple]]
 ) -> set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
-    if isinstance(torch_input, _TensorLike):
-        dtype = torch_input.dtype
-        if isinstance(dtype, set):
-            # NOTE: dtype is a sequence_dtype_string, eg: seq(tensor(int64))
-            # torch doesn't support, but onnx does
-            return dtype
+    if isinstance(torch_input, _TensorLike) and torch_input.dtype is not None:
         return _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
             torch_input.dtype
         ]
@@ -304,4 +314,15 @@ def _find_onnx_data_type(
         else:
             # constant list of non-tensor type
             return set_dtype
+    if (
+        torch_input is None
+        or (isinstance(torch_input, _TensorLike) and torch_input.dtype is None)
+        or (isinstance(torch_input, (list, tuple)) and not torch_input)
+    ):
+        # NOTE: None, No dtype, and empty list are edge cases, we allow it to be any type to relax the type check
+        # seq(tensor) also goes to here, as it is not supported in torchscript, and it would be None in this case.
+        return set().union(
+            *_type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
+        )
+
     raise RuntimeError(f"Unknown input type from input: {torch_input}")

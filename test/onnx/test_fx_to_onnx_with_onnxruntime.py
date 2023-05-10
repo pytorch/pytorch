@@ -268,15 +268,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MNISTModel(), (tensor_x,)
         )
 
-    @pytorch_test_common.xfail(
-        "assert len(flattened_torch_outputs) == len(flattened_function_outputs)"
-    )
-    @pytorch_test_common.xfail(
-        "onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : "
-        "10 : INVALID_GRAPH : This is an invalid model. Type Error: Type 'tensor(float)' "
-        "of input parameter (1) of operator (aten_getitem) in node (aten_getitem_4) is "
-        "invalid."
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",

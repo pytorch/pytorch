@@ -202,16 +202,6 @@ def _fill_tensor_shape_type(
     ):
         # ex: aten::split - in onnx_dtype: seq(tensor)
         # onnxscript_values is a single tensor, but expected_values is a list of tensors.
-
-        # NOTE: PyTorch doesn't have a compared dtype to ONNX seq(tensor), so we write
-        #       the dtype as string into TorchScriptTensor.dtype to support dispatcher,
-        #       but it's not written into ONNX graph.
-        onnxscript_values.dtype = {
-            f"seq({type})"
-            for type in _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
-                expected_values[0].dtype
-            ]
-        }
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
