@@ -30,7 +30,6 @@ env:
 
 jobs:
   build:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
