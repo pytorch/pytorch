@@ -1,8 +1,8 @@
-def pluralize(count: int, singular_word: str, plural_word: str = None) -> str:
+def pluralize(count: int, singular_word: str, plural_word: str = "") -> str:
     if count == 1:
         return f"{count} {singular_word}"
 
-    if plural_word is None:
+    if not plural_word:
         plural_word = f"{singular_word}s"
 
     return f"{count} {plural_word}"
