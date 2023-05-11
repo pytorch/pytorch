@@ -21,6 +21,7 @@ from torch.ao.quantization._pt2e.quantizer import (
 )
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
+    _convert_to_reference_decomposed_fx,
     prepare_pt2e_quantizer,
     prepare_qat_pt2e_quantizer,
 )
@@ -32,9 +33,9 @@ from torch.ao.quantization.qconfig import (
     default_symmetric_qnnpack_qat_qconfig,
 )
 from torch.ao.quantization.quantize_fx import (
-    convert_to_reference_fx,
     prepare_fx,
     prepare_qat_fx,
+    convert_to_reference_fx,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -43,9 +44,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-
-
-from torch.ao.quantization.quantize_fx import _convert_to_reference_decomposed_fx
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -599,6 +597,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         model: torch.nn.Module,
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
+        verify_convert: bool = False,
     ):
         """
         Helper method to verify that the QAT numerics for PT2E quantization match those of
@@ -615,7 +614,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
-        result_pt2e = model_pt2e(*example_inputs)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
 
         # FX
         # Note: In order to match the PT2E numerics exactly, we need to feed the
@@ -632,11 +631,36 @@ class TestQuantizePT2E(QuantizationTestCase):
         qconfig_mapping = QConfigMapping().set_global(default_qconfig)
         backend_config = get_qnnpack_backend_config()
         model_fx = prepare_qat_fx(model_fx, qconfig_mapping, example_inputs, backend_config=backend_config)
-        result_fx = model_fx(*example_inputs)
+        after_prepare_result_fx = model_fx(*example_inputs)
 
         # Verify that numerics match
-        self.assertEqual(result_pt2e, result_fx)
+        self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
+        if verify_convert:
+            model_pt2e = convert_pt2e(model_pt2e)
+            quant_result_pt2e = model_pt2e(*example_inputs)
+
+            model_fx = _convert_to_reference_decomposed_fx(model_fx, backend_config=backend_config)
+            quant_result_fx = model_fx(*example_inputs)
+            self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
+
+
+    def test_convert_qat_conv_bn_numerics(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        # TODO: enable in a separate PR
+        # self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision

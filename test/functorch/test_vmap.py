@@ -3594,6 +3594,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcmul'),
         xfail('clamp'),
 
+        # TypeError: expected Tensor as element 0 in argument 0, but got float
+        xfail('item'),
+
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -3645,6 +3648,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
+        # TypeError: expected Tensor as element 0 in argument 0, but got float
+        xfail('item'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('__getitem__', ''),
@@ -4096,6 +4101,19 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         self.assertEqual(vmap(f, in_dims=(0, (None, None), 0))(tensor, idxs[1:], value), expected)
         self.assertEqual(vmap(f, in_dims=(0, (None, None), None))(tensor, idxs[1:], value[0]), expected)
+
+        # boolean mask
+        B = 2
+        x = torch.randn(1, 3, 3)
+        gy = torch.randn(B, 1, 3, 3)
+
+        def f(x, gy):
+            mask = x < 1e-09
+            zeros = torch.zeros([])
+            index_put = torch.ops.aten.index_put.default(gy, [mask], zeros)
+            return index_put
+
+        self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
 
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])
