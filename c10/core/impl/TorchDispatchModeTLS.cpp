@@ -1,4 +1,4 @@
-#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
