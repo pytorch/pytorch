@@ -14,6 +14,8 @@ def fuse_conv_bn_eval(conv, bn, transpose=False):
     return fused_conv
 
 def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=False):
+    conv_weight_dtype = conv_w.dtype
+    conv_bias_dtype = conv_b.dtype if conv_b is not None else conv_weight_dtype
     if conv_b is None:
         conv_b = torch.zeros_like(bn_rm)
     if bn_w is None:
@@ -27,8 +29,8 @@ def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, trans
     else:
         shape = [-1, 1] + [1] * (len(conv_w.shape) - 2)
 
-    fused_conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape(shape)
-    fused_conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
+    fused_conv_w = (conv_w * (bn_w * bn_var_rsqrt).reshape(shape)).to(dtype=conv_weight_dtype)
+    fused_conv_b = ((conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b).to(dtype=conv_bias_dtype)
 
     return torch.nn.Parameter(fused_conv_w, conv_w.requires_grad), torch.nn.Parameter(fused_conv_b, conv_b.requires_grad)
 
