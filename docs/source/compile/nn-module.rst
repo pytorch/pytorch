@@ -3,6 +3,8 @@ PyTorch 2.0 NNModule Support
 
 **Author**: `Will Constable <https://github.com/wconstab>`_
 
+TODO: update this!!!
+
 `torch.compile` has special handling for torch.nn.Module objects, tracing them differently than it traces
 arbitrary python classes, with the intent of producing faster code by making assumptions about the structure.
 
