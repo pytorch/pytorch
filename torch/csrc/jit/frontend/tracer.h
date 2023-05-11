@@ -301,10 +301,6 @@ TORCH_API void addInputs(
     const char* name,
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const c10::ClassTypePtr& class_type);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    c10::optional<caffe2::TypeMeta> opt_dtype);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(
     Node* n,
