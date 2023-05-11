@@ -381,6 +381,7 @@ class WorldData:
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
     pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+    pg_object_coll_device: Dict[dist.ProcessGroup, torch.device]
 
 
 class ThreadLocalWorld:
@@ -388,7 +389,7 @@ class ThreadLocalWorld:
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {})
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -434,6 +435,10 @@ class ThreadLocalWorld:
     @property
     def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
+
+    @property
+    def pg_object_coll_device(self) -> Dict[dist.ProcessGroup, torch.device]:
+        return self._get_world().pg_object_coll_device
 
 
 _old_pg_world = None

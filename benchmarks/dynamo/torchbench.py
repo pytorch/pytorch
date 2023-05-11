@@ -270,10 +270,17 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        try:
-            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
-        except ModuleNotFoundError:
-            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
+        candidates = [
+            f"torchbenchmark.models.{model_name}",
+            f"torchbenchmark.canary_models.{model_name}",
+            f"torchbenchmark.models.fb.{model_name}",
+        ]
+        for c in candidates:
+            try:
+                module = importlib.import_module(c)
+                break
+            except ModuleNotFoundError:
+                pass
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
