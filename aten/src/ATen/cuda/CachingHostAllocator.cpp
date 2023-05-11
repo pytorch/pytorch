@@ -310,7 +310,7 @@ class CUDAHostAllocator {
         auto& event = processed->first;
         cudaError_t err = cudaEventQuery(*event);
         if (err == cudaErrorNotReady) {
-          cudaGetLastError();
+          (void)cudaGetLastError(); // clear CUDA error
           // push the event onto the back of the queue if it's not
           // ready. TODO: do we need some debouncing logic to avoid allocating
           // threads repeatedly spinning on an event?

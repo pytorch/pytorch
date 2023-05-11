@@ -114,21 +114,28 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
-  at::vec::Vectorized<float> res_vec(0);
-  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
-  return res_vec;
+inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
+    const at::vec::Vectorized<bfloat16> src) {
+  at::vec::Vectorized<float> res_vec1(0);
+  at::vec::Vectorized<float> res_vec2(0);
+  std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
+  return res_vec1;
 }
 
-inline void store_float_as_bf16(
-    bfloat16* bf16_buf,
-    at::vec::Vectorized<float> src_buf) {
-  auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
-  res.store(bf16_buf, at::vec::Vectorized<float>::size());
+inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
+    const at::vec::Vectorized<float> src) {
+  auto res = at::vec::convert_float_bfloat16(src, src);
+  return res;
+}
+
+inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
+  auto zeros = at::vec::Vectorized<float>(0);
+  auto ones = at::vec::Vectorized<float>(1);
+  return at::vec::Vectorized<float>::blendv(zeros, ones, src);
 }
 
 template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
@@ -138,10 +145,15 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
 
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+    *(uint32_t*)(dst_tmp + i) = src_tmp[i] ? 0xFFFFFFFF : 0;
   }
 
   return res_vec.loadu(dst_tmp);
+}
+
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+  return vec_convert_to_mask(src);
 }
 
 template <>

@@ -21,7 +21,7 @@ from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..scheduler import FusedSchedulerNode, SchedulerNode
+from ..scheduler import SchedulerNode
 from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
 from ..virtualized import ops, V
 from .common import (
@@ -284,12 +284,13 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
-    if OptimizationContext.key in V.interpreter.current_node.meta:
-        return V.interpreter.current_node.meta[OptimizationContext.key]
-    else:
-        return None
+    return get_opt_ctx(V.interpreter.current_node)
 
 
 class CppVecOverrides(OpOverrides):
@@ -500,8 +501,6 @@ class CppVecOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
         assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
-        if dtype in [torch.bfloat16]:
-            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
             assert proposed_dtype == torch.float
@@ -599,6 +598,20 @@ class CppVecOverrides(OpOverrides):
             torch.bfloat16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        node: torch.fx.Node = V.interpreter.current_node
+        assert node
+        opt_ctx_x = get_opt_ctx(node.args[1])
+        assert opt_ctx_x
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+            return f"vec_convert_to_mask({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+            return f"mask_convert_to_float({x})"
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bfloat16:
+            return f"cvt_fp32_to_bf16({x})"
+        if opt_ctx_x.dtype == torch.bfloat16 and dtype in (torch.float, torch.float32):
+            return f"cvt_bf16_to_fp32({x})"
+        # TODO(jgong5): support conversion for other types
+        # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
 
     @staticmethod
@@ -632,9 +645,12 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
+        elif math.isnan(other):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
+            )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
-
         type = f"decltype({var}())"
         float_mask = f"to_float_mask({mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
@@ -909,6 +925,8 @@ class CppOverrides(OpOverrides):
             other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
+        elif math.isnan(other):
+            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
         else:
             other_code = f"static_cast<{type}>({repr(other)})"
 
@@ -1242,11 +1260,9 @@ class CppVecKernel(CppKernel):
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
-            if opt_ctx.is_load_bf16_as_fp32:
-                line = f"load_bf16_as_float({loadbuf})"
-            else:
-                assert opt_ctx.is_bf16_mem_copy
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            line = (
+                f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            )
         else:
             line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
@@ -1284,11 +1300,7 @@ class CppVecKernel(CppKernel):
         if non_contiguous:
             var_expr = "tmpbuf"
         if V.graph.get_dtype(name) in [torch.bfloat16]:
-            if opt_ctx.is_store_fp32_as_bf16:
-                line = f"store_float_as_bf16({var_expr}, {value});"
-            else:
-                assert opt_ctx.is_bf16_mem_copy
-                line = f"{value}.store({var_expr}, {self.tiling_factor});"
+            line = f"{value}.store({var_expr}, {self.tiling_factor});"
         elif (V.graph.get_dtype(name) in [torch.uint8]) and (
             opt_ctx.is_store_float_as_uint8
         ):
@@ -1490,11 +1502,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector load inside the kernel inner loop
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                if opt_ctx.is_load_bf16_as_fp32:
-                    line = f"load_bf16_as_float({loadbuf})"
-                else:
-                    assert opt_ctx.is_bf16_mem_copy
-                    line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1521,11 +1529,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                if opt_ctx.is_store_fp32_as_bf16:
-                    line = f"store_float_as_bf16({storebuf}, {value})"
-                else:
-                    assert opt_ctx.is_bf16_mem_copy
-                    line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor})"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -1627,34 +1631,6 @@ class CppVecKernelChecker(CppVecKernel):
         else:
             return False
 
-    def can_load_bf16_as_fp32(self, input_node: torch.fx.Node):
-        assert input_node.target in ["load", "constant"]
-        load_type = (
-            V.graph.get_dtype(input_node.args[1])
-            if input_node.target == "load"
-            else input_node.args[-1]
-        )
-        if load_type not in [torch.bfloat16]:
-            return False
-
-        if not all(
-            user.target == "to_dtype" and user.args[-1] == torch.float
-            for user in input_node.users
-        ):
-            return False
-
-        return True
-
-    def can_store_fp32_as_bf16(self, store_var: str, value_node: torch.fx.Node):
-        load_type = V.graph.get_dtype(store_var)
-        if load_type not in [torch.bfloat16]:
-            return False
-
-        if value_node.target == "to_dtype" and value_node.args[-1] == torch.bfloat16:
-            return True
-
-        return False
-
     def is_load_uint8_as_float(self, name: str, users: Dict[torch.fx.Node, None]):
         """
         Check:
@@ -1726,14 +1702,6 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{load_dtype} not supported by load")
                 return var
 
-            if load_dtype in [torch.bfloat16]:
-                opt_ctx.is_load_bf16_as_fp32 = self.can_load_bf16_as_fp32(
-                    node_ctx.get_fx_node()
-                )
-                if not (opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy):
-                    self.disable_vec("bfloat16 not legalized as float on load")
-                    return var
-
             index = self.rename_indexing(index)
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
@@ -1753,15 +1721,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"{store_dtype} not supported by store")
                 return self.simd_vec
 
-            if store_dtype in [torch.bfloat16]:
-                value_node = node_ctx.get_fx_node().all_input_nodes[-1]
-                opt_ctx.is_store_fp32_as_bf16 = self.can_store_fp32_as_bf16(
-                    name, value_node
-                )
-                if not (opt_ctx.is_store_fp32_as_bf16 or opt_ctx.is_bf16_mem_copy):
-                    self.disable_vec("bfloat16 not legalized as float on store")
-                    return self.simd_vec
-            elif store_dtype in [torch.uint8]:
+            if store_dtype in [torch.uint8]:
                 value_node = node_ctx.get_fx_node().all_input_nodes[-1]
                 opt_ctx.is_store_float_as_uint8 = self.can_store_fp32_as_uint8(
                     name, value_node
@@ -1905,16 +1865,6 @@ class CppVecKernelChecker(CppVecKernel):
                         )
                     ):
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
-
-                    if opt_ctx.dtype in [torch.bfloat16]:
-                        if self.can_load_bf16_as_fp32(node_ctx.get_fx_node()):
-                            opt_ctx.is_load_bf16_as_fp32 = True
-                            opt_ctx.dtype = torch.float
-                        elif not opt_ctx.is_bf16_mem_copy:
-                            self.disable_vec(
-                                "bfloat16 not legalized as float in constant"
-                            )
-
                     return val
 
             @staticmethod
@@ -2014,15 +1964,13 @@ class CppVecKernelChecker(CppVecKernel):
                                 if input_value.target == "load"
                                 else input_value.args[-1]
                             )
-                            if dtype in [torch.bfloat16]:
-                                opt_ctx.is_load_bf16_as_fp32 = True
-                            elif (dtype == torch.uint8) and (
+                            if (dtype == torch.uint8) and (
                                 input_value.target == "load"
                             ):
                                 # 1. doing uint8 to float.
                                 # 2. the previous node of uint8 to float is load.
                                 opt_ctx.is_load_uint8_as_float = True
-                            elif dtype == torch.float:
+                            elif dtype in [torch.bfloat16, torch.float]:
                                 pass
                             elif (
                                 dtype in [torch.int32, torch.int64]
@@ -2054,8 +2002,6 @@ class CppVecKernelChecker(CppVecKernel):
                                 "to_dtype: expecting all stores into bfloat16"
                             )
                             return x
-
-                        opt_ctx.is_store_fp32_as_bf16 = True
                     elif dtype == torch.bool:
                         pass
                     elif dtype == torch.uint8:
@@ -2087,18 +2033,11 @@ class CppKernelProxy(CppKernel):
             data_type_propagation(_node)
 
     def legalize_bf16(self, nodes):
-        def add_to_dtype_or_mark_memcopy(
-            sub_graph: torch.fx.Graph, should_add_to_dtype: bool
-        ):
+        def add_to_dtype(sub_graph: torch.fx.Graph):
             for node in sub_graph.nodes:
                 _node: torch.fx.Node = node
                 if _node.target in ["load", "constant"]:
                     assert len(_node.args) == 3
-                    if not should_add_to_dtype:
-                        opt_ctx = OptimizationContext()
-                        opt_ctx.is_bf16_mem_copy = True
-                        node.meta[OptimizationContext.key] = opt_ctx
-                        continue
                     ops = _node.args[0]
                     # If the node is constant, the last arg is dtype
                     load_dtype = (
@@ -2117,11 +2056,6 @@ class CppKernelProxy(CppKernel):
                             to_type_node.args = to_type_node_args
                             metrics.cpp_to_dtype_count += 1
                 elif _node.target == "store":
-                    if not should_add_to_dtype:
-                        opt_ctx = OptimizationContext()
-                        opt_ctx.is_bf16_mem_copy = True
-                        node.meta[OptimizationContext.key] = opt_ctx
-                        continue
                     ops, store_var, _, value_var, _ = _node.args
                     store_dtype = V.graph.get_dtype(store_var)
                     if store_dtype == torch.bfloat16:
@@ -2207,10 +2141,10 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        def _legalize_bf16(loop_body: ir.LoopBody, should_add_to_dtype: bool):
+        def _legalize_bf16(loop_body: ir.LoopBody):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
-                add_to_dtype_or_mark_memcopy(sub_block.graph, should_add_to_dtype)
+                add_to_dtype(sub_block.graph)
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
@@ -2222,20 +2156,11 @@ class CppKernelProxy(CppKernel):
                     len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
                 )
 
-            def is_fused_schedulernode(node: SchedulerNode):
-                scheduler = node.scheduler
-                name = node.get_name()
-                return isinstance(
-                    scheduler.name_to_fused_node[name], FusedSchedulerNode
-                )
+            should_add_to_dtype = not is_memory_copy_schedulernode(node)
 
-            should_add_to_dtype = True
-            if is_memory_copy_schedulernode(node):
-                should_add_to_dtype = is_fused_schedulernode(node)
-
-            if isinstance(node._body, ir.LoopBody):
+            if should_add_to_dtype and isinstance(node._body, ir.LoopBody):
                 body: ir.LoopBody = node._body
-                _legalize_bf16(body, should_add_to_dtype=should_add_to_dtype)
+                _legalize_bf16(body)
 
     def codegen_nodes(self, nodes):
         # Legalize BF16 node by adding to_dtype explicitly
