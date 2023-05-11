@@ -129,6 +129,10 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
+    # Torchbench
+    "speech_transformer",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_isoneutral_mixing",  # https://github.com/pytorch/pytorch/issues/99893
+    "pyhpc_turbulent_kinetic_energy",  # https://github.com/pytorch/pytorch/issues/99893
 ]
 
 CI_SKIP[CI("aot_eager", training=True)] = [
@@ -177,6 +181,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "detectron2_maskrcnn_r_50_fpn",
     # TorchBench
     "detectron2",
+    "densenet121",  # flaky accuracy
     "hf_T5",  # accuracy
     "hf_BigBird",  # accuracy
     "hf_GPT2_large",  # OOM
@@ -263,7 +268,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    "yolov3",  # Accuracy failed torch.Size([4, 3, 12, 16, 85])
     "levit_128",  # Accuracy fails on A10G, passes on A100
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
@@ -325,11 +329,15 @@ def output_csv(filename, headers, row):
             if headers and len(headers) > len(lines[0]):
                 # if prior results failed the header might not be filled in yet
                 lines[0] = headers
+            else:
+                headers = lines[0]
     else:
         lines = [headers]
-    lines.append([(f"{x:.4f}" if isinstance(x, float) else x) for x in row])
+    lines.append([(f"{x:.6f}" if isinstance(x, float) else x) for x in row])
     with open(filename, "w") as fd:
-        csv.writer(fd, lineterminator="\n").writerows(lines)
+        writer = csv.writer(fd, lineterminator="\n")
+        for line in lines:
+            writer.writerow(line + ["0"] * (len(headers) - len(line)))
 
 
 class NullContext:
@@ -397,7 +405,7 @@ def print_summary_table(data):
                 pass_rate = (data[col] == "pass").mean()
                 print(col.ljust(width), f"pass_rate={100*pass_rate:.2f}%")
             else:
-                cdata = data[col].clip(1)
+                cdata = data[col]
                 print(
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
@@ -533,17 +541,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    prof = torch._dynamo.utils.CompileProfiler()
-    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-        model_iter_fn
-    )
-    opt_model_iter_fn(model, example_inputs)
-    output_csv(
-        output_filename, ["model", "profiler report"], [current_name, prof.report()]
-    )
-    met = prof.get_metrics()
-    guard_failures = len(met["guard_failures"])
-    return [guard_failures]
+    with torch._dynamo.utils.CompileProfiler() as prof:
+        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+            model_iter_fn
+        )
+        opt_model_iter_fn(model, example_inputs)
+        output_csv(
+            output_filename, ["model", "profiler report"], [current_name, prof.report()]
+        )
+        met = prof.get_metrics()
+        guard_failures = len(met["guard_failures"])
+        return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -587,7 +595,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
     should_check_result = should_randomize_input = args.randomize_input
-    is_correct = True
 
     import contextlib
 
@@ -656,7 +663,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         name = args.profiler_trace_name + "_" + model.name + ".json"
         name = os.path.join(torch._dynamo.config.base_dir, name)
         p.export_chrome_trace(name)
-    pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     if args.dump_raw_metrics:
@@ -672,6 +678,26 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
+    msg = f"{speedup:.3f}x"
+    if args.baseline:
+        headers.extend(
+            [
+                "baseline",
+                "speedup_vs_baseline",
+            ]
+        )
+        df = pd.read_csv(args.baseline)
+        try:
+            baseline_speedup = df[df["name"] == current_name]["speedup"].item()
+            row.extend([baseline_speedup, speedup / baseline_speedup])
+            msg = f"{baseline_speedup:.3f}x -> {speedup:.3f}x [{speedup / baseline_speedup:.3f}x]"
+        except (KeyError, ZeroDivisionError):
+            row.extend(
+                [
+                    0.0,
+                    0.0,
+                ]
+            )
     if "compilation_latency" in kwargs:
         headers += [
             "compilation_latency",
@@ -701,7 +727,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_headers + headers,
         first_fields + data,
     )
-    return format_speedup(speedup, pvalue, is_correct=is_correct)
+    return msg
 
 
 def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
@@ -1151,6 +1177,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1290,7 +1320,7 @@ class BenchmarkRunner:
                 fields.append(v)
 
             output_csv(output_filename, headers, fields)
-            return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
+            return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
@@ -1365,13 +1395,16 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
-            if not same(
-                correct_result,
-                correct_rerun_result,
-                fp64_ref=None,
-                cos_similarity=False,
-                tol=0,
-                equal_nan=self.equal_nan,
+            if (
+                name not in self.skip_accuracy_check_as_eager_non_deterministic
+                and not same(
+                    correct_result,
+                    correct_rerun_result,
+                    fp64_ref=None,
+                    cos_similarity=False,
+                    tol=0,
+                    equal_nan=self.equal_nan,
+                )
             ):
                 accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
@@ -1413,6 +1446,10 @@ class BenchmarkRunner:
                     return record_status(
                         accuracy_status, dynamo_start_stats=start_stats
                     )
+
+            if name in self.skip_accuracy_check_as_eager_non_deterministic:
+                return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+
             if not same(
                 correct_result,
                 new_result,
@@ -1483,11 +1520,12 @@ class BenchmarkRunner:
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
-            print(
-                f"memory: eager: {eager_peak_mem:.2f} GB, "
-                f"dynamo: {dynamo_peak_mem:.2f} GB, "
-                f"ratio: {compression_ratio:.2f}"
-            )
+            if self.args.print_memory:
+                print(
+                    f"memory: eager: {eager_peak_mem:.2f} GB, "
+                    f"dynamo: {dynamo_peak_mem:.2f} GB, "
+                    f"ratio: {compression_ratio:.2f}"
+                )
 
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
@@ -1792,6 +1830,10 @@ def parse_args(args=None):
         help="Overrides the directory to place output files.",
     )
     parser.add_argument(
+        "--baseline",
+        help="Compare with a prior --output",
+    )
+    parser.add_argument(
         "--part",
         default=None,
         help="Specify the part of the model to run.",
@@ -1823,6 +1865,11 @@ def parse_args(args=None):
         "--stats",
         action="store_true",
         help="print graph counter stats",
+    )
+    parser.add_argument(
+        "--print-memory",
+        action="store_true",
+        help="print extra memory statistics",
     )
     parser.add_argument(
         "--cold-start-latency",
@@ -2002,7 +2049,6 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-
     return parser.parse_args(args)
 
 
@@ -2010,6 +2056,8 @@ def main(runner, original_dir=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args()
+    if args.baseline:
+        args.baseline = os.path.abspath(args.baseline)
 
     if should_diff_branch(args):
         import git
@@ -2053,6 +2101,8 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        if not args.dynamic_batch_only:
+            torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
@@ -2498,10 +2548,12 @@ def run(runner, args, original_dir=None):
             if args.progress:
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
-            def write_csv():
+            def write_csv(status):
                 for device in args.devices:
                     output_csv(
-                        output_filename, [], [device, name, placeholder_batch_size, 0.0]
+                        output_filename,
+                        ["dev", "name", "batch_size", "accuracy"],
+                        [device, name, placeholder_batch_size, status],
                     )
 
             try:
@@ -2513,10 +2565,10 @@ def run(runner, args, original_dir=None):
                 )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
-                write_csv()
+                write_csv("timeout")
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
-                write_csv()
+                write_csv("infra_error")
         print_summary(output_filename)
 
 

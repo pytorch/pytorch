@@ -30,6 +30,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -272,10 +273,17 @@ class BuiltinVariable(VariableTracker):
         def tuple_add_handler(tx, a, b, options):
             return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
 
+        def size_add_handler(tx, a, b, options):
+            return SizeVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
             # some SizeVariable weirdness. Specifically, the tuple-specific logic
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
+            (
+                (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
             (
                 (TupleVariable, TupleVariable),
                 tuple_add_handler,
@@ -491,7 +499,7 @@ class BuiltinVariable(VariableTracker):
                     fn,
                     *proxy_args_kwargs(args, kwargs),
                 )
-                if any([isinstance(arg, FakeItemVariable) for arg in args]):
+                if any(isinstance(arg, FakeItemVariable) for arg in args):
                     return wrap_fx_proxy_cls(
                         FakeItemVariable,
                         tx,
@@ -664,7 +672,7 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-                if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
+                if any(isinstance(val, FakeItemVariable) for val in [a, b]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -724,8 +732,8 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def _dynamic_args(self, *args, **kwargs):
-        return any([isinstance(x, SymNodeVariable) for x in args]) or any(
-            [isinstance(x, SymNodeVariable) for x in kwargs.values()]
+        return any(isinstance(x, SymNodeVariable) for x in args) or any(
+            isinstance(x, SymNodeVariable) for x in kwargs.values()
         )
 
     def call_slice(self, tx, *args):
@@ -942,11 +950,9 @@ class BuiltinVariable(VariableTracker):
         if (
             isinstance(seq, (variables.ListVariable, variables.TupleVariable))
             and all(
-                [
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, (int, float))
-                    for x in seq.items
-                ]
+                isinstance(x, variables.ConstantVariable)
+                and isinstance(x.value, (int, float))
+                for x in seq.items
             )
             and not kwargs
         ):
@@ -1257,11 +1263,16 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
+        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
+            return ConstantVariable(op(left.value, right.value))
+
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -1274,7 +1285,9 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(

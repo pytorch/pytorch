@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torchgen.utils import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
 import sys
@@ -304,6 +304,7 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten.binary_cross_entropy.default,
     aten.complex.default,
+    aten.polar.default,
     aten.copysign.Tensor,
     aten.div.Tensor_mode,
     aten.floor_divide.default,
@@ -579,7 +580,7 @@ meta disagrees with real impl:
             else:
                 seen_succeeded.setdefault(func, set()).add(dtype)
                 if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                    raise RuntimeError(f"unexpected success {resolve_name(func)}")
+                    raise RuntimeError(f"unexpected success {resolve_name(func)} {meta_args} {meta_kwargs}")
 
     return rs
 
@@ -603,7 +604,6 @@ meta_function_expected_failures = {
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
-    torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},
@@ -627,7 +627,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
-    torch.polar : {f64, f32},
     torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.cholesky : {f64, f32, c128, c64},
@@ -640,6 +639,10 @@ meta_function_expected_failures = {
 
 meta_function_expected_failures_only_outplace = {
     torch.nn.functional.rrelu : {f64, bf16, f32},
+}
+
+meta_function_expected_failures_conditional = {
+    torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
 }
 
 """
@@ -798,6 +801,8 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
+        elif meta_function_expected_failures_conditional.get(func, lambda *_, **__: False)(self.dtype, *args, **kwargs):
+            test_expect = TestExpect.XFAILURE
         elif not self.inplace and \
                 self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
@@ -832,7 +837,6 @@ meta_dispatch_expected_failures = {
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
-    aten.polar.out : {f32, f64},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
     aten.to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -864,7 +868,6 @@ meta_dispatch_expected_failures = {
     aten.multinomial.default : {bf16, f32, f64},
     aten.multinomial.out : {bf16, f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
-    aten.polar.default : {f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.searchsorted.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.searchsorted.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},

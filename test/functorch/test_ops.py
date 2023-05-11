@@ -101,9 +101,9 @@ def diff_arg(arg, requires_grad=True):
         else:
             return arg.is_floating_point() or arg.is_complex()
     if is_iterable_of_tensors(arg):
-        if all([is_differentiable_arg(a) for a in arg]):
+        if all(is_differentiable_arg(a) for a in arg):
             return True
-        if all([not is_differentiable_arg(a) for a in arg]):
+        if all(not is_differentiable_arg(a) for a in arg):
             return False
         raise RuntimeError("NYI: The test runner can't handle this")
     return isinstance(arg, Tensor) and is_differentiable_arg(arg)
@@ -1084,7 +1084,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
@@ -1183,7 +1182,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'prod'),
         xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.max_unpool3d', ''),
