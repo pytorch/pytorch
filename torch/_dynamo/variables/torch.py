@@ -370,15 +370,12 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
-        elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
-        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
-            assert "device_type" not in kwargs
-            if self.value is torch.cuda.amp.autocast:
-                kwargs.update({"device_type": ConstantVariable("cuda")})
-            else:
-                kwargs.update({"device_type": ConstantVariable("cpu")})
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]:
+            return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
