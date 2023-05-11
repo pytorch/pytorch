@@ -596,14 +596,6 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-void TensorImpl::throw_data_ptr_access_error() const {
-  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
-    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
-  }
-  TORCH_CHECK(
-      false, "Cannot access data pointer of Tensor that doesn't have storage");
-}
-
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(

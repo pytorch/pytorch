@@ -237,7 +237,6 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
-  c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -251,16 +250,12 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
-    if (other.custom_data_ptr_error_msg_) {
-      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
-      intrusive_ptr<c10::BackendMeta> backend_meta,
-      c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
+      intrusive_ptr<c10::BackendMeta> backend_meta)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(backend_meta) {}
@@ -1543,9 +1538,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
   T* data_ptr_impl_impl(const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
-      throw_data_ptr_access_error();
-    }
+    TORCH_CHECK(
+        has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
@@ -1594,9 +1589,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /// std::byte const*, etc.
   template <typename Void, typename Func>
   Void* data_impl(const Func& get_data) const {
-    if (C10_UNLIKELY(!has_storage())) {
-      throw_data_ptr_access_error();
-    }
+    TORCH_CHECK(
+        has_storage(),
+        "Cannot access data pointer of Tensor that doesn't have storage");
     TORCH_CHECK(
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
@@ -1651,12 +1646,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->backend_meta_;
   }
 
-  void release_storage_and_set_meta_custom_data_ptr_error_msg_(
-      c10::optional<std::string> s) {
-    storage_ = {};
-    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
-  }
-
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
@@ -1668,7 +1657,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
-  [[noreturn]] void throw_data_ptr_access_error() const;
 
   ExtraMeta& get_extra_meta() {
     if (!extra_meta_) {
