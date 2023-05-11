@@ -40,6 +40,10 @@ static Tensor pixel_shuffle_helper(const Tensor& self, int64_t factor, bool upsc
 
   Tensor output = at::empty(out_shape, self.options());
 
+  if (output.numel() == 0) {
+    return output;
+  }
+
   @autoreleasepool {
     string key = (upscale ? "pixel_shuffle_" : "pixel_unshuffle_") + getTensorsStringKey({self}) + "_factor_" +
         std::to_string(factor);
