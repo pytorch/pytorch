@@ -803,6 +803,28 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         foo._destroy()
 
+    def test_duplicate_impl(self):
+        @custom_op('_torch_testing::foo')
+        def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
+            ...
+
+        @foo.impl_abstract()
+        def foo_meta(x, dim):
+            output_shape = list(x.shape)
+            del output_shape[dim]
+            return x.new_empty(output_shape)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"already has a abstract impl.*at .*test_python_dispatch.py:\d+"):
+            @foo.impl_abstract()
+            def foo_meta2(x, dim):
+                output_shape = list(x.shape)
+                del output_shape[dim]
+                return x.new_empty(output_shape)
+
+        foo._destroy()
+
     def test_new_data_dependent_symint(self):
         @custom_op('_torch_testing::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -847,7 +869,7 @@ class TestCustomOp(TestCase):
         foo._destroy()
 
     def test_abstract_registration_location(self):
-        loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._get_impl('abstract').location
         matches = re.match(r'.*custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 
