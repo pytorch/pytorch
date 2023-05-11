@@ -532,6 +532,8 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
 
   if (report_error_callback_ != nullptr) {
     report_error_callback_->pyinterpreter()->reportErrorCallback(report_error_callback_->ptr(&report_error_callback_->pyinterpreter()), dispatchKey);
+    // reportErrorCallback should have raised an error
+    TORCH_INTERNAL_ASSERT(false);
   }
   if (dispatchKey == DispatchKey::Undefined) {
     TORCH_CHECK_NOT_IMPLEMENTED(false,
