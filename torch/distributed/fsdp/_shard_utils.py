@@ -13,6 +13,8 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
+from torch.distributed._tensor import DTensor, Shard as DShard
+from torch.distributed._tensor.device_mesh import DeviceMesh
 
 
 def _all_gather_sharded_tensor(
@@ -68,6 +70,12 @@ def _gather_state_dict(
                 tensor = output_tensor
             else:
                 tensor = output_tensor.cpu()
+        elif isinstance(tensor, DTensor):
+            device_type = 'cuda' if tensor.is_cuda else 'cpu'
+            device_mesh = DeviceMesh(device_type, torch.arange(dist.get_world_size(pg)))
+            tensor = device_mesh.all_gather(
+                tensor.to_local(), mesh_dim=0, gather_dim=0
+            )
         new_state_dict[key] = tensor
     return new_state_dict
 
@@ -121,3 +129,36 @@ def _create_chunk_sharded_tensor(
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards, sharded_tensor_metadata=sharded_tensor_metadata, process_group=pg
     )
+
+
+def _create_chunk_dtensor(
+    tensor: torch.Tensor,
+    rank: int,
+    world_size: int,
+    num_devices_per_node: int,
+    pg: dist.ProcessGroup,
+) -> DTensor:
+    """
+    Shard a tensor to chunks along the first dimension. The local rank will gets its
+    corresponding chunk as the local tensor to create a DTensor.
+    """
+    shard_placement = DShard(0)
+    device_type = 'cuda' if tensor.is_cuda else 'cpu'
+    device_mesh = DeviceMesh(device_type, torch.arange(dist.get_world_size(pg)))
+    
+    #we need to handle the situation where ....if len(chunks) > rank:
+
+
+    tensor_padded_list, pad_sizes = shard_placement._split_tensor(
+        tensor,
+        device_mesh.size(),
+        with_padding=True,
+        contiguous=True,
+    )
+    unpadded_list = [
+        shard_placement._unpad_tensor(tensor_padded_list[i], pad_sizes[i])
+        if pad_sizes[i] > 0
+        else tensor_padded_list[i]
+        for i, tensor in enumerate(tensor_padded_list)
+    ]
+    return DTensor.from_local(unpadded_list[dist.get_rank()], device_mesh, [shard_placement])
