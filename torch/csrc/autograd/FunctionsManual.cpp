@@ -3825,8 +3825,8 @@ Tensor linalg_qr_backward(
       "mode='r'. Please use linalg.qr(A, mode='reduced') if you are "
       "going to differentiate through linalg.qr.");
 
-  auto m = Q.size(-2);
-  auto n = R.size(-1);
+  auto m = Q.sym_size(-2);
+  auto n = R.sym_size(-1);
 
   TORCH_CHECK(
       reduced || m <= n,
@@ -3870,10 +3870,10 @@ Tensor linalg_qr_backward(
     };
     gA = Q.matmul(trilImInvAdjSkew(-gA));
     gA = at::linalg_solve_triangular(
-        R.narrow(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
-    auto shape = R.sizes().vec();
+        R.narrow_symint(-1, 0, m).mH(), gA, /*upper*/ false, /*left*/ false);
+    auto shape = R.sym_sizes().vec();
     shape.end()[-1] = n - m;
-    gA = at::cat({gA, gA.new_zeros(shape)}, /*dim=*/-1);
+    gA = at::cat({gA, gA.new_zeros_symint(shape)}, /*dim=*/-1);
     if (gR.defined()) {
       gA = gA + Q.matmul(gR);
     }
@@ -6778,6 +6778,142 @@ Tensor to_sparse_backward(
     }
     return grad.to_sparse(self_layout, blocksize);
   }
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+mkldnn_rnn_layer_differentiable_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace) {
+  const Tensor& grad_output_r =
+      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
+  const Tensor& grad_hy_r =
+      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
+  const Tensor& grad_cy_r =
+      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
+  if (!grad_output_r.defined() && !grad_hy_r.defined() &&
+      !grad_cy_r.defined()) {
+    return std::make_tuple(
+        Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  }
+  auto grad_output = grad_output_r.defined()
+      ? grad_output_r.contiguous()
+      : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_hy = grad_hy_r.defined()
+      ? grad_hy_r.contiguous()
+      : at::zeros_like(hx_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_cy = cx_tmp.defined()
+      ? (grad_cy_r.defined()
+             ? grad_cy_r.contiguous()
+             : at::zeros_like(cx_tmp, LEGACY_CONTIGUOUS_MEMORY_FORMAT))
+      : grad_cy_r.contiguous();
+  Tensor bias_ih, bias_hh;
+  if (has_biases) {
+    bias_ih = weight2;
+    bias_hh = weight3;
+  } else {
+    bias_ih = at::zeros(
+        {4 /* num_bias_gates of LSTM */ * hidden_size}, weight0.options());
+    bias_hh = at::zeros(
+        {4 /* num_bias_gates of LSTM */ * hidden_size}, weight0.options());
+  }
+  auto input_ = input;
+  auto hx_prev = hx_;
+  auto cx_prev = cx_tmp;
+
+  // Re-calculate gates and hidden states during one layer, which will be used
+  // in backward.
+  int64_t seq_length = input.size(0);
+  std::vector<std::tuple<Tensor, Tensor, Tensor, Tensor>> layer_gates(
+      seq_length);
+  std::vector<std::tuple<Tensor, Tensor>> layer_states(seq_length + 1);
+  layer_states[0] = std::make_tuple(hx_, cx_tmp);
+  for (int seq = 1; seq < seq_length + 1; seq++) {
+    auto hx = hx_prev;
+    auto cx = cx_prev;
+    int x_index = reverse ? seq_length - seq : seq - 1;
+    auto gate = at::linear(input_[x_index], weight0, bias_ih)
+                    .add_(at::linear(hx, weight1, bias_hh));
+    auto chunked_gates = gate.unsafe_chunk(4, 1);
+    auto i = chunked_gates[0].sigmoid_();
+    auto f = chunked_gates[1].sigmoid_();
+    auto g = chunked_gates[2].tanh_();
+    auto o = chunked_gates[3].sigmoid_();
+    layer_gates[x_index] = std::make_tuple(i, f, g, o);
+    auto cy = (f * cx).add(i * g);
+    auto hy = o * cy.tanh();
+    layer_states[seq] = std::make_tuple(hy, cy);
+    hx_prev = hy;
+    cx_prev = cy;
+  }
+
+  Tensor dx, dWx, dWh, db, db_, dprev_h, dprev_c, dWh_, dWx_;
+  Tensor new_grad_hy, d1, dgp, dip, dfp, dop, do_, dg, df, di, da;
+  std::vector<at::Tensor> layer_dx(seq_length);
+  for (int seq = seq_length - 1; seq >= 0; seq--) {
+    int x_index = reverse ? seq_length - seq - 1 : seq;
+    auto i = std::get<0>(layer_gates[x_index]);
+    auto f = std::get<1>(layer_gates[x_index]);
+    auto g = std::get<2>(layer_gates[x_index]);
+    auto o = std::get<3>(layer_gates[x_index]);
+    auto hy = std::get<0>(layer_states[seq + 1]);
+    auto cy = std::get<1>(layer_states[seq + 1]);
+    auto hx = std::get<0>(layer_states[seq]);
+    auto cx = std::get<1>(layer_states[seq]);
+    new_grad_hy = grad_output[x_index].add(grad_hy);
+    d1 = grad_cy.add(new_grad_hy * o * (1 - cy.tanh() * cy.tanh()));
+    dgp = d1 * i;
+    dip = d1 * g;
+    dprev_c = d1 * f;
+    dfp = d1 * cx;
+    dop = new_grad_hy * cy.tanh();
+    do_ = dop * o * (1 - o);
+    dg = dgp * (1 - g * g);
+    df = dfp * f * (1 - f);
+    di = dip * i * (1 - i);
+    da = at::cat({di, df, dg, do_}, 1);
+    db_ = at::sum(da, 0);
+    dx = at::matmul(da, weight0);
+    dx = at::unsqueeze(dx, 0);
+    dprev_h = at::matmul(da, weight1);
+    dWx_ = at::matmul(da.transpose(0, 1), input_[x_index]);
+    dWh_ = at::matmul(da.transpose(0, 1), hx);
+    if (seq == seq_length - 1) {
+      db = db_;
+      dWx = dWx_;
+      dWh = dWh_;
+    } else {
+      db += db_;
+      dWx += dWx_;
+      dWh += dWh_;
+    }
+    layer_dx[x_index] = dx;
+    grad_hy = dprev_h;
+    grad_cy = dprev_c;
+  }
+
+  auto cat_layer_dx = at::cat(layer_dx, 0);
+  return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
 }
 
 } // namespace details
