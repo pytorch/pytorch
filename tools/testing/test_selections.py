@@ -228,6 +228,7 @@ def get_reordered_tests(
         )
         return ([], tests)
 
+    # TODO: Would be great to upload these metrics to RDS/Rockset
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
     print(f"Prioritized tests will run up to {to_time_str(time_savings)} faster")
