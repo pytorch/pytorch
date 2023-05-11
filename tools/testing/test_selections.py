@@ -181,9 +181,9 @@ def _get_test_prioritized_due_to_test_file_changes() -> Set[str]:
 
     prefix = f"test{os.path.sep}"
     # TODO: Make prioritization work with C++ test as well
-    prioritized_tests = set([
+    prioritized_tests = {
         f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
-    ])
+    }
     prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
     prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
 

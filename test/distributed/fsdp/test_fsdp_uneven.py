@@ -37,6 +37,9 @@ class TestUnevenParamShard(FSDPTest):
 
         return ref_forward_output_my_rank, ref_weight_out
 
+    def test_should_fail(self):
+        self.assertTrue(False)
+
     @skip_if_lt_x_gpu(2)
     def test_one_iteration(self):
         """Test FSDP with uneven divide of parameter shards."""
