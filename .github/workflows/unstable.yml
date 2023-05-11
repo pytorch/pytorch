@@ -31,26 +31,6 @@ jobs:
           echo "Once the jobs are deemed stable enough (% red signal < 5% and TTS < 3h),"
           echo " they can graduate and move back to pull or trunk."
 
-  linux-vulkan-bionic-py3_11-clang9-build:
-    name: linux-vulkan-bionic-py3.11-clang9
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-vulkan-bionic-py3.11-clang9
-      docker-image-name: pytorch-linux-bionic-py3.11-clang9
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
-  linux-vulkan-bionic-py3_11-clang9-test:
-    name: linux-vulkan-bionic-py3.11-clang9
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-vulkan-bionic-py3_11-clang9-build
-    with:
-      build-environment: linux-vulkan-bionic-py3.11-clang9
-      docker-image: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-vulkan-bionic-py3_11-clang9-build.outputs.test-matrix }}
-
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml

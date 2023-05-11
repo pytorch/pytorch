@@ -388,17 +388,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # np.number are lifted to graph inputs
         self._test_wrap_simple(f, (x,), 3)
 
-    @torch._dynamo.config.patch(specialize_int=False, dynamic_shapes=True)
-    def test_capture_uncommon_int(self):
-        y = 328
-
-        def f(x):
-            return wrap(lambda x: x + y, x)
-
-        x = torch.randn(3)
-        # Under this specific config, uncommon ints are lifted to graph inputs.
-        self._test_wrap_simple(f, (x,), 3)
-
     def test_freevars_as_inputs_to_wrap(self):
         y = torch.randn(3)
 

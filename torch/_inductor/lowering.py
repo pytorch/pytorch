@@ -1566,6 +1566,13 @@ make_fallback(aten.zeros.names)
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
 
+# ROCm specific fallback, perf issues are observed when registered
+make_fallback(aten.miopen_batch_norm, warn=False)
+
+if torch.version.hip is not None and torch.cuda.is_available():
+    # tl.reduce not available yet in ROCm's version of triton
+    make_fallback(aten.prod, warn=False)
+
 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
@@ -2678,11 +2685,17 @@ def reflection_pad2d_backward(grad_output, x, padding):
         bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
 
         # Accumulate gradients from different areas
-        grad = load_from_output(center_x, center_y)
-        accumulate(center_x, left_reflect_y, (y, 1, left))
-        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top))
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        # If some of the padding is negative, center load is not always valid
+        range_cx = (center_x, 0, h + top + bot)
+        range_cy = (center_y, 0, w + left + right)
+        cond = ops.and_(
+            index_range_condition(range_cx), index_range_condition(range_cy)
+        )
+        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
+        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
         accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
         accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
         accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
