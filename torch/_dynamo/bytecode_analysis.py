@@ -154,6 +154,8 @@ def livevars_analysis(instructions, instruction):
                     pass
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
+            if inst.exn_tab_entry:
+                walk(may, indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
                 walk(may, indexof[inst.target])
                 state = may
@@ -187,6 +189,13 @@ class StackSize:
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
 
+    def exn_tab_jump(self, depth):
+        prior = (self.low, self.high)
+        self.low = min(self.low, depth)
+        self.high = max(self.high, depth)
+        if (self.low, self.high) != prior:
+            self.fixed_point.value = False
+
 
 def stacksize_analysis(instructions):
     assert instructions
@@ -213,6 +222,11 @@ def stacksize_analysis(instructions):
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
+            if inst.exn_tab_entry:
+                # see https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+                # on why depth is computed this way.
+                depth = inst.exn_tab_entry.depth + int(inst.exn_tab_entry.lasti) + 1
+                stack_sizes[inst.exn_tab_entry.target].exn_tab_jump(depth)
 
     if False:
         for inst in instructions:
