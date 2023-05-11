@@ -39,6 +39,8 @@ class _FSDPPolicy(ABC):
 
     # The motivation for this abstract base class is to hide the interface
     # expected by `_recursive_wrap()` from users (i.e. the `recurse` argument).
+    def __init__(self):
+        ...
 
     @property
     @abstractmethod

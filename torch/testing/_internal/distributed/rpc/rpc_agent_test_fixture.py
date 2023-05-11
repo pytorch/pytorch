@@ -35,7 +35,7 @@ class RpcAgentTestFixture(ABC):
     def rpc_backend_options(self):
         pass
 
-    def setup_fault_injection(self, faulty_messages, messages_to_delay):  # noqa: B027
+    def setup_fault_injection(self, faulty_messages, messages_to_delay):
         """Method used by dist_init to prepare the faulty agent.
 
         Does nothing for other agents.

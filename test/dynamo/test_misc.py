@@ -3523,7 +3523,7 @@ def fn():
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
-            def read(self):  # noqa: B027
+            def read(self):
                 pass
 
         class Bar(Foo):

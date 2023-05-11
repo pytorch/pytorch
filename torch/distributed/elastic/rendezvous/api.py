@@ -105,7 +105,6 @@ class RendezvousHandler(ABC):
         allow nodes to join the correct distributed application.
         """
 
-    @abstractmethod
     def shutdown(self) -> bool:
         """Closes all resources that were open for the rendezvous.
 
