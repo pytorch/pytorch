@@ -963,7 +963,7 @@ def download_retry_decorator(download_fn):
         tries = 0
         model = None
         total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
-        while tries < total_allowed_tries:
+        while tries <= total_allowed_tries:
             try:
                 model = download_fn(self, *args, **kwargs)
                 return model
