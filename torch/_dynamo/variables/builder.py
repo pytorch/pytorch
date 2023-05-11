@@ -594,18 +594,7 @@ class VariableBuilder:
         )
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
-        # One can index a tensor with a list/tuple. Therefore, we need to
-        # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
-            )
-            and not config.dynamic_shapes
-        ):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-        else:
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
@@ -720,7 +709,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int and config.dynamic_shapes
+        unspec = not config.specialize_int
         if unspec and type(value) is torch.Size:
             return SizeVariable(
                 [
@@ -862,8 +851,7 @@ class VariableBuilder:
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
             if (
-                config.dynamic_shapes
-                and isinstance(value, int)
+                isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
@@ -1092,10 +1080,10 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
+    elif istype(example_value, (int, bool, float)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable.create(tx, proxy, example_value, **options)
-    elif istype(example_value, torch.Size) and config.dynamic_shapes:
+    elif istype(example_value, torch.Size):
         proxy.node.meta["example_value"] = example_value
         sizes = []
         for i, v in enumerate(example_value):
@@ -1109,16 +1097,8 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
     ):
-        if config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            return SymNodeVariable.create(tx, proxy, example_value, **options)
-        else:
-            return ConstantVariable(example_value, **options)
-    elif istype(example_value, torch.Size) and all(
-        isinstance(x, int) for x in example_value
-    ):
-        sizes = [ConstantVariable(x) for x in example_value]
-        return SizeVariable(sizes, **options)
+        proxy.node.meta["example_value"] = example_value
+        return SymNodeVariable.create(tx, proxy, example_value, **options)
     elif isinstance(example_value, (tuple, list)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
@@ -1282,7 +1262,7 @@ def wrap_to_fake_tensor_and_record(
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
-                if marked_dynamic:
+                if curr_sizes and marked_dynamic:
                     curr_sizes[i] = None
 
                 # We will process constraints first, as they will imply that we

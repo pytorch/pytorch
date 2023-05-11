@@ -1886,17 +1886,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from .test_functions import tensor_for_import_testing
+                from .utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                from test_functions import tensor_for_import_testing
+                from utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
@@ -1909,19 +1909,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import_no_modulename(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from . import test_functions
+                from . import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                import test_functions
+                import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -2776,8 +2776,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(3))
 
+<<<<<<< HEAD
         self.assertEqual(counter.op_count, 3)
         self.assertEqual(counter.frame_count, 1)
+=======
+        self.assertEqual(counter.op_count, ifdyn(ifunspec(3, 3), 3))
+        self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
+>>>>>>> 20226533dbf... WIP policy
 
     def test_delattr(self):
         class MyObj:

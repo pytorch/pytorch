@@ -603,7 +603,7 @@ class TestInductorOpInfo(TestCase):
                         "nopython": True,
                         # skip checking gradient on CPU for now
                         "check_gradient": False,
-                        "dynamic": False,
+                        "dynamic": True,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
 

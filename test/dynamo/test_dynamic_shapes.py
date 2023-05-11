@@ -54,6 +54,7 @@ def make_test_cls(cls, *, dynamic, static_default=False):
         cls_prefix,
         suffix,
         (config, "dynamic_shapes", dynamic),
+        (config, "automatic_dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
     )

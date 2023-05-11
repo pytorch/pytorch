@@ -395,6 +395,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # just one graph
         self.assertEqual(cnt.frame_count, 1)
 
+    @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_kwarg(self):
         def fn(a, b):
             return a - b * 10
@@ -415,6 +416,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             # just one graph
             self.assertEqual(cnt_dynamic.frame_count, 1)
 
+    @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_duck_size(self):
         def fn(a, b):
             if a.size(0) == b.size(0):
