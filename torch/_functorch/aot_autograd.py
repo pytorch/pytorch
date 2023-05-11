@@ -1330,7 +1330,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             del guard
     return out
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -1365,6 +1365,11 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     if aot_config.enable_log:
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
+
+    return fw_module
+
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    fw_module = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
