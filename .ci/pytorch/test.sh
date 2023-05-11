@@ -585,13 +585,13 @@ test_libtorch() {
     # Wait for background download to finish
     wait
 
-    if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
         TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
         mkdir -p $TEST_REPORTS_DIR
 
-        # TODO: Not quite sure why these tests time out only on ASAN, probably
-        # this is due to the fact that a python executable is used and ASAN
-        # treats that differently
+        # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
+        # this is due to the fact that a python executable is used or some logic
+        # inside run_test. This test usually takes only minutes to run
         OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
         "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     else
