@@ -233,7 +233,6 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude \
       test_autograd \
-      test_jit \
       test_proxy_tensor \
       test_quantization \
       test_public_bindings \
@@ -256,10 +255,6 @@ test_dynamo_shard() {
 }
 
 test_inductor_distributed() {
-  # Smuggle a few multi-gpu tests here so that we don't have to request another large node
-  echo "Testing multi_gpu tests in test_torchinductor"
-  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
-
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
   python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
@@ -586,13 +581,13 @@ test_libtorch() {
     # Wait for background download to finish
     wait
 
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
         TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
         mkdir -p $TEST_REPORTS_DIR
 
-        # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
-        # this is due to the fact that a python executable is used or some logic
-        # inside run_test. This test usually takes only minutes to run
+        # TODO: Not quite sure why these tests time out only on ASAN, probably
+        # this is due to the fact that a python executable is used and ASAN
+        # treats that differently
         OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
         "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     else
@@ -635,6 +630,10 @@ test_vulkan() {
 }
 
 test_distributed() {
+  # Smuggle a few multi-gpu tests here so that we don't have to request another large node
+  echo "Testing multi_gpu tests in test_torchinductor"
+  pytest test/inductor/test_torchinductor.py -k test_multi_gpu
+
   echo "Testing distributed python tests"
   time python test/run_test.py --distributed-tests --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty

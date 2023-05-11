@@ -29,7 +29,6 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/impl/*.cpp
-        core/impl/cow/*.cpp
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
@@ -38,7 +37,6 @@ file(GLOB C10_HEADERS
         *.h
         core/*.h
         core/impl/*.h
-        core/impl/cow/*.h
         mobile/*.h
         macros/*.h
         util/*.h
