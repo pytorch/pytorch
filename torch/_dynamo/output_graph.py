@@ -63,6 +63,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    graph_break_reasons,
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     nnmodule_doc_url_msg,
@@ -132,6 +133,10 @@ class GraphCompileReason:
 
     # Indicates if this was a graph compile reason due to graph break.
     graph_break: bool = True
+
+    def __post_init__(self):
+        if self.graph_break:
+            graph_break_reasons.append(self)
 
 
 def _get_gen_rand_values_fn(random_calls):
@@ -251,6 +256,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+        # Map each tensor id to a list of sources. This is necessary because
+        # tensor ids cannot be recovered from tracked fakes (in general).
+        # We use this map to interpret (i.e., check for violations of) constraints,
+        # specifically equality constraints, which have shared tensor ids in them.
+        # This map should also be generally useful, e.g., for (de)serialization.
+        self.tracked_fakes_id_to_source: Dict[
+            int, List[Source]
+        ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
@@ -1049,12 +1062,15 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = target
+            rv.node.meta["source_fn"] = (rv.node.name, target)
         elif kind == "call_module":
             if self.parent is not None:
                 unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
-            rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
+            rv.node.meta["source_fn"] = (
+                rv.node.name,
+                rv.node.meta["nn_module_stack"][target][1],
+            )
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

@@ -910,11 +910,16 @@ class BackwardSignature:
     (2) A mapping from each gradient (backwards output) to the user input
         it corresponds to (forward input)
     (3) Which of the forward outputs corresponds to the loss, that we backprop on.
+
+    Each string name is the `node.name` of the corresponding node in the fx graph.
     """
     gradients_to_parameters: Dict[str, str]
     gradients_to_user_inputs: Dict[str, str]
     loss_output: str
 
+GraphOutputName = NewType('GraphOutputName', str)
+GraphInputName = NewType('GraphInputName', str)
+FQN = NewType('FQN', str)
 
 @dataclass
 class GraphSignature:
@@ -934,17 +939,20 @@ class GraphSignature:
         a signature on the backward section of the joint graph.
     """
 
-    # Parameters/buffers are named according to their name in the GraphModule,
-    # *not* their name in the input/output list.
-    parameters: List[str]
-    buffers: List[str]
+    parameters: List[FQN]
+    buffers: List[FQN]
 
-    user_inputs: List[str]
-    user_outputs: List[str]
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
+    user_inputs: List[GraphInputName]
+    user_outputs: List[GraphOutputName]
+    inputs_to_parameters: Dict[GraphInputName, FQN]
+    inputs_to_buffers: Dict[GraphInputName, FQN]
 
-    buffers_to_mutate: Dict[str, str]
+    # If the user's module mutates a buffer,
+    # it's represented in the graph as an extra graph output.
+    # This dict is a mapping from
+    # "graph outputs that correspond to updated buffers"
+    # to the FQN names of those mutated buffers.
+    buffers_to_mutate: Dict[GraphOutputName, FQN]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
@@ -1037,7 +1045,7 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
-    is_export: bool
+    is_export: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
@@ -1228,7 +1236,7 @@ def create_joint(
         if grad_primals:
             with fx_traceback.preserve_node_meta():
                 # If our output is a scalar loss, we don't need to pass in tangents.
-                if len(needed_tangents) == 1 and needed_tangents[0].ndim == 0:
+                if len(needed_tangents) == 1 and needed_tangents[0].numel() == 1:
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -2053,7 +2061,7 @@ def aot_wrapper_dedupe(
 
     # export path: ban duplicate inputs for now, add later if requested.
     if aot_config.is_export:
-        raise AssertionError(f"""\
+        raise RuntimeError(f"""\
 Encountered duplicated inputs that are mutated in the graph you are trying to export.
 This functionality is currently not supported. If needed, please file a github issue.
 
@@ -2104,13 +2112,15 @@ fw_metadata={str(fw_metadata)}
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
-    for i, t in enumerate(flat_args):
-        if t in seen_args:
-            keep_arg_mask.append(False)
-            add_dupe_map.append(seen_args[t])
-            continue
+    for t in flat_args:
+        if isinstance(t, torch.Tensor):
+            if t in seen_args:
+                keep_arg_mask.append(False)
+                add_dupe_map.append(seen_args[t])
+                continue
+            seen_args[t] = j
+
         keep_arg_mask.append(True)
-        seen_args[t] = j
         add_dupe_map.append(j)
         j += 1
     assert len(add_dupe_map) == duped_arg_len, (
@@ -2231,7 +2241,7 @@ def aot_wrapper_synthetic_base(
 
     # export path: ban synthetic bases for now, add later if requested.
     if aot_config.is_export:
-        raise AssertionError(f"""\
+        raise RuntimeError(f"""\
 Encountered aliased inputs that are mutated in the graph you are trying to export.
 This functionality is currently not supported. If needed, please file a github issue.
 
@@ -2593,7 +2603,7 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -2604,7 +2614,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     assert len(fw_metadata.requires_grad_info) == fw_metadata.num_mutated_inputs + fw_metadata.num_outputs
     joint_inputs = (flat_args, traced_tangents)
-    disable_amp = torch._C._is_any_autocast_enabled()
 
     fn_prepared_for_autograd = fn_prepped_for_autograd(
         flat_fn,
@@ -2629,14 +2638,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
     fx_g.recompile()
+    # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
+    # when we need to manually detach() some inputs in the forward.
+    # Higher order ops might eventually need to do the same.
+    return fx_g
 
-    if aot_config.is_export:
-        # For export, we return the joint directly
-        # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
-        # when we need to manually detach() some inputs in the forward.
-        # Higher order ops might eventually need to do the same.
-        return fx_g
+def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    fx_g = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
+    # Copied from aot_dispatch_autograd_graph.
+    traced_tangents = pytree.tree_map(
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+        fw_metadata.traced_tangents,
+    )
+    joint_inputs = (flat_args, traced_tangents)
+    disable_amp = torch._C._is_any_autocast_enabled()
 
     if aot_config.enable_log:
         aot_joint_log.info("%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id))
@@ -3136,25 +3152,28 @@ def create_aot_dispatcher_function(
             # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
             # Keeping .resize_() in the graph will require some work
             # Allowing it but keeping the graph functional will require some calling convention changes.
-            assert len([x for x in fw_metadata.input_info if x.mutates_metadata]) == 0, f"""\
+            if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
+                raise RuntimeError(f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
-fw_metadata={str(fw_metadata)}"""
+fw_metadata={str(fw_metadata)}""")
             # In export, banning data mutations on inputs that require grad for now.
             # This should be rare, and is tricky to get right. When we trace the backward,
             # we currently trace with autograd.grad instead of .backward(), which makes it difficult
             # to ensure that we run autograd all the way through the input **before** it saw the mutation.
-            assert len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x]) == 0, f"""\
+            if len([x for x in fw_metadata.requires_grad_info[:fw_metadata.num_mutated_inputs] if x]) != 0:
+                raise RuntimeError(f"""\
 Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
-fw_metadata={str(fw_metadata)}"""
+fw_metadata={str(fw_metadata)}""")
             # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
             # and turning it on will require a non-trivial calling convention change for any export runtime.
-            assert not config.functionalize_rng_ops, """\
+            if config.functionalize_rng_ops:
+                raise RuntimeError("""\
 Functionalized RNG is not currently supported in the aot_export workflow. Please file a github issue,
-or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
+or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         # crappy version of dispatcher
         # TODO: Do this properly
@@ -3163,7 +3182,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             # when run with export, and an opaque callable otherwise.
             # In theory we could factor these out, but I wanted to let the dust
             # settle on how functionalized rng fits into export first.
-            compiler_fn = aot_dispatch_autograd
+            compiler_fn = aot_dispatch_autograd_graph if aot_config.is_export else aot_dispatch_autograd
         else:
             # aot_dispatch_base_graph contains only the "graph bits", while aot_dispatch_base
             # includes some extra work around handling a runtime epilogue.
@@ -3334,7 +3353,7 @@ def create_graph_signature(
         num_fw_outs = num_user_fw_outs + fw_metadata.num_mutated_inputs
         backward_output_names = graph_output_names[num_fw_outs:]
 
-        grad_index = iter(range(len(backward_output_names)))
+        grad_index = itertools.count(0)
         gradients_to_parameters = {
             backward_output_names[next(grad_index)]: param_names[i]
             for i, param in enumerate(params_and_buffers_flat)
@@ -3655,36 +3674,6 @@ def aot_module_simplified(
 
     return forward
 
-"""
-This function takes in a module, and returns:
-(1) an FX graph that can be exported
-(2) some metadata about the graph
-
-If `trace_joint=True` we will return a joint graph of the forward + backward.
-
-The traced FX graph will have the following properties compared to the original module:
-(1) Inputs and outputs to the module will be pytree-flattened
-(2) Parameters and buffers on the module will be lifted into graph inputs,
-    graph_inputs = (*parameters, *buffers, *user_inputs)
-(3) The graph will be fully functionalized
-(4) Any input mutations will be converted into additional outputs in the graph,
-    meaning whoever calls this graph is responsible for applying the mutations
-    back to the original inputs.
-(5) If is_backward is provided the graph will return parameter gradients in addition to user outputs.
-    The graph output will look like:
-    graph_outputs = (*updated_inputs, *user_outputs, *param_gradients)
-
-There are also several restrictions on what modules can use this API. In particular:
-(1) If trace_joint is specified, we expect the loss function to be **fused**
-    into the module forward. One of the outputs to the forward must be a scalar loss,
-    which is specified with `output_loss_index`.
-    All other outputs to the forward are presumed to not require gradients.
-(2) This API cannot capture optimizers (although in theory we could build an API for this).
-(3) Metadata mutations on params/buffers/inputs are banned.
-(4) Data mutations on anything that requires gradients are banned (parameters)
-(5) If an input is mutated, it is not allowed to alias any other inputs.
-(6) Parameters must not be duplicated.
-"""
 def aot_export_module(
     mod: nn.Module,
     args,
@@ -3697,6 +3686,36 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
+    """
+    This function takes in a module, and returns:
+    (1) an FX graph that can be exported
+    (2) some metadata about the graph
+
+    If `trace_joint=True` we will return a joint graph of the forward + backward.
+
+    The traced FX graph will have the following properties compared to the original module:
+    (1) Inputs and outputs to the module will be pytree-flattened
+    (2) Parameters and buffers on the module will be lifted into graph inputs,
+        graph_inputs = (*parameters, *buffers, *user_inputs)
+    (3) The graph will be fully functionalized
+    (4) Any input mutations will be converted into additional outputs in the graph,
+        meaning whoever calls this graph is responsible for applying the mutations
+        back to the original inputs.
+    (5) If is_joint is provided the graph will return parameter gradients in addition to user outputs.
+        The graph output will look like:
+        graph_outputs = (*updated_inputs, *user_outputs, *param_gradients)
+
+    There are also several restrictions on what modules can use this API. In particular:
+    (1) If trace_joint is specified, we expect the loss function to be **fused**
+        into the module forward. One of the outputs to the forward must be a scalar loss,
+        which is specified with `output_loss_index`.
+        All other outputs to the forward are presumed to not require gradients.
+    (2) This API cannot capture optimizers (although in theory we could build an API for this).
+    (3) Metadata mutations on params/buffers/inputs are banned.
+    (4) Data mutations on anything that requires gradients are banned (parameters)
+    (5) If an input is mutated, it is not allowed to alias any other inputs.
+    (6) Parameters must not be duplicated.
+    """
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     params_and_buffers = {
@@ -3719,24 +3738,37 @@ def aot_export_module(
         def fn_to_trace(*args):
             nonlocal num_fw_outs
             out = functional_call(*args)
-            if output_loss_index is not None:
-                assert isinstance(out, (list, tuple))
-                for i, o in enumerate(out):
-                    # We only want to create a backward graph w.r.t. the loss that the user passed in.
-                    # This implies that every other output should not require gradients.
-                    # Instead of making this an error (and forcing the user to detach all other outputs
-                    # of their forward),
-                    # we'll automatically detach them here.
-                    if o.requires_grad and i != output_loss_index:
-                        o.detach_()
-                out_loss = out[output_loss_index]
-                num_fw_outs = len(out)
-            else:
-                out_loss = out
-                num_fw_outs = 1
-            assert isinstance(out_loss, torch.Tensor)
-            assert out_loss.requires_grad
-            assert out_loss.numel() == 1, "When passing a module into aot_export_module, the output must be a scalar loss."
+            if output_loss_index is None:
+                raise RuntimeError("""\
+If trace_joint=Trueit is required that one of your forward outputs must be a scalar loss.
+You must specify the which (index) output is the loss with output_loss_index.""")
+            if isinstance(out, (torch.Tensor)):
+                out = (out,)
+            if not isinstance(out, (tuple, list)):
+                raise RuntimeError(f"Expected forward output to be either a tensor or a list/tuple of tensors. found {type(out)}")
+
+            for i, o in enumerate(out):
+                # We only want to create a backward graph w.r.t. the loss that the user passed in.
+                # This implies that every other output should not require gradients.
+                # Instead of making this an error (and forcing the user to detach all other outputs
+                # of their forward),
+                # we'll automatically detach them here.
+                if o.requires_grad and i != output_loss_index:
+                    raise RuntimeError(f"""\
+Found an output of the forward that requires gradients, that was not the scalar loss.
+We require all outputs to the forward that are not the scalar loss to not require gradient,
+because we will only compute a backward graph against the scalar loss.
+You can fix this by calling .detach() on each of your forward outputs that is not the loss.
+You specified that output index {output_loss_index} is the loss, but we found that
+the output at index {i} requires gradients.""")
+            out_loss = out[output_loss_index]
+            num_fw_outs = len(out)
+            if not out_loss.requires_grad:
+                raise RuntimeError(f"""\
+The output at index {output_loss_index} was marked as the loss, but it does not require gradients""")
+            if out_loss.numel() != 1:
+                raise RuntimeError(f"""\
+We require the output marked as the loss (at index {output_loss_index}) to be a scalar, but it has shape {out_loss.shape}""")
             return out
         ctx = nullcontext
     else:
@@ -3783,7 +3815,9 @@ def aot_export_module(
                 if isinstance(a, torch.Tensor) and a.requires_grad:
                     assert grad is not None, """\
 Found a parameter that did not receive a gradient.
-"This is most likely a bug, but if this needs to be supported please file an issue on GitHub."""
+"This is most likely a bug, but if this needs to be supported please comment on this Github issue:
+https://github.com/pytorch/pytorch/issues/101192
+"""
                     output_gradients.append(grad)
                 else:
                     assert grad is None
@@ -3805,23 +3839,6 @@ Found a parameter that did not receive a gradient.
         loss_index=output_loss_index,
     )
 
-"""
-A simplified version of export. Used by higher order operators.
-
-This function makes a high-level "no calling convention changes" guarantee:
-- If no inputs require grad (so we export an inference graph),
-  there are *no* calling convention change between the exported graph, and "func".
-- If at least one input requires grad (so we trace out and expot a joint fw-bw graph),
-  Then if you were partition the graph into a separate forward and backward graph,
-  The forward graph will have no calling convention changes compared to "func".
-
-The above also relies on some strong restrictions around which functions this API accepts:
-(1) `args` cannot contain any pytrees (they must have been pytree_flattened already)
-(2) `func` cannot mutate any inputs
-(3) The outputs of `func` cannot alias any inputs.
-
-Note: this function is only lightly tested today. It will probably be tested more heavily by higher order ops.
-"""
 def aot_export_joint_simple(
     func: Callable,
     args,
@@ -3833,27 +3850,55 @@ def aot_export_joint_simple(
     num_params_buffers: int = 0,
     decompositions: Optional[Dict] = None,
 ) -> torch.fx.GraphModule:
-    fx_g, metadata, in_spec, out_spec = _aot_export_function(
-        functional_call,
-        full_args,
-        decompositions=decompositions,
-        keep_input_mutations=False,
-        num_params_buffers=len(params_flat),
-    )
+    """
+    A simplified version of export. Used by higher order operators.
+
+    This function makes a high-level "no calling convention changes" guarantee:
+    - If no inputs require grad (so we export an inference graph),
+      there are *no* calling convention change between the exported graph, and "func".
+    - If at least one input requires grad (so we trace out and expot a joint fw-bw graph),
+      Then if you were partition the graph into a separate forward and backward graph,
+      The forward graph will have no calling convention changes compared to "func".
+
+    The above also relies on some strong restrictions around which functions this API accepts:
+    (1) `args` cannot contain any pytrees (they must have been pytree_flattened already)
+    (2) `func` cannot mutate any inputs
+    (3) The outputs of `func` cannot alias any inputs.
+
+    Note: this function is only lightly tested today. It will probably be tested more heavily by higher order ops.
+    """
+    if trace_joint:
+        ctx = nullcontext
+    else:
+        # Run under no_grad, so our tracing machinery only traces an inference graph.
+        ctx = torch.no_grad
+
+    with ctx():
+        fx_g, metadata, in_spec, out_spec = _aot_export_function(
+            func,
+            args,
+            decompositions=decompositions,
+        )
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
     # These restrictions are *in addition to* the general restrictions on export.
 
     # No input mutations
-    assert len([x for x in metadata.input_infos if x.mutates_data or x.mutates_metadata] == 0), metadata
+    if len([x for x in metadata.input_info if x.mutates_data or x.mutates_metadata]) != 0:
+        raise RuntimeError(f"aot_export_joint_simple does not support input mutations. {str(metadata)}")
     # No output aliasing
-    assert len([x for x in metadata.output_infos if x.output_type == OutputType.non_alias] == 0), metadata
+    if len([x for x in metadata.output_info if x.output_type != OutputType.non_alias]) != 0:
+        raise RuntimeError(f"aot_export_joint_simple does not support outputs that alias inputs. {str(metadata)}")
     # No pytrees
-    assert type(in_spec) != pytree.LeafSpec, in_spec
-    assert len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec] == 0), in_spec
-    assert type(out_spec) != pytree.LeafSpec, out_spec
-    assert len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec] == 0), out_spec
+    if type(in_spec) == pytree.LeafSpec:
+        raise RuntimeError(f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}")
+    if len([x for x in in_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+        raise RuntimeError(f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}")
+    if type(out_spec) == pytree.LeafSpec:
+        raise RuntimeError(f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}")
+    if len([x for x in out_spec.children_specs if type(x) != pytree.LeafSpec]) != 0:
+        raise RuntimeError(f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}")
     # TODO: we might have to temporarily patch config.functionalize_rng
     # so that it doesn't run when we're exporting a higher order op.
 
@@ -3863,7 +3908,11 @@ def aot_export_joint_simple(
             fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)
         )
         # Attempt to run the fw_module with the original user inputs
-        fw_module(*args)
+        fake_mode = detect_fake_mode(args)
+        if fake_mode is None:
+            fake_mode = FakeTensorMode()
+        with fake_mode:
+            fw_module(*args)
     return fx_g
 
 # Private for now because we aren't providing a contract on what to return
