@@ -201,13 +201,13 @@ def get_reordered_tests(
 
     test_time_for_regular_tests_so_far = 0.0
     # how much sooner did we run prioritized tests compared to a naive ordering
-    time_savings = 0.0
+    time_savings_sec = 0.0
 
     for test in tests:
         if test.name in prioritized_tests:
             bring_to_front.append(test)
             # Calculate approx time saved by reordering
-            time_savings = test_time_for_regular_tests_so_far
+            time_savings_sec = test_time_for_regular_tests_so_far
         else:
             the_rest.append(test)
             test_time_for_regular_tests_so_far += test.get_time()
@@ -219,10 +219,10 @@ def get_reordered_tests(
         )
         return ([], tests)
 
-    # TODO: Would be great to upload these metrics to RDS/Rockset
+    # TODO: Would be great to upload these stats to RDS/Rockset
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-    print(f"Prioritized tests will run up to {to_time_str(time_savings)} sooner")
+    print(f"Prioritized tests will run up to {to_time_str(time_savings_sec)} sooner")
 
     prioritized_test_names = [t.name for t in bring_to_front]
     print(f"Prioritized: {prioritized_test_names}")
