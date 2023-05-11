@@ -3,7 +3,8 @@ import random
 import sys
 import unittest
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 try:
@@ -12,6 +13,7 @@ try:
     from tools.testing.test_selections import (
         _parse_prev_failing_test_files,
         calculate_shards,
+        get_reordered_tests,
         ShardedTest,
         THRESHOLD,
     )
@@ -358,6 +360,45 @@ class TestParsePrevTests(unittest.TestCase):
         found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
+
+    @staticmethod
+    def mocked_get_previously_failing_tests():
+        return {"test4"}
+
+    @staticmethod
+    def mocked_get_modified_tests():
+        return {"test2", "test4"}
+
+    @mock.patch(
+        "tools.testing.test_selections._get_previously_failing_tests",
+        side_effect=mocked_get_previously_failing_tests,
+    )
+    @mock.patch(
+        "tools.testing.test_selections._get_modified_tests",
+        side_effect=mocked_get_modified_tests,
+    )
+    def test_get_reordered_tests(
+        self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
+    ) -> None:
+        tests = [
+            ShardedTest(name="test1", shard=1, num_shards=2, time=600.0),
+            ShardedTest(name="test2", shard=1, num_shards=2, time=500.0),
+            ShardedTest(name="test3", shard=1, num_shards=2, time=400.0),
+            ShardedTest(name="test4", shard=1, num_shards=2, time=300.0),
+            ShardedTest(name="test5", shard=1, num_shards=2, time=200.0),
+        ]
+
+        expected_prioritized_tests = {"test4", "test2"}
+        expected_remaining_tests = {"test1", "test3", "test5"}
+
+        prioritized_tests, remaining_tests = get_reordered_tests(tests)
+
+        # Just want to check the names of the tests
+        prioritized_tests = {test.name for test in prioritized_tests}
+        remaining_tests = {test.name for test in remaining_tests}
+
+        self.assertSetEqual(expected_prioritized_tests, prioritized_tests)
+        self.assertSetEqual(expected_remaining_tests, remaining_tests)
 
 
 if __name__ == "__main__":

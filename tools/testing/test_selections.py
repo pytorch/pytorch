@@ -143,7 +143,7 @@ def _get_previously_failing_tests() -> Set[str]:
     )
 
     if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
-        return []
+        return set()
 
     with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
         last_failed_tests = json.load(f)
@@ -172,12 +172,12 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
     return prioritized_tests
 
 
-def _get_test_prioritized_due_to_test_file_changes() -> Set[str]:
+def _get_modified_tests() -> Set[str]:
     try:
         changed_files = _query_changed_test_files()
     except Exception:
         # If unable to get changed files from git, quit without doing any sorting
-        return []
+        return set()
 
     prefix = f"test{os.path.sep}"
     # TODO: Make prioritization work with C++ test as well
@@ -203,7 +203,7 @@ def get_reordered_tests(
     """
     prioritized_tests: Set[str] = set()
     prioritized_tests |= _get_previously_failing_tests()
-    prioritized_tests |= _get_test_prioritized_due_to_test_file_changes()
+    prioritized_tests |= _get_modified_tests()
 
     bring_to_front = []
     the_rest = []
