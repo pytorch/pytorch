@@ -8,7 +8,6 @@ from copy import deepcopy
 
 import torch
 import torch.optim as optim
-import torch.nn.functional as F
 from torch.nn import Parameter
 from torch.optim import Adam, SGD, Optimizer
 from torch.optim.lr_scheduler import (
@@ -179,13 +178,13 @@ class TestOptim(TestCase):
 
             initial_value = fn().item()
             for _ in range(200):
+                optimizer.step(fn)
                 for scheduler in schedulers:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         val_loss = fn()
                         scheduler.step(val_loss)
                     else:
                         scheduler.step()
-                optimizer.step(fn)
             if maximize:
                 self.assertGreater(fn().item(), initial_value)
             else:
@@ -1144,13 +1143,13 @@ class TestOptim(TestCase):
     def test_nadam(self):
         self._test_basic_cases(
             lambda weight, bias, foreach: optim.NAdam(
-                [weight, bias], lr=1e-3, foreach=foreach
+                self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, foreach=foreach
             ),
             constructor_accepts_foreach=True,
         )
         self._test_basic_cases(
             lambda weight, bias, foreach: optim.NAdam(
-                self._build_params_dict(weight, bias, lr=1e-2), lr=1e-3, foreach=foreach
+                [weight, bias], lr=1e-3, foreach=foreach
             ),
             constructor_accepts_foreach=True,
         )
