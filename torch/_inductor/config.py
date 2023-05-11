@@ -30,6 +30,9 @@ pick_loop_orders = True
 # generate inplace computations
 inplace_buffers = True
 
+# allow reusing buffers for more efficient memory use
+allow_buffer_reuse = True
+
 # codegen benchmark harness
 benchmark_harness = True
 
@@ -159,6 +162,15 @@ permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 # Mark the wrapper call in PyTorch profiler
 profiler_mark_wrapper_call = False
 
+# Generate hook calls to torch._inductor.hooks.run_intermediate_hooks for
+# every intermediate for which we can correlate it with an intermediate
+# from the original FX graph
+generate_intermediate_hooks = False
+
+# Populate traceback field on IRNode; good for debugging why origin_node is
+# not populated, or finding out where an IRNode was constructed
+debug_ir_traceback = False
+
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
@@ -169,7 +181,7 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 disable_cpp_codegen = is_fbcode()
 
 
-# config specific to codegen/cpp.pp
+# config specific to codegen/cpp.py
 class cpp:
     # set to torch.get_num_threads()
     threads = -1
@@ -201,6 +213,16 @@ class cpp:
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = True
 
+    # Inject a bug into our relu implementation; useful for testing our repro
+    # extraction and minification functionality.
+    # Valid values: "compile_error", "runtime_error", "accuracy"
+    inject_relu_bug_TESTING_ONLY = None
+    inject_log1p_bug_TESTING_ONLY = None
+
+    # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
+    # force usage as specified, without testing.
+    vec_isa_ok = None
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -208,10 +230,13 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = False
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
+
+    # TODO - need to debug why this prevents cleanup
+    cudagraph_trees_history_recording = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -276,6 +301,11 @@ class triton:
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
     spill_threshold = 0
+
+    # Inject a bug into our relu implementation; useful for testing our repro
+    # extraction and minification functionality.
+    # Valid values: "compile_error", "runtime_error", "accuracy"
+    inject_relu_bug_TESTING_ONLY = None
 
 
 # create a directory containing lots of debug information

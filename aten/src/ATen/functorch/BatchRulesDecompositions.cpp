@@ -25,7 +25,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   OP_DECOMPOSE(feature_dropout_);
 }
 
-void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
 }
 

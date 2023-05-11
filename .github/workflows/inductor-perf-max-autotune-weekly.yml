@@ -1,8 +1,6 @@
 name: inductor-A100-max-autotune-weekly
 
 on:
-  schedule:
-    - cron: 0 0 * * 0
   workflow_dispatch:
 
 concurrency:

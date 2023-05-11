@@ -28,6 +28,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     _get_param_to_fqns,
     _module_handles,
+    _named_parameters_with_duplicates,
     clean_tensor_name,
 )
 from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
@@ -211,7 +212,7 @@ def _communicate_optim_state(
             dist.all_gather_into_tensor(
                 tensor_buffer, value, group=fsdp_state.process_group
             )
-            torch.cuda.synchronize()
+            fsdp_state._device_handle.synchronize()
             unpadded_numel = cast(
                 nn.Parameter, flat_param._unpadded_unsharded_size
             ).numel()
@@ -277,7 +278,7 @@ def _unflatten_communicated_optim_state(
                     optim_state,
                     fsdp_state.rank,
                     fsdp_state.world_size,
-                    torch.cuda.device_count(),
+                    fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
                 )
             unflat_state_param[state_name] = optim_state
@@ -365,7 +366,11 @@ def _shard_orig_param_state(
     intra_param_start_idx = shard_param_info.intra_param_start_idx
     intra_param_end_idx = shard_param_info.intra_param_end_idx
     for state_name, value in optim_state.items():
-        if torch.is_tensor(value) and value.dim() > 0:
+        if (
+            torch.is_tensor(value)
+            and value.dim() > 0
+            and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
+        ):
             value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
         new_optim_state[state_name] = value
     return new_optim_state
@@ -977,7 +982,9 @@ def _get_param_id_to_param_from_optim_input(
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
     def module_fn(module, prefix, tree_level, flat_param_to_fqn):
-        for param_name, param in module.named_parameters(recurse=False):
+        for param_name, param in _named_parameters_with_duplicates(
+            module, recurse=False
+        ):
             if type(param) is not FlatParameter:
                 continue
             fqn = clean_tensor_name(prefix + param_name)
@@ -991,7 +998,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters()],
+        [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         flat_param_to_fqn_ret,
     )
 
@@ -1015,7 +1022,7 @@ def _get_param_key_to_param(
             param_to_fqns is not None and flat_param_to_fqn is not None
         ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
         assert model is not None
-        for key, _ in model.named_parameters():
+        for key, _ in _named_parameters_with_duplicates(model):
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
     param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
@@ -1444,7 +1451,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         model,
         module_fn,
         return_fn,
-        [fqn for fqn, _ in model.named_parameters()],
+        [fqn for fqn, _ in _named_parameters_with_duplicates(model)],
         fqn_to_param_info,
     )
 
@@ -1599,7 +1606,7 @@ def _gather_orig_param_state(
                 value,
                 fsdp_state.rank,
                 fsdp_state.world_size,
-                torch.cuda.device_count(),
+                fsdp_state._device_handle.device_count(),
                 fsdp_state.process_group,
             )
         value = value.cpu()

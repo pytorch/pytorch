@@ -685,6 +685,9 @@ class OpInfo:
     # function to generate inputs that will throw errors
     error_inputs_func: Callable = None
 
+    # function to generate sparse (coo, csr, csc, bsr, bsc) inputs that will throw errors
+    error_inputs_sparse_func: Callable = None
+
     # function to generate sample inputs with sparse coo layouts
     sample_inputs_sparse_coo_func: Callable = None
 
@@ -816,8 +819,9 @@ class OpInfo:
 
     # the following metadata relates to sparse support and is used in test_sparse.py
 
-    # whether the op supports sparse inputs
-    supports_sparse: bool = False
+    # whether the op supports sparse coo inputs, defaults to False
+    # TODO: rename supports_sparse to supports_sparse_coo
+    supports_sparse: bool = None
 
     # only run tracing tests
     supports_scripting: bool = True
@@ -825,16 +829,17 @@ class OpInfo:
     # if the operator can be traced
     supports_tracing: bool = True
 
-    # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
+    # the following metadata relates to sparse compressed support and
+    # is used in test_sparse_csr.py and test_sparse.py
 
-    # whether the op supports sparse csr inputs
-    supports_sparse_csr: bool = False
-    # whether the op supports sparse csc inputs
-    supports_sparse_csc: bool = False
-    # whether the op supports sparse bsr inputs
-    supports_sparse_bsr: bool = False
-    # whether the op supports sparse bsc inputs
-    supports_sparse_bsc: bool = False
+    # whether the op supports sparse csr inputs, defaults to False
+    supports_sparse_csr: bool = None
+    # whether the op supports sparse csc inputs, defaults to False
+    supports_sparse_csc: bool = None
+    # whether the op supports sparse bsr inputs, defaults to False
+    supports_sparse_bsr: bool = None
+    # whether the op supports sparse bsc inputs, defaults to False
+    supports_sparse_bsc: bool = None
 
     # the following metadata relates to complex support and is checked in test_ops.py
 
@@ -963,6 +968,23 @@ class OpInfo:
                 self.inplace_operator_variant = None
 
         self.decorators = (*self.decorators, *self.skips)
+
+        # Specifying sample inputs function without specifying the
+        # corresponding layout support implies the layout support:
+        if self.supports_sparse is None:
+            self.supports_sparse = self.sample_inputs_sparse_coo_func is not None
+
+        if self.supports_sparse_csr is None:
+            self.supports_sparse_csr = self.sample_inputs_sparse_csr_func is not None
+
+        if self.supports_sparse_csc is None:
+            self.supports_sparse_csc = self.sample_inputs_sparse_csc_func is not None
+
+        if self.supports_sparse_bsr is None:
+            self.supports_sparse_bsr = self.sample_inputs_sparse_bsr_func is not None
+
+        if self.supports_sparse_bsc is None:
+            self.supports_sparse_bsc = self.sample_inputs_sparse_bsc_func is not None
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
@@ -1168,16 +1190,43 @@ class OpInfo:
         """
         return self.error_inputs_func(self, device, **kwargs)
 
+    def error_inputs_sparse(self, device, layout, **kwargs):
+        """
+        Returns an iterable of ErrorInputs that contain sparse sample
+        inputs with a specified layout.
+        """
+        if not self.supports_sparse_layout(layout):
+            raise unittest.SkipTest("unsupported sparse layout")
+        return self.error_inputs_sparse_func(self, device, layout, **kwargs)
+
+    def supports_sparse_layout(self, layout):
+        """Return True if OpInfo supports the specified sparse layout."""
+        layout_name = str(layout).split(".")[-1]
+        # map torch.sparse_coo to OpInfo.supports_sparse:
+        layout_name = layout_name.replace("_coo", "")
+        return getattr(self, f"supports_{layout_name}")
+
     def sample_inputs_sparse(
         self, layout, device, dtype, requires_grad=False, **kwargs
     ):
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
         """
-        sample_inputs_mth = getattr(
-            self, "sample_inputs_" + str(layout).split(".", 1)[-1]
+        layout_name = str(layout).split(".")[-1]
+        sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
+
+        def non_empty_sampler(op, generator):
+            found_sample = False
+            for sample in generator:
+                found_sample = True
+                yield sample
+            if not found_sample:
+                raise unittest.SkipTest("NO SAMPLES!")
+
+        return non_empty_sampler(
+            self,
+            sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs),
         )
-        return sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs)
 
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
@@ -2550,6 +2599,7 @@ def sample_inputs_foreach(
     low=None,
     high=None,
     zero_size: bool,
+    requires_grad: bool,
 ):
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
@@ -2562,6 +2612,7 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
+                requires_grad=requires_grad,
             )
             for _ in range(N)
         ]
@@ -2574,6 +2625,7 @@ def sample_inputs_foreach(
                 noncontiguous=noncontiguous,
                 low=low,
                 high=high,
+                requires_grad=requires_grad,
             )
             for i in range(N)
         ]

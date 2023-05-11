@@ -374,7 +374,7 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-bool use_mkldnn(const Tensor& input) {
+static bool use_mkldnn(const Tensor& input) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;

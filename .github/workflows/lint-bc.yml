@@ -45,35 +45,24 @@ jobs:
           repository: pytorch/test-infra
           path: test-infra
 
-      - name: Fetching PR base commit
-        id: fetch_base_head
+      - name: Merge PR changes onto base
+        id: merge_changes
         if: steps.check_user.outputs.allowed == 'true'
         working-directory: pytorch
         run: |
-          git fetch --no-tags --prune --no-recurse-submodules --depth=$((${{ github.event.pull_request.commits }} + 1)) origin ${{ github.event.pull_request.head.sha }}
-          git checkout --force ${{ github.event.pull_request.head.sha }}
+          # need to configure git to be able to merge
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git fetch origin "${{ github.event.pull_request.base.ref }}"
 
-          # Iterate until a common ancestor is found
-          base=""
-          counter=0
-          while [[ -z $base ]] && [[ $counter -lt 128 ]]
-          do
-            # Fetch more commits from the base branch's history with a depth of 10
-            git fetch --no-tags --prune --no-recurse-submodules --deepen=10 origin ${{ github.event.pull_request.base.sha }}
-
-            # Try to find the common ancestor commit (base commit) again
-            base=$(git rev-list "${{ github.event.pull_request.head.sha }}" ^"${{ github.event.pull_request.base.sha }}" | tail -1)
-            base=$(git rev-list "${base}"~1 2>/dev/null | head -1)
-
-            counter=$((counter + 1))
-          done
-
-          if [[ -z $base ]]; then
-            echo "Failed to find PR base commit"
-            exit 1
+          git reset --hard "${{ github.event.pull_request.base.sha }}"
+          git merge "${{ github.event.pull_request.head.sha }}" || MERGE_CONFLICT=1
+          if [ -z "$MERGE_CONFLICT" ]; then
+            NEW_HEAD_SHA=$(git rev-parse HEAD)
+            echo "new_head_sha=${NEW_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "Hit merge conflict, skipping BC-linter. Rebase your PR to resolve the conflict."
           fi
-
-          echo "base=${base}" >> "${GITHUB_OUTPUT}"
 
       - name: Check for suppression by label
         id: check_label
@@ -83,7 +72,7 @@ jobs:
           echo "suppression=--suppressed" >> "${GITHUB_OUTPUT}"
 
       - name: Build and run BC-linter
-        if: steps.check_user.outputs.allowed == 'true'
+        if: steps.check_user.outputs.allowed == 'true' && steps.merge_changes.outputs.new_head_sha != ''
         working-directory: pytorch
         run: |
           set -eux
@@ -94,8 +83,8 @@ jobs:
           # When suppressed by label or #suppress-api-compatibility-check tag in the commit message
           # the job will not fail and will output notices instead of warnings.
           ../test-infra/tools/stronghold/bin/check-api-compatibility \
-              --base-commit=${{ steps.fetch_base_head.outputs.base }} \
-              --head-commit=${{ github.event.pull_request.head.sha }} \
+              --base-commit=${{ github.event.pull_request.base.sha }} \
+              --head-commit=${{ steps.merge_changes.outputs.new_head_sha }} \
               ${{ steps.check_label.outputs.suppression }}
 
 concurrency:

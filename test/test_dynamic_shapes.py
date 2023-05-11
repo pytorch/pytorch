@@ -4,8 +4,10 @@
 import contextlib
 import copy
 import itertools
+import inspect
 import math
 import operator
+import re
 
 import sympy
 import torch
@@ -1755,20 +1757,51 @@ class TestDimConstraints(TestCase):
         self.assertEqual(dim_constraints._static_results, {
             "L['x3'].size()[0] == 8",
             "L['x4'].size()[0] == 8",
-            "L['x1'].size()[2] = 96",
+            "L['x1'].size()[2] == 96",
             "L['x11'].size()[1] == 1",
             "L['x7'].size()[3] == 96",
             "L['x12'].size()[2] == 3",
             "L['x8'].size()[1] == 22",
             "L['x2'].size()[0] == 8",
-            "L['x5'].size()[1] = 22",
-            "L['x0'].size()[0] = 8",
+            "L['x5'].size()[1] == 22",
+            "L['x0'].size()[0] == 8",
         })
         self.assertEqual(dim_constraints._dynamic_results, {
             "dynamic_dim(L['x10'], 1) == dynamic_dim(L['x6'], 1)",
             "2 <= dynamic_dim(L['x6'], 1)",
             "dynamic_dim(L['x9'], 1) == dynamic_dim(L['x6'], 1)",
         })
+
+        def dummy_f(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+            pass
+
+        action_code = dim_constraints.prettify_results(inspect.signature(dummy_f))
+        static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
+        print(static_code)
+        expected_static = '''
+def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+    return (x0.size()[0] == 8 and
+    x1.size()[2] == 96 and
+    x11.size()[1] == 1 and
+    x12.size()[2] == 3 and
+    x2.size()[0] == 8 and
+    x3.size()[0] == 8 and
+    x4.size()[0] == 8 and
+    x5.size()[1] == 22 and
+    x7.size()[3] == 96 and
+    x8.size()[1] == 22)
+'''
+        expected_dynamic = '''
+def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+    return [
+        2 <= dynamic_dim(x6, 1),
+        dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
+        dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
+    ]
+'''
+
+        self.assertEqual(static_code, expected_static)
+        self.assertEqual(dynamic_code, expected_dynamic)
 
 
 
