@@ -922,7 +922,7 @@ class TestCustomOp(TestCase):
             foo(x)
 
         @custom_op(f'{TestCustomOp.test_ns}::bar')
-        def bar(sizes: Tuple[int, ...]) -> torch.Tensor:
+        def bar(sizes: List[int]) -> torch.Tensor:
             ...
 
         with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
