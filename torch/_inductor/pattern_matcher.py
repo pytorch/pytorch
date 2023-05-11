@@ -711,6 +711,36 @@ def register_graph_pattern(
     return decorator
 
 
+def is_start_of_fx_graph(node):
+    return len(node.all_input_nodes) == 0
+
+
+def is_mutation_op(node):
+    if node.op == "call_function":
+        if node.target.__name__.endswith("_"):
+            return True
+    elif node.op == "call_method":
+        if node.target.endswith("_"):
+            return True
+    if "out" in node.kwargs:
+        if node.kwargs["out"] in node.all_input_nodes:
+            return True
+    return False
+
+
+def get_mutation_region_id(node):
+    n = node
+    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(n):
+        n = n.prev
+    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    while n is not node:
+        n = n.next
+        if is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+    return mutation_region_id
+
+
 class PatternMatcherPass:
     def __init__(self):
         super().__init__()
@@ -740,6 +770,9 @@ class PatternMatcherPass:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if m and len(set(map(get_mutation_region_id, m.nodes))) != 1:
+                        continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if m and entry.extra_check(m):
