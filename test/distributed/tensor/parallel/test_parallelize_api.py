@@ -126,9 +126,7 @@ class TensorParallelAPITests(DTensorTestBase):
         inp = inp.chunk(self.world_size, dim=-1)[self.rank] if rowwise else inp
         dist_output = dist_module(inp)
         dist_output = (
-            dist_output.redistribute(dist_output.device_mesh, [Replicate()]).to_local()
-            if isinstance(dist_output, DTensor)
-            else dist_output
+            dist_output.to_local() if isinstance(dist_output, DTensor) else dist_output
         )
         self.assertEqual(local_output, dist_output)
 
@@ -176,14 +174,7 @@ class TensorParallelAPITests(DTensorTestBase):
         model_tp = parallelize_module(
             model_tp,
             device_mesh,
-            {
-                "net1": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
-                "net2": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
-            },
+            {"net1": ColwiseParallel(), "net2": ColwiseParallel()},
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
 
@@ -217,12 +208,8 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "dummy_encoder.net1": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
-                "dummy_encoder.net2": ColwiseParallel(
-                    make_input_replicate_1d, make_output_replicate_1d
-                ),
+                "dummy_encoder.net1": ColwiseParallel(),
+                "dummy_encoder.net2": ColwiseParallel(),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
@@ -269,7 +256,7 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_linear_col_wise_parallel(self):
         # test ColwiseParallel
         inp_size = [8, 10]
-        colwise = ColwiseParallel(make_input_replicate_1d, make_output_replicate_1d)
+        colwise = ColwiseParallel()
 
         torch.manual_seed(5)
         model = torch.nn.Linear(10, 16, device=self.device_type)

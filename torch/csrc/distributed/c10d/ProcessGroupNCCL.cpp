@@ -85,15 +85,12 @@ ncclRedOpRAII unpackPreMulSum(
   ncclRedOp_t preMulSum;
   bool has_tensor = preMulSupplement->tensor_factor.defined();
   auto residence = has_tensor ? ncclScalarDevice : ncclScalarHostImmediate;
-  const T* ptr_factor = has_tensor
-      ? preMulSupplement->tensor_factor.const_data_ptr<T>()
-      : nullptr;
+  T* ptr_factor =
+      has_tensor ? preMulSupplement->tensor_factor.data_ptr<T>() : nullptr;
   T scalar_factor = T(preMulSupplement->double_factor);
   ncclRedOpCreatePreMulSum(
       &preMulSum,
-      // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
-      // tells us that the scalar input is strictly a multiplier.
-      /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
+      has_tensor ? ptr_factor : &scalar_factor,
       dataType,
       residence,
       comm);
@@ -435,14 +432,12 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
-    c10::optional<std::chrono::milliseconds> timeout) {
+bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
-  auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < workTimeout)
+  if (timeElapsed < opTimeout_)
     return false;
 
   // Timed out
@@ -513,8 +508,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout(
-          timeout == kNoTimeout ? c10::nullopt : c10::make_optional(timeout));
+      bool timedOut = checkTimeout();
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
       // If throwing timed out excepiton without aborting nccl communicators
@@ -1568,7 +1562,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 #endif
     }
   }
-  post(ncclStreams, work);
+  post(ncclStreams);
 
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(devices.size())) {
@@ -1781,8 +1775,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       fn,
       [](std::vector<at::cuda::CUDAStream>&,
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-      [](std::vector<at::cuda::CUDAStream>&,
-         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [](std::vector<at::cuda::CUDAStream>&) {},
       opType,
       profilingTitle);
 }
@@ -2156,8 +2149,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
           // released back to their allocation streams until after work_ is
           // waited on.
         },
-        [&](std::vector<at::cuda::CUDAStream>& ncclStreams,
-            c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+        [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
           // Copy the flattened output tensors to the outputs.
           for (const auto i : c10::irange(outputTensors.size())) {
             at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
@@ -2295,8 +2287,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             }
           }
         },
-        [&](std::vector<at::cuda::CUDAStream>&,
-            c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+        [&](std::vector<at::cuda::CUDAStream>&) {},
         OpType::REDUCE_SCATTER,
         "nccl:reduce_scatter");
   } else {
@@ -2389,6 +2380,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
             comm,
             stream.stream());
       },
+      [](std::vector<at::cuda::CUDAStream>&,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [](std::vector<at::cuda::CUDAStream>&) {},
       OpType::_REDUCE_SCATTER_BASE,
       "nccl:_reduce_scatter_base");
 }
@@ -2602,8 +2596,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
           v->insert(v->end(), outputTensors.begin(), outputTensors.end());
         }
       },
-      [](std::vector<at::cuda::CUDAStream>&,
-         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [](std::vector<at::cuda::CUDAStream>&) {},
       OpType::ALLTOALL);
 }
 
@@ -2950,6 +2943,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
             comm,
             stream.stream());
       },
+      [&](std::vector<at::cuda::CUDAStream>&,
+          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [&](std::vector<at::cuda::CUDAStream>&) {},
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base");
 }

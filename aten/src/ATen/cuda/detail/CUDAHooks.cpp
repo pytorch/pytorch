@@ -140,14 +140,14 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    (void)cudaGetLastError(); // clear CUDA error
+    cudaGetLastError();
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    (void)cudaGetLastError(); // clear HIP error
+    cudaGetLastError();
     return false;
   }
 #endif

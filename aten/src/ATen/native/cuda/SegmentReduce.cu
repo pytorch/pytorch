@@ -62,6 +62,24 @@ struct CustomMin {
   }
 };
 
+Tensor _get_complete_sum(const Tensor& lengths) {
+  int64_t segment_count = lengths.numel();
+  TORCH_CHECK(segment_count < INT_MAX);
+  auto offsets = at::empty({segment_count + 1}, lengths.options());
+  offsets[0].zero_();
+
+  AT_DISPATCH_INDEX_TYPES(
+      lengths.scalar_type(), "_segment_reduce_cuda_lengths_offsets_backward_kernel1", ([&] {
+        auto* lengths_data_ptr = lengths.const_data_ptr<index_t>();
+        auto* offsets_data_ptr = offsets.mutable_data_ptr<index_t>();
+        at::cuda::cub::inclusive_sum(
+            lengths_data_ptr,
+            offsets_data_ptr + 1,
+            segment_count);
+      }));
+  return offsets;
+}
+
 template <typename scalar_t, typename index_t>
 __global__ static void post_sum_div_kernel(
     scalar_t* output_data,
@@ -280,6 +298,7 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
+    // _get_complete_sum only supports 1D
     auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
     offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
@@ -408,6 +427,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
   if (is_offsets_like) {
     lengths = lengths.diff();
   } else {
+    // _get_complete_sum only supports 1D
     auto zeros_shape = offsets.sizes().vec();
     zeros_shape[axis] = 1;
     offsets = at::cat({at::zeros(zeros_shape, offsets.options()), offsets}, axis);
@@ -450,7 +470,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
               auto* output_data_ptr = output.mutable_data_ptr<scalar_t>();
 
               // initialize starting value
-              scalar_t initial_value = 0;
+              scalar_t initial_value;
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
               } else if (reduction == ReductionType::MAX) {

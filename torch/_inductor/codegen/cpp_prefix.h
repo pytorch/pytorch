@@ -127,14 +127,8 @@ inline void store_float_as_bf16(
   res.store(bf16_buf, at::vec::Vectorized<float>::size());
 }
 
-inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
-  auto zeros = at::vec::Vectorized<float>(0);
-  auto ones = at::vec::Vectorized<float>(1);
-  return at::vec::Vectorized<float>::blendv(zeros, ones, src);
-}
-
 template <typename SRC>
-inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
@@ -144,15 +138,10 @@ inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> s
 
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    *(uint32_t*)(dst_tmp + i) = src_tmp[i] ? 0xFFFFFFFF : 0;
+    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
   }
 
   return res_vec.loadu(dst_tmp);
-}
-
-template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
-  return vec_convert_to_mask(src);
 }
 
 template <>

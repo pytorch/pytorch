@@ -848,7 +848,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(con
       grad_input, grad_weight, grad_bias);
 }
 
-static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
+std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,

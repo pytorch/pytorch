@@ -189,12 +189,12 @@ namespace fmt {
 
 template <>
 struct formatter<::addrinfo> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) const {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) const {
+  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
     char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
     int r = ::getnameinfo(
@@ -219,14 +219,14 @@ struct formatter<::addrinfo> {
 
 template <>
 struct formatter<c10d::detail::SocketImpl> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) const {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
     return ctx.begin();
   }
 
   template <typename FormatContext>
   decltype(auto) format(
       const c10d::detail::SocketImpl& socket,
-      FormatContext& ctx) const {
+      FormatContext& ctx) {
     ::sockaddr_storage addr_s{};
 
     auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);

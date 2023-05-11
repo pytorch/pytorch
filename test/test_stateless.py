@@ -887,10 +887,12 @@ exit(len(w))
 
 class TestPythonOptimizeMode(TestCase):
     def test_runs_with_optimize_flag(self):
-        script = "import torch; import torch._functorch.deprecated"
+        script = """
+import torch
+"""
         try:
             subprocess.check_output(
-                [sys.executable, "-OO", "-c", script],
+                [sys.executable, '-OO', '-c', script],
                 stderr=subprocess.STDOUT,
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory

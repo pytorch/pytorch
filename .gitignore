@@ -324,7 +324,6 @@ bazel-*
 xla/
 
 # direnv, posh-direnv
-.env
 .envrc
 .psenvrc
 

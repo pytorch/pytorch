@@ -3,14 +3,17 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 
+#include <cstddef>
 #include <iosfwd>
 #include <utility>
 
