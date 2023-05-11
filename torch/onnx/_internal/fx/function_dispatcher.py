@@ -14,6 +14,7 @@ from typing import (
     Protocol,
     runtime_checkable,
     Sequence,
+    Set,
     TYPE_CHECKING,
     Union,
 )
@@ -256,6 +257,7 @@ class OpSchemaWrapper:
             constraint.type_param_str: set(constraint.allowed_type_strs)
             for constraint in op_schema.type_constraints
         }
+        self.attributes = set(op_schema.attributes)
         self._matching_score: int = 0
 
     @property
@@ -274,7 +276,7 @@ class OpSchemaWrapper:
 
         Args:
             args: The input arguments.
-            kwargs: The input keyword arguments. (kept for future usage)
+            kwargs: The input keyword arguments.
 
         Returns:
             True if the inputs match the requirements, False otherwise.
@@ -290,13 +292,18 @@ class OpSchemaWrapper:
                 # of this input defined in the OpSchema, we know the function
                 # and the input are not compatible
                 self._matching_score += 1
-        return self._matching_score == len(self.schema.inputs)
+        for attr in kwargs:
+            if attr in self.attributes:
+                self._matching_score += 1
+        return self._matching_score == (
+            len(self.schema.inputs) + max(len(self.attributes), len(kwargs))
+        )
 
 
 @_beartype.beartype
 def _find_onnx_data_type(
     torch_input: Optional[Union[_TensorLike, str, int, float, bool, list, tuple]]
-) -> set[str]:
+) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
     if isinstance(torch_input, _TensorLike) and torch_input.dtype is not None:
         return _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
