@@ -1461,8 +1461,9 @@ try:
             return base ** exp
 
         def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
-            base, divisor = self(expr.args)
-            return z3.If(divisor < 0, (-base) / (-divisor), base / divisor)  # type: ignore
+            # After real division, ToInt gets the floor of the result.
+            base, divisor = [self._to_real(self(a)) for a in expr.args]
+            return self._to_int(base / divisor)
 
         # Entry point for the translation process.
         #
@@ -1576,7 +1577,18 @@ try:
             self._add_freesymbols(e)
             self._outputs.add(self._z3(e))
 
-        def validate(self) -> bool:
+        # The result of a validation run.
+        @dataclass
+        class Result:
+            success: bool
+
+            # Mapping of the name of each free variable to the value assigned to it.
+            model: Optional[z3.ModelRef] = None
+
+            # List of the expressions that failed due to the assignment.
+            failed_inputs: Optional[List[str]] = None
+
+        def validate(self) -> "TranslationValidator.Result":
             from torch._dynamo.utils import dynamo_timed
 
             # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
@@ -1591,18 +1603,14 @@ try:
                 # Output expressions are unsound.
                 # Log the found model and input expressions that failed.
                 model = solver.model()
-                model_dict = {sym: model[sym] for sym in model}
-
-                log.debug(f"translation validation: fail: {model_dict}")
-                for inp in self._inputs:
-                    if not model.evaluate(inp):
-                        log.info(f">> {inp}")
-
-                return False
+                return self.Result(
+                    success=False,
+                    model=model,
+                    failed_inputs=[inp for inp in self._inputs if not model.evaluate(inp)],
+                )
             else:
                 # Output expressions are sound.
-                log.debug("translation validation: success")
-                return True
+                return self.Result(success=True)
 except:
     _HAS_Z3 = False
 else:
@@ -2052,7 +2060,14 @@ class ShapeEnv:
 
     def _check_translation_validate(self) -> None:
         if _translation_validator_enabled():
-            assert self.validator.validate(), "translation validation failed."
+            result = self.validator.validate()
+            if not result.success:
+                assert result.model is not None and result.failed_inputs is not None
+                oneline_model = {sym: result.model[sym] for sym in result.model}
+                failed_inputs = "\n".join(f">> {inp}" for inp in result.failed_inputs)
+                raise RuntimeError(f"""translation validation failed with model: {oneline_model}
+Failed inputs:
+{failed_inputs}""")
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
