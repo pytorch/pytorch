@@ -2699,24 +2699,24 @@ def meta__scaled_dot_product_flash_backward(
     num_heads = query.size(1)
     head_dim = query.size(3)
 
-    Nnz_q = batch_size * max_q
-    Nnz_kv = batch_size * max_k
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
-    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
-    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
-    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
-
-    grad_q = torch.empty_like(query_reshaped)
-    grad_k = torch.empty_like(key_reshaped)
-    grad_v = torch.empty_like(value_reshaped)
-
-    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
-    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
-    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, max_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
     return grad_q, grad_k, grad_v
 
