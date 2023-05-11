@@ -139,7 +139,7 @@ def _check_requires_grad(inputs, input_type, strict):
                 raise RuntimeError("The gradient with respect to input {} is independent of the inputs of the"
                                    " user-provided function. This is not allowed in strict mode.".format(i))
             else:
-                raise RuntimeError("Output {} of the user-provided function does not require gradients."
+                raise RuntimeError("Output {} of the broken test is here!."
                                    " The outputs must be computed in a differentiable manner from the input"
                                    " when running in strict mode.".format(i))
 
