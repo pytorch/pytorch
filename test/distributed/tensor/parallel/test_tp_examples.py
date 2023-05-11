@@ -7,8 +7,8 @@ import torch.nn as nn
 from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
-    PairwiseSequenceParallel,
     parallelize_module,
+    SequenceParallel,
     TensorParallelMultiheadAttention,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -80,7 +80,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
-        parallel_style = PairwiseSequenceParallel() if is_seq_parallel else PairwiseParallel()
+        parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)

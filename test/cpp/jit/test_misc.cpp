@@ -2408,7 +2408,7 @@ TEST(FutureTest, SparseTensor) {
   }
   auto f = c10::make_intrusive<Future>(TensorType::get());
   at::TensorOptions opts = at::TensorOptions().device(at::DeviceType::CUDA);
-  auto sparse_tensor = at::sparse_coo_tensor(torch::ones(10), torch::ones(10), opts);
+  auto sparse_tensor = at::sparse_coo_tensor(at::arange(10).unsqueeze(0).to(at::kLong), at::ones({10, 10}), opts);
   // Runs storage extraction for sparse CUDA tensors
   f->markCompleted(sparse_tensor);
   ASSERT_TRUE(f->completed());
