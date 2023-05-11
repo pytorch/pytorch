@@ -102,7 +102,7 @@ Tensor pixel_shuffle_mps(const Tensor& self, int64_t upscale_factor) {
     TORCH_WARN_ONCE("MPS: pixel_shuffle op is supported starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
 
-    return at::native::pixel_shuffle_cpu(self.to("cpu"), upscale_factor).clone().to("mps");
+    return at::native::pixel_shuffle_cpu(self.to("cpu"), upscale_factor).to("mps");
   }
 
   return pixel_shuffle_helper(self, upscale_factor, /*upscale=*/true);
@@ -113,7 +113,7 @@ Tensor pixel_unshuffle_mps(const Tensor& self, int64_t downscale_factor) {
     TORCH_WARN_ONCE("MPS: pixel_unshuffle op is supported starting from macOS 13.0. ",
                     "Falling back on CPU. This may have performance implications.");
 
-    return at::native::pixel_unshuffle_cpu(self.to("cpu"), downscale_factor).clone().to("mps");
+    return at::native::pixel_unshuffle_cpu(self.to("cpu"), downscale_factor).to("mps");
   }
 
   return pixel_shuffle_helper(self, downscale_factor, /*upscale=*/false);
