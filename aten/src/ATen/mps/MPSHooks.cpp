@@ -1,9 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSHooks.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSHooks.h>
+#include <c10/util/Logging.h>
 
 namespace at {
 namespace mps {
@@ -25,9 +26,11 @@ bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_1_PLUS);
     case 2:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
+    case 3:
+      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
     default:
-      TORCH_WARN("Can't check whether running on 13.",minor,"+ returning one for 13.2+");
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS);
+      TORCH_WARN("Can't check whether running on 13.",minor,"+ returning one for 13.3+");
+      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   }
 }
 
