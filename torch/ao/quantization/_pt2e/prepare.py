@@ -16,7 +16,6 @@ from torch.ao.quantization.fx.prepare import (
 from torch.fx import (
     GraphModule,
     Node,
-    Graph,
 )
 from torch.fx.node import Argument
 
@@ -73,8 +72,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         arg_as_input_target_dtype,
         arg_as_input_target_is_dynamic,
         reuse_input_obs_or_fq,
-        True, # set is_zeroth_arg to True so that non-zeroth arg can be observed for
-              # dynamic quantization as well
+        True,  # set is_zeroth_arg to True so that non-zeroth arg can be observed for
+               # dynamic quantization as well
     )
 
     if needs_obs_or_fq:
@@ -102,7 +101,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
         if existing_obs_node is None:
             new_obs_node = _insert_observer(
-                arg, new_obs_mod, model, named_modules, model.graph)
+                arg, new_obs_mod, model, named_modules, model.graph)  # type: ignore[arg-type]
             # override this arg to be the observed arg
             new_arg = new_obs_node
         else:
@@ -156,11 +155,11 @@ def _maybe_insert_input_and_output_observers_for_node(
     else:
         output_is_a_tensor = this_node_dtype_info is not None
 
-    skip_inserting_observers = (
-        not output_is_a_tensor
+    skip_inserting_input_and_output_observers = (
+        this_node_dtype_info is None
     )
 
-    if skip_inserting_observers:
+    if skip_inserting_input_and_output_observers:
         return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
@@ -171,6 +170,13 @@ def _maybe_insert_input_and_output_observers_for_node(
         model,
         named_modules,
     )
+
+    skip_inserting_output_observers = (
+        not output_is_a_tensor
+    )
+
+    if skip_inserting_output_observers:
+        return
 
     # this returns the new observer node if it was needed
     maybe_output_obs_node = _maybe_insert_output_observer_for_node(node, model, named_modules, model.graph)

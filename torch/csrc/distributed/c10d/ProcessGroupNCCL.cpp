@@ -435,12 +435,14 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
+bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
+    c10::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
+  auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < opTimeout_)
+  if (timeElapsed < workTimeout)
     return false;
 
   // Timed out
@@ -511,7 +513,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout();
+      bool timedOut = checkTimeout(
+          timeout == kNoTimeout ? c10::nullopt : c10::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
       // If throwing timed out excepiton without aborting nccl communicators
@@ -2204,6 +2207,29 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
   TORCH_CHECK(false, "ProcessGroupNCCL does not support allgather_coalesced");
+}
+
+c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      OpType::COALESCED,
+      "nccl:all_gather_into_tensor_coalesced");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(

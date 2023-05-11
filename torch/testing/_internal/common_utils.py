@@ -153,9 +153,11 @@ class _TestParametrizer:
     The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
 
-    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
-    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parametrize over device type, as that is already handled separately.
+    In the details, the decorator adds a 'parametrize_fn' property to the test function. This function
+    is intended to be called later by one of:
+      * Device-specific test instantiation via instantiate_device_type_tests(). Note that for this
+        case there is no need to explicitly parametrize over device type, as that is handled separately.
+      * Device-agnostic parametrized test instantiation via instantiate_parametrized_tests().
 
     If the decorator is applied to a test function that already has a 'parametrize_fn' property, a new
     composite 'parametrize_fn' will be created that generates tests with the product of the parameters
@@ -240,7 +242,8 @@ def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
-    parametrized tests with specialized names.
+    parametrized tests with specialized names. This should be used instead of
+    instantiate_device_type_tests() if the test class contains device-agnostic tests.
 
     You can also use it as a class decorator. E.g.
 
@@ -346,6 +349,11 @@ class parametrize(_TestParametrizer):
                               subtest((1, 4), name='quadruple')])
         def test_baz(self, x, y):
             ...
+
+    To actually instantiate the parametrized tests, one of instantiate_parametrized_tests() or
+    instantiate_device_type_tests() should be called. The former is intended for test classes
+    that contain device-agnostic tests, while the latter should be used for test classes that
+    contain device-specific tests. Both support arbitrary parametrizations using the decorator.
 
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
