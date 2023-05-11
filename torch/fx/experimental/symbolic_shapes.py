@@ -328,7 +328,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
-    # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
@@ -2036,7 +2035,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
