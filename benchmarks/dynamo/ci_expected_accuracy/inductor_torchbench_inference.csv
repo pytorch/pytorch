@@ -7,10 +7,10 @@ alexnet,pass,0
 attention_is_all_you_need_pytorch,pass,0
 dcgan,pass,0
 dlrm,pass,0
-doctr_det_predictor,pass,3
-doctr_reco_predictor,pass,3
+doctr_det_predictor,pass,4
+doctr_reco_predictor,pass,4
 drq,pass,0
-fastNLP_Bert,pass,4
+fastNLP_Bert,pass,5
 functorch_dp_cifar10,pass,0
 functorch_maml_omniglot,pass,0
 hf_Albert,pass,0
@@ -19,7 +19,7 @@ hf_Bert,pass,0
 hf_Bert_large,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
-hf_Reformer,pass,26
+hf_Reformer,pass,27
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,0
 llama,pass,0
@@ -28,7 +28,7 @@ mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 nvidia_deeprecommender,pass,0
-opacus_cifar10,pass,44
+opacus_cifar10,pass,45
 phlippe_densenet,pass,0
 phlippe_resnet,pass,0
 pyhpc_isoneutral_mixing,pass,0
@@ -41,7 +41,7 @@ resnet50,pass,0
 resnext50_32x4d,pass,0
 shufflenet_v2_x1_0,pass,0
 soft_actor_critic,pass,0
-speech_transformer,pass,9
+speech_transformer,pass,10
 squeezenet1_1,pass,0
 timm_efficientnet,pass,0
 timm_regnet,pass,0
@@ -49,6 +49,6 @@ timm_resnest,pass,0
 timm_vision_transformer,pass,0
 timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
-tts_angular,pass,1
+tts_angular,pass,2
 vgg16,pass,0
-yolov3,pass,1
+yolov3,pass,2
