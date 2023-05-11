@@ -175,6 +175,9 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
         B_dims = {static_cast<int>(n), 1};
       }
     } else {
+      A_dims.reserve(A.sizes().size());
+      B_dims.reserve(B.sizes().size());
+
       std::copy(
           A.sizes().cbegin(), A.sizes().cend(), std::back_inserter(A_dims));
       std::copy(
@@ -183,6 +186,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
       auto C_dims_int =
           elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
               A_dims, B_dims);
+      C_dims.reserve(C_dims_int.size());
       std::copy(
           C_dims_int.cbegin(), C_dims_int.cend(), std::back_inserter(C_dims));
       if (IsInputOutputAlias(0, 0)) {
