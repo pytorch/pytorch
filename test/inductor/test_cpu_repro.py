@@ -242,6 +242,36 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    def test_pad_with_nan_value(self):
+        # https://github.com/pytorch/pytorch/issues/100988.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = F.pad(x, (1, 1, 1, 1), value=float("nan"))
+                return x
+
+        mod = Model().eval()
+        v = torch.randn(1, 3, 10, 10, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
+    def test_masked_fill_with_inf_or_nan_value(self):
+        def fn(value, mask):
+            y1 = torch.masked_fill(value, mask, float("inf"))
+            y2 = torch.masked_fill(value, mask, float("-inf"))
+            y3 = torch.masked_fill(value, mask, float("nan"))
+            return y1, y2, y3
+
+        value = torch.randn((2, 17))
+        mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8).to(torch.bool)
+        with torch.no_grad():
+            self.common(
+                fn,
+                (value, mask),
+            )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -1578,6 +1608,26 @@ class CPUReproTests(TestCase):
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         self.assertTrue(same(fn(x), opt_fn(x)))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_to_dtype_bool_float(self):
+        # https://github.com/pytorch/pytorch/issues/100800
+        def f(a):
+            return torch.where(
+                torch.ones_like(a).to(torch.bool),
+                torch.zeros_like(a),
+                torch.ones_like(a) * 2,
+            )
+
+        self.common(f, (torch.ones(16),))
+
+    def test_to_dtype_float_bool(self):
+        # https://github.com/pytorch/pytorch/issues/100466
+        def f(a):
+            a = a * torch.tensor(a >= 0, dtype=torch.float32)
+            return a
+
+        x = torch.rand(16)
+        self.common(f, (x,))
 
 
 if __name__ == "__main__":
