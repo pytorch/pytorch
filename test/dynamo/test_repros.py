@@ -2776,13 +2776,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(3))
 
-<<<<<<< HEAD
         self.assertEqual(counter.op_count, 3)
         self.assertEqual(counter.frame_count, 1)
-=======
-        self.assertEqual(counter.op_count, ifdyn(ifunspec(3, 3), 3))
-        self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
->>>>>>> 20226533dbf... WIP policy
 
     def test_delattr(self):
         class MyObj:
