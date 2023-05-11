@@ -1087,11 +1087,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
-  m.def("_set_storage_access_error_msg", [](at::Tensor t, std::string s) {
-    t.unsafeGetTensorImpl()
-        ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-  });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
