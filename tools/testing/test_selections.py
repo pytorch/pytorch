@@ -41,7 +41,7 @@ class ShardedTest(NamedTuple):
     name: str
     shard: int
     num_shards: int
-    time: Optional[float]
+    time: Optional[float]  # In seconds
 
     def __str__(self) -> str:
         return f"{self.name} {self.shard}/{self.num_shards}"
@@ -184,8 +184,8 @@ def _get_modified_tests() -> Set[str]:
     prioritized_tests = {
         f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
     }
-    prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
-    prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
+    prioritized_tests = {f[len(prefix) :] for f in prioritized_tests}
+    prioritized_tests = {f[: -len(".py")] for f in prioritized_tests}
 
     print(
         f"Prioritized {pluralize(len(prioritized_tests), 'test')} from test file changes."

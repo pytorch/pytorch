@@ -335,6 +335,14 @@ class TestCalculateShards(unittest.TestCase):
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
 
 
+def mocked_get_previously_failing_tests():
+    return {"test4"}
+
+
+def mocked_get_modified_tests():
+    return {"test2", "test4"}
+
+
 class TestParsePrevTests(unittest.TestCase):
     def test_empty_cache(self) -> None:
         last_failed_file_contents = {
@@ -361,21 +369,13 @@ class TestParsePrevTests(unittest.TestCase):
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
-    @staticmethod
-    def mocked_get_previously_failing_tests():
-        return {"test4"}
-
-    @staticmethod
-    def mocked_get_modified_testss():
-        return {"test2", "test4"}
-
     @mock.patch(
         "tools.testing.test_selections._get_previously_failing_tests",
         side_effect=mocked_get_previously_failing_tests,
     )
     @mock.patch(
         "tools.testing.test_selections._get_modified_tests",
-        side_effect=mocked_get_modified_testss,
+        side_effect=mocked_get_modified_tests,
     )
     def test_get_reordered_tests(
         self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
