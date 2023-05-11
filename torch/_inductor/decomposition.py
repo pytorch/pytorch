@@ -170,7 +170,39 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
         return torch.ops.aten.addmm(input, mat1, mat2)[:-m_padded_length, :]
 
 
+# TODO - write to disk
+cached_should_pad_bench = {}
+
+
+def should_pad_bench_key(mat1, mat2, op, input=None):
+    def tensor_key(t):
+        return (t.shape, t.stride(), t.dtype)
+
+    key = (
+        tensor_key(mat1),
+        tensor_key(mat2),
+        op,
+        input if input is None else tensor_key(input),
+    )
+
+    return key
+
+
 def should_pad_bench(mat1, mat2, op, input=None):
+
+    key = should_pad_bench_key(mat1, mat2, op, input)
+
+    should_pad = cached_should_pad_bench.get(key, None)
+    if should_pad is not None:
+        return should_pad
+
+    should_pad = _should_pad_bench_impl(mat1, mat2, op, input)
+    cached_should_pad_bench[key] = should_pad
+
+    return should_pad
+
+
+def _should_pad_bench_impl(mat1, mat2, op, input=None):
     if not utils.has_triton():
         return False
 
@@ -200,8 +232,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
 
         mat1 = torch.randn_like(mat1)
         mat2 = torch.randn_like(mat2)
-        warmup = 5
-        rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2),
