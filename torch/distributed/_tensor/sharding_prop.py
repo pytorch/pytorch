@@ -260,6 +260,7 @@ class ShardingPropagator:
         skip_prop_list = [
             torch.ops.aten._local_scalar_dense.default,
             torch.ops.aten.equal.default,
+            torch.ops.aten.is_same_size.default,
         ]
         if op_overload in skip_prop_list:
             return None
