@@ -1,4 +1,3 @@
-#include <c10/util/Exception.h>
 #include <c10/util/numa.h>
 
 C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
