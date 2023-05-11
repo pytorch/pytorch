@@ -393,7 +393,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 config.pad_token_id = 0
 
         else:
-            model_cls, config = EXTRA_MODELS[model_name]
+            config, model_cls = EXTRA_MODELS[model_name]
 
         return model_cls, config
 
