@@ -37,6 +37,13 @@ class _Faketqdm:  # type: ignore[no-redef]
             sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
         sys.stderr.flush()
 
+    # Don't bother implementing; use real tqdm if you want
+    def set_description(self, *args, **kwargs):
+        pass
+
+    def write(self, s):
+        sys.stderr.write(f"{s}\n")
+
     def close(self):
         self.disable = True
 

@@ -60,13 +60,6 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-        # Top 60
-        # CPU: empty is returning all 0's and there is a mismatch with MPS
-        # allocation (MacOS 13). According to
-        # https://pytorch.org/docs/2.0/generated/torch.empty.html
-        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
-        'empty': [torch.float16, torch.float32],
-
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -102,6 +95,8 @@ def mps_ops_grad_modifier(ops):
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
+        # 'float' object is not iterable
+        'item': [torch.float16, torch.float32],
         # "mse_backward_cpu_out" not implemented for 'Half'
         'nn.functional.mse_loss': [torch.float16],
         # "smooth_l1_backward_cpu_out" not implemented for 'Half'
@@ -119,7 +114,6 @@ def mps_ops_grad_modifier(ops):
         'signal.windows.hann': [torch.float32],
         'signal.windows.kaiser': [torch.float32],
         'signal.windows.nuttall': [torch.float32],
-        'empty_permuted': [torch.float16, torch.float32],
         'eye': [torch.float16, torch.float32],
 
         # trunc_tensor not working properly for float16
@@ -315,11 +309,6 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # fill tensors with uninitialized data, causing mismatch with CPU
-        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
-                           torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
-                  torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -346,10 +335,12 @@ def mps_ops_modifier(ops):
         'masked.cumsum': [torch.int64],
     }
 
-    MACOS_13_3_XFAILLIST = {
-        # before macOS 13.3 it falls back to cpu and pass the forward pass
+    MACOS_AFTER_13_1_XFAILLIST = {
+        # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+    }
 
+    MACOS_13_3_XFAILLIST = {
         # Failure due to precision issue for fp16
         # on both cpu and mps there are test cases that might produce inf result
         # 'nn.functional.pairwise_distance': [torch.float16],
@@ -678,12 +669,6 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
 
-        # these fill tensors with uninitialized data, causing mismatch with CPU
-        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # 'empty': [torch.int8],
-        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
-                              torch.int32, torch.int64, torch.uint8, torch.int8],
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
         # zero to negative integer powers are undefined
@@ -714,12 +699,33 @@ def mps_ops_modifier(ops):
         'byte': [torch.float16, torch.float32],
     }
 
+    EMPTY_OPS_SKIPLIST = {
+        # Fill tensors with uninitialized data, causing mismatch with CPU.
+        # They occasionally match, thus skipping them.
+        # See https://github.com/pytorch/pytorch/issues/100175
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
 
     for op in ops:
         key = op.name + op.variant_test_name
+        if key in EMPTY_OPS_SKIPLIST:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip("Skipping empty ops."),
+                         dtypes=EMPTY_OPS_SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -730,6 +736,11 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_BEFORE_13_3_XFAILLIST[key]))
+
+        if key in MACOS_AFTER_13_1_XFAILLIST and torch.backends.mps.is_macos13_or_newer(2):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_AFTER_13_1_XFAILLIST[key]))
 
         if key in MACOS_13_3_XFAILLIST and (product_version >= 13.3):
             addDecorator(op, DecorateInfo(
@@ -772,6 +783,10 @@ def mps_ops_error_inputs_modifier(ops):
         # MPS does not support tensor dimensions > 16
         'amax',
         'amin',
+        'aminmax',
+
+        # memory overlapping checks
+        'index_select',
 
         # unimplemented
         'logcumsumexp',
@@ -4853,6 +4868,16 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
 
     def test_all(self):
         def helper(shape):
@@ -9665,6 +9690,34 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(output, input_list)
 
+    def test_index_put_deterministic(self, device="mps"):
+        def helper(dtype, accumulate, deterministic, num_tests=128):
+            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
+            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
+            t_idx = torch.tensor(
+                [0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2,
+                 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2]
+            )
+            for _ in range(num_tests):
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+                    t = torch.zeros(3, dtype=dtype, device=device)
+                    t.index_put_((t_idx,), torch.arange(len(t_idx), device=device, dtype=dtype), accumulate=accumulate)
+                    if accumulate:
+                        self.assertEqual(t, acc_expected)
+                    else:
+                        self.assertEqual(t, non_acc_expected)
+                finally:
+                    torch.use_deterministic_algorithms(False)
+
+        for accumulate, deterministic in product((False, True), (False, True)):
+            dtype = torch.float if accumulate else torch.long
+            if not accumulate and not deterministic:
+                with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
+                    helper(dtype, accumulate, deterministic)
+            else:
+                helper(dtype, accumulate, deterministic)
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -10476,10 +10529,12 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
-class TestErrorInputs(TestCaseMPS):
+class TestErrorInputs(TestCase):
+    _ignore_not_implemented_error = True
+
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
-        self.assertEqual(device, "mps")
+        self.assertEqual(device, "mps:0")
 
         mps_samples = op.error_inputs(device)
 

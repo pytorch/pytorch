@@ -488,6 +488,7 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
+aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -973,8 +974,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_

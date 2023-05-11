@@ -9,6 +9,8 @@ jobs:
       contents: read
       pull-requests: write
     runs-on: ubuntu-latest
+    # Do not auto-label nightly builds PR
+    if: ${{ github.event.pull_request.number != 26921 }}
     steps:
     - uses: actions/labeler@v4
       with:
