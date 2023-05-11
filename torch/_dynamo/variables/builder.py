@@ -865,6 +865,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if value < 0 or torch._dynamo.config.specialize_int:
                     # Negative values don't create_symbol correctly,
@@ -880,7 +881,28 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                dynamic_dim = DimDynamic.DYNAMIC
+                name = self.source.name()
+                if name not in self.tx.output.frame_state:
+                    curr_size = value
+                else:
+                    curr_size = self.tx.output.frame_state[name]
+                    if curr_size != value:
+                        curr_size = None
+                self.tx.output.frame_state[name] = curr_size
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                if curr_size is None or not config.assume_static_by_default:
+                    dynamic_dim = DimDynamic.DYNAMIC
+                else:  # assume_static_by_default
+                    # TODO: dynamic_dim = DimDynamic.STATIC should work but
+                    # for some reason it doesn't
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -1212,21 +1234,32 @@ def wrap_to_fake_tensor_and_record(
         # do a linear scan every time here
         t_id = id(e)
         dim2constraint = {}
+
+        def update_dim2constraint(dim, constraint_range):
+            if dim in dim2constraint:
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+                dim2constraint[dim] = StrictMinMaxConstraint(
+                    vr=constraint_range.vr & dim2constraint[dim].vr,
+                    warn_only=False,
+                )
+            else:
+                dim2constraint[dim] = constraint_range
+
         if tx.output.export_constraints:
             for constraint in tx.output.export_constraints:
                 if constraint.t_id == t_id:
-                    if constraint.dim in dim2constraint:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        dim2constraint[constraint.dim] = StrictMinMaxConstraint(
-                            vr=constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr,
-                            warn_only=False,
-                        )
-                    else:
-                        dim2constraint[constraint.dim] = constraint.constraint_range
+                    update_dim2constraint(constraint.dim, constraint.constraint_range)
+                if constraint.shared is not None and constraint.shared.t_id == t_id:
+                    # We process constraint ranges for each shared dimension separately
+                    # so that we can directly check range constraint violations on them
+                    # without looking up which other shared dimensions have this info.
+                    # In other words, for this t_id, we will have processed all of its
+                    # constraint ranges, no matter where / how they were specified, by
+                    # by the end of this loop.
+                    update_dim2constraint(
+                        constraint.shared.dim, constraint.constraint_range
+                    )
 
         dynamic_dims = None
         constraint_dims = None
@@ -1248,7 +1281,7 @@ def wrap_to_fake_tensor_and_record(
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
-                if marked_dynamic:
+                if curr_sizes and marked_dynamic:
                     curr_sizes[i] = None
 
                 # We will process constraints first, as they will imply that we
@@ -1294,6 +1327,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+            tx.output.tracked_fakes_id_to_source[t_id].append(source)
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
