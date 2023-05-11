@@ -1683,16 +1683,11 @@ def format_guard_bug_msg(aot_config, expected):
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: List[bool],
+    add_dupe_map: List[int],
 ) -> ViewAndMutationMeta:
     assert len(m.input_info) == len(keep_arg_mask)
     # Easy invariant: the first argument should never be a dupe (it will be kept)
     assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
-    dupe_to_dedup_idx = [0]
-    for i, b in enumerate(keep_arg_mask[1:]):
-        if b:
-            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1] + 1)
-        else:
-            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1])
 
     # Filter dupe'd mutated inputs out of traced_tangents
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
@@ -1715,7 +1710,7 @@ def remove_dupe_metadata(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
                 dynamic_dims=o.dynamic_dims,
-                base_idx=None if o.base_idx is None else dupe_to_dedup_idx[o.base_idx]
+                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx]
             )
             for o in m.output_info
         ],
@@ -2013,7 +2008,7 @@ def aot_wrapper_dedupe(
     deduped_flat_args = remove_dupe_args(flat_args)
 
     # Update our input metadata to remove duped input metadata.
-    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
+    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask, add_dupe_map)
 
     tracing_context = TracingContext.get()
     if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
