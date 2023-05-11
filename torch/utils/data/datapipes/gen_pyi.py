@@ -1,5 +1,6 @@
 import os
 import pathlib
+from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple, Union
 
 
@@ -64,11 +65,12 @@ def extract_class_name(line: str) -> str:
     return line[start:end]
 
 
-def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
+def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
     """
     Given a path to file, parses the file and returns a dictionary of method names to function signatures.
     """
     method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
+    doc_string_dict = defaultdict(lambda: list())
     with open(file_path) as f:
         open_paren_count = 0
         method_name, class_name, signature = "", "", ""
@@ -76,10 +78,12 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
         for line in f.readlines():
             if line.count("\"\"\"") % 2 == 1:
                 skip = not skip
-            if skip or "\"\"\"" in line:  # Skipping comment/example blocks
+            if skip or "\"\"\"" in line:  # Saving docstrings
+                doc_string_dict[method_name].append(line)
                 continue
             if "@functional_datapipe" in line:
                 method_name = extract_method_name(line)
+                doc_string_dict[method_name] = []
                 continue
             if method_name and "class " in line:
                 class_name = extract_class_name(line)
@@ -103,17 +107,24 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
                     raise RuntimeError("open parenthesis count < 0. This shouldn't be possible.")
                 else:
                     signature += line.strip('\n').strip(' ')
-    return method_to_signature, method_to_class_name, special_output_type
+    return method_to_signature, method_to_class_name, special_output_type, doc_string_dict
 
 
-def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
+def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, List[str]]]:
     methods_and_signatures, methods_and_class_names, methods_with_special_output_types = {}, {}, set()
+    methods_and_doc_strings = {}
     for path in file_paths:
-        method_to_signature, method_to_class_name, methods_needing_special_output_types = parse_datapipe_file(path)
+        (
+            method_to_signature,
+            method_to_class_name,
+            methods_needing_special_output_types,
+            doc_string_dict,
+        ) = parse_datapipe_file(path)
         methods_and_signatures.update(method_to_signature)
         methods_and_class_names.update(method_to_class_name)
         methods_with_special_output_types.update(methods_needing_special_output_types)
-    return methods_and_signatures, methods_and_class_names, methods_with_special_output_types
+        methods_and_doc_strings.update(doc_string_dict)
+    return methods_and_signatures, methods_and_class_names, methods_with_special_output_types, methods_and_doc_strings
 
 
 def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
@@ -176,7 +187,7 @@ def get_method_definitions(file_path: Union[str, List[str]],
     file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(file_path,
                                  files_to_exclude=files_to_exclude.union(deprecated_files))
-    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = \
+    methods_and_signatures, methods_and_class_names, methods_w_special_output_types, methods_and_doc_strings = \
         parse_datapipe_files(file_paths)
 
     for fn_name in method_to_special_output_type:
@@ -190,8 +201,12 @@ def get_method_definitions(file_path: Union[str, List[str]],
             output_type = method_to_special_output_type[method_name]
         else:
             output_type = default_output_type
+        doc_string = "".join(methods_and_doc_strings[method_name])
+        if doc_string == "":
+            doc_string = "    ...\n"
         method_definitions.append(f"# Functional form of '{class_name}'\n"
-                                  f"def {method_name}({arguments}) -> {output_type}: ...")
+                                  f"def {method_name}({arguments}) -> {output_type}:\n"
+                                  f"{doc_string}")
     method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
 
     return method_definitions

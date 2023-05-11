@@ -302,6 +302,8 @@ class TestFSDPCheckpoint(FSDPTest):
                 self.assertIsInstance(tensor, ShardedTensor)
             elif "u2" in fqn:
                 self.assertIsInstance(tensor, torch.Tensor)
+        # Ensure that get_state_dict_type can still correctly get the settings.
+        _ = FSDP.get_state_dict_type(model)
 
 
 instantiate_parametrized_tests(TestFSDPCheckpoint)
