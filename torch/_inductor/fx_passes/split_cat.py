@@ -159,9 +159,13 @@ def merge_splits(
                 continue
             old_getitem = first_split_num_to_user[split_num]
             if split_num != next_split_index:
-                old_getitem.update_arg(0, new_split)
-                old_getitem.update_arg(1, new_split_num)
+                with graph.inserting_after(new_split):
+                    new_getitem = graph.call_function(
+                        operator.getitem, args=(new_split, new_split_num)
+                    )
                 new_split_num += 1
+                new_getitem.meta.update(old_getitem.meta)
+                old_getitem.replace_all_uses_with(new_getitem)
             else:
                 next_split_num_to_user = {
                     user.args[1]: user for user in node.users.keys()
@@ -177,8 +181,7 @@ def merge_splits(
                     next_getitem.replace_all_uses_with(new_getitem)
                     to_remove.append(next_getitem)
                 to_remove.append(node)
-                to_remove.append(old_getitem)
-
+            to_remove.append(old_getitem)
         to_remove.append(first_split)
     for node in to_remove:
         graph.erase_node(node)

@@ -404,46 +404,23 @@ def checkInputsSolver(
     )
 
 
-def checkUplo(UPLO: str):
-    UPLO_uppercase = UPLO.upper()
-    check(
-        len(UPLO) == 1 and (UPLO_uppercase == "U" or UPLO_uppercase == "L"),
-        lambda: f"Expected UPLO argument to be 'L' or 'U', but got {UPLO}",
-    )
+def checkUplo(uplo: str):
+    uplo_uppercase = uplo.upper()
+    assert (
+        len(uplo) == 1 and uplo_uppercase == "U" or uplo_uppercase == "L"
+    ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-@register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
-def meta__linalg_eigh(
-    A: Tensor,
-    UPLO: str = "L",
-    compute_v: bool = True,
-    *,
-    eigenvalues: Tensor = None,
-    eigenvectors: Tensor = None,
-):
-    squareCheckInputs(A, "linalg.eigh")
-    checkUplo(UPLO)
-
-    shape = list(A.shape)
-    if compute_v:
-        vecs = A.new_empty(shape)
-        vecs.as_strided_(shape, make_contiguous_strides_for(shape, row_major=False))
-    else:
-        vecs = A.new_empty([0])
-
-    shape.pop()
-    vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
-
-    if eigenvalues is not None and eigenvectors is not None:
-        assert isinstance(eigenvalues, TensorLike)
-        assert isinstance(eigenvectors, TensorLike)
-        eigenvalues = _maybe_resize_out(eigenvalues, vals.shape)
-        eigenvectors = _maybe_resize_out(eigenvectors, vecs.shape)
-        _safe_copy_out(copy_from=vals, copy_to=eigenvalues)  # type: ignore[arg-type]
-        _safe_copy_out(copy_from=vecs, copy_to=eigenvectors)  # type: ignore[arg-type]
-        return eigenvalues, eigenvectors
-
-    return vals, vecs
+# @register_meta(aten.linalg_eigh.default)
+def meta_linalg_eigh(self, uplo="L"):
+    squareCheckInputs(self, "linalg_eigh")
+    checkUplo(uplo)
+    real_dtype = toRealValueType(self.dtype)
+    assert self.dim() >= 2
+    values = self.new_empty(self.shape, dtype=real_dtype)
+    values.transpose_(-2, -1)
+    vectors = self.new_empty(self.shape[:-1])
+    return (values, vectors)
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -2699,24 +2676,24 @@ def meta__scaled_dot_product_flash_backward(
     num_heads = query.size(1)
     head_dim = query.size(3)
 
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
+    Nnz_q = batch_size * max_q
+    Nnz_kv = batch_size * max_k
+
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+
+    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
+    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
+    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
+
+    grad_q = torch.empty_like(query_reshaped)
+    grad_k = torch.empty_like(key_reshaped)
+    grad_v = torch.empty_like(value_reshaped)
+
+    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
+    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
 
     return grad_q, grad_k, grad_v
 

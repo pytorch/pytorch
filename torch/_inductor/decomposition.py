@@ -189,7 +189,6 @@ def should_pad_bench_key(mat1, mat2, op, input=None):
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
-
     key = should_pad_bench_key(mat1, mat2, op, input)
 
     should_pad = cached_should_pad_bench.get(key, None)
