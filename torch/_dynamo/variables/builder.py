@@ -1281,7 +1281,7 @@ def wrap_to_fake_tensor_and_record(
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
-                if marked_dynamic:
+                if curr_sizes and marked_dynamic:
                     curr_sizes[i] = None
 
                 # We will process constraints first, as they will imply that we
