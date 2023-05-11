@@ -18,6 +18,42 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
+template <typename T, typename opmath_t, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline T downscale(float val);
+
+template<> inline BFloat16 downscale(float val) {
+  return BFloat16(val);
+}
+
+template<> inline Half downscale(float val) {
+  uint16_t d;
+  __m512 v = _mm512_set_ps(val, val, val, val, val, val, val, val,
+                           val, val, val, val, val, val, val, val);
+  __m256i o = _mm512_cvtps_ph(
+      v, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  // _mm256_storeu_epi16(reinterpret_cast<__m256i*>(d), o);
+  std::memcpy(&d, &o, sizeof(d));
+  Half result;
+  result.x = d;
+  return result;
+}
+
+template <typename T, typename opmath_t, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
+inline opmath_t upscale(T& val);
+
+template<> inline float upscale(BFloat16& val) {
+  return float(val);
+}
+
+template<> inline float upscale(Half& val) {
+  float d[16];
+  __m256i v = _mm256_setr_epi16(
+        val.x, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  __m512 o = _mm512_cvtph_ps(v);
+  _mm512_storeu_ps(d, o);
+  return d[0];
+}
+
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m256i& a, __m512& o) {
   o = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(a), 16));
@@ -1168,7 +1204,36 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 
+template <typename T, typename opmath_t>
+inline
+typename std::enable_if_t<!std::is_same_v<T, opmath_t>, T>
+downscale(float val) {
+  return T(val);
+}
+
+template <typename T, typename opmath_t>
+inline
+typename std::enable_if_t<!std::is_same_v<T, opmath_t>, opmath_t>
+upscale(T& val) {
+  return opmath_t(val);
+}
+
+
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+
+template <typename T, typename opmath_t>
+inline
+typename std::enable_if_t<std::is_same_v<T, opmath_t>, T>
+downscale(T val) {
+  return val;
+}
+
+template <typename T, typename opmath_t>
+inline
+typename std::enable_if_t<std::is_same_v<T, opmath_t>, opmath_t>
+upscale(T val) {
+  return val;
+}
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
