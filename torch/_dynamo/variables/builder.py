@@ -858,16 +858,23 @@ class VariableBuilder:
 
     def wrap_numpy_ndarray(self, value):
         assert isinstance(value, np.ndarray)
-        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+        arg_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
         source = self.get_source()
         tensor_value = torch.from_numpy(value)
 
+        from ..utils import to_torch_np_ndarray
+
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
-            proxy=tensor_proxy,
+            proxy=self.tx.output.create_proxy(
+                "call_function",
+                to_torch_np_ndarray,
+                (arg_proxy,),
+                {},
+            ),
             example_value=tensor_value,
             source=source,
         )
@@ -882,7 +889,7 @@ class VariableBuilder:
             is_tensor=True,
             example_strong_ref=tensor_value,
         )
-        numpy_ndarray_variable.proxy.node.meta["grapharg"] = grapharg
+        arg_proxy.node.meta["grapharg"] = grapharg
 
         return numpy_ndarray_variable
 

@@ -1236,6 +1236,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_as_input(self):
+        def fn(x: np.ndarray, y: np.ndarray):
+            a = x.real
+            b = y.real
+            torch._dynamo.graph_break()
+            return np.add(a, 1), np.add(b, 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3]).numpy()
+            y = torch.randn([1, 3]).numpy()
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_inplace_resize_on_graph_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
