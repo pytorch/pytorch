@@ -451,6 +451,7 @@ class DeterministicAlgorithmsSource(Source):
     def guard_source(self):
         return GuardSource.GLOBAL
 
+
 @dataclasses.dataclass(frozen=True)
 class GradModeSource(Source):
     def name(self):

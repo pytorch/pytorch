@@ -171,6 +171,11 @@ REQUIRE_HIGHER_TOLERANCE = {
 }
 
 
+SKIP_FOR_CPU = {
+    "OPTForCausalLM",  # OOMs
+}
+
+
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
         "Speech2Text2Decoder": "transformers.models.speech_to_text_2.modeling_speech_to_text_2",
@@ -372,6 +377,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "huggingface"
+
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
 
     def load_model(
         self,
