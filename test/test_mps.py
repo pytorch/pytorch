@@ -95,6 +95,8 @@ def mps_ops_grad_modifier(ops):
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
+        # 'float' object is not iterable
+        'item': [torch.float16, torch.float32],
         # "mse_backward_cpu_out" not implemented for 'Half'
         'nn.functional.mse_loss': [torch.float16],
         # "smooth_l1_backward_cpu_out" not implemented for 'Half'
@@ -10525,7 +10527,7 @@ class TestErrorInputs(TestCase):
 
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
-        self.assertEqual(device, "mps")
+        self.assertEqual(device, "mps:0")
 
         mps_samples = op.error_inputs(device)
 
