@@ -2824,11 +2824,11 @@ class ExternKernel(InputsKernel):
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
-        if config.size_asserts:
+        if config.size_asserts and not V.graph.cpp_wrapper:
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
-                wrapper.generate_size_asserts(self.get_name(), size, stride)
+                f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
 
     def get_group_stride(self):
