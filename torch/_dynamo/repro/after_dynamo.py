@@ -259,6 +259,14 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
 
     compiler_fn = lookup_backend(compiler_name)
 
+    # TODO: It's inconsistent to pass SymInt inputs but REAL tensors.
+    # We should pass ints and look at the GraphModule placeholders
+    # to resolve them to SymInt (if necessary)
+    example_inputs = [
+        i.node.hint if isinstance(i, torch.SymInt) else i
+        for i in example_inputs
+    ]
+
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
         run_fwd_maybe_bwd(compiled_gm, example_inputs)
@@ -353,17 +361,6 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
 
 
 def repro_common(options, mod, load_args):
-    # Invariant for graphs we generate with the repro script
-    assert not any(mod.named_parameters())
-    for n, b in mod.named_buffers():
-        if b.numel() > MAX_CONSTANT_NUMEL_INLINE:
-            log.warning(
-                "Constant %s was not serialized, generated random data instead. "
-                "If you think this is affecting you, please comment on "
-                "https://github.com/pytorch/pytorch/issues/100468",
-                n,
-            )
-
     if not hasattr(load_args, "_version"):
         log.warning(
             "load_args does not have a _version attribute, please file a bug to PyTorch "
