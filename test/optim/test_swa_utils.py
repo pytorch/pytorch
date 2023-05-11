@@ -4,7 +4,7 @@ import itertools
 import pickle
 
 import torch
-from torch.optim.swa_utils import AveragedModel, SWALR, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
+from torch.optim.swa_utils import AveragedModel, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
