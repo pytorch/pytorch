@@ -212,7 +212,7 @@ class TestSelectAlgorithm(TestCase):
         @torch.compile
         def fn(x1, x2, seed):
             mm_4 = torch.ops.aten.mm.default(x2, x1)
-            rnd = torch.ops.prims.philox_rand_like.default(mm_4, seed, 0)
+            rnd = torch.ops.prims.inductor_random.default(mm_4.shape, seed, "rand")
             return mm_4 * rnd
 
         # sizes picked so triton autotuning wins

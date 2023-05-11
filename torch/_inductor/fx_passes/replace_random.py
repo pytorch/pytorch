@@ -142,7 +142,7 @@ def _dropout_replacement(x: torch.Tensor, dropout_p: float):
     # the randomness calls, and if you fix that it decides to put both
     # bool_mask computations in the forwards.
     bool_mask = (
-        inductor_prims.random(x.size(), seed, "rand", **default_kwargs(x.device))
+        inductor_prims.random([*x.size()], seed, "rand", **default_kwargs(x.device))
         > dropout_p
     )
 
