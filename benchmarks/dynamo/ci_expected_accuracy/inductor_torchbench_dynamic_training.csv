@@ -18,7 +18,7 @@ hf_GPT2,pass,8
 hf_Reformer,pass,47
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,9
-llama,eager_1st_run_fail,0
+llama,pass,12
 maml_omniglot,pass,9
 mnasnet1_0,pass,9
 mobilenet_v2,pass,9
