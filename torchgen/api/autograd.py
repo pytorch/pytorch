@@ -316,15 +316,13 @@ def is_reference_for_foreach(
     f: NativeFunction,
     function_schema: FunctionSchema,
 ) -> bool:
-    return (
-        f.func.name.name.base.split("_foreach_")[-1] == function_schema.name.name.base
-        and not function_schema.name.name.inplace
-        and all(
-            ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
-            for arg, ref_arg in zip(
-                f.func.arguments.flat_non_out,
-                function_schema.arguments.flat_non_out,
-            )
+    return f.func.name.name.base.split("_foreach_")[
+        -1
+    ] == function_schema.name.name.base and all(
+        ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
+        for arg, ref_arg in zip(
+            f.func.arguments.flat_non_out,
+            function_schema.arguments.flat_non_out,
         )
     )
 
@@ -332,8 +330,10 @@ def is_reference_for_foreach(
 # TODO(crcrpar): Avoid hard coding "Default" ideally.
 def gen_foreach_derivativeinfo(
     foreach_function: NativeFunction,
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     functional_info_by_signature: Dict[
+        FunctionSchema, Dict[str, DifferentiabilityInfo]
+    ],
+    non_functional_info_by_signature: Dict[
         FunctionSchema, Dict[str, DifferentiabilityInfo]
     ],
     dispatch_key: str = "Default",
@@ -343,26 +343,26 @@ def gen_foreach_derivativeinfo(
     The second return value indicates whether the info is generated in this function.
     """
     ref_diff_info: Optional[DifferentiabilityInfo] = None
-    for function_schema in functional_info_by_signature:
+
+    for function_schema, diff_info in functional_info_by_signature.items():
         if not is_reference_for_foreach(foreach_function, function_schema):
             continue
-        if function_schema in differentiability_infos:
-            ref_diff_info = differentiability_infos[function_schema][dispatch_key]
-        elif (
-            function_schema.signature(strip_default=True)
-            in functional_info_by_signature
-        ):
-            ref_diff_info = functional_info_by_signature[
-                function_schema.signature(strip_default=True)
-            ][dispatch_key]
-        else:
-            raise RuntimeError(
-                "Reference `DifferentiabilityInfo` for {} not found".format(
-                    foreach_function.func
-                )
-            )
+        ref_diff_info = diff_info[dispatch_key]
         if ref_diff_info is not None:
             break
+    # note(crcrpar): It seems like `zero`'s info isn't available in functional_info_by_signature
+    # while the info of `zero_` is in non_functional_info_by_signature
+    if (
+        ref_diff_info is None
+        and foreach_function.func.kind() == SchemaKind.inplace
+        and str(foreach_function.func.name) in {"_foreach_zero_"}
+    ):
+        for function_schema, diff_info in non_functional_info_by_signature.items():
+            if not is_reference_for_foreach(foreach_function, function_schema):
+                continue
+            ref_diff_info = diff_info[dispatch_key]
+            if ref_diff_info is not None:
+                break
     if ref_diff_info is None:
         return None, False
 
@@ -534,7 +534,9 @@ Attempted to convert a derivative formula for a mutable operator
         if is_foreach_func(f):
             assert f.func not in differentiability_infos
             diff_info, is_generated = gen_foreach_derivativeinfo(
-                f, differentiability_infos, functional_info_by_signature
+                f,
+                functional_info_by_signature,
+                non_functional_info_by_signature,
             )
             if diff_info is None:
                 return None, False
