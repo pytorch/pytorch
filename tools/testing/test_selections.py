@@ -192,9 +192,24 @@ def get_reordered_tests(
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
     """
+
+    def print_tests(tests: Set[str], test_group: str):
+        if not tests:
+            return
+
+        print(f"{test_group}:")
+        for test in tests:
+            print(f"  {test}")
+
     prioritized_tests: Set[str] = set()
-    prioritized_tests |= _get_previously_failing_tests()
-    prioritized_tests |= _get_modified_tests()
+
+    pri_test = _get_previously_failing_tests()
+    print_tests(pri_test, "Prioritizing these tests since they previously failed")
+    prioritized_tests |= pri_test
+
+    pri_test |= _get_modified_tests()
+    print_tests(pri_test, "Prioritizing these tests since they were modified")
+    prioritized_tests |= pri_test
 
     bring_to_front = []
     the_rest = []
