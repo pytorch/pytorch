@@ -1102,6 +1102,7 @@ aten_cpu_source_list = sorted(aten_cpu_source_non_codegen_list + aten_cpu_source
 # Same as ${aten_cpu_source_codegen_list}, this list will go through aten codegen, and be included in
 # ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt.
 aten_native_source_codegen_list = [
+    "aten/src/ATen/native/Attn.cpp",
     "aten/src/ATen/native/cpu/Activation.cpp",
     "aten/src/ATen/native/cpu/AvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/BinaryOpsKernel.cpp",
