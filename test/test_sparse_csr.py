@@ -3492,7 +3492,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             blocksize = input.values().shape[-2:]
 
             def make_out(full_size=False):
-                batch_dims = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[-2])
+                batch_dims = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[:-2])
                 out_size = batch_dims + (m, n)
                 if not full_size:
                     out_crow_indices = input.crow_indices().broadcast_to(batch_dims + (-1,))
@@ -3536,11 +3536,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                 out = make_out(full_size=False)
                 out.values().copy_(beta * input.values())
                 return out
-            if beta == 0.0:
-                out = make_out(full_size=True)
-                mm_res = (alpha * (mat1 @ mat2)).to_sparse_bsr(blocksize)
-                out.copy_(mm_res)
-                return out
             out = make_out(full_size=False)
             mm_res = filter_mm(alpha * (mat1 @ mat2))
             out.values().copy_(mm_res.values()).add_(beta * input.values())
@@ -3552,15 +3547,15 @@ class TestSparseCompressedTritonKernels(TestCase):
             mat2 = tensor(bm2 + (k, n))
 
             scalars = (0.0, 2.0)
-            for alpha, beta in itertools.product(scalars, scalars):
-                if alpha > 0 and beta > 0:
-                    continue
+            for alpha, beta in itertools.product((0.0,), scalars):
                 bsr = input.to_sparse_bsr(block_size)
                 res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
-                res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
 
                 batch_broadcasted_shape = torch.broadcast_shapes(*(t.shape[:-2] for t in (input, mat1, mat2)))
                 self.assertTrue(res_tri.shape == batch_broadcasted_shape + (m, n))
+
+                res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
+                self.assertEqual(res_tri, res_ref)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

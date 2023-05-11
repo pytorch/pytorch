@@ -431,32 +431,18 @@ if _has_triton():
                 if out is None:
                     # zero_like is broken, see https://github.com/pytorch/pytorch/issues/101078.
                     # TODO: replace with zero_like once fixed.
-                    return input_broadcasted.clone().zero_()
+                    res = input_broadcasted.clone()
+                    res.values().zero_()
+                    return res
                 else:
-                    return out.zero_()
+                    out.values().zero_()
+                    return out
 
         blocksize = input.values().shape[-2:]
         m = mat1.size(-2)
         n = mat2.size(-1)
         k = mat1.size(-1)
 
-        if beta == 0.0:
-            # In this case `input` is ignored.
-            if m * n < min(m * k, k * n):
-                mm_res = (mat1 @ mat2).mul_(alpha)
-            else:
-                if m < n:
-                    mm_res = mat1.mul(alpha) @ mat2
-                else:
-                    mm_res = mat1 @ mat2.mul(alpha)
-
-            mm_res = broadcast_batch_dims_bsr(f_name, mm_res.to_sparse_bsr(blocksize), input)
-            if out is None:
-                return mm_res
-            else:
-                return out.copy_(mm_res)
-
-        # From now on both alpha and beta are non-zero.
         return None
 
 
