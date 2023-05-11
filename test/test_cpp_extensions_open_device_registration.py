@@ -258,16 +258,21 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
             # Test storage pin_memory on custom device
             cpu_storage = cpu_tensor.storage()
+            foo_device = torch.device("foo")
             self.assertFalse(cpu_storage.is_pinned("foo"))
             cpu_storage_pin = cpu_storage.pin_memory("foo")
             self.assertFalse(cpu_storage.is_pinned("foo"))
+            self.assertFalse(cpu_storage.is_pinned(foo_device))
             self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
             self.assertTrue(cpu_storage_pin.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pin_already.is_pinned(foo_device))
             # Test storage pin_memory on error device
             self.assertFalse(cpu_storage.is_pinned("foo"))
-            with self.assertRaisesRegex(TypeError, "cannot pin CPU memory to hpu device, please check the target device."):
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
                 cpu_storage_pin = cpu_storage.pin_memory("hpu")
             self.assertFalse(cpu_storage.is_pinned("hpu"))
             self.assertFalse(cpu_storage.is_pinned())
@@ -280,8 +285,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
             cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
             self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
-            self.assertFalse(cpu_untyped_storage_pinned.is_pinned(123))
             self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
             with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
                 cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
 

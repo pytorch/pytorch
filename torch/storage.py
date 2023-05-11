@@ -194,47 +194,43 @@ class _StorageBase:
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
 
-    def is_pinned(self, device="cuda"):
-        """
-        Determine whether the CPU storage is already pinned on device.
+    def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Determine whether the CPU storage is already pinned on device.
 
-        :param device (str): String representation of device type to pin memory on.
-            If the device is not set, the default behavior is CUDA device.
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
 
-        :return: A boolean variable
+        Returns:
+            A boolean variable.
         """
-        import torch
-        if device == "cuda" or device == torch._C._get_privateuse1_backend_name():
+        device_str = None
+        if isinstance(device, str):
+            device_str = device
+        elif isinstance(device, torch.device):
+            device_str = device.type
+
+        if device_str == "cuda" or device_str == torch._C._get_privateuse1_backend_name():
             return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
                 cast(Storage, self)).is_pinned(device)
         else:
             # Currently, cannot pin CPU storage memory to other device, except for cuda and privateuse1.
             return False
 
-    def pin_memory(self, device="cuda"):
-        """
-        Copies the CPU storage to pinned memory, if it's not already pinned.
+    def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Copies the CPU storage to pinned memory, if it's not already pinned.
 
-        :param device (str): String representation of device type to pin memory on.
-            If the device is not set, the default behavior is CUDA device.
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
 
-        :return: A pinned CPU storage variable
+        Returns:
+            A pinned CPU storage.
         """
         if self.device.type != 'cpu':
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
 
-        if device == "cuda":
-            import torch.cuda
-            allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
-            return type(self)(self.size(), allocator=allocator).copy_(self)
-        else :
-            import torch
-            if torch._C._get_privateuse1_backend_name() == device:
-                pinned_tensor = torch.tensor([], dtype=torch.uint8, device=self.device).set_(
-                    cast(Storage, self)).pin_memory(device)
-                return pinned_tensor.untyped_storage()
-            else :
-                raise TypeError(f"cannot pin CPU memory to {device} device, please check the target device.")
+        pinned_tensor = torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+            cast(Storage, self)).pin_memory(device)
+        return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -807,26 +803,26 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device="cuda"):
-        """
-        Determine whether the CPU TypedStorage is already pinned on device.
+    def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Determine whether the CPU TypedStorage is already pinned on device.
 
-        :param device (str): String representation of device type to pin memory on.
-            If the device is not set, the default behavior is CUDA device.
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``
 
-        :return: A boolean variable
+        Returns:
+            A boolean variable.
         """
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device="cuda"):
-        """
-        Copies the CPU TypedStorage to pinned memory, if it's not already pinned.
+    def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Copies the CPU TypedStorage to pinned memory, if it's not already pinned.
 
-        :param device (str): String representation of device type to pin memory on.
-            If the device is not set, the default behavior is CUDA device.
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
 
-        :return: A pinned CPU storage variable
+        Returns:
+            A pinned CPU storage.
         """
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
