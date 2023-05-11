@@ -1167,6 +1167,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_cpu(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2305,6 +2309,7 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+        runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
