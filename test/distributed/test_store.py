@@ -20,7 +20,8 @@ if not dist.is_available():
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import (
     skip_if_win32,
-    create_tcp_store
+    create_tcp_store,
+    tp_transports
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -145,6 +146,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         # Init RPC using file
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
         rpc_backend_options.init_method = f"file://{file.name}"
+        rpc_backend_options._transports = tp_transports()
         rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
 
         # Init PG using file
@@ -258,7 +260,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}"
+            init_method=f"tcp://{addr}:{port}",
+            _transports=tp_transports()
         )
         rpc.init_rpc(
             name="worker0",
@@ -324,6 +327,28 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+    def test_append(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_multi_set(self):
+        store = self._create_store()
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_get(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -341,7 +366,6 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
-
 
 class MyPythonStore(dist.Store):
     def __init__(self):
