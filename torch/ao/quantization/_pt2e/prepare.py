@@ -155,11 +155,11 @@ def _maybe_insert_input_and_output_observers_for_node(
     else:
         output_is_a_tensor = this_node_dtype_info is not None
 
-    skip_inserting_input_observers = (
+    skip_inserting_input_and_output_observers = (
         this_node_dtype_info is None
     )
 
-    if skip_inserting_input_observers:
+    if skip_inserting_input_and_output_observers:
         return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
