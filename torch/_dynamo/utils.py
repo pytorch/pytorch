@@ -20,7 +20,6 @@ import textwrap
 import time
 import types
 import typing
-import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -1596,16 +1595,6 @@ def to_numpy_helper(___tmp_0):
     return convert(___tmp_0)
 
 
-@functools.lru_cache(None)
-def _warn_functionalization_rng_flag():
-    warnings.warn(
-        "torch.compile on activation checkpointing is an experimental feature. "
-        "Please manually set torch._functorch.config.functionalize_rng_ops=True "
-        "to run torch.compile with activation checkpointing. Without this flag, "
-        "checkpointed function will not get compiled and fallback to eager."
-    )
-
-
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
@@ -1636,7 +1625,13 @@ def get_higher_order_op(obj):
         # Until we make it ON by default, we will have to ask users to turn on
         # this flag manually.  TODO - Revisit if there is a simpler way to
         # resolve this problem.
-        _warn_functionalization_rng_flag()
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
         unimplemented(
             "torch.compile requires functioanlization of rng ops to be turned on"
         )
