@@ -64,10 +64,9 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def cache_dir():
-    cache_dir = os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR",
-        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
-    )
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
