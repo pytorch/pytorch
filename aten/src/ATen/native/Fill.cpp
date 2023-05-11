@@ -131,7 +131,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   return self;
 }
 
-static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
+Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   void* ptr = self.data_ptr();
   if (nullptr == ptr) {
     return self.fill_(0);

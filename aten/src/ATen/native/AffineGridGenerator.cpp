@@ -61,7 +61,7 @@ static Tensor make_base_grid_5D(
   return base_grid;
 }
 
-static Tensor affine_grid_generator_4D(
+Tensor affine_grid_generator_4D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -73,7 +73,7 @@ static Tensor affine_grid_generator_4D(
   return grid.view({N, H, W, 2});
 }
 
-static Tensor affine_grid_generator_5D(
+Tensor affine_grid_generator_5D(
     const Tensor& theta,
     int64_t N,
     int64_t C,
@@ -99,7 +99,7 @@ Tensor affine_grid_generator(const Tensor& theta, IntArrayRef size, bool align_c
   }
 }
 
-static Tensor affine_grid_generator_4D_backward(
+Tensor affine_grid_generator_4D_backward(
     const Tensor& grad_grid,
     int64_t N,
     int64_t C,
@@ -114,7 +114,7 @@ static Tensor affine_grid_generator_4D_backward(
   return grad_theta.transpose(1, 2);
 }
 
-static Tensor affine_grid_generator_5D_backward(
+Tensor affine_grid_generator_5D_backward(
     const Tensor& grad_grid,
     int64_t N,
     int64_t C,

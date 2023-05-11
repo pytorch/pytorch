@@ -14,8 +14,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace torch {
@@ -669,11 +667,9 @@ public:
 
   // IntList
   bool isIntList() const;
-  bool isSymIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
-  std::vector<c10::SymInt> toSymIntVector() const;
   at::DimVector toDimVector() const;
 
   // ConstantString

@@ -322,7 +322,6 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  NotImplementedError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;

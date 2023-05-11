@@ -1,4 +1,3 @@
-import collections
 import contextlib
 import dataclasses
 import functools
@@ -29,7 +28,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.fx.experimental.symbolic_shapes import FloorDiv, SymTypes
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
@@ -663,7 +662,7 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
+        _, (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
             r.get_size(), r.get_reduction_size()
         )
         num_outer = 0
@@ -2182,7 +2181,7 @@ class ComputedBuffer(Buffer):
                       This is also something just begging to be autotuned.
         """
         if isinstance(self.layout, FlexibleLayout):
-            (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
+            _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
             reads = self.get_read_writes().reads
@@ -2228,7 +2227,7 @@ class ComputedBuffer(Buffer):
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
         """
-        args, var_ranges = dependencies.index_vars_squeeze(
+        _, args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_size(), self.data.get_reduction_size(), prefix="q"
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
@@ -2433,7 +2432,6 @@ class InputsKernel(Buffer):
             set(),
             [],
             None,
-            op_counts=collections.Counter(),
         )
 
     @staticmethod
@@ -3130,6 +3128,8 @@ class FallbackKernel(ExternKernelAlloc):
         V.graph.warn_fallback(self.kernel)
 
     def codegen_args(self):
+        from torch._inductor.codegen.wrapper import pexpr
+
         @dataclasses.dataclass
         class Shim:
             ref: Any
@@ -3137,12 +3137,19 @@ class FallbackKernel(ExternKernelAlloc):
             def __repr__(self):
                 return self.ref
 
+        def gen_kwarg(k, v):
+            return f"{k}={repr(v)}"
+
+        def get_pexpr(x):
+            if isinstance(x, SymTypes):
+                return pexpr(sympy.expand(repr(x)))
+            else:
+                return repr(x)
+
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
-        args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_str(x) for x in args]
-        # let self.codegen_kwargs handle kwargs
-        self.kwargs.update(kwargs)
-        return args
+        constant_args = [Shim(get_pexpr(x)) for x in self.constant_args]
+        args, kwargs = self.unflatten_args(tensor_args, constant_args)
+        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):

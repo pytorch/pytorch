@@ -12,7 +12,6 @@ CUDA_VERSION              = 11.7.0
 CUDNN_VERSION             = 8
 BASE_RUNTIME              = ubuntu:18.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
-CMAKE_VARS               ?=
 
 # The conda channel to use to install cudatoolkit
 CUDA_CHANNEL              = nvidia
@@ -32,8 +31,7 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg CUDA_CHANNEL=$(CUDA_CHANNEL) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
-							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
-							--build-arg CMAKE_VARS="$(CMAKE_VARS)"
+							--build-arg TRITON_VERSION=$(TRITON_VERSION)
 EXTRA_DOCKER_BUILD_FLAGS ?=
 
 BUILD                    ?= build

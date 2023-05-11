@@ -76,8 +76,7 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph):
         for n in reversed(self.nodes):
-            if not n._erased:
-                graph.erase_node(n)
+            graph.erase_node(n)
 
     def output_nodes(self):
         return [

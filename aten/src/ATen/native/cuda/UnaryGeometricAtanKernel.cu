@@ -5,24 +5,20 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
 namespace at::native {
 
-#if AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char atan_name[] = "atan_impl";
-#endif
-
+CONSTEXPR_EXCEPT_WIN_CUDA char atan_name[] = "atan";
 void atan_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR()
+#if AT_USE_JITERATOR
   static const auto atan_string = jiterator_stringify(
     template <typename T>
-    T atan_impl(T a) {
+    T atan(T a) {
         return std::atan(a);
     }
   );
