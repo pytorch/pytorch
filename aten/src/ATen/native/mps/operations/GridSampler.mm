@@ -86,7 +86,11 @@ void grid_sampler_2d_mps_impl(Tensor& output,
                                         relativeCoordinates:FALSE
                                                alignCorners:align_corners
                                                 paddingMode:paddingMode
+#if defined(__MAC_13_2)
                                         nearestRoundingMode:MPSGraphResizeNearestRoundingModeRoundToEven
+#else
+                                        nearestRoundingMode:(MPSGraphResizeNearestRoundingMode)4L
+#endif
                                               constantValue:0.0f
                                                        name:nil];
       } else {
