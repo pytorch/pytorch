@@ -45,6 +45,8 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 
+from torch.fx.experimental.symbolic_shapes import guard_int
+
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
 
@@ -2791,11 +2793,12 @@ def expand(a: Tensor, *shape) -> Tensor:
     for idx, x in enumerate(a.shape):
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
+        requested_length = guard_int(requested_length)
+        x = guard_int(x)
         check(
             requested_length == x or x == 1 or requested_length == -1,
             lambda: f"expand: attempting to expand a dimension of length {x}!",
         )
-
         shape_[offset_idx] = requested_length if requested_length != -1 else x
 
     # At this point shape must be valid
