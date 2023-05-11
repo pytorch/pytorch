@@ -82,8 +82,7 @@ Error::Error(SourceLocation source_location, std::string msg)
           std::move(msg),
           str("Exception raised from ",
               source_location,
-              " (most recent call first):\n",
-              (*GetFetchStackTrace())())) {}
+              " (most recent call first):\n")) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;

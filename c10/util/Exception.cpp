@@ -13,7 +13,6 @@ namespace c10 {
 
 Error::Error(std::string msg, std::string backtrace, const void* caller)
     : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
-  refresh_what();
 }
 
 // PyTorch-style error message
@@ -61,7 +60,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   return oss.str();
 }
 
-void Error::refresh_what() {
+void Error::refresh_what() const {
   what_ = compute_what(/*include_backtrace*/ true);
   what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
 }

@@ -45,8 +45,8 @@ class C10_API Error : public std::exception {
   // signature of std::exception requires).  Currently, the invariant
   // is that these fields are ALWAYS populated consistently with respect
   // to msg_stack_ and backtrace_.
-  std::string what_;
-  std::string what_without_backtrace_;
+  mutable std::string what_;
+  mutable std::string what_without_backtrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
   // in caller, and then when you catch the exception, you can compare
@@ -94,6 +94,9 @@ class C10_API Error : public std::exception {
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   const char* what() const noexcept override {
+    if (what_.empty()) {
+      refresh_what();
+    }
     return what_.c_str();
   }
 
@@ -105,11 +108,14 @@ class C10_API Error : public std::exception {
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   const char* what_without_backtrace() const noexcept {
+    if (what_without_backtrace_.empty()) {
+      refresh_what();
+    }
     return what_without_backtrace_.c_str();
   }
 
  private:
-  void refresh_what();
+  void refresh_what() const;
   std::string compute_what(bool include_backtrace) const;
 };
 
