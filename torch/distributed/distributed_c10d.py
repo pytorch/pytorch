@@ -276,6 +276,8 @@ class Backend:
             Backend.backend_capability[name.lower()] = devices
 
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
+        # Add torch.distributed.is_custombackend_available() functional
+        setattr(torch.distributed, f'is_{name.lower()}_available', lambda : True)
 
 class BackendConfig:
 

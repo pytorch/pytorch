@@ -1600,6 +1600,10 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+        self.assertEqual(
+            hasattr(dist, "is_dummy_available") and dist.is_dummy_available(),
+            True
+        )
 
     def test_backend_config(self):
         dist.Backend.register_backend(
