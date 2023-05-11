@@ -1,34 +1,30 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
+#include <c10/util/typeid.h>
 
 #include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <type_traits>
 #include <utility>
 
@@ -56,11 +52,6 @@ namespace at {
 class Tensor;
 class TensorBase;
 } // namespace at
-
-namespace c10 {
-class Scalar;
-struct Storage;
-} // namespace c10
 
 namespace c10 {
 
@@ -150,8 +141,6 @@ struct C10_API PlacementDeleteContext {
     // original memory will be freed when data_ptr_ is destructed
   }
 };
-
-struct TensorImpl;
 
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(
@@ -417,20 +406,6 @@ struct C10_API VariableVersion {
 // Forward declaration of TensorImpl needed for forward declaration of
 // C10_TensorImpl_Size_Check_Dummy_Class
 struct C10_API TensorImpl;
-
-// Forward declaration needed because TensorImpl needs to be friends with
-// C10_TensorImpl_Size_Check_Dummy_Class in order to check the size
-// of its private fields.
-template <
-    size_t cplusplus,
-    size_t clang_ver_major,
-    size_t gcc_ver,
-    size_t gcc_ver_minor,
-    size_t nvcc,
-    size_t cuda_version,
-    size_t cuda_version_major,
-    size_t ptr_size>
-class C10_TensorImpl_Size_Check_Dummy_Class;
 
 /**
  * NOTE: Some TensorImpl methods are small and not overridden in the
