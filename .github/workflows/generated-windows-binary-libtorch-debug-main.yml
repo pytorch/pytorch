@@ -8,8 +8,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'ciflow/trunk/*'
   workflow_dispatch:
 
 env:
