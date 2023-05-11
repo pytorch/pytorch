@@ -400,6 +400,7 @@ if _has_triton():
         f_name = "sampled_addmm"
 
         input_broadcasted = broadcast_batch_dims_bsr(f_name, input, mat1, mat2)
+        
 
         if not skip_checks:
             check_bsr_layout(f_name, input)
@@ -412,6 +413,9 @@ if _has_triton():
                 check_bsr_layout(f_name, out)
             # TODO: insert all checks
         # TODO: insert out checks
+
+        if input_broadcasted.numel() == 0 or input_broadcasted._nnz() == 0:
+            return input_broadcasted.clone()
 
         if alpha == 0.0:
             if beta != 0.0:
