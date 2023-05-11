@@ -18,6 +18,7 @@ from .. import config, overrides
 from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
 from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
+from ..quantization import quantization_pre_grad_pass
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,9 @@ def pre_grad_passes(gm, example_inputs):
 
     # used to implement low memory dropout
     gm = overrides.replace_fx(gm, example_inputs)
+
+    # Preprocessing for quantization on CPU. Skipped if gm is not quantized.
+    gm = quantization_pre_grad_pass(gm, example_inputs)
 
     if config.pattern_matcher:
         lazy_init()

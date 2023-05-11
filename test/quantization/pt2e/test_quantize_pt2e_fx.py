@@ -445,6 +445,50 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     inductor_res = run(*example_inputs)
                     self.assertEqual(ref_result, inductor_res, atol=5e-2, rtol=5e-2)
 
+    @skipIfNoX86
+    def test_inductor_qconv_lowering(self):
+        dim_to_module = {
+            1: nn.Conv1d,
+            2: nn.Conv2d,
+            3: nn.Conv3d
+        }
+        class M(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.conv = dim_to_module[dim](3, 6, 2, stride=2, padding=0, dilation=1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        conv_dims = [1, 2, 3]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for dim in conv_dims:
+                    m = M(dim).eval()
+                    input_shape = (2, 3, *([6] * dim))
+                    example_inputs = (torch.randn(input_shape),)
+                    # program capture
+                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
+                    # https://github.com/pytorch/pytorch/issues/96274
+                    export_module, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    qconfig = get_default_qconfig("x86")
+                    qconfig_mapping = QConfigMapping().set_global(qconfig)
+                    backend_config = get_x86_inductor_pt2e_backend_config()
+                    prepare_module = prepare_pt2e(
+                        export_module, qconfig_mapping, example_inputs, backend_config
+                    )
+                    prepare_module(*example_inputs)
+                    convert_module = convert_pt2e(prepare_module)
+
+                    run = compile_fx(convert_module, example_inputs)
+                    run(*example_inputs)
+
 
 class TestQuantizePT2EFXModels(QuantizationTestCase):
     @skip_if_no_torchvision
