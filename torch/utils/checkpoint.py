@@ -374,7 +374,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 def _internal_assert(cond):
     if not cond:
         raise AssertionError(
-            "Something went unexpectedly wrong in activation checkpoint."
+            "Something went unexpectedly wrong in activation checkpoint. "
             "Please report this bug by filing an issue to PyTorch."
         )
 
