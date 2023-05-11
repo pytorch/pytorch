@@ -193,6 +193,34 @@ def _sfdp_replacement_8(query, key, value):
         is_causal=False,
     )
 
+def _sfdp_pattern_9(query, key, value, dropout_p):
+    q = query.permute(0, 2, 1, 3)
+    k = key.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3)
+    q = q / math.sqrt(q.size(-1))
+    div = q @ k.transpose(-2, -1)
+    div = div.to(torch.float32)
+    attn_weight = torch.softmax(div, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p, True)
+    attn_weight = attn_weight.to(torch.float16)
+    return attn_weight @ v
+
+
+def _sfdp_replacement_9(query, key, value, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    q = query.permute(0, 2, 1, 3)
+    k = key.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3)
+    return aten.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        attn_mask=None,  # attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+    )
+
+
 
 
 # TODO(jansel): add more patterns based on what we see in real models
@@ -307,6 +335,7 @@ def _sfdp_init():
         ),
         (_sfdp_pattern_7, _sfdp_replacement_7, [gp(), gp(), gp()], d, _sfdp_params_check),
         (_sfdp_pattern_8, _sfdp_replacement_8, [gp(), gp(), gp()], {},_sfdp_params_check),
+        (_sfdp_pattern_9, _sfdp_replacement_9, [gp(), gp(), gp()], d, _sfdp_params_check),
     ]:
         args = [*args, *workaround.values()]
         register_replacement(
