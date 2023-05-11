@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <atomic>
 
 namespace c10 {
