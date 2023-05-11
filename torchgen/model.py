@@ -249,6 +249,31 @@ dispatch_keys = [
 ]
 
 
+def rename_dispatch_key_privateuse1(custom_device: str) -> None:
+    """
+    User can rename DispatchKey.PrivateUse1 to custom device rather than 'PrivateUse1'.
+    For example:
+    >>>from torchgen.model import DispatchKey, rename_dispatch_key_privateuse1
+    >>>rename_dispatch_key_privateuse1("FOO")
+    >>>str(DispatchKey.PrivateUse1) # "FOO"
+    >>>DispatchKey.parse("FOO") # DispatchKey.PrivateUse1
+    """
+
+    def rename_privateuse1(self: DispatchKey) -> str:
+        return self.name.replace("PrivateUse1", custom_device)
+
+    @staticmethod  # type: ignore[misc]
+    def parse_custom_device(value: str) -> "DispatchKey":
+        for k, v in DispatchKey.__members__.items():
+            if k == value.replace(custom_device, "PrivateUse1"):
+                return v
+        raise AssertionError(f"unknown dispatch key {value}")
+
+    DispatchKey.__str__ = rename_privateuse1  # type: ignore[assignment]
+    DispatchKey.parse = parse_custom_device  # type: ignore[assignment]
+    dispatch_keys.append(DispatchKey.PrivateUse1)
+
+
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
@@ -1373,7 +1398,7 @@ class FunctionSchema:
             len(mutable_returns) == 0 or len(immutable_returns) == 0
         ), f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
         for ret in mutable_returns:
-            assert any([ret.annotation == arg.annotation for arg in out_and_self]), (
+            assert any(ret.annotation == arg.annotation for arg in out_and_self), (
                 'All mutable returns must be aliased either to a keyword argument, or to "self". '
                 "Did you forget to mark an out argument as keyword-only?"
             )

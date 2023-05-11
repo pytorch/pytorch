@@ -81,15 +81,15 @@ fi
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
-_UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
-_UCC_COMMIT=1c7a7127186e7836f73aafbd7697bbc274a77eee
+_UCX_COMMIT=00bcc6bb18fc282eb160623b4c0d300147f579af
+_UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.7.0
+  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7)
+    CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=7

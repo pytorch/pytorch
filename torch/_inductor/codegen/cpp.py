@@ -75,6 +75,8 @@ INDEX_TYPE = "long"
 
 RTYPE_TO_CPP = {
     "sum": "+",
+    "prod": "*",
+    "xor_sum": "^",
     "min": "min",
     "max": "max",
     "argmin": "argmin",
@@ -88,8 +90,10 @@ def reduction_init(reduction_type, dtype):
         # Since load promotes all half-precision inputs to float, the initial
         # constant for reduction must be promoted as well
         dtype = torch.float32
-    if reduction_type in ("sum", "any"):
+    if reduction_type in ("xor_sum", "sum", "any"):
         return 0
+    if reduction_type == "prod":
+        return 1
     if reduction_type in {"max", "argmax"}:
         return (
             f"-std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::infinity()"
@@ -108,9 +112,15 @@ def reduction_init(reduction_type, dtype):
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
         return f"{var} += {next_value}"
+    if reduction_type == "prod":
+        return f"{var} *= {next_value}"
+    if reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
-    return f"{var} = std::{reduction_type}({var}, {next_value})"
+    if reduction_type in ("min", "max"):
+        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+    raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
@@ -120,6 +130,10 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} = at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
         return f"{var} += {next_value}"
+    elif reduction_type == "prod":
+        return f"{var} *= {next_value}"
+    elif reduction_type == "xor_sum":
+        return f"{var} ^= {next_value}"
     else:
         raise NotImplementedError()
 
@@ -194,7 +208,7 @@ class CppPrinter(ExprPrinter):
         mod = self.paren(self.doprint(mod))
         if div != "1":
             x = f"({x} / {div})"
-        return f"{x} % {mod}"
+        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
@@ -506,8 +520,21 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
+    # TODO: this seems to be dead
     @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
@@ -535,14 +562,6 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
@@ -584,7 +603,15 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def log1p(x):
-        return f"{x}.log1p()"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x}.log1p()"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def masked(mask, body, other):
@@ -677,7 +704,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log1p(x):
-        return f"std::log1p({x})"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"std::log1p({x})"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def tan(x):
@@ -801,23 +836,27 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"{x} * ({x}>0)"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x} * ({x}>0)"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def minimum(a, b):
-        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
+        return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"std::min({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -902,6 +941,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
         return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+
+    @staticmethod
+    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
 
     @staticmethod
     def sigmoid(x):
@@ -1271,7 +1314,7 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum"}
+        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
         reduce_map = {"max": "maximum", "min": "minimum"}
@@ -1284,6 +1327,10 @@ class CppVecKernel(CppKernel):
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
             if reduction_type == "sum":
                 vec_reduc_prefix += "omp_out += omp_in"
+            elif reduction_type == "prod":
+                vec_reduc_prefix += "omp_out *= omp_in"
+            elif reduction_type == "xor_sum":
+                vec_reduc_prefix += "omp_out ^= omp_in"
             else:
                 vec_reduc_prefix += (
                     f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
@@ -1318,6 +1365,10 @@ class CppVecKernel(CppKernel):
             reduce_all_body = "{"
             if reduction_type == "sum":
                 reduce_all_body += "return x + y;"
+            elif reduction_type == "prod":
+                reduce_all_body += "return x * y;"
+            elif reduction_type == "xor_sum":
+                reduce_all_body += "return x ^ y;"
             else:
                 reduce_all_body += (
                     f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
@@ -1734,7 +1785,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum"]
+            and reduction_type in ["max", "min", "sum", "prod", "xor_sum"]
         ):
             pass
         else:
@@ -1801,7 +1852,7 @@ class CppVecKernelChecker(CppVecKernel):
                     if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
-                    if not (name in self.fast_vec_list):
+                    if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
                     return self.simd_vec
 
@@ -2444,9 +2495,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str)
+        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args)
+        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
 
 
 class CppWrapperKernelGroup(KernelGroup):

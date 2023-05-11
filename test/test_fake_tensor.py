@@ -14,6 +14,9 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -642,6 +645,26 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+class FakeTensorOpInfoTest(TestCase):
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        data_dependent_outputs = {
+            'NumpyNMSCustomOp',
+            'NumpyNonzeroCustomOp',
+        }
+
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs_itr:
+            args = (sample_input.input,) + sample_input.args
+            kwargs = sample_input.kwargs
+        with torch._subclasses.CrossRefFakeMode():
+            try:
+                op(*args, **kwargs)
+            except DynamicOutputShapeException:
+                if op.name not in data_dependent_outputs:
+                    raise
+
+
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -847,14 +870,16 @@ class FakeTensorOperatorInvariants(TestCase):
     def test_cross_entropy_loss(self):
         inp = torch.randn(3, 5)
         target = torch.randint(5, (3,), dtype=torch.long)
+        weight = torch.rand(5)
         fn = torch.nn.functional.cross_entropy
-        ref = fn(inp, target)
-        with FakeTensorMode() as m:
-            meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in (inp, target)]
+        for w in (weight, None):
+            args = (inp, target, w)
+            ref = fn(*args)
+            with FakeTensorMode() as m:
+                meta_args = [m.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+                meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
 
-            meta_out = torch.nn.functional.cross_entropy(*meta_args, label_smoothing=0.5)
-
-        self.assertEqual(ref.size(), meta_out.size())
+            self.assertEqual(ref.size(), meta_out.size())
 
 
     @skipIfRocm
@@ -992,6 +1017,9 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 instantiate_parametrized_tests(FakeTensorTest)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=only_for)
 
 if __name__ == "__main__":
     run_tests()

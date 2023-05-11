@@ -12,14 +12,14 @@
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 typedef id<MTLDevice> MTLDevice_t;
 typedef id<MTLLibrary> MTLLibrary_t;
-typedef id<MTLFunction> MTLFunction_t;
-typedef MTLFunctionConstantValues* MTLFunctionConstantValues_t;
+typedef id<MTLComputePipelineState> MTLComputePipelineState_t;
+typedef id<MTLLibrary> MTLLibrary_t;
 #else
 typedef void* MTLDevice;
 typedef void* MTLDevice_t;
 typedef void* MTLLibrary_t;
-typedef void* MTLFunction_t;
-typedef void* MTLFunctionConstantValues_t;
+typedef void* MTLComputePipelineState_t;
+typedef void* MTLLibrary_t;
 #endif
 
 using namespace std;
@@ -66,7 +66,8 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
-  MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
+  MTLComputePipelineState_t metalIndexingFunction(const std::string &kernel);
+  MTLLibrary_t getMetalIndexingLibrary();
 
   ~MPSDevice();
 
