@@ -335,10 +335,12 @@ def mps_ops_modifier(ops):
         'masked.cumsum': [torch.int64],
     }
 
-    MACOS_13_3_XFAILLIST = {
-        # before macOS 13.3 it falls back to cpu and pass the forward pass
+    MACOS_AFTER_13_1_XFAILLIST = {
+        # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+    }
 
+    MACOS_13_3_XFAILLIST = {
         # Failure due to precision issue for fp16
         # on both cpu and mps there are test cases that might produce inf result
         # 'nn.functional.pairwise_distance': [torch.float16],
@@ -734,6 +736,11 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_BEFORE_13_3_XFAILLIST[key]))
+
+        if key in MACOS_AFTER_13_1_XFAILLIST and torch.backends.mps.is_macos13_or_newer(2):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_AFTER_13_1_XFAILLIST[key]))
 
         if key in MACOS_13_3_XFAILLIST and (product_version >= 13.3):
             addDecorator(op, DecorateInfo(

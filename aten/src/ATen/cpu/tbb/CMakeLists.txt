@@ -121,9 +121,9 @@ endif()
 if(UNIX)
   add_definitions(-DUSE_PTHREAD)
 
-   check_cxx_compiler_flag("-std=c++17" SUPPORTS_STDCXX17)
-  if(SUPPORTS_STDCXX17)
-    set(CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
+   check_cxx_compiler_flag("-std=c++14" SUPPORTS_STDCXX14)
+  if(SUPPORTS_STDCXX14)
+    set(CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
   endif()
 
    check_cxx_compiler_flag("-mrtm -Werror" SUPPORTS_MRTM)
