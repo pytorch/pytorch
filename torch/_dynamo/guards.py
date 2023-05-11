@@ -38,7 +38,6 @@ from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
-from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -860,7 +859,8 @@ class CheckFunctionManager:
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
                 and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
-                and guard.create_fn is not GuardBuilder.NN_MODULE  # Force-enable NN_MODULE checks for now
+                # Force-enable NN_MODULE checks for now
+                and guard.create_fn is not GuardBuilder.NN_MODULE
             ):
                 continue
             guard.create(local_builder, global_builder)

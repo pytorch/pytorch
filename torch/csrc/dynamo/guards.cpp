@@ -465,21 +465,20 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 typedef struct {
-  PyDictObject *dict;  // borrowed reference
+  PyDictObject* dict; // borrowed reference
   uint64_t dict_version_tag;
 } AttrTag;
 
 static const char* module_guard_attrs[] = {
-  "_parameters",
-  "_buffers",
-  "_modules",
-  "_forward_hooks",
-  "_forward_pre_hooks",
+    "_parameters",
+    "_buffers",
+    "_modules",
+    "_forward_hooks",
+    "_forward_pre_hooks",
 };
 
 typedef struct {
-  PyObject_HEAD
-  PyObject *wr;
+  PyObject_HEAD PyObject* wr;
   unsigned int version_tag;
   uint64_t dict_version_tag;
   AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
@@ -494,8 +493,11 @@ static PyTypeObject NNModuleGuardType = {
     // NOLINTNEXTLINE
     PyVarObject_HEAD_INIT(NULL, 0)};
 
-static PyObject* NNModuleGuard_call(PyObject *callable, PyObject *args, PyObject *kwargs) {
-  NNModuleGuard *guard = (NNModuleGuard *)callable;
+static PyObject* NNModuleGuard_call(
+    PyObject* callable,
+    PyObject* args,
+    PyObject* kwargs) {
+  NNModuleGuard* guard = (NNModuleGuard*)callable;
 
   PyObject* mod = PyWeakref_GetObject(guard->wr);
   if (mod == NULL) {
@@ -524,7 +526,8 @@ static PyObject* NNModuleGuard_call(PyObject *callable, PyObject *args, PyObject
 }
 
 static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
-  NNModuleGuard *guard = (NNModuleGuard *)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
+  NNModuleGuard* guard =
+      (NNModuleGuard*)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
   if (guard == NULL) {
     return NULL;
   }
@@ -535,7 +538,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
     return NULL;
   }
 
-  PyObject *dict = PyObject_GenericGetDict(obj, NULL);
+  PyObject* dict = PyObject_GenericGetDict(obj, NULL);
   if (dict == NULL) {
     Py_DECREF(guard);
     return NULL;
@@ -545,7 +548,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
   Py_ssize_t idx = 0;
   for (const char* attr : module_guard_attrs) {
     auto& tag = guard->attr_tags[idx];
-    PyObject *attr_obj = PyDict_GetItemString(dict, attr);
+    PyObject* attr_obj = PyDict_GetItemString(dict, attr);
     if (attr_obj == NULL) {
       Py_DECREF(dict);
       Py_DECREF(guard);
@@ -561,7 +564,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
   if (Py_TYPE(obj)->tp_version_tag == 0) {
     // The tp_version_tag may be lazily set on attribute access. If we don't
     // have a valid tag, perform a property lookup to force the tag to be set.
-    PyObject *tmp = PyObject_GetAttrString(obj, "__dict__");
+    PyObject* tmp = PyObject_GetAttrString(obj, "__dict__");
     if (tmp == NULL) {
       Py_DECREF(guard);
       return NULL;
@@ -575,7 +578,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
     PyErr_SetString(PyExc_ValueError, "object has no version tag");
     return NULL;
   }
-  return (PyObject *)guard;
+  return (PyObject*)guard;
 }
 
 static PyMethodDef _methods[] = {
@@ -630,7 +633,8 @@ PyObject* torch_c_dynamo_guards_init() {
     return NULL;
   }
 
-  if (PyModule_AddObject(m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
+  if (PyModule_AddObject(
+          m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
     Py_DECREF(&NNModuleGuardType);
     Py_DECREF(m);
     return NULL;
