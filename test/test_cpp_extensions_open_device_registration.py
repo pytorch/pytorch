@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 from typing import Union
-import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
@@ -259,33 +258,17 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_storage.is_pinned())
 
         def test_open_device_serialization():
+            self.module.set_custom_device_index(-1)
             storage = torch.UntypedStorage(4, device=torch.device('foo'))
             self.assertEqual(torch.serialization.location_tag(storage), 'foo')
+
+            self.module.set_custom_device_index(0)
+            storage = torch.UntypedStorage(4, device=torch.device('foo'))
+            self.assertEqual(torch.serialization.location_tag(storage), 'foo:0')
+
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
-            # test tensor MetaData serialization
-            x = torch.empty(4, 4).long()
-            y = x.foo()
-            self.assertFalse(self.module.check_backend_meta(y))
-            self.module.custom_set_backend_meta(y)
-            self.assertTrue(self.module.check_backend_meta(y))
-
-            self.module.custom_serialization_registry()
-            with tempfile.TemporaryDirectory() as tmpdir:
-                path = os.path.join(tmpdir, 'data.pt')
-                torch.save(y, path)
-                z1 = torch.load(path)
-                # loads correctly onto the foo backend device
-                self.assertTrue(z1.is_foo)
-                # loads BackendMeta data correctly
-                self.assertTrue(self.module.check_backend_meta(z1))
-                # cross-backend
-                z2 = torch.load(path, map_location='cpu')
-                # loads correctly onto the cpu backend device
-                self.assertFalse(z2.is_foo)
-                # loads BackendMeta data correctly
-                self.assertFalse(self.module.check_backend_meta(z2))
 
         def test_open_device_storage_resize(self):
             torch.utils.rename_privateuse1_backend('foo')

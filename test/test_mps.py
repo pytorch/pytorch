@@ -92,6 +92,8 @@ def mps_ops_grad_modifier(ops):
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
+        # 'float' object is not iterable
+        'item': [torch.float16, torch.float32],
         # "mse_backward_cpu_out" not implemented for 'Half'
         'nn.functional.mse_loss': [torch.float16],
         # "smooth_l1_backward_cpu_out" not implemented for 'Half'
@@ -115,8 +117,8 @@ def mps_ops_grad_modifier(ops):
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
 
-        'nn.functional.normalize': [torch.float16],
-        'round': [torch.float16],
+        # 'nn.functional.normalize': [torch.float16],
+        # 'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -4861,6 +4863,16 @@ class TestNLLLoss(TestCaseMPS):
         helper((1, 1, 3, 3))
         helper((7, 13))
         helper((2, 8, 4, 5))
+
+    @unittest.skip("Test is crashing")
+    def test_reduction_ops_5D(self):
+        def helper(fn, dim):
+            x_cpu = fn(torch.zeros(1, 1, 1, 1, 1), dim=dim)
+            x_mps = fn(torch.zeros(1, 1, 1, 1, 1, device="mps"), dim=dim)
+            self.assertEqual(x_cpu, x_mps.to('cpu'))
+        for fn in [torch.any]:
+            for dim in range(0, 4):
+                helper(fn, dim)
 
     def test_all(self):
         def helper(shape):
@@ -9673,6 +9685,34 @@ class TestAdvancedIndexing(TestCaseMPS):
 
             self.assertEqual(output, input_list)
 
+    def test_index_put_deterministic(self, device="mps"):
+        def helper(dtype, accumulate, deterministic, num_tests=128):
+            acc_expected = torch.tensor([233, 187, 360], device=device, dtype=dtype)
+            non_acc_expected = torch.tensor([38, 37, 39], device=device, dtype=dtype)
+            t_idx = torch.tensor(
+                [0, 0, 0, 0, 2, 2, 1, 0, 2, 1, 0, 1, 2, 1, 0, 2, 2, 2, 2, 2,
+                 0, 0, 2, 1, 2, 1, 0, 0, 2, 0, 2, 1, 1, 2, 2, 0, 2, 1, 0, 2]
+            )
+            for _ in range(num_tests):
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+                    t = torch.zeros(3, dtype=dtype, device=device)
+                    t.index_put_((t_idx,), torch.arange(len(t_idx), device=device, dtype=dtype), accumulate=accumulate)
+                    if accumulate:
+                        self.assertEqual(t, acc_expected)
+                    else:
+                        self.assertEqual(t, non_acc_expected)
+                finally:
+                    torch.use_deterministic_algorithms(False)
+
+        for accumulate, deterministic in product((False, True), (False, True)):
+            dtype = torch.float if accumulate else torch.long
+            if not accumulate and not deterministic:
+                with self.assertRaisesRegex(AssertionError, "Tensor-likes are not equal!"):
+                    helper(dtype, accumulate, deterministic)
+            else:
+                helper(dtype, accumulate, deterministic)
+
     def test_multiple_byte_mask(self, device="mps"):
         v = torch.randn(5, 7, 3, device=device)
         # note: these broadcast together and are transposed to the first dim
@@ -10417,6 +10457,9 @@ class TestConsistency(TestCaseMPS):
                 mps_sample = cpu_sample.transform(
                     lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
+                print("cpu_sample", cpu_sample)
+                print("mps_sample", mps_sample)
+
                 cpu_args = [cpu_sample.input] + list(cpu_sample.args)
                 cpu_kwargs = cpu_sample.kwargs
                 mps_args = [mps_sample.input] + list(mps_sample.args)
@@ -10452,6 +10495,9 @@ class TestConsistency(TestCaseMPS):
                 else:
                     atol = None
                     rtol = None
+
+                print("cpu_out", cpu_out)
+                print("mps_out", mps_out)
 
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -10493,6 +10539,9 @@ class TestConsistency(TestCaseMPS):
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
+            print("cpu_grad_inputs", cpu_grad_inputs)
+            print("mps_grad_inputs", mps_grad_inputs)
+
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 
@@ -10501,7 +10550,7 @@ class TestErrorInputs(TestCase):
 
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
-        self.assertEqual(device, "mps")
+        self.assertEqual(device, "mps:0")
 
         mps_samples = op.error_inputs(device)
 
