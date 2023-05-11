@@ -11980,6 +11980,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bfloat16, torch.half),
         backward_dtypes = all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        backward_dtypesIfCUDA = all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
