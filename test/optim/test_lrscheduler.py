@@ -3,7 +3,6 @@
 import warnings
 import math
 import pickle
-from copy import deepcopy
 import weakref
 
 import torch
