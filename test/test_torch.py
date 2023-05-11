@@ -1439,6 +1439,7 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         grad = None
@@ -7462,7 +7463,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         torch.__config__.parallel_info()
 
     def test_get_cpu_capability(self):
+        # This method is primarily exposed for torchvision's resize
         torch.backends.cpu.get_cpu_capability()
+
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):
