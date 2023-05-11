@@ -373,8 +373,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "huggingface"
 
-    @download_retry_decorator
-    def _download_model(self, model_name):
+    def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -394,8 +393,13 @@ class HuggingfaceRunner(BenchmarkRunner):
                 config.pad_token_id = 0
 
         else:
-            config, model_cls = EXTRA_MODELS[model_name]
+            model_cls, config = EXTRA_MODELS[model_name]
 
+        return model_cls, config
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model_cls, config = self._get_model_cls_and_config(model_name)
         if "auto" in model_cls.__module__:
             # Handle auto classes
             model = model_cls.from_config(config)
@@ -413,6 +417,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         reset_rng_state()
+        model_cls, config = self._get_model_cls_and_config(model_name)
         model = self._download_model(model_name)
         model = model.to(device, dtype=dtype)
         if model_name in BATCH_SIZE_KNOWN_MODELS:
