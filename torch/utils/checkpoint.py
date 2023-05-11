@@ -371,6 +371,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+def _internal_assert(cond):
+    if not cond:
+        raise AssertionError(
+            "Something went unexpectedly wrong in activation checkpoint."
+            "Please report this bug by filing an issue to PyTorch."
+        )
+
 # NOTE [ Nestable Checkpoint ]
 #
 # The semantics of nested checkpoint can be defined by two basic rules.
@@ -599,7 +606,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: int):
         def pack_hook(x):
             target_frame = target_frame_ref()
-            assert target_frame is not None
+            assert target_frame is not None  # appease mypy
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
 
@@ -612,7 +619,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             # This holder may have been cleared because someone may have called
             # backward within forward. If so, we don't need to save.
             if holder is not None:
-                assert holder.handles.get(gid, None) is None, "this is a bug, please file an issue"
+                _internal_assert(holder.handles.get(gid, None) is None)
                 holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
@@ -659,11 +666,11 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             if holder.handles[gid] is None:
                 raise RuntimeError(
                     "torch.utils.checkpoint: unpack is being triggered for a tensor that was either"
-                    "never recomputed, or already unpacked once. If you are calling ctx.saved_tensor "
+                    "never recomputed, or already unpacked once. If you are calling ctx.saved_tensors "
                     "in backward, make sure to do so only once. Otherwise please open an issue with "
                     "details on your use case."
                 )
-            assert holder.handles[gid] in frame.recomputed[gid], "this is a bug, please file an issue"
+            _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
             holder.handles[gid] = None
             return ret
