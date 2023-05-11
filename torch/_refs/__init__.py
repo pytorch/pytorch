@@ -186,7 +186,7 @@ __all__ = [
     #
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
-    "item",  # TODO: add OpInfo
+    "item",
     "to",
     #
     # Reduction ops
