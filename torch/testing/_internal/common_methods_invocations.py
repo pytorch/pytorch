@@ -15120,7 +15120,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_autograd=True,
            sample_inputs_func=sample_inputs_attn,
-           error_inputs_func=error_inputs_func),
+           error_inputs_func=error_inputs_attn),
     OpInfo('flatten',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            ref=reference_flatten,
