@@ -1,10 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
-#include <ATen/mps/MPSHooks.h>
-#include <c10/util/Logging.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 
 namespace at {
 namespace mps {
