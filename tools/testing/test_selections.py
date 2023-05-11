@@ -149,11 +149,6 @@ def _get_previously_failing_tests() -> Set[str]:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
-
-    print(
-        f"Prioritized {pluralize(len(prioritized_tests), 'test')} from test file changes."
-    )
-
     return prioritized_tests
 
 
@@ -186,10 +181,6 @@ def _get_modified_tests() -> Set[str]:
     }
     prioritized_tests = {f[len(prefix) :] for f in prioritized_tests}
     prioritized_tests = {f[: -len(".py")] for f in prioritized_tests}
-
-    print(
-        f"Prioritized {pluralize(len(prioritized_tests), 'test')} from test file changes."
-    )
 
     return prioritized_tests
 
@@ -231,9 +222,12 @@ def get_reordered_tests(
     # TODO: Would be great to upload these metrics to RDS/Rockset
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-    print(f"Prioritized tests will run up to {to_time_str(time_savings)} faster")
-    print(f"Prioritized: {bring_to_front}")
-    print(f"The rest: {the_rest}")
+    print(f"Prioritized tests will run up to {to_time_str(time_savings)} sooner")
+
+    prioritized_test_names = [t.name for t in bring_to_front]
+    print(f"Prioritized: {prioritized_test_names}")
+    remaining_test_names = [t.name for t in the_rest]
+    print(f"The rest: {remaining_test_names}")
 
     return (bring_to_front, the_rest)
 
