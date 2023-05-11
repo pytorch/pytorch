@@ -3801,11 +3801,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             kernel=kernel,
         )
 
+
 class QConv(ExternKernelAlloc):
     kernels = {
         1: "torch.ao.nn.quantized.functional.conv1d",
         2: "torch.ao.nn.quantized.functional.conv2d",
-        3: "torch.ao.nn.quantized.functional.conv3d"
+        3: "torch.ao.nn.quantized.functional.conv3d",
     }
 
     def __init__(
@@ -3818,7 +3819,7 @@ class QConv(ExternKernelAlloc):
         constant_args=(),
         dim=2,
     ):
-        '''
+        """
         Needs input/weight/output qparams
         - inputs = [x, w, b]
         - const_args = [stride, padding, dilation, groups]
@@ -3828,7 +3829,7 @@ class QConv(ExternKernelAlloc):
 
         Scales/zero points should be taken as inputs
         Axis/dtypes are constants
-        '''
+        """
         assert len(input_qparams) == 2  # scale, zero point
         assert len(weight_qparams) == 3  # scale, zero point, axis
         assert len(output_qparams) == 3  # scale, zero point, dtype
@@ -3863,13 +3864,16 @@ class QConv(ExternKernelAlloc):
             f"{args[1]} = torch._make_per_channel_quantized_tensor({args[1]}, {', '.join(weight_qparams)})"
         )
         # Note: padding_mode is always 'zeros'
-        padding_mode = '\'zeros\''
-        conv_args = ', '.join(args[:-6]) + ', ' + ', '.join(const_args[:-2]) \
-            + f', {padding_mode}, ' + ', '.join(output_qparams)
-        # Do not need `.int_repr()` for output since its dtype is already uint8 instead of quint8
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({conv_args})"
+        padding_mode = "'zeros'"
+        conv_args = (
+            ", ".join(args[:-6])
+            + ", "
+            + ", ".join(const_args[:-2])
+            + f", {padding_mode}, "
+            + ", ".join(output_qparams)
         )
+        # Do not need `.int_repr()` for output since its dtype is already uint8 instead of quint8
+        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -3891,12 +3895,21 @@ class QConv(ExternKernelAlloc):
         groups: int,
         output_scale: "TensorBox",
         output_zero_point: "TensorBox",
-        output_dtype
+        output_dtype,
     ):
         transposed = False
         output_padding = (0 for _ in range(dim))
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
-            cls, x, weight, bias, padding_, stride_, dilation_, groups, transposed, output_padding
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups,
+            transposed,
+            output_padding,
         )
         # swap padding and stride to align with functional conv arg order
         constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
@@ -3912,7 +3925,6 @@ class QConv(ExternKernelAlloc):
             constant_args=constant_args,
             dim=dim,
         )
-
 
 
 @dataclasses.dataclass

@@ -1,24 +1,7 @@
 import torch
-import torch.nn.quantized.functional as qF
-from .pattern_matcher import (
-    _return_true,
-    Arg,
-    CallFunction,
-    filter_nodes,
-    get_arg_value,
-    Ignored,
-    init_once_fakemode,
-    KeywordArg,
-    ListOf,
-    Match,
-    MULTIPLE,
-    PatternMatcherPass,
-    register_graph_pattern,
-    stable_topological_sort,
-)
 from .fx_passes.post_grad import register_lowering_pattern
-from .lowering import lowerings as L
 from .ir import QConv
+from .pattern_matcher import Arg, CallFunction, Match
 
 
 def _is_cpu(example_inputs):
@@ -104,132 +87,99 @@ def quantization_pre_grad_pass(gm: torch.fx.GraphModule, example_inputs):
 
     return gm
 
+
 aten = torch.ops.aten
 prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
-quantize_per_tensor = quantized_decomposed.quantize_per_tensor
-dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
 dequantize_per_channel = quantized_decomposed.dequantize_per_channel.default
-convolution = aten.convolution.default
-relu = aten.relu.default
-relu_ = aten.relu_.default
-unary_post_ops = {
-    'none' : None,
-    'relu' : relu,
-    'relu_' : relu_,
-}
 
-'''
-dequantize activation =
-  mul(
-      sub(
-          x.to(fp32),
-          zero_point
-      ),
-      scales
-  )
-'''
-dequantize_activation_pattern = \
+"""
+dequantize activation:
+    x = x.to(fp32)
+    x = x - zero_point
+    x = x * scale
+"""
+dequantize_activation_pattern = CallFunction(
+    aten.mul.Tensor,
     CallFunction(
-        aten.mul.Tensor,
+        aten.sub.Tensor,
         CallFunction(
-            aten.sub.Tensor,
-            CallFunction(
-                prims.convert_element_type.default,
-                Arg(),  # x
-                Arg()  # dtype=torch.float32
-            ),
-            Arg()  # zero point
+            prims.convert_element_type.default, Arg(), Arg()  # args = x, torch.float32
         ),
-        Arg()  # scales
-    )
-dequantize_weight_pattern = \
-    CallFunction(
-        dequantize_per_channel,
-        Arg(),  # weight
-        Arg(),  # scales
         Arg(),  # zero point
-        Arg(),  # axis
-        Arg(),  # lower limit
-        Arg(),  # upper limit
-        Arg()   # dtype=torch.int8
-    )
-aten_conv_pattern = \
+    ),
+    Arg(),  # scales
+)
+
+dequantize_weight_pattern = CallFunction(
+    dequantize_per_channel,
+    Arg(),  # weight
+    Arg(),  # scales
+    Arg(),  # zero point
+    Arg(),  # axis
+    Arg(),  # lower limit
+    Arg(),  # upper limit
+    Arg(),  # dtype=torch.int8
+)
+
+aten_conv_pattern = CallFunction(
+    aten.convolution.default,
+    dequantize_activation_pattern,
+    dequantize_weight_pattern,
+    Arg(),  # bias
+    Arg(),  # stride
+    Arg(),  # padding
+    Arg(),  # dilation
+    Arg(),  # transposed
+    Arg(),  # output_padding
+    Arg(),  # groups
+)
+
+"""
+quantize output:
+    scale = 1 / scale
+    scale = 1.0 * scale
+    output = round(output * scale)
+    output = output + zero_point
+    output = clamp_min(output, 0)
+    output = clamp_max(output, 127)
+    output = output.to(uint8)
+"""
+quantize_conv_output_pattern = CallFunction(
+    prims.convert_element_type.default,
     CallFunction(
-        aten.convolution.default,
-        dequantize_activation_pattern,
-        dequantize_weight_pattern,
-        Arg(),  # bias
-        Arg(),  # stride
-        Arg(),  # padding
-        Arg(),  # dilation
-        Arg(),  # transposed
-        Arg(),  # output_padding
-        Arg(),  # groups
-    )
-'''
-quantize output = 
-  clamp_max(
-      clamp_min(
-          add(
-              round(
-                  mul(
-                      output,
-                      mul(
-                          reciprocal(scale),
-                          1.0
-                      )
-                  )
-              ),
-              zero_point
-          ),
-          0
-      ),
-      127
-  ).to(uint8)
-'''
-quantize_conv_output_pattern = \
-    CallFunction(
-        prims.convert_element_type.default,
+        aten.clamp_max.default,
         CallFunction(
-            aten.clamp_max.default,
+            aten.clamp_min.default,
             CallFunction(
-                aten.clamp_min.default,
+                aten.add.Tensor,
                 CallFunction(
-                    aten.add.Tensor,
+                    aten.round.default,
                     CallFunction(
-                        aten.round.default,
+                        aten.mul.Tensor,
+                        aten_conv_pattern,  # output of conv
                         CallFunction(
                             aten.mul.Tensor,
-                            aten_conv_pattern,  # output of conv
                             CallFunction(
-                                aten.mul.Tensor,
-                                CallFunction(
-                                    aten.reciprocal.default,
-                                    Arg()  # scales
-                                ),
-                                Arg()  # 1.0
-                            )
-                        )
+                                aten.reciprocal.default, Arg()  # arg = scales
+                            ),
+                            Arg(),  # 1.0
+                        ),
                     ),
-                    Arg()  # zero point
                 ),
-                Arg()  # 0
+                Arg(),  # zero point
             ),
-            Arg()  # 127
+            Arg(),  # 0
         ),
-        Arg()  # dtype=torch.uint8
-    )
-
-@register_lowering_pattern(
-    quantize_conv_output_pattern
+        Arg(),  # 127
+    ),
+    Arg(),  # dtype=torch.uint8
 )
-def qconv_unary(match: Match,
-                x, dqx_dtype, x_zp, x_scale,
-                w, w_scale, w_zp, w_axis, w_qmin, w_qmax, qw_dtype,
-                b, stride, padding, dilation, trans, o_padding, groups,
-                o_scale, o_scale_coef, o_zero_point, o_qmin, o_qmax, o_dtype):
-    '''
+
+
+@register_lowering_pattern(quantize_conv_output_pattern)
+def qconv(match: Match, *args, **kwargs):
+    """
     There are 24 args. They are
     [0] input
     [1] input dequant dtype (e.g., float32)
@@ -255,19 +205,12 @@ def qconv_unary(match: Match,
     [21] output quant min (e.g., 0)
     [22] output quant max (e.g., 127 with reduce_range=True)
     [23] output quant dtype (e.g., uint8)
-    ''' 
-    # print('[info] Match dq - conv - q pattern:')
-    # print('match =', match)
-    # print('len(args) =', len(args), 'args =')
-    # for i, arg in enumerate(args):
-    #     print(f'  +{i}', arg)
-    # print('kwargs =', kwargs)
-    # x, x_scale, x_zp = args[0], args[3], args[2]
-    # w, w_scale, w_zp, w_axis = args[4], args[5], args[6], args[7]
-    # b = args[11]
-    # stride, padding, dilation = args[12], args[13], args[14]
-    # groups, o_scale, o_zero_point, o_dtype = args[17], args[18], args[20], args[23]
-    # print('[info] match qconv: scale =', scale, 'zp =', zero_point)
+    """
+    x, x_scale, x_zp = args[0], args[3], args[2]
+    w, w_scale, w_zp, w_axis = args[4], args[5], args[6], args[7]
+    b = args[11]
+    stride, padding, dilation = args[12], args[13], args[14]
+    groups, o_scale, o_zero_point, o_dtype = args[17], args[18], args[20], args[23]
     weight_shape = w.get_size()
     dim = len(weight_shape) - 2
     return QConv.create(
@@ -286,18 +229,5 @@ def qconv_unary(match: Match,
         groups,
         o_scale,
         o_zero_point,
-        o_dtype
+        o_dtype,
     )
-
-    # weight_shape = w.get_size()
-    # w_dim_to_functional_conv = {
-    #     3: L[torch.ao.nn.quantized.functional.conv1d],
-    #     4: L[torch.ao.nn.quantized.functional.conv2d],
-    #     5: L[torch.ao.nn.quantized.functional.conv3d]
-    # }
-
-    # w_dim = len(weight_shape)
-    # assert w_dim in [3, 4, 5]
-    # return w_dim_to_functional_conv[w_dim](
-    #     x, w, b, stride, padding, dilation, groups, scale, zero_point, dtype
-    # )
