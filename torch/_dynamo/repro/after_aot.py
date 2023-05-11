@@ -726,6 +726,11 @@ def repro_minify(options, mod, load_args):
         dump_state=functools.partial(
             dump_compiler_graph_state, compiler_name=compiler_name
         ),
+        save_dir=options.save_dir,
+        offload_to_disk=options.offload_to_disk,
+        skip_offload=options.skip_saving_eager_intermediates,
+        skip_sanity=options.skip_sanity,
+        max_granularity=options.max_granularity,
     )
 
 
@@ -991,6 +996,13 @@ divergences--you just might not end up with a useful repro in the end.""",
             help="directory where saved inputs live",
         )
         parser.add_argument(
+            "--no-save-dir",
+            dest="save_dir",
+            action="store_const",
+            const=None,
+            help="don't use any directory for saved inputs",
+        )
+        parser.add_argument(
             "--tracing-mode",
             type=str,
             metavar="{real,fake,symbolic}",
@@ -1024,6 +1036,28 @@ divergences--you just might not end up with a useful repro in the end.""",
         dest="isolate",
         action="store_false",
         help="speed up by running all compilation in same process",
+    )
+    parser_minify.add_argument(
+        "--skip-saving-eager-intermediates",
+        action="store_true",
+        help="skip saving eager intermediates on --minify",
+    )
+    # TODO: make this an option for --analyze too
+    parser_minify.add_argument(
+        "--offload-to-disk",
+        action="store_true",
+        help="during minification, offload delta debugging intermediates to disk.  Use if you're OOMing",
+    )
+    parser_minify.add_argument(
+        "--skip-sanity",
+        action="store_true",
+        help="skip sanity check at beginning of minification on original graph",
+    )
+    parser_minify.add_argument(
+        "--max-granularity",
+        type=int,
+        default=None,
+        help="start at this granularity and work down; must be power of 2",
     )
 
     parser_analyze = subparsers.add_parser(
