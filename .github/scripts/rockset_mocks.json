@@ -1637,7 +1637,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229456,
-      "name": "win-vs2019-cuda11.6-py3 / test (default, 3, 5, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (default, 3, 5, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T06:10:17Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642264",
@@ -1988,7 +1988,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229601,
-      "name": "win-vs2019-cuda11.6-py3 / test (functorch, 1, 1, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (functorch, 1, 1, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:50:59Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642391",
@@ -2205,7 +2205,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229347,
-      "name": "win-vs2019-cuda11.6-py3 / test (default, 1, 5, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (default, 1, 5, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T06:22:27Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642166",
@@ -2295,7 +2295,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229549,
-      "name": "win-vs2019-cuda11.6-py3 / test (default, 5, 5, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (default, 5, 5, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T05:59:02Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642344",
@@ -3041,7 +3041,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229408,
-      "name": "win-vs2019-cuda11.6-py3 / test (default, 2, 5, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (default, 2, 5, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T06:19:47Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642219",
@@ -3131,7 +3131,7 @@
     {
       "workflow_name": "trunk",
       "id": 10793229504,
-      "name": "win-vs2019-cuda11.6-py3 / test (default, 4, 5, windows.8xlarge.nvidia.gpu)",
+      "name": "win-vs2019-cuda11.6-py3 / test (default, 4, 5, windows.8xlarge.nvidia.gpu.nonephemeral)",
       "conclusion": "success",
       "completed_at": "2023-01-21T06:17:38Z",
       "html_url": "https://github.com/pytorch/pytorch/actions/runs/3972873205/jobs/6811642305",
