@@ -85,6 +85,18 @@ def strtobool(s):
     return True
 
 
+def parse_test_module(test):
+    return test.split(".")[0]
+
+
+class TestChoices(list):
+    def __init__(self, *args, **kwargs):
+        super().__init__(args[0])
+
+    def __contains__(self, item):
+        return list.__contains__(self, parse_test_module(item))
+
+
 def discover_tests(
     base_dir: Optional[pathlib.Path] = None,
     cpp_tests_dir: Optional[pathlib.Path] = None,
@@ -125,7 +137,7 @@ def discover_tests(
     # Add the cpp prefix for C++ tests so that we can tell them apart
     rc.extend(
         [
-            f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}"
+            parse_test_module(f"{CPP_TEST_PREFIX}/{fname.relative_to(cpp_tests_dir)}")
             for fname in all_cpp_files
         ]
     )
@@ -139,7 +151,9 @@ def discover_tests(
     return sorted(rc)
 
 
+CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
 TESTS = discover_tests(
+    cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
         "ao",
         "bottleneck_test",
@@ -524,13 +538,21 @@ def run_test(
         return 0
 
     if test_file.startswith(CPP_TEST_PREFIX):
-        # C++ tests are in CPP_TEST_PATH, not the regular test directory
-        argv = [
-            os.path.join(
+        # C++ tests are not the regular test directory
+        if CPP_TESTS_DIR:
+            cpp_test = os.path.join(
+                CPP_TESTS_DIR,
+                test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
+            )
+        else:
+            cpp_test = os.path.join(
                 pathlib.Path(test_directory).parent,
                 CPP_TEST_PATH,
                 test_file.replace(f"{CPP_TEST_PREFIX}/", ""),
             )
+
+        argv = [
+            cpp_test if sys.platform != "win32" else cpp_test + ".exe"
         ] + unittest_args
     else:
         # Can't call `python -m unittest test_*` here because it doesn't run code
@@ -921,14 +943,14 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.append("--use-pytest")
-    else:
-        # NB: Use --junit-xml to generate the C++ test report for now in
-        # pytest format. Note that this format is different than the one
-        # used by unittest via --junit-xml-reruns. But this is ok as we
-        # only need to deal with this later to support disable flaky and
-        # slow C++ tests
+    elif IS_CI:
+        # Add the option to generate XML test report here as C++ tests
+        # won't go into common_utils
         test_report_path = get_report_path(pytest=True)
-        pytest_args.extend(["--junit-xml", test_report_path])
+        pytest_args.extend(["--junit-xml-reruns", test_report_path])
+
+    if options.pytest_k_expr:
+        pytest_args.extend(["-k", options.pytest_k_expr])
 
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -962,18 +984,6 @@ CUSTOM_HANDLERS = {
 PYTEST_SKIP_RETRIES = {"test_public_bindings"}
 
 
-def parse_test_module(test):
-    return test.split(".")[0]
-
-
-class TestChoices(list):
-    def __init__(self, *args, **kwargs):
-        super().__init__(args[0])
-
-    def __contains__(self, item):
-        return list.__contains__(self, parse_test_module(item))
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Run the PyTorch unit test suite",
@@ -986,14 +996,14 @@ def parse_args():
         "--verbose",
         action="count",
         default=0,
-        help="print verbose information and test-by-test results",
+        help="Print verbose information and test-by-test results",
     )
     parser.add_argument("--jit", "--jit", action="store_true", help="run all jit tests")
     parser.add_argument(
         "--distributed-tests",
         "--distributed-tests",
         action="store_true",
-        help="run all distributed tests",
+        help="Run all distributed tests",
     )
     parser.add_argument(
         "--functorch",
@@ -1040,6 +1050,12 @@ def parse_args():
         help="If true, use `pytest` to execute the tests. E.g., this runs "
         "TestTorch with pytest in verbose and coverage mode: "
         "python run_test.py -vci torch -pt",
+    )
+    parser.add_argument(
+        "-k",
+        "--pytest-k-expr",
+        default="",
+        help="Pass to pytest as its -k expr argument",
     )
     parser.add_argument(
         "-c",
@@ -1439,6 +1455,18 @@ def run_tests(
     pool = get_context("spawn").Pool(
         NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
     )
+
+    # NB: This is a hack to make conftest.py available on CPP_TESTS_DIR. We should
+    # see if the file could be turned into a full-fledge ptest plugin instead
+    cpp_conftest_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
+    if (
+        options.cpp
+        and os.path.exists(CPP_TESTS_DIR)
+        and os.path.isdir(CPP_TESTS_DIR)
+        and not os.path.exists(cpp_conftest_file)
+    ):
+        # Take the conftest file from the test directory
+        shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
 
     def handle_error_messages(err_message):
         if err_message is None:
