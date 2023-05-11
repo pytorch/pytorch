@@ -783,19 +783,6 @@ void addInputs(
   n->addInput(list_node->output());
 }
 
-void addInputs(
-    Node* n,
-    const char* name,
-    c10::optional<caffe2::TypeMeta> opt_dtype) {
-  if (opt_dtype.has_value()) {
-    return addInputs(n, name, at::typeMetaToScalarType(*opt_dtype));
-  } else {
-    Graph* g = n->owningGraph();
-    Value* none = g->insertNode(g->createNone())->output();
-    n->addInput(none);
-  }
-}
-
 void addInputs(Node* n, const char* name, at::IntArrayRef value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntArrayRef(name)
