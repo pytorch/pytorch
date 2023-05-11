@@ -64,34 +64,6 @@ static torch::jit::Value* GenerateClone(
   return cloned.front();
 }
 
-static void GenerateCopy(
-    torch::jit::Value* destination,
-    torch::jit::Value* source,
-    std::shared_ptr<torch::jit::GraphFunction> function) {
-  std::vector<torch::jit::NamedValue> arguments;
-  arguments.emplace_back(destination);
-  arguments.emplace_back(source);
-  LowerBuiltin(at::aten::copy_, function, arguments);
-}
-
-static torch::jit::Value* GenerateSlice(
-    torch::jit::Value* base,
-    int64_t dim,
-    int64_t start,
-    int64_t end,
-    int64_t step,
-    std::shared_ptr<torch::jit::GraphFunction> function) {
-  std::vector<torch::jit::NamedValue> arguments;
-  arguments.emplace_back(base);
-  arguments.emplace_back(dim);
-  arguments.emplace_back(start);
-  arguments.emplace_back(end);
-  arguments.emplace_back(step);
-  TSOpVector selected = LowerBuiltin(at::aten::slice, function, arguments);
-  TORCH_CHECK_EQ(selected.size(), 1);
-  return selected.front();
-}
-
 // Node Lowerings
 
 // Default node lowering
