@@ -50,10 +50,6 @@ class Shard(Placement):
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
-        assert (
-            tensor.size(self.dim) >= num_chunks
-        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as "
-        f"the number of devices in that dimension {num_chunks}"
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
