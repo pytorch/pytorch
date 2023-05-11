@@ -209,6 +209,7 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node = binary_node.args[conv_node_idx]
+        extra_input_node = binary_node.args[extra_input_node_idx]
         assert isinstance(conv_node, Node)
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             # No conv node found to be fused with add
@@ -216,22 +217,24 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([unary_node, binary_node, conv_node]):
             return
 
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "_annotated": True,
         }
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr_map": {
+                extra_input_node: get_act_obs_or_fq_ctr(quantization_config),
+            },
             "_annotated": True,
-            "args_act_index": [extra_input_node_idx],
         }
         unary_node.meta["target_dtype_info"] = {
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
@@ -262,6 +265,7 @@ class X86InductorQuantizer(Quantizer):
             return
 
         conv_node = binary_node.args[conv_node_idx]
+        extra_input_node = binary_node.args[extra_input_node_idx]
         assert isinstance(conv_node, Node)
         if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
             # No conv node found to be fused with add
@@ -269,23 +273,25 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([binary_node, conv_node]):
             return
 
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "_annotated": True,
         }
         # TODO(Leslie) Need to insert observer for the extra input node
         # Maybe use "args_act_index"
         binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr_map": {
+                extra_input_node: get_act_obs_or_fq_ctr(quantization_config),
+            },
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
-            "args_act_index": [extra_input_node_idx],
         }
 
     def _annotate_conv2d_unary(self, node: Node, quantization_config: QuantizationConfig) -> None:
@@ -300,14 +306,15 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([unary_node, conv_node]):
             return
 
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "_annotated": True,
         }
         unary_node.meta["target_dtype_info"] = {
@@ -322,15 +329,16 @@ class X86InductorQuantizer(Quantizer):
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             return
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
             "_annotated": True,
         }
 
