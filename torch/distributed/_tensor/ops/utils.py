@@ -7,15 +7,6 @@ import torch
 from torch.distributed._tensor.api import DTensor
 
 
-# pyre-fixme[3]: Return type must be annotated.
-# pyre-fixme[2]: Parameter must be annotated.
-def unwrap_single_placement(e):
-    if not isinstance(e, DTensor):
-        return None
-    assert len(e.placements) == 1, "more than one placement!"
-    return e.placements[0]
-
-
 # convenient wrapper to register sharding propagation rules
 # pyre-fixme[3]: Return type must be annotated.
 # pyre-fixme[2]: Parameter must be annotated.
@@ -27,6 +18,19 @@ def register_prop_rule(op):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._propagator.register_sharding_prop_rule(overload, impl)
+        return impl
+
+    return wrapper
+
+
+def register_op_strategy(op):
+    # pyre-fixme[53]: Captured variable `func` is not annotated.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def wrapper(impl):
+        overloads = op if isinstance(op, list) else [op]
+        for overload in overloads:
+            DTensor._propagator.register_op_strategy(overload, impl)
         return impl
 
     return wrapper
