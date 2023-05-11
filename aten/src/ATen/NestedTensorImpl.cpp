@@ -236,6 +236,18 @@ NestedTensorImpl::NestedTensorImpl(
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
+NestedTensorImpl::NestedTensorImpl(
+    c10::TensorImpl::ImplType impl_type,
+    const at::Tensor& base_tensor,
+    at::Tensor nested_sizes)
+    : NestedTensorImpl(
+          impl_type,
+          base_tensor,
+          nested_sizes,
+          construct_nested_strides(nested_sizes),
+          construct_offsets(nested_sizes)) {
+}
+
 c10::optional<int64_t> NestedTensorImpl::opt_size(int64_t d) const {
   if (C10_UNLIKELY(!opt_sizes_.has_value())) {
     // Cache the metadata to avoid recomputing it each time.
