@@ -3163,6 +3163,11 @@ class FallbackKernel(ExternKernelAlloc):
             aten._linalg_svd.default,
             aten._linalg_svd.U,
             aten._fused_moving_avg_obs_fq_helper_functional,
+            # if grad_out is contiguous while self is channels last,
+            # eager returns a channels last tensor while in FakeTensorMode we returns
+            # a contiguous tensor.
+            # This causes vgg16 training to fail when enabling layout optimization.
+            aten._adaptive_avg_pool2d_backward,
         )
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
