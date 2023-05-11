@@ -562,7 +562,7 @@ class TestSparseCompressed(TestCase):
 
                 # check empty batch
                 torch._validate_sparse_compressed_tensor_args(
-                    *map(lambda t: make_zero_batched(t), (compressed_indices, plain_indices, values)),
+                    *(make_zero_batched(t) for t in (compressed_indices, plain_indices, values)),
                     (0,) + size,
                     layout
                 )
