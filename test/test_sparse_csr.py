@@ -551,11 +551,21 @@ class TestSparseCompressed(TestCase):
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_validate(self, layout, device, dtype):
+        def make_zero_batched(t):
+            return torch.empty(*((0,) + t.shape), dtype=t.dtype, device=t.device)
+
         for index_dtype in [torch.int32, torch.int64]:
             for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
                     layout, device=device, dtype=dtype, index_dtype=index_dtype, output_tensor=False):
                 size = kwargs['size']
                 torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, values, size, layout)
+
+                # check empty batch
+                torch._validate_sparse_compressed_tensor_args(
+                    *map(lambda t: make_zero_batched(t), (compressed_indices, plain_indices, values)),
+                    (0,) + size,
+                    layout
+                )
 
     def _generate_invalid_input(self, layout, device):
         from functools import partial
@@ -3476,8 +3486,68 @@ class TestSparseCompressedTritonKernels(TestCase):
         batches = [(), (2,)]
         size = [128, 256, 0]
 
+        def sampled_addmm_ref(input, mat1, mat2, alpha, beta):
+            m, n = input.shape[-2:]
+            nnz = input._nnz()
+            blocksize = input.values().shape[-2:]
+
+            def make_out(full_size=False):
+                batch_dims = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[-2])
+                out_size = batch_dims + (m, n)
+                if not full_size:
+                    out_crow_indices = input.crow_indices().broadcast_to(batch_dims + (-1,))
+                    out_col_indices = input.col_indices().broadcast_to(batch_dims + (nnz,))
+                    out_vals = torch.empty(*batch_dims, nnz, *blocksize, dtype=input.dtype, device=input.device)
+                    return torch.sparse_compressed_tensor(
+                        out_crow_indices,
+                        out_col_indices,
+                        out_vals,
+                        size=out_size,
+                        layout=input.layout
+                    )
+                else:
+                    return torch.rand(*batch_dims, m, n, dtype=input.dtype, device=input.device).to_sparse_bsr(blocksize)
+
+            def tile_to_blocksize(t, blocksize):
+                *rest, m, n = t.shape
+                new_shape = rest + [
+                    m // blocksize[0],
+                    blocksize[0],
+                    n // blocksize[1],
+                    blocksize[1],
+                ]
+                return t.reshape(new_shape).transpose(-3, -2)
+
+            def filter_mm(mm):
+                crow_indices = input.crow_indices().reshape(-1, n_blockrows + 1)
+                col_indices = input.col_indices().reshape(-1, nnz)
+                mm = mm.reshape(-1, m, n)
+                mm = tile_to_blocksize(mm, blocksize)
+
+                filtered = []
+                for b in range(mm.shape[0]):
+                    coo_indices = torch._convert_indices_from_csr_to_coo(crow_indices[b], col_indices[b])
+                    row_indices, col_indices = coo_indices.unbind()
+                    filtered.append(mm[..., row_indices, col_indices, :, :].squeeze(0))
+
+                return torch.cat(filtered, dim=-3).to_sparse_bsr(blocksize)
+
+            if alpha == 0.0:
+                out = make_out(full_size=False)
+                out.values().copy_(beta * input.values())
+                return out
+            if beta == 0.0:
+                out = make_out(full_size=True)
+                mm_res = (alpha * (mat1 @ mat2)).to_sparse_bsr(blocksize)
+                out.copy_(mm_res)
+                return out
+            out = make_out(full_size=False)
+            mm_res = filter_mm(alpha * (mat1 @ mat2))
+            out.values().copy_(mm_res.values()).add_(beta * input.values())
+            return out
+
         for bi, bm1, bm2, m, n, k in itertools.product(batches, batches, batches, size, size, size):
-            input = tensor(bi + (m, n))
+            input = tensor(bi + (m, n)).tril_()
             mat1 = tensor(bm1 + (m, k))
             mat2 = tensor(bm2 + (k, n))
 
@@ -3487,6 +3557,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                     continue
                 bsr = input.to_sparse_bsr(block_size)
                 res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
+                res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
 
                 batch_broadcasted_shape = torch.broadcast_shapes(*(t.shape[:-2] for t in (input, mat1, mat2)))
                 self.assertTrue(res_tri.shape == batch_broadcasted_shape + (m, n))

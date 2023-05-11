@@ -438,15 +438,19 @@ if _has_triton():
         blocksize = input.values().shape[-2:]
         m = mat1.size(-2)
         n = mat2.size(-1)
+        k = mat1.size(-1)
 
         if beta == 0.0:
             # In this case `input` is ignored.
-            if mat1.numel() < mat2.numel():
-                lhs, rhs = mat1.mul(alpha), mat2
+            if m * n < min(m * k, k * n):
+                mm_res = (mat1 @ mat2).mul_(alpha)
             else:
-                lhs, rhs = mat1, mat2.mul(alpha)
+                if m < n:
+                    mm_res = mat1.mul(alpha) @ mat2
+                else:
+                    mm_res = mat1 @ mat2.mul(alpha)
 
-            mm_res = broadcast_batch_dims_bsr(f_name, (lhs @ rhs).to_sparse_bsr(blocksize), input)
+            mm_res = broadcast_batch_dims_bsr(f_name, mm_res.to_sparse_bsr(blocksize), input)
             if out is None:
                 return mm_res
             else:
