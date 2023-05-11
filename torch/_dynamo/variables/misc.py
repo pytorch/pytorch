@@ -259,10 +259,25 @@ class AutogradFunctionVariable(VariableTracker):
             def trampoline_autograd_bwd(*args, **kwargs):
                 return self.fn_cls.backward(*args, **kwargs)
 
-            # Speculate fwd, will raise unimplemented and bubble up if not sound, or will accumulate guards
-            # onto tx if sound.
-            # TODO(voz): NOTE: This function identity is unguarded, but the odds of someone swapping self.fn_cls from
-            # autograd fn to something else is very low.
+
+            # Note - On Tracing autograd.Function w/ grad
+            # The complex system described here revolves around the soundness evaluation of an autograd.Function in 
+            # PyTorch. The system follows a well-defined strategy for tracing, which involves three key steps: tracing 
+            # forward, tracing backward, and if both are sound the potential recording of an "apply" operation into the
+            # graph.We trace forward, and evaluate soundness. Soundness, in this context, refers to the absence of side
+            # effects, the avoidance of lifting new arguments into the trace, the production of a single tensor output, 
+            # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound, 
+            # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
+            # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and 
+            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the 
+            # trace by restoring. Otherwise, we raise.
+
+            # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
+
+            # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute 
+            # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards, 
+            # and that we can inline properly here. Inlining is required in order to be able to ensure that the 
+            # soundness evaluation works as described above.
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
@@ -272,23 +287,6 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            # ctx.saved_tensors = []
-            # for tensor in ctx.value.saved_tensors:
-            # proxy = ctx.as_proxy().saved_tensors
-            # Safe because it came from saving tensors
-            # proxy.node.meta["whitelisted"] = True
-            # ctx.saved_tensors.append(
-            #     wrap_fx_proxy(tx=tx, proxy=proxy, example_value=tensor)
-            # )
-            # On varying strides of grads
-            #
-            # A varying stride in speculated_fwd_result can produce potentially unsound code.
-            # To quote rzou, It does matter if the autograd.Function branches on the strides of the Tensor and is
-            # actually unsafe in one of the branches. The actual case where this matters is if a Tensor is a Tensor
-            # subclass -- it would be more likely that in the Tensor subclass case there will be unsafe behavior.
-            # We think this is unlikely to happen today. If we find this happening, and we think that capturing
-            # autograd function is leading to issues, we can extend this to rewrite bwd to coerce the guards to
-            # be the expected strides.
             bwd_args = [ctx, speculated_fwd_result]
             trampoline_autograd_bwd._source = AttrSource(module_source, "backward")
             safe_or_raise_always_restore(

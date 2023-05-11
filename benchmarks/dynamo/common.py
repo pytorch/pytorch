@@ -1141,7 +1141,7 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
-        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
             self.autocast = torch.cpu.amp.autocast
 
     def init_optimizer(self, name, device, params):
