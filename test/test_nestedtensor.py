@@ -1945,6 +1945,12 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: nt1.reshape(2, -1, -1, 2, 2)
         )
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_view_as(self, device, dtype):
+        nt = random_nt(device, dtype, 4, (4, 4))
+        t = nt.values()
+        t.view_as(nt)
+
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
 
