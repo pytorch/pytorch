@@ -136,6 +136,13 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
 
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+
       - name: Test
         id: test
         shell: bash
@@ -185,6 +192,15 @@ jobs:
           popd
 
           .ci/pytorch/win-test.sh
+
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
 
       - name: Print remaining test logs
         shell: bash
