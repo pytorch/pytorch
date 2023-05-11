@@ -1110,7 +1110,16 @@ def create_joint(
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
         ]
-    return inner_fn
+
+    def inner_fn_with_anomaly(*args):
+        with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with torch.autograd.detect_anomaly(check_nan=False):
+                return inner_fn(*args)
+
+    return inner_fn_with_anomaly
 
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
