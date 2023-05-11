@@ -5157,6 +5157,26 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
+    def test_nested_function_resuming_with_correct_globals(self):
+        # https://github.com/pytorch/pytorch/issues/99665
+        try:
+            from .utils import outer_func
+        except ImportError:
+            from utils import outer_func
+
+        def gn(x, y):
+            return x + y
+
+        def fn(x, y):
+            return outer_func(gn)(x, y)
+
+        x = torch.rand([3])
+        y = torch.rand([3])
+        opt_fn = torch.compile(backend="eager")(fn)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
