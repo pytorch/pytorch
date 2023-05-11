@@ -146,7 +146,8 @@ def generate_dynamo_fx_repro_string(
 
     model_str = NNModuleToString.convert(gm)
 
-    writer = InputWriter(save_dir)
+    # TODO: Figure out why torch.compile'd hash isn't work on this codepath
+    writer = InputWriter(save_dir, stable_hash=True)
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
