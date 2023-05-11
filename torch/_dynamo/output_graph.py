@@ -49,6 +49,7 @@ from .source import (
     DefaultDeviceSource,
     DeterministicAlgorithmsSource,
     is_constant_source,
+    GradModeSource,
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
@@ -245,6 +246,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
                 GuardBuilder.DETERMINISTIC_ALGORITHMS
+            )
+        )
+
+        self.guards.add(
+            GradModeSource().make_guard(
+                GuardBuilder.GRAD_MODE
             )
         )
 

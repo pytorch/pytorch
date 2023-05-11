@@ -33,7 +33,6 @@ class TensorCheck {
         dtype_(v.dtype().toScalarType()),
         device_index_(v.device().index()),
         requires_grad_(v.requires_grad()),
-        grad_mode_enabled_(state.grad_mode_enabled),
         sizes_(std::move(dynamic_dims_sizes)),
         strides_(std::move(dynamic_dims_strides)) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
@@ -47,8 +46,7 @@ class TensorCheck {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
         device_index_ != v.device().index() ||
-        requires_grad_ != v.requires_grad() ||
-        grad_mode_enabled_ != state.grad_mode_enabled) {
+        requires_grad_ != v.requires_grad()) {
       return false;
     }
     auto ndim = v.ndimension();
@@ -105,12 +103,6 @@ class TensorCheck {
       fail_reason << "requires_grad mismatch. expected requires_grad="
                   << requires_grad_;
       return fail_reason.str();
-    } else if (grad_mode_enabled_ != state.grad_mode_enabled) {
-      // return fmt::format("grad_mode_enabled mismatch. expected {}",
-      // grad_mode_enabled_);
-      fail_reason << "grad_mode_enabled mismatch. expected grad_mode_enabled="
-                  << grad_mode_enabled_;
-      return fail_reason.str();
     }
     auto ndim = v.ndimension();
     if (ndim != dim_) {
@@ -149,7 +141,6 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
-  bool grad_mode_enabled_;
   // NB: These are unset if dynamic shapes is enabled.
   std::vector<std::optional<int64_t>> sizes_;
   std::vector<std::optional<int64_t>> strides_;
