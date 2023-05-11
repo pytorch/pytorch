@@ -117,7 +117,7 @@ uint32_t _getAlignment(uintptr_t address) {
 
 static size_t _parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
-  size_t workspace_size = 1024 * 1024; /* default size according to #73328 */
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
   if (val) {
     try {
       workspace_size = std::stoi(val);
