@@ -394,11 +394,11 @@ class TestParsePrevTests(unittest.TestCase):
         prioritized_tests, remaining_tests = get_reordered_tests(tests)
 
         # Just want to check the names of the tests
-        prioritized_tests = {test.name for test in prioritized_tests}
-        remaining_tests = {test.name for test in remaining_tests}
+        prioritized_tests_name = {test.name for test in prioritized_tests}
+        remaining_tests_name = {test.name for test in remaining_tests}
 
-        self.assertSetEqual(expected_prioritized_tests, prioritized_tests)
-        self.assertSetEqual(expected_remaining_tests, remaining_tests)
+        self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
+        self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
 
 
 if __name__ == "__main__":
