@@ -435,12 +435,14 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   return true;
 }
 
-bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
+bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
+    c10::optional<std::chrono::milliseconds> timeout) {
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
+  auto workTimeout = timeout ? *timeout : opTimeout_;
 
-  if (timeElapsed < opTimeout_)
+  if (timeElapsed < workTimeout)
     return false;
 
   // Timed out
@@ -511,7 +513,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
     while (!isCompleted()) {
-      bool timedOut = checkTimeout();
+      bool timedOut = checkTimeout(
+          timeout == kNoTimeout ? c10::nullopt : c10::make_optional(timeout));
       // Explicitly abort ncclComms here before throwing this timed out
       // exception to users.
       // If throwing timed out excepiton without aborting nccl communicators
