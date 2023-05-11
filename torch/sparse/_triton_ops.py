@@ -206,7 +206,7 @@ if _has_triton():
             dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block)
+            output_acc_block += tl.dot(values_block, dense_block, out_dtype=acc_dtype)
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride
