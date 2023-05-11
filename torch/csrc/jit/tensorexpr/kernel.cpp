@@ -87,6 +87,7 @@ static int64_t randomTransformsRequested() {
   return std::stoi(std::string(enable_c_str));
 }
 
+#ifdef TORCH_ENABLE_LLVM
 static bool dontUseLLVMFlag() {
   static const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
@@ -95,6 +96,7 @@ static bool dontUseLLVMFlag() {
   }
   return std::string(enable_c_str) == "1";
 }
+#endif
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
