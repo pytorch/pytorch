@@ -1110,7 +1110,16 @@ def create_joint(
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
         ]
-    return inner_fn
+
+    def inner_fn_with_anomaly(*args):
+        with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with torch.autograd.detect_anomaly(check_nan=False):
+                return inner_fn(*args)
+
+    return inner_fn_with_anomaly
 
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
@@ -1954,13 +1963,15 @@ def aot_wrapper_dedupe(
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
-    for i, t in enumerate(flat_args):
-        if t in seen_args:
-            keep_arg_mask.append(False)
-            add_dupe_map.append(seen_args[t])
-            continue
+    for t in flat_args:
+        if isinstance(t, torch.Tensor):
+            if t in seen_args:
+                keep_arg_mask.append(False)
+                add_dupe_map.append(seen_args[t])
+                continue
+            seen_args[t] = j
+
         keep_arg_mask.append(True)
-        seen_args[t] = j
         add_dupe_map.append(j)
         j += 1
     assert len(add_dupe_map) == duped_arg_len, (

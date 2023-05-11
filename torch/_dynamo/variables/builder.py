@@ -13,7 +13,7 @@ from typing import List, NamedTuple, Optional, Union
 import torch
 
 from torch import SymInt
-from torch._guards import GuardSource
+from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
@@ -22,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils.weak import WeakIdRef
+from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
@@ -125,7 +125,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    example: Union[torch.Tensor, torch.SymInt]
+    _example: Union[TensorWeakRef, torch.SymInt]
     is_unspecialized: bool
     fake_tensor: Optional[torch._subclasses.fake_tensor.FakeTensor]
     # UnspecializedPythonVariable often masquerades as a tensor.
@@ -134,9 +134,23 @@ class GraphArg:
     # is_tensor lets us tell if this graph arg actually is a tensor
     # or not.
     is_tensor: bool = True
+    # Sometimes, the Tensor we pass to example is freshly allocated (smh).
+    # Then we cannot only keep a weak reference to it.  This lets you
+    # stash a strong reference too.
+    example_strong_ref: Optional[torch.Tensor] = None
+
+    @property
+    def example(self):
+        if isinstance(self._example, TensorWeakRef):
+            r = self._example()
+            assert r is not None
+            return r
+        else:
+            return self._example
 
     def __post_init__(self):
-        if isinstance(self.example, torch.Tensor):
+        if isinstance(self._example, torch.Tensor):
+            self._example = TensorWeakRef(self._example)
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
@@ -147,7 +161,7 @@ class GraphArg:
         return self.source.reconstruct(tx)
 
     def erase(self):
-        self.example = None
+        self._example = None
 
 
 class VariableBuilder:
@@ -159,6 +173,7 @@ class VariableBuilder:
         source: Source,
     ):
         assert source is not None
+        assert TracingContext.get() is not None, "Expected active TracingContext"
         super().__init__()
         self.tx = tx
         self.source = source
@@ -591,6 +606,11 @@ class VariableBuilder:
             guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
         else:
             guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+
+        for item in value:
+            if item is value:
+                unimplemented("list elements are pointing to the list itself")
+
         output = [
             VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(
                 item
@@ -783,7 +803,15 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
-        tensor_proxy = self.tx.output.create_graph_input(
+        # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
+        # When we've discovered an untracked tensor, then we actually need
+        # to get Dynamo to track the tensor (which is what this function does)
+        # and put it as a graph input on the root tracer. Later on,
+        # if the input is actually used in the body of the HigherOrderOperator,
+        # then the relevant SubgraphTracer will lift it to being an input of
+        # the subgraph.
+        # See NOTE [HigherOrderOperator tracing design] for more details.
+        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
         tensor_variable = wrap_fx_proxy(
@@ -837,6 +865,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if value < 0 or torch._dynamo.config.specialize_int:
                     # Negative values don't create_symbol correctly,
@@ -852,7 +881,28 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                dynamic_dim = DimDynamic.DYNAMIC
+                name = self.source.name()
+                if name not in self.tx.output.frame_state:
+                    curr_size = value
+                else:
+                    curr_size = self.tx.output.frame_state[name]
+                    if curr_size != value:
+                        curr_size = None
+                self.tx.output.frame_state[name] = curr_size
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                if curr_size is None or not config.assume_static_by_default:
+                    dynamic_dim = DimDynamic.DYNAMIC
+                else:  # assume_static_by_default
+                    # TODO: dynamic_dim = DimDynamic.STATIC should work but
+                    # for some reason it doesn't
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -881,7 +931,7 @@ class VariableBuilder:
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
 
-            proxy = self.tx.output.create_graph_input(
+            proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
             )
 
@@ -913,6 +963,7 @@ class VariableBuilder:
                     isinstance(wrapped_value, torch.Tensor),
                     fake_tensor_value,
                     is_tensor=False,
+                    example_strong_ref=wrapped_value,
                 )
             return unspec_var
 
@@ -1183,21 +1234,32 @@ def wrap_to_fake_tensor_and_record(
         # do a linear scan every time here
         t_id = id(e)
         dim2constraint = {}
+
+        def update_dim2constraint(dim, constraint_range):
+            if dim in dim2constraint:
+                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+                dim2constraint[dim] = StrictMinMaxConstraint(
+                    vr=constraint_range.vr & dim2constraint[dim].vr,
+                    warn_only=False,
+                )
+            else:
+                dim2constraint[dim] = constraint_range
+
         if tx.output.export_constraints:
             for constraint in tx.output.export_constraints:
                 if constraint.t_id == t_id:
-                    if constraint.dim in dim2constraint:
-                        from torch.fx.experimental.symbolic_shapes import (
-                            StrictMinMaxConstraint,
-                        )
-
-                        dim2constraint[constraint.dim] = StrictMinMaxConstraint(
-                            vr=constraint.constraint_range.vr
-                            & dim2constraint[constraint.dim].vr,
-                            warn_only=False,
-                        )
-                    else:
-                        dim2constraint[constraint.dim] = constraint.constraint_range
+                    update_dim2constraint(constraint.dim, constraint.constraint_range)
+                if constraint.shared is not None and constraint.shared.t_id == t_id:
+                    # We process constraint ranges for each shared dimension separately
+                    # so that we can directly check range constraint violations on them
+                    # without looking up which other shared dimensions have this info.
+                    # In other words, for this t_id, we will have processed all of its
+                    # constraint ranges, no matter where / how they were specified, by
+                    # by the end of this loop.
+                    update_dim2constraint(
+                        constraint.shared.dim, constraint.constraint_range
+                    )
 
         dynamic_dims = None
         constraint_dims = None
@@ -1265,6 +1327,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
+            tx.output.tracked_fakes_id_to_source[t_id].append(source)
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
