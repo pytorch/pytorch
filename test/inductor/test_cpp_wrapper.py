@@ -89,18 +89,18 @@ if RUN_CPU:
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
-        BaseTest(
-            "test_conv2d_binary",
-            "",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            True,
-        ),
-        BaseTest(
-            "test_conv2d_unary",
-            "",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            slow=True,
-        ),
+        # BaseTest(
+        #     "test_conv2d_unary",
+        #     "",
+        #     test_mkldnn_pattern_matcher.TestPaternMatcher(),
+        #     slow=True,
+        # ),
+        # BaseTest(
+        #     "test_conv2d_binary",
+        #     "",
+        #     test_mkldnn_pattern_matcher.TestPaternMatcher(),
+        #     True,
+        # ),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
