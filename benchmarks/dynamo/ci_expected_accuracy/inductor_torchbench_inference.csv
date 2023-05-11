@@ -6,7 +6,6 @@ Super_SloMo,pass,0
 alexnet,pass,0
 attention_is_all_you_need_pytorch,pass,0
 dcgan,pass,0
-densenet121,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,3
 doctr_reco_predictor,pass,3
@@ -51,4 +50,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
 tts_angular,pass,1
 vgg16,pass,0
+vision_maskrcnn,infra_error,0
 yolov3,pass,1
