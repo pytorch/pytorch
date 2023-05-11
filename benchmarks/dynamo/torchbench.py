@@ -275,12 +275,15 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             f"torchbenchmark.canary_models.{model_name}",
             f"torchbenchmark.models.fb.{model_name}",
         ]
+        module = None
         for c in candidates:
             try:
                 module = importlib.import_module(c)
                 break
             except ModuleNotFoundError:
                 pass
+        if module is None:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
