@@ -4097,6 +4097,19 @@ class TestVmapOperatorsOpInfo(TestCase):
         self.assertEqual(vmap(f, in_dims=(0, (None, None), 0))(tensor, idxs[1:], value), expected)
         self.assertEqual(vmap(f, in_dims=(0, (None, None), None))(tensor, idxs[1:], value[0]), expected)
 
+        # boolean mask
+        B = 2
+        x = torch.randn(1, 3, 3)
+        gy = torch.randn(B, 1, 3, 3)
+
+        def f(x, gy):
+            mask = x < 1e-09
+            zeros = torch.zeros([])
+            index_put = torch.ops.aten.index_put.default(gy, [mask], zeros)
+            return index_put
+
+        self.vmap_outplace_test(f, (x, gy), {}, in_dims=(None, 0))
+
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])
     @parametrize('affine', [True, False])
