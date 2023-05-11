@@ -909,7 +909,6 @@ class TestForeach(TestCase):
             ref = torch.zero_
 
         for sample in foreach_inputs_sample_func(1, False, False)(FakeOpInfo(), device, dtype, requires_grad=True):
-            print(f"{sample.kwargs['zero_size'] = }")
             original_inputs = sample.input
             inputs = [t.clone() for t in original_inputs]
             zeros = [torch.zeros_like(t) for t in original_inputs]
