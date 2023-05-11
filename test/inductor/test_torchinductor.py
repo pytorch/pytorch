@@ -5568,6 +5568,38 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @requires_cuda()
+    @torch._inductor.config.patch("shape_padding", True)
+    def test_shape_padding(self):
+        if torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("dynamic shapes do not support padding")
+
+        dtypes = [
+            torch.float16,
+            torch.float32,
+        ]
+
+        b, m, n, k = 7, 11, 13, 15
+
+        def gen(*shape, dtype=torch.float32):
+            return torch.randn(*shape, device="cuda", dtype=dtype) / k + 1.0
+
+        for dtype in dtypes:
+            x = gen(m, k, dtype=dtype)
+            y = gen(k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.mm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.addmm(z, x, y), (x, y, z))
+
+        for dtype in dtypes:
+            x = gen(b, m, k, dtype=dtype)
+            y = gen(b, k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.bmm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
