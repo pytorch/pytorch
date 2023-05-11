@@ -1068,6 +1068,8 @@ class MultiheadAttention(Module):
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
+            Set ``need_weights=False`` to use the optimized ``scaled_dot_product_attention``
+            and achieve the best performance for MHA.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
             :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
@@ -1140,6 +1142,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
             why_not_fast_path = "training is enabled"
+        elif (self.num_heads % 2) != 0:
+            why_not_fast_path = "self.num_heads is not even"
         elif not self.batch_first:
             why_not_fast_path = "batch_first was not True"
         elif self.bias_k is not None:
@@ -1170,9 +1174,9 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([_arg_cuda_or_cpu(x) for x in tensor_args]):
+            elif not all(_arg_cuda_or_cpu(x) for x in tensor_args):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([_arg_requires_grad(x) for x in tensor_args]):
+            elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
