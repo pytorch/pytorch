@@ -1064,13 +1064,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return x * x * x
 
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
             warnings.resetwarnings()
             with warnings.catch_warnings(record=True) as w:
                 out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
             FileCheck().check(
-                "Unable to end warm up phase of CUDAGraphs because of pending"
+                "Unable to hit fast path of CUDAGraphs because of pending"
             ).run(str(w[0]))
             self.assertTrue(self.get_manager().new_graph_id().id == 0)
 

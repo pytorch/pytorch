@@ -1659,7 +1659,7 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording()
+            self.try_end_curr_recording(function_id)
 
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
@@ -1869,7 +1869,7 @@ class CUDAGraphTreeManager:
     def in_new_torch_compile_invocation(self):
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self) -> None:
+    def try_end_curr_recording(self, function_id: FunctionID) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -1887,6 +1887,8 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
             return
+
+        self.check_warn_on_unable_to_start_executing(function_id)
 
     def try_end_curr_execution(self) -> None:
         """
@@ -1916,39 +1918,40 @@ class CUDAGraphTreeManager:
             self.current_node = None
             return
 
-        self.check_warn_on_unable_to_end_warmup(function_id)
+        self.check_warn_on_unable_to_start_executing(function_id)
 
-    def check_warn_on_unable_to_end_warmup(self, function_id: FunctionID):
-        # are we in a potential loop where we are unable to end warmup
-        if not (
-            function_id in self.warmed_up_functions
-            and function_id not in self.warned_functions
-            and self.in_new_torch_compile_invocation()
+    def check_warn_on_unable_to_start_executing(self, function_id: FunctionID):
+        "Warn if we in a potential loop where we are unable to hit fast path"
+        if (
+            function_id in self.warned_functions
+            or not self.in_new_torch_compile_invocation()
         ):
             return
 
-        prior_warmup = next(
-            (
-                node
-                for node in self.current_node._path_from_root
-                if node.wrapped_function.id == function_id
-            ),
-            None,
+        existing_nodes = [
+            node
+            for node in self.current_node._path_from_root
+            if node.wrapped_function.id == function_id
+        ]
+
+        if len(existing_nodes) <= 1:
+            return
+
+        # repeated same pattern
+        parents = {
+            n.parent.wrapped_function.id
+            for n in itertools.chain(existing_nodes, (self.current_node,))
+            if n.parent is not None
+        }
+        if len(parents) == len(existing_nodes):
+            return
+
+        self.warned_functions.add(function_id)
+        warnings.warn(
+            "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
+            "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
+            "before each model invocation"
         )
-
-        if prior_warmup is None:
-            return
-
-        # first node executed or same pattern
-        if prior_warmup.parent is None or (
-            prior_warmup.parent.wrapped_function == self.current_node.wrapped_function
-        ):
-            self.warned_functions.add(function_id)
-            warnings.warn(
-                "Unable to end warm up phase of CUDAGraphs because of pending, uninvoked backwards. "
-                "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
-                "before each model invocation"
-            )
 
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
