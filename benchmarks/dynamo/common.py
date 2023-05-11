@@ -248,7 +248,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "pit_b_224",
     "twins_pcpvt_base",
     "visformer_small",
-    "vit_base_path16_224",
+    "vit_base_patch16_224",
     "xcit_large_24_p8_224",
 ]
 
