@@ -1,11 +1,5 @@
 FROM mcr.microsoft.com/vscode/devcontainers/miniconda:0-3
 
-# This was needed to make sure cmake work
-# RUN python -m pip install --upgrade pip
-# RUN pip install pyOpenSSL --upgrade
-# RUN /opt/conda/bin/conda update -n base -c defaults conda
-
-
 #  I am suprised this is needed
 RUN conda init
 
