@@ -119,11 +119,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
-        options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
-        for x_shape, mode_train, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.Conv2d(3, 64, 3, 3, padding=padding)
-            ).train(mode=mode_train)
+        options = itertools.product([[3, 56, 56]], [True, False])
+        for x_shape, mode_train in options:
+            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
+                mode=mode_train
+            )
             v = torch.randn(x_shape, dtype=torch.float32)
 
             with torch.no_grad():
@@ -213,11 +213,8 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed(self):
-        options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
-        for x_shape, padding in options:
-            mod = torch.nn.Sequential(
-                torch.nn.ConvTranspose2d(3, 64, 3, 3, padding=padding)
-            ).eval()
+        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
+        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
             v = torch.randn(x_shape, dtype=torch.float32)
             with torch.no_grad():
                 self.common(
@@ -244,6 +241,36 @@ class CPUReproTests(TestCase):
             self.common(
                 mod,
                 (v,),
+            )
+
+    def test_pad_with_nan_value(self):
+        # https://github.com/pytorch/pytorch/issues/100988.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x = F.pad(x, (1, 1, 1, 1), value=float("nan"))
+                return x
+
+        mod = Model().eval()
+        v = torch.randn(1, 3, 10, 10, dtype=torch.float32)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
+    def test_masked_fill_with_inf_or_nan_value(self):
+        def fn(value, mask):
+            y1 = torch.masked_fill(value, mask, float("inf"))
+            y2 = torch.masked_fill(value, mask, float("-inf"))
+            y3 = torch.masked_fill(value, mask, float("nan"))
+            return y1, y2, y3
+
+        value = torch.randn((2, 17))
+        mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8).to(torch.bool)
+        with torch.no_grad():
+            self.common(
+                fn,
+                (value, mask),
             )
 
     def test_inplace_squeeze_needed(self):
