@@ -14,78 +14,14 @@ jobs:
   bc_linter:
     runs-on: ubuntu-latest
     steps:
-      - name: Check if user is in the dogfooding group
-        id: check_user
-        run: |
-          allowed_users=("albanD" "ezyang" "izaitsevfb")
-          pr_author="${{ github.event.pull_request.user.login }}"
-          allowed="false"
-          for user in "${allowed_users[@]}"; do
-            if [[ "$pr_author" == "$user" ]]; then
-              allowed="true"
-              break
-            fi
-          done
-          echo "allowed=${allowed}" >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout PyTorch
-        if: steps.check_user.outputs.allowed == 'true'
-        uses: malfet/checkout@silent-checkout
+      - name: Run BC Lint Action
+        uses: pytorch/test-infra/.github/actions/bc-lint@main
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: -1
-          submodules: false
-          quiet-checkout: true
-          path: pytorch
-
-      - name: Checkout pytorch/test-infra repository
-        if: steps.check_user.outputs.allowed == 'true'
-        uses: actions/checkout@v3
-        with:
-          repository: pytorch/test-infra
-          path: test-infra
-
-      - name: Merge PR changes onto base
-        id: merge_changes
-        if: steps.check_user.outputs.allowed == 'true'
-        working-directory: pytorch
-        run: |
-          # need to configure git to be able to merge
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git fetch origin "${{ github.event.pull_request.base.ref }}"
-
-          git reset --hard "${{ github.event.pull_request.base.sha }}"
-          git merge "${{ github.event.pull_request.head.sha }}" || MERGE_CONFLICT=1
-          if [ -z "$MERGE_CONFLICT" ]; then
-            NEW_HEAD_SHA=$(git rev-parse HEAD)
-            echo "new_head_sha=${NEW_HEAD_SHA}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "Hit merge conflict, skipping BC-linter. Rebase your PR to resolve the conflict."
-          fi
-
-      - name: Check for suppression by label
-        id: check_label
-        if: contains(github.event.pull_request.labels.*.name, 'suppress-api-compatibility-check')
-        run: |
-          echo "API compatibility check is suppressed by label"
-          echo "suppression=--suppressed" >> "${GITHUB_OUTPUT}"
-
-      - name: Build and run BC-linter
-        if: steps.check_user.outputs.allowed == 'true' && steps.merge_changes.outputs.new_head_sha != ''
-        working-directory: pytorch
-        run: |
-          set -eux
-          ../test-infra/tools/stronghold/bin/build-check-api-compatibility
-
-          # Run the BC-linter script.
-          # The script checks for BC-breaking changes in the PR.
-          # When suppressed by label or #suppress-api-compatibility-check tag in the commit message
-          # the job will not fail and will output notices instead of warnings.
-          ../test-infra/tools/stronghold/bin/check-api-compatibility \
-              --base-commit=${{ github.event.pull_request.base.sha }} \
-              --head-commit=${{ steps.merge_changes.outputs.new_head_sha }} \
-              ${{ steps.check_label.outputs.suppression }}
+          repo: ${{ github.event.pull_request.head.repo.full_name }}
+          base_sha: ${{ github.event.pull_request.base.sha }}
+          head_sha: ${{ github.event.pull_request.head.sha }}
+          suppression: ${{ contains(github.event.pull_request.labels.*.name, 'suppress-api-compatibility-check') || contains(github.event.pull_request.labels.*.name, 'suppress-bc-linter') }}
+          docs_link: 'https://github.com/pytorch/test-infra/wiki/BC-Linter'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
