@@ -643,7 +643,7 @@ def mps_ops_modifier(ops):
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
 
-        # 'round': [torch.float16],
+        'round': [torch.float16],
     }
 
     UNDEFINED_XFAILLIST = {
