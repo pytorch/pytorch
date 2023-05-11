@@ -186,14 +186,14 @@ class TensorVariable(VariableTracker):
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if self.source is not None:
-            try:
-                fn = getattr(torch.ops.aten, name)
-                if torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags:
-                    # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
-                    return variables.misc.DelayGraphBreakVariable()
-            except AttributeError:
-                pass
+        if self.source is not None and hasattr(torch.ops.aten, name):
+            fn = getattr(torch.ops.aten, name)
+            if (
+                hasattr(fn, fn.overloads()[0])
+                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+            ):
+                # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
