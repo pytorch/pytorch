@@ -117,7 +117,7 @@ def mps_ops_grad_modifier(ops):
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
 
-        # 'nn.functional.normalize': [torch.float16],
+        # round not working properly for float16
         'round': [torch.float16],
     }
 
@@ -643,6 +643,7 @@ def mps_ops_modifier(ops):
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
 
+        # round not working properly for float16
         'round': [torch.float16],
     }
 
@@ -10395,9 +10396,6 @@ class TestConsistency(TestCaseMPS):
             mps_sample = cpu_sample.transform(
                 lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-            print("cpu_sample: ", cpu_sample)
-            print("mps_sample: ", mps_sample)
-
             cpu_args = [cpu_sample.input] + list(cpu_sample.args)
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
@@ -10429,9 +10427,6 @@ class TestConsistency(TestCaseMPS):
                 atol = None
                 rtol = None
 
-            print("cpu_out: ", cpu_out)
-            print("mps_out: ", mps_out)
-
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
@@ -10456,9 +10451,6 @@ class TestConsistency(TestCaseMPS):
             try:
                 mps_sample = cpu_sample.transform(
                     lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
-
-                print("cpu_sample", cpu_sample)
-                print("mps_sample", mps_sample)
 
                 cpu_args = [cpu_sample.input] + list(cpu_sample.args)
                 cpu_kwargs = cpu_sample.kwargs
@@ -10495,9 +10487,6 @@ class TestConsistency(TestCaseMPS):
                 else:
                     atol = None
                     rtol = None
-
-                print("cpu_out", cpu_out)
-                print("mps_out", mps_out)
 
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
@@ -10538,9 +10527,6 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
-
-            print("cpu_grad_inputs", cpu_grad_inputs)
-            print("mps_grad_inputs", mps_grad_inputs)
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
