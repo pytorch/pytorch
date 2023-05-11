@@ -464,14 +464,20 @@ def native_dropout(input: Tensor, p: float, train: bool):
 @register_decomposition(aten.rand_like)
 def rand_like(self, *, dtype=None, device=None, **kwargs):
     return torch.rand(
-        self.size(), dtype=dtype or self.dtype, device=device or self.device, **kwargs
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
     )
 
 
 @register_decomposition(aten.randn_like)
 def randn_like(self, *, dtype=None, device=None, **kwargs):
     return torch.randn(
-        self.size(), dtype=dtype or self.dtype, device=device or self.device, **kwargs
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
     )
 
 
@@ -480,7 +486,7 @@ def randint_like(self, high, *, dtype=None, device=None, **kwargs):
     return aten.randint.low(
         0,
         high,
-        self.size(),
+        [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
@@ -492,7 +498,7 @@ def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
     return aten.randint.low(
         low,
         high,
-        self.size(),
+        [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
