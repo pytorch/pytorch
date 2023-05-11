@@ -10,7 +10,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/FbcodeMaps.h>
-#include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/Export.h>
 
@@ -297,32 +296,60 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
-// Declare BackendMeta serialization and deserialization function pointer types.
-using BackendMetaPtr =
-    void (*)(const at::Tensor&, std::unordered_map<std::string, bool>&);
+// Return a map of Tensor Metadata for serialization.
+// For now, it only takes care of `conj` and `neg` bit.
+inline std::unordered_map<std::string, bool> getTensorMetadata(
+    const at::Tensor& t) {
+  // We don't support serializing `ZeroTensor` as it is not public
+  // facing yet.
+  TORCH_CHECK(
+      !t._is_zerotensor(),
+      "ZeroTensor is not serializable,",
+      " please file an issue if required.");
+  std::unordered_map<std::string, bool> metadata{};
 
-// Register function pointer of Tensor BackendMetadata for serialization.
-TORCH_API void TensorBackendMetaRegistry(
-    c10::DeviceType t,
-    BackendMetaPtr get_fptr,
-    BackendMetaPtr set_fptr);
-
-// Return a map of Tensor Metadata which including BackendMetaData for
-// serialization. For now, it only takes care of `conj` and `neg` bit.
-TORCH_API std::unordered_map<std::string, bool> getTensorMetadata(
-    const at::Tensor& t);
+  // Only add meta-data if the value is not default.
+  if (t.is_conj()) {
+    metadata["conj"] = true;
+  }
+  if (t.is_neg()) {
+    metadata["neg"] = true;
+  }
+  return metadata;
+}
 
 // set Tensor Metadata based on the map.
-// Refer: getTensorMetadata
-TORCH_API void setTensorMetadata(
+// Refer: getTensorMathdata
+inline void setTensorMetadata(
     const at::Tensor& t,
-    std::unordered_map<std::string, bool> metadata);
+    std::unordered_map<std::string, bool> metadata) {
+  for (auto& key_value_pair : metadata) {
+    if (key_value_pair.first == "conj") {
+      t._set_conj(true);
+    } else if (key_value_pair.first == "neg") {
+      t._set_neg(true);
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unexpected key `",
+          key_value_pair.first,
+          "` passed to setTensorMetadata.");
+    }
+  }
+}
 
 // set Tensor metadata based on the map.
 // NOTE: This overload is required by unpickler.cpp
-TORCH_API void setTensorMetadata(
+inline void setTensorMetadata(
     const at::Tensor& t,
-    c10::Dict<c10::IValue, c10::IValue> metadata_idict);
+    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
+  std::unordered_map<std::string, bool> metadata;
+  for (auto& pair : metadata_idict) {
+    auto key = *pair.key().toString();
+    metadata[key] = pair.value().toBool();
+  }
+  setTensorMetadata(t, std::move(metadata));
+}
 
 } // namespace jit
 } // namespace torch

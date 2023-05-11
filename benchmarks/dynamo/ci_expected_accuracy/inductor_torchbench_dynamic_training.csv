@@ -5,7 +5,6 @@ Super_SloMo,pass,9
 alexnet,pass,9
 attention_is_all_you_need_pytorch,pass,9
 dcgan,pass,9
-densenet121,pass,9
 drq,pass,8
 fastNLP_Bert,pass,14
 functorch_dp_cifar10,pass,9
@@ -16,9 +15,10 @@ hf_Bert,pass,8
 hf_Bert_large,pass,8
 hf_DistilBert,pass,8
 hf_GPT2,pass,8
-hf_Reformer,pass,45
+hf_Reformer,pass,47
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,9
+llama,eager_1st_run_fail,0
 maml_omniglot,pass,9
 mnasnet1_0,pass,9
 mobilenet_v2,pass,9
@@ -34,7 +34,6 @@ resnet50,pass,9
 resnext50_32x4d,pass,9
 shufflenet_v2_x1_0,pass,9
 soft_actor_critic,pass,8
-speech_transformer,fail_to_run,4
 squeezenet1_1,pass,9
 timm_efficientnet,pass,9
 timm_regnet,pass,9
