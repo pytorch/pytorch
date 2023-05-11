@@ -10,7 +10,7 @@ SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 
-def read_triton_pin(rocm_hash: bool) -> str:
+def read_triton_pin(rocm_hash: bool = False) -> str:
     triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
