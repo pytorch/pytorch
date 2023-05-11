@@ -1117,22 +1117,6 @@ class ContainedStmtsFinder : public IRVisitor {
   std::unordered_set<StmtPtr> contained_;
 };
 
-static bool containsAll(
-    const std::vector<BufLoadOrStoreUse>& uses,
-    BlockPtr b) {
-  std::unordered_set<StmtPtr> not_found;
-  for (const auto& use : uses) {
-    not_found.insert(use.s);
-  }
-
-  ContainedStmtsFinder csf;
-  const std::unordered_set<StmtPtr>& contained = csf.findContainedStmts(b);
-  for (const auto& s : contained) {
-    not_found.erase(s);
-  }
-  return not_found.empty();
-}
-
 class StmtDeleter : public IRMutator {
  public:
   StmtDeleter(const std::unordered_set<StmtPtr>& targets) : targets_(targets) {}
