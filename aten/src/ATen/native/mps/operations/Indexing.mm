@@ -47,6 +47,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   if (iter.numel() == 0) {
     return true;
   }
+  const bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
@@ -60,7 +61,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
-      const uint32_t numThreads = iter.numel();
+      const uint32_t numIters = serial_index_put ? iter.numel() : 1;
+      uint32_t numThreads = iter.numel();
       const uint32_t nDim = iter.ndim();
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -101,7 +103,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      std::string indexFunction =
+          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
@@ -155,6 +158,13 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
       [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
+      if (serial_index_put) {
+        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
+        gridSize = MTLSizeMake(1, 1, 1);
+        numThreads = 1;
+      } else {
+        gridSize = MTLSizeMake(numThreads, 1, 1);
+      }
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
@@ -624,7 +634,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   // Empty index
-  if (num_indices == 0) {
+  if (num_indices == 0 || self.numel() == 0) {
     return output;
   }
 
