@@ -1603,6 +1603,8 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
               "_get_backend_name",
               &::c10d::ProcessGroup::getBackendName,

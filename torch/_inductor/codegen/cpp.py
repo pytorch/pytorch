@@ -643,9 +643,12 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
+        elif math.isnan(other):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
+            )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
-
         type = f"decltype({var}())"
         float_mask = f"to_float_mask({mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
@@ -920,6 +923,8 @@ class CppOverrides(OpOverrides):
             other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
+        elif math.isnan(other):
+            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
         else:
             other_code = f"static_cast<{type}>({repr(other)})"
 
