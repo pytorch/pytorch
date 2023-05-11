@@ -82,7 +82,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets =
           (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
       TORCH_CHECK(
@@ -109,7 +109,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
       if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS)) {
-        indexSelectPSO = MPSDevice::getInstance()->metalIndexingFunction(indexFunction);
+        indexSelectPSO = MPSDevice::getInstance()->metalIndexingPSO(indexFunction);
         size_t argumentBufferLength = sizeof(uint64_t) * num_indices;
         indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
         uint64_t* indexABContents = (uint64_t*)(indexAB.contents);
