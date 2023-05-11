@@ -737,7 +737,7 @@ def parse_param(name, param, error_fn):
 
 
 def derived_types(
-    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+    base_type: typing.Any, cpp_type, list_base, optional_base_list, optional_list_base
 ):
     result = [
         (base_type, cpp_type),
