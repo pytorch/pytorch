@@ -244,6 +244,12 @@ CI_SKIP[CI("inductor", training=True)] = [
     "resnet50_quantized_qat",  # Eager model failed to run
     "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
     "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
+    "mobilevit_s",
+    "pit_b_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "vit_base_path16_224",
+    "xcit_large_24_p8_224",
 ]
 
 # Skips for dynamic=True
