@@ -6,8 +6,6 @@
 
 #include <ATen/TensorUtils.h>
 #include <ATen/Dispatch.h>
-#include <c10/core/GradMode.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
