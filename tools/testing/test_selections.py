@@ -4,7 +4,7 @@ import os
 import pathlib
 import subprocess
 
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from tools.shared.logging_utils import pluralize, to_time_str
 
@@ -137,7 +137,7 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def _get_previously_failing_tests() -> List[str]:
+def _get_previously_failing_tests() -> Set[str]:
     PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = pathlib.Path(
         ".pytorch_cache/v/cache/lastfailed"
     )
@@ -157,7 +157,7 @@ def _get_previously_failing_tests() -> List[str]:
     return prioritized_tests
 
 
-def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> List[str]:
+def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
     prioritized_tests = set()
 
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
@@ -169,10 +169,10 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> List[s
             print(f"Adding part: {test_file}. Parts had len {len(parts)}")
             prioritized_tests.add(test_file)
 
-    return list(prioritized_tests)
+    return prioritized_tests
 
 
-def _get_test_prioritized_due_to_test_file_changes() -> List[str]:
+def _get_test_prioritized_due_to_test_file_changes() -> Set[str]:
     try:
         changed_files = _query_changed_test_files()
     except Exception:
@@ -181,9 +181,9 @@ def _get_test_prioritized_due_to_test_file_changes() -> List[str]:
 
     prefix = f"test{os.path.sep}"
     # TODO: Make prioritization work with C++ test as well
-    prioritized_tests = [
+    prioritized_tests = set([
         f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
-    ]
+    ])
     prioritized_tests = [f[len(prefix) :] for f in prioritized_tests]
     prioritized_tests = [f[: -len(".py")] for f in prioritized_tests]
 
@@ -201,9 +201,9 @@ def get_reordered_tests(
     Get the reordered test filename list based on github PR history or git changed file.
     We prioritize running test files that were changed.
     """
-    prioritized_tests: List[str] = []
-    prioritized_tests += _get_previously_failing_tests()
-    prioritized_tests += _get_test_prioritized_due_to_test_file_changes()
+    prioritized_tests: Set[str] = set()
+    prioritized_tests |= _get_previously_failing_tests()
+    prioritized_tests |= _get_test_prioritized_due_to_test_file_changes()
 
     bring_to_front = []
     the_rest = []

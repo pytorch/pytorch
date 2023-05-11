@@ -339,11 +339,11 @@ class TestParsePrevTests(unittest.TestCase):
             "": True,
         }
 
-        expected_failing_test_files = []
+        expected_failing_test_files = set()
 
         found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
 
-        self.assertListEqual(expected_failing_test_files, found_tests)
+        self.assertSetEqual(expected_failing_test_files, found_tests)
 
     def test_dedupes_failing_test_files(self) -> None:
         last_failed_file_contents = {
@@ -353,11 +353,11 @@ class TestParsePrevTests(unittest.TestCase):
             "test_bar.py::TestBar::test_fun_copy[25]": True,
         }
 
-        expected_failing_test_files = ["test_car", "test_bar", "test_far"]
+        expected_failing_test_files = set(["test_car", "test_bar", "test_far"])
 
         found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
 
-        self.assertListEqual(expected_failing_test_files, found_tests)
+        self.assertSetEqual(expected_failing_test_files, found_tests)
 
 
 if __name__ == "__main__":
