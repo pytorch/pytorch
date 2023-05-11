@@ -259,24 +259,23 @@ class AutogradFunctionVariable(VariableTracker):
             def trampoline_autograd_bwd(*args, **kwargs):
                 return self.fn_cls.backward(*args, **kwargs)
 
-
             # Note - On Tracing autograd.Function w/ grad
-            # The complex system described here revolves around the soundness evaluation of an autograd.Function in 
-            # PyTorch. The system follows a well-defined strategy for tracing, which involves three key steps: tracing 
+            # The complex system described here revolves around the soundness evaluation of an autograd.Function in
+            # PyTorch. The system follows a well-defined strategy for tracing, which involves three key steps: tracing
             # forward, tracing backward, and if both are sound the potential recording of an "apply" operation into the
             # graph.We trace forward, and evaluate soundness. Soundness, in this context, refers to the absence of side
-            # effects, the avoidance of lifting new arguments into the trace, the production of a single tensor output, 
-            # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound, 
+            # effects, the avoidance of lifting new arguments into the trace, the production of a single tensor output,
+            # and a limited input scope confined to contexts, tensors, and constants. If the forward trace is sound,
             # we install any guards accumulated from tracing. If not, we graph break. We trace backward, and evaluate
-            # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and 
-            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the 
+            # for soundness, same as forward, except with more strictness. We enable a strict mode on the tx, and
+            # reject certain ops when running under this strict mode. If the backward trace is sound, we discard the
             # trace by restoring. Otherwise, we raise.
 
             # if both the forward and backward traces are sound, we write the autograd function’s apply into the graph.
 
-            # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute 
-            # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards, 
-            # and that we can inline properly here. Inlining is required in order to be able to ensure that the 
+            # For tracing forward and backward, we use UserFunctionVariable. Although it does not directly contribute
+            # to soundness evaluation, it plus a  GlobalSource makes sure we can produce valid guards,
+            # and that we can inline properly here. Inlining is required in order to be able to ensure that the
             # soundness evaluation works as described above.
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
@@ -328,11 +327,11 @@ class AutogradFunctionVariable(VariableTracker):
     ):
         if name == "backward":
             with tx.strict_translation_mode():
-                return tx.inline_user_function_return(
-                    UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                return tx.inline_call(
+                    tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
                 )
-        return tx.inline_user_function_return(
-            UserFunctionVariable(self.fn_cls.forward), args, kwargs
+        return tx.inline_call(
+            tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
         )
 
 
