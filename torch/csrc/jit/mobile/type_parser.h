@@ -1,8 +1,5 @@
 #pragma once
 
-#include <unordered_map>
-#include <unordered_set>
-
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
 
