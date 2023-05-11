@@ -792,7 +792,7 @@ FW_DERIVATIVE_FOREACH_TEMPLATE = CodeTemplate(
     """\
 ${fw_grad_opt_definition}
 for (const auto& i : c10::irange(${vector_of_optional_tensor}.size())) {
-  if (${recompute_any_has_forward_grad_for_current_index}) {
+  if (${any_has_forward_grad_for_current_index}) {
       ${unpacked_arguments}
       ${vector_of_optional_tensor}[i] = ${formula};
   }
@@ -1344,14 +1344,21 @@ def emit_body(
                     )
 
             if all_forward_grad_cond:
-                body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
                 if not is_inplace_foreach:
+                    body.append(f'if ({" || ".join(all_forward_grad_cond)}) {{')
                     body.append("  original_self = self.clone();")
+                    body.append("}")
                 else:
-                    body.append("  for (const auto& i : c10::irange(self.size())) {")
+                    current_all_forward_grad_cond = [
+                        f"{cond}[i]" for cond in all_forward_grad_cond
+                    ]
+                    body.append("for (const auto& i : c10::irange(self.size())) {")
+                    body.append(
+                        f"  if ({' || '.join(current_all_forward_grad_cond)}) {{"
+                    )
                     body.append("    original_selfs[i] = self[i].clone();")
                     body.append("  }")
-                body.append("}")
+                    body.append("}")
 
         return body
 
@@ -1732,14 +1739,39 @@ def emit_body(
 
     def emit_any_has_forward_grad() -> List[str]:
         content: List[str] = []
-        for derivative in fw_derivatives:
-            requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
-            if info and info.output_differentiability_conditions:
-                assert len(info.output_differentiability_conditions) == 1
-                requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
-            content.append(
-                f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
-            )
+        if not is_inplace_foreach:
+            for derivative in fw_derivatives:
+                requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
+                if info and info.output_differentiability_conditions:
+                    assert len(info.output_differentiability_conditions) == 1
+                    requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
+                content.append(
+                    f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
+                )
+        else:
+            for derivative in fw_derivatives:
+                bool_vector_name = get_any_has_forward_grad_name(derivative.var_names)
+                cur_derivative_conditions = [
+                    FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
+                        req_inp=refargname2inplace_foreacharg[inp.name].name
+                        + (
+                            "[i]"
+                            if is_tensor_list_type(
+                                refargname2inplace_foreacharg[inp.name].type
+                            )
+                            else ""
+                        ),
+                    )
+                    for inp in differentiable_inputs
+                    if derivative.required_inputs_fw_grad is not None
+                    and inp.name in derivative.required_inputs_fw_grad
+                ]
+                content.append(f"std::vector<bool> {bool_vector_name}(self.size());")
+                content.append("for (const auto& i : c10::irange(self.size())) {")
+                content.append(
+                    f"  {bool_vector_name}[i] = {' || '.join(cur_derivative_conditions)};"
+                )
+                content.append("}")
         return content
 
     def emit_check_inplace() -> List[str]:
@@ -1901,27 +1933,9 @@ def emit_body(
                     FW_DERIVATIVE_FOREACH_TEMPLATE.substitute(
                         fw_grad_opt_definition=fw_grad_opt_definition,
                         vector_of_optional_tensor=f"{'_'.join(res)}_new_fw_grad_opts",
-                        recompute_any_has_forward_grad_for_current_index=(
-                            " || ".join(
-                                [
-                                    FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
-                                        req_inp=refargname2inplace_foreacharg[
-                                            inp.name
-                                        ].name
-                                        + (
-                                            "[i]"
-                                            if is_tensor_list_type(
-                                                refargname2inplace_foreacharg[
-                                                    inp.name
-                                                ].type
-                                            )
-                                            else ""
-                                        ),
-                                    )
-                                    for inp in differentiable_inputs
-                                    if inp.name in derivative.required_inputs_fw_grad
-                                ]
-                            )
+                        any_has_forward_grad_for_current_index=" || ".join(
+                            get_any_has_forward_grad_name(derivative.var_names) + "[i]"
+                            for derivative in fw_derivatives
                         ),
                         formula=inplace_foreach_forward_grad_formula,
                         unpacked_arguments=unpacked_arguments,
@@ -1983,31 +1997,14 @@ def emit_body(
                     )
                 any_has_fw_grad = "true"
             else:
-                if not is_inplace_foreach:
-                    any_has_fw_grad = " || ".join(
-                        [
-                            FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
-                            for inp in differentiable_inputs
-                            if inp.name in derivative.required_inputs_fw_grad
-                        ]
-                    )
-                    any_has_fw_grad = f"({any_has_fw_grad})"
-                else:
-                    any_has_fw_grad = " || ".join(
-                        [
-                            (
-                                FW_DERIVATIVE_TENSORLIST_CHECK_TEMPLATE
-                                if is_tensor_list_type(
-                                    refargname2inplace_foreacharg[inp.name].type
-                                )
-                                else FW_DERIVATIVE_CHECK_TEMPLATE
-                            ).substitute(
-                                req_inp=refargname2inplace_foreacharg[inp.name].name
-                            )
-                            for inp in differentiable_inputs
-                            if inp.name in derivative.required_inputs_fw_grad
-                        ]
-                    )
+                any_has_fw_grad = " || ".join(
+                    [
+                        FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
+                        for inp in differentiable_inputs
+                        if inp.name in derivative.required_inputs_fw_grad
+                    ]
+                )
+                any_has_fw_grad = f"({any_has_fw_grad})"
 
             return any_has_fw_grad
 
