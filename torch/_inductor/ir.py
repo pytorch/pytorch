@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import re
 import textwrap
 import traceback
 from contextlib import nullcontext
