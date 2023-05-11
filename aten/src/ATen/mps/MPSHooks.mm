@@ -30,7 +30,7 @@ bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
     case 3:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
     default:
-      TORCH_WARN("Can't check whether running on 13.",minor,"+ returning one for 13.3+");
+      TORCH_WARN("Can't check whether running on 13.", minor, "+ returning one for 13.3+");
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   }
 }

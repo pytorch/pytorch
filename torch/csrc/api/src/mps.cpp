@@ -29,13 +29,11 @@ void commit() {
 }
 
 MTLCommandBuffer_t get_command_buffer() {
-  return static_cast<MTLCommandBuffer_t>(
-      at::detail::getMPSHooks().getCommandBuffer());
+  return at::detail::getMPSHooks().getCommandBuffer();
 }
 
 DispatchQueue_t get_dispatch_queue() {
-  return static_cast<DispatchQueue_t>(
-      at::detail::getMPSHooks().getDispatchQueue());
+  return at::detail::getMPSHooks().getDispatchQueue();
 }
 
 } // namespace mps
