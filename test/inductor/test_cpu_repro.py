@@ -961,9 +961,7 @@ class CPUReproTests(TestCase):
 
         torch._dynamo.reset()
         metrics.reset()
-        traced = make_fx(fn)(x)
-        compiled = compile_fx_inner(traced, [x])
-        assert same(fn(x)[0], compiled([x])[0])
+        self.common(fn, (x,))
         assert metrics.cpp_to_dtype_count == 2
         if codecache.valid_vec_isa_list():
             assert metrics.generated_cpp_vec_kernel_count == 1
