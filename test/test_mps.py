@@ -118,7 +118,7 @@ def mps_ops_grad_modifier(ops):
         'fmod': [torch.float16],
 
         # 'nn.functional.normalize': [torch.float16],
-        # 'round': [torch.float16],
+        'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
