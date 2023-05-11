@@ -1842,11 +1842,17 @@ else:
             x = torch.zeros(m, device=device)
             res = x.scatter_add(dim, idx, src)
 
+            # Checking if scatter_add is deterministic
+            for i in range(5):
+                res_next = x.scatter_add(dim, idx, src)
+                self.assertEqual(res, res_next, atol=0, rtol=0)
+                res = res_next
+
             expected = torch.zeros(m, device=device)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
-            self.assertEqual(res, expected, atol=0, rtol=0)
+            self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -4474,6 +4480,17 @@ else:
         self.assertEqual(torch.CharTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
+
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
 
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
@@ -7437,6 +7454,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_parallel_info(self):
         torch.__config__.parallel_info()
+
+    def test_get_cpu_capability(self):
+        # This method is primarily exposed for torchvision's resize
+        torch.backends.cpu.get_cpu_capability()
+
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):

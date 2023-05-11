@@ -2,50 +2,120 @@ import torch.fx as fx
 import copy
 import torch
 import math
+import sys
 from typing import Callable, List
 from functools import wraps, partial
 from dataclasses import dataclass
 from .compile_utils import get_placeholders, get_outputs
+from torch.utils._content_store import ContentStoreWriter
+from torch.hub import tqdm
+from torch.multiprocessing.reductions import StorageWeakRef
+import os.path
+
+is_tuple = object()
+
+@dataclass
+class LoadTensorMeta:
+    size: List[int]
+    stride: List[int]
+    dtype: torch.dtype
+    device: torch.device
 
 class ConcreteProp(torch.fx.Interpreter):
+    def __init__(self, mod, *, writer=None, skip_offload=False):
+        super().__init__(mod)
+        self.writer = writer
+        self.skip_offload = skip_offload
+        self.seen_storages = set()
+
     def run_node(self, n):
-        result = super().run_node(n)
+        self.pbar.update(1)
+        r = super().run_node(n)
+        name = n.name
 
-        found_tensor = False
-
-        def extract_tensor_meta(obj):
-            if isinstance(obj, torch.Tensor):
-                nonlocal found_tensor
-                found_tensor = True
-                return obj
+        if isinstance(r, torch.Tensor):
+            if self.writer is None:
+                n.meta['concrete_value'] = r
             else:
-                return obj
+                if StorageWeakRef(r.untyped_storage()) in self.seen_storages:
+                    # Refuse to offload tensors which alias other live
+                    # tensors, because this will violate operator contracts
+                    n.meta['concrete_value'] = None
+                else:
+                    if not self.skip_offload:
+                        self.writer.write_tensor(os.path.join("eager", name), r)
+                    n.meta['concrete_value'] = LoadTensorMeta(
+                        r.size(),
+                        r.stride(),
+                        r.dtype,
+                        r.device
+                    )
+                    self.seen_storages.add(StorageWeakRef(r.untyped_storage()))
+        else:
+            n.meta['concrete_value'] = is_tuple
 
-        from torch.fx.node import map_aggregate
-        concrete_value = map_aggregate(result, extract_tensor_meta)
-        if found_tensor:
-            n.meta['concrete_value'] = concrete_value
-        return result
+        return r
 
     def propagate(self, *args):
-        return super().run(*args)
+        with tqdm(
+            desc="Saving intermediates for delta debugging",
+            total=len(self.module.graph.nodes),
+            disable=self.writer is None
+        ) as pbar:
+            self.pbar = pbar
+            r = super().run(*args)
+            if not self.skip_offload:
+                pbar.set_description("Saved!  To skip next time, run with --skip-saving-eager-intermediates")
+            return r
+
+def is_load_tensor_node(node):
+    return node.op == 'call_function' and node.target is torch.ops.debugprims.load_tensor.default
 
 
 # inplace modifies node/inps
-def _convert_node_to_placeholder(node, inps):
+def _convert_node_to_placeholder(graph, node, inps):
     if node.op == 'output' or node.op == "placeholder":
-        return
-    node.op = 'placeholder'
-    node.args = ()
-    node.kwargs = {}
-    node.target = node.name
+        return False
+
+    if is_load_tensor_node(node):
+        return False
+
     concrete_val = node.meta.get('concrete_value', None)
+
     if isinstance(concrete_val, torch.Tensor):
+        node.op = 'placeholder'
+        node.target = node.name
+        node.args = ()
+        node.kwargs = {}
+
         inps.append(concrete_val)
-    else:
-        inps.append(torch.zeros(()))
+        return True
+
+    elif concrete_val is None:
+        return False
+
+    elif concrete_val is is_tuple:
+        r = False
         for tuple_user in list(node.users):
-            _convert_node_to_placeholder(tuple_user, inps)
+            r = _convert_node_to_placeholder(graph, tuple_user, inps) or r
+        # NB: We must not erase the node at this point, because
+        # we are iterating over the nodes and this would change
+        # the iteration order
+        # graph.erase_node(node)
+        return r
+
+    elif isinstance(concrete_val, LoadTensorMeta):
+        node.op = 'call_function'
+        node.target = torch.ops.debugprims.load_tensor.default
+        node.args = (os.path.join("eager", node.name), concrete_val.size, concrete_val.stride)
+        node.kwargs = {
+            'device': concrete_val.device,
+            'dtype': concrete_val.dtype,
+        }
+        return True
+
+    return False
+
 
 def dump_state(fx_g, inps):
     print(f"""
@@ -55,12 +125,21 @@ inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device=device) for (s
 {fx_g.code}
 """)
 
+def is_power_of_two(n):
+    if n == 0:
+        return False
+    return (n & (n - 1)) == 0
+
 @dataclass
 class ReproState:
     graph: fx.Graph
     inps: List[torch.Tensor]
 
-def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state):
+def minifier(
+    fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state, *,
+    save_dir=None, offload_to_disk=False, skip_offload=False, skip_sanity=False,
+    max_granularity=None
+):
     """
     Minimizes a FX graph with given inputs, such that the resulting FX graph still returns True for module_fails.
 
@@ -78,6 +157,9 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     failing_graph = fail_f.graph
     cur_size = len(failing_graph.nodes)
 
+    if max_granularity is not None and not is_power_of_two(max_granularity):
+        raise RuntimeError(f"max_granularity {max_granularity} not power of two")
+
     num_queries = 0
 
     def deepcopy_fx_graph(fx_graph):
@@ -92,16 +174,24 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         mod.graph.lint()
         return module_fails(mod, inps)
 
-    ConcreteProp(fail_f).propagate(*inps)
-    if not graph_fails(failing_graph, inps):
+    writer = None
+    if offload_to_disk:
+        writer = ContentStoreWriter(save_dir)
+
+    ConcreteProp(fail_f, writer=writer, skip_offload=skip_offload).propagate(*inps)
+    if not skip_sanity and not graph_fails(failing_graph, inps):
         raise RuntimeError("Input graph did not fail the tester")
-    print(f"Started off with {cur_size} nodes")
+    print(f"Started off with {cur_size} nodes", file=sys.stderr)
 
     def _register_strategy(strategy: Callable, name: str):
         @wraps(strategy)
         def new_func(old_state: ReproState, granularity=1):
-            print()
-            print(f"Strategy: {name} (G: {granularity}) ({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)")
+            print(file=sys.stderr)
+            print(
+                f"Strategy: {name} (G: {granularity}) "
+                f"({len(old_state.graph.nodes)} nodes, {len(old_state.inps)} inputs)",
+                file=sys.stderr
+            )
             new_state = strategy(deepcopy_fx_graph(old_state.graph), list(old_state.inps), granularity)
             if new_state is not None:
                 new_nodes = len(new_state.graph.nodes)
@@ -113,23 +203,23 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
                 progress_made = False
                 if new_nodes < old_nodes:
                     progress_made = True
-                    print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes")
+                    print(f"SUCCESS: Went from {old_nodes} to {new_nodes} nodes", file=sys.stderr)
                 if new_inps > old_inps:
                     progress_made = True
-                    print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs")
+                    print(f"SUCCESS: Went from {old_inps} to {new_inps} inputs", file=sys.stderr)
                 if new_outs < old_outs:
                     progress_made = True
-                    print(f"SUCCESS: Went from {old_outs} to {new_outs} outputs")
+                    print(f"SUCCESS: Went from {old_outs} to {new_outs} outputs", file=sys.stderr)
 
                 if not progress_made:
                     raise RuntimeError("Success raised but no progress made?")
 
                 if not graph_fails(new_state.graph, new_state.inps):
-                    print("WARNING: Something went wrong, not applying this minification")
+                    print("WARNING: Something went wrong, not applying this minification", file=sys.stderr)
                     return None
                 return new_state
             else:
-                print(f"FAIL: {name}")
+                print(f"FAIL: {name}", file=sys.stderr)
             return None
 
         return new_func
@@ -210,16 +300,28 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
         return None
 
 
-    def _consolidate_placeholders(cur_graph):
+    def _consolidate_placeholders(cur_graph, inps):
         new_graph = fx.Graph()
         env = {}
+        seen_non_placeholder = False
+
+        # Move all placeholders to the front; also, if any load_tensor
+        # is at the front, convert it into an input (because it can be live
+        # all the time)
         for node in cur_graph.nodes:
             if node.op == 'placeholder':
                 new_node = new_graph.node_copy(node, lambda x: env[x])
                 env[node] = new_node
+            elif not seen_non_placeholder and is_load_tensor_node(node):
+                new_node = new_graph.placeholder(node.name)
+                env[node] = new_node
+                inps.append(torch.ops.debugprims.load_tensor.default(*node.args, **node.kwargs))
+            else:
+                seen_non_placeholder = True
 
+        # Move everyone else
         for node in cur_graph.nodes:
-            if node.op != 'placeholder':
+            if node not in env:
                 new_node = new_graph.node_copy(node, lambda x: env[x])
                 env[node] = new_node
         return new_graph
@@ -234,12 +336,12 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
             end_range = min(num_nodes, start_range + granularity)
             for idx in range(start_range, end_range):
                 new_node = list(new_graph.nodes)[idx]
-                if new_node.op not in ['placeholder', 'output']:
+                if _convert_node_to_placeholder(new_graph, new_node, new_inps):
                     is_removing = True
-                    _convert_node_to_placeholder(new_node, new_inps)
             if not is_removing:
                 continue
-            new_graph = _consolidate_placeholders(new_graph)
+            new_graph.eliminate_dead_code()
+            new_graph = _consolidate_placeholders(new_graph, new_inps)
             new_state = remove_unused_inputs_unchecked(ReproState(new_graph, new_inps))
             if new_state is None:
                 new_state = ReproState(new_graph, new_inps)
@@ -248,10 +350,18 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
 
         return None
 
+    @register_strategy("Consolidate Inputs")
+    def consolidate_inputs(cur_graph, cur_inps, granularity):
+        old_len = len(cur_inps)
+        cur_graph = _consolidate_placeholders(cur_graph, cur_inps)
+        if len(cur_inps) > old_len and graph_fails(cur_graph, cur_inps):
+            return ReproState(cur_graph, cur_inps)
+        return None
+
     failing_state = ReproState(failing_graph, inps)
 
     def try_granularity(failing_state, granularity, use_non_granular):
-        print(f"Trying granularity {granularity}")
+        print(f"Trying granularity {granularity}", file=sys.stderr)
 
         strategies = []
         num_nodes = len(failing_state.graph.nodes)
@@ -260,7 +370,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
             strategies += [remove_outputs]
 
         if use_non_granular:
-            strategies += [eliminate_dead_code, remove_unused_inputs]
+            strategies += [eliminate_dead_code, remove_unused_inputs, consolidate_inputs]
 
         strategies += [remove_suffix, delta_debugging]
 
@@ -273,6 +383,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     while True:
         dump_state(fx.GraphModule(fail_f, failing_state.graph), failing_state.inps)
         granularity = int(2**(math.floor(math.log2(len(failing_state.graph.nodes)))))
+        if max_granularity is not None:
+            granularity = min(max_granularity, granularity)
         new_state = try_granularity(failing_state, granularity, use_non_granular=True)
         if new_state is not None:
             failing_state = new_state
@@ -300,8 +412,8 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = 
     if not graph_fails(failing_state.graph, failing_state.inps):
         raise RuntimeError("Uh oh, something went wrong :( Final graph is not failing")
 
-    print(f"Made {num_queries} queries")
+    print(f"Made {num_queries} queries", file=sys.stderr)
     failing_fx = fx.GraphModule(fail_f, failing_state.graph)
     dump_state(failing_fx, failing_state.inps)
-    print("Wrote minimal repro out to repro.py")
+    print("Wrote minimal repro out to repro.py", file=sys.stderr)
     return failing_fx, failing_state.inps

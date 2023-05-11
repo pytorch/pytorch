@@ -56,7 +56,7 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     steps:
@@ -86,7 +86,7 @@ jobs:
 {%- if config["gpu_arch_type"] == "cuda" %}
     runs-on: windows.8xlarge.nvidia.gpu
 {%- else %}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
