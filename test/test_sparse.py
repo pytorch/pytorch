@@ -26,8 +26,6 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -3736,8 +3734,8 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    # NOTE: addcmul_out is not implemented for bool.
-    @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
+    # NOTE: addcmul_out is not implemented for bool and half.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_sparse_mul(self, device, dtype, coalesced):
         self._test_mul_skips(device, dtype, coalesced)
@@ -4774,10 +4772,6 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
-            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
-                # that is, the validation returns the sparse sample
-                # wrapped within ErrorInput instance
-                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
             result = op.op(t_inp, *t_args, **t_kwargs)
@@ -4800,6 +4794,61 @@ class TestSparseAny(TestCase):
                     continue
                 raise
             self.assertEqual(result, dense)
+
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @dtypes(torch.int8, torch.half)
+    def test_structured_sparse_linear(self, device, dtype):
+        def make_tensor(shape, dtype):
+            if dtype.is_complex:
+                return torch.zeros(shape, dtype=dtype)
+            elif dtype.is_floating_point:
+                return torch.randn(shape, dtype=dtype) / 10
+            else:
+                return torch.randint(-5, 5, shape, dtype=dtype)
+
+        def random_mask_choice(i=None):
+            choices = [
+                [1, 1, 0, 0],
+                [1, 0, 1, 0],
+                [1, 0, 0, 1],
+                [0, 1, 1, 0],
+                [0, 1, 0, 1],
+                [0, 0, 1, 1]
+            ]
+            if i is None:
+                i = random.randint(0, len(choices) - 1)
+            return choices[i]
+
+        def run_test(m, n, k, device, dtype):
+            a = make_tensor((m, k), dtype).to(device)
+            b = make_tensor((n, k), dtype).to(device).T
+
+            for meta_choice in (list(range(6)) + [None]):
+                mask_entries = [random_mask_choice(meta_choice) for i in range(m * (k // 4))]
+                mask = torch.tensor(mask_entries, dtype=torch.bool).view(m, k).to(device)
+
+                a_sparse = a.masked_select(mask).view(m, k // 2)
+                a_dense = a.masked_fill(~mask, 0)
+
+                dtype_dense = torch.float
+                c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense))
+
+                c0, meta = torch._structured_sparse_linear(a_sparse, b, mask)
+                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+
+                c0, _ = torch._structured_sparse_linear(a_sparse, b, meta)
+                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+
+        is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
+        if not is_sm8x:
+            return
+        for (m, n, k) in itertools.product(range(4), range(4), range(4)):
+            m = (m + 1) * 32
+            n = (n + 1) * 32
+            k = (k + 1) * 128
+            run_test(m, n, k, device, dtype)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

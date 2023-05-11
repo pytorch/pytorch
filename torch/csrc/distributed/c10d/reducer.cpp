@@ -550,13 +550,13 @@ void Reducer::delay_all_reduce() {
   // unused_parameters_ will not change after 1st iteration.
   unused_parameters_.clear();
 
+  require_finalize_ = true;
   // copy all gradients to buckets
   for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);
     }
-    require_finalize_ = true;
     set_divide_factor();
     if (expect_sparse_gradients_[variable_index]) {
       mark_variable_ready_sparse(variable_index);
