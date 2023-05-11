@@ -384,9 +384,12 @@ def _export_fx_node_to_onnxscript(
             isinstance(node.target, torch._ops.OpOverload)
             and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target
-            ]
+            if node.target == torch.ops.aten.arange.start:
+                exporter_key = "aten::arange.start"
+            else:
+                exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
+                    node.target
+                ]
         elif isinstance(node.target, torch._ops.OpOverloadPacket):
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor

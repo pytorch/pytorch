@@ -46,7 +46,8 @@ _ATENLIB_FUNCTIONS = {
     "aten::amax": ops.core.aten_amax,
     "aten::amin": ops.core.aten_amin,
     "aten::any": ops.core.aten_any,
-    "aten::arange": ops.core.aten_arange_start,
+    "aten::arange": ops.core.aten_arange,
+    "aten::arange.start": ops.core.aten_arange_start,
     "aten::argmax": ops.core.aten_argmax,
     "aten::argmin": ops.core.aten_argmin,
     "aten::as_strided": ops.core.aten_as_strided,
@@ -57,6 +58,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::avg_pool2d": ops.nn.aten_avg_pool2d,
     "aten::baddbmm": ops.core.aten_baddbmm,
     "aten::bitwise_not": ops.core.aten_bitwise_not_bool,
+    "aten::bitwise_or": ops.core.aten_bitwise_or_bool,
     "aten::bmm": ops.core.aten_bmm,
     "aten::broadcast_to": ops.core.aten_broadcast_to,
     "aten::cat": ops.core.aten_cat,
@@ -239,7 +241,7 @@ def _create_op_overload_to_exporter_key_table() -> (
     # https://github.com/pytorch/pytorch/issues/99681
     # This is a workaround to make sure we register ONNX symbolic functions for these.
     onnx_supported_aten_lookup_table = [
-        k.split("::")[1] for k in _ATENLIB_FUNCTIONS.keys() if k.startswith("aten::")
+        k.split("::")[1].split(".")[0] for k in _ATENLIB_FUNCTIONS.keys() if k.startswith("aten::")
     ]
 
     for op_namespace in (torch.ops.aten, torch.ops.prims):
