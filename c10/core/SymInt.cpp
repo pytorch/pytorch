@@ -3,9 +3,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include <array>
 #include <functional>
-#include <utility>
 
 namespace c10 {
 
