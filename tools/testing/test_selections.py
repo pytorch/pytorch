@@ -219,7 +219,7 @@ def get_reordered_tests(
             time_savings = test_time_for_regular_tests_so_far
         else:
             the_rest.append(test)
-            test_time_for_regular_tests_so_far += test.time
+            test_time_for_regular_tests_so_far += test.get_time()
 
     if len(tests) != len(bring_to_front) + len(the_rest):
         print(
