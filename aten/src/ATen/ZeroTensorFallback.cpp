@@ -11,7 +11,7 @@ namespace at {
 
   // TODO: add a note explaining the design decisions
   // ZeroTensors are designed to be immutable. Thus, we error out when an in-place operation is performed on ZeroTensors
-  void zeroTensorFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  static void zeroTensorFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
