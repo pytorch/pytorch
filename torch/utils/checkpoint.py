@@ -665,7 +665,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
             if holder.handles[gid] is None:
                 raise RuntimeError(
-                    "torch.utils.checkpoint: unpack is being triggered for a tensor that was either"
+                    "torch.utils.checkpoint: unpack is being triggered for a tensor that was either "
                     "never recomputed, or already unpacked once. If you are calling ctx.saved_tensors "
                     "in backward, make sure to do so only once. Otherwise please open an issue with "
                     "details on your use case."
