@@ -39,6 +39,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map, tree_map_only
 
+from tqdm.auto import tqdm, trange
+
 try:
     from .microbenchmarks.operator_inp_utils import OperatorInputsMode
 except ImportError:
@@ -639,7 +641,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
-        for rep in range(args.repeat):
+        for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
                 if should_randomize_input
@@ -2481,24 +2483,30 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 try:
-                    if args.part:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(
-                            device, model_name, batch_size=batch_size, part=args.part
-                        )
-                    else:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(device, model_name, batch_size=batch_size)
+                    with tqdm(desc="loading model"):
+                        if args.part:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device,
+                                model_name,
+                                batch_size=batch_size,
+                                part=args.part,
+                            )
+                        else:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device, model_name, batch_size=batch_size
+                            )
                 except NotImplementedError as e:
                     print(e)
                     import traceback
