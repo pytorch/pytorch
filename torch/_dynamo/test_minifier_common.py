@@ -152,19 +152,21 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir, isolate):
+    def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         with open(launch_file, "r") as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
-        args = ["python3", launch_file, "minify"]
+        args = ["python3", launch_file, "minify", *minifier_args]
         if not isolate:
             args.append("--no-isolate")
         launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
         print("minifier stdout:", launch_proc.stdout.decode("utf-8"))
-        print("minifier stderr:", launch_proc.stderr.decode("utf-8"))
+        stderr = launch_proc.stderr.decode("utf-8")
+        print("minifier stderr:", stderr)
+        self.assertNotIn("Input graph did not fail the tester", stderr)
 
         return launch_proc, launch_code
 
@@ -208,21 +210,30 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # If possible, you should run the test with isolate=False; use
     # isolate=True only if the bug you're testing would otherwise
     # crash the process
-    def _run_full_test(self, run_code, repro_after, expected_error, *, isolate):
+    def _run_full_test(
+        self, run_code, repro_after, expected_error, *, isolate, minifier_args=()
+    ):
         if isolate:
             repro_level = 3
+        elif expected_error is None or expected_error == "AccuracyError":
+            repro_level = 4
         else:
-            repro_level = 4 if expected_error == "AccuracyError" else 2
+            repro_level = 2
         test_code = self._gen_test_code(run_code, repro_after, repro_level)
         print("running test", file=sys.stderr)
         test_proc, repro_dir = self._run_test_code(test_code, isolate=isolate)
+        if expected_error is None:
+            # Just check that there was no error
+            self.assertEqual(test_proc.returncode, 0)
+            self.assertIsNone(repro_dir)
+            return
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
         minifier_proc, minifier_code = self._run_minifier_launcher(
-            repro_dir, isolate=isolate
+            repro_dir, isolate=isolate, minifier_args=minifier_args
         )
         print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
