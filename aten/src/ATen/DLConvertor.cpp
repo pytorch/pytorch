@@ -75,7 +75,7 @@ DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
   DLDevice ctx;
   ctx.device_id = device_id;
   switch (tensor.device().type()) {
@@ -221,7 +221,7 @@ struct ATenDLMTensor {
   DLManagedTensor tensor;
 };
 
-void deleter(DLManagedTensor* arg) {
+static void deleter(DLManagedTensor* arg) {
   delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
 }
 

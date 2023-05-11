@@ -288,6 +288,11 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
+        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
+        # since we ensure `forward` of allowed modules can be traced by AOT safely.
+        # Note this is not only for allowed modules, as user customized modules can extend from
+        # allowed modules but using parent's `forward` method, which is also covered by this branch.
         if isinstance(self.obj, variables.NNModuleVariable):
             module_attr = getattr(self.fn, "__module__", "")
             if (

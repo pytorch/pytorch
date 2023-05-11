@@ -279,7 +279,8 @@ class NNModuleVariable(VariableTracker):
 
             if is_lazy:
                 # The module type will change after it is called
-                self.module_type = mod.cls_to_become
+                if mod.cls_to_become is not None:
+                    self.module_type = mod.cls_to_become
 
                 # The pre-hook runs to initialize the module shapes, then deletes itself.  After this,
                 # the module is more or less not lazy and can be treated as a normal module regardless of
@@ -685,7 +686,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
-            self.value_type = mod.cls_to_become
+            if mod.cls_to_become is not None:
+                self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
         name = "__call__"
