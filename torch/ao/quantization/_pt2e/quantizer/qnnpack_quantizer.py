@@ -411,9 +411,9 @@ class QNNPackQuantizer(Quantizer):
         bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr_map": {
-                input_node: _get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: _get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: _get_bias_obs_or_fq_ctr(quantization_config),
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
             },
             "_annotated": True,
         }
@@ -440,11 +440,11 @@ class QNNPackQuantizer(Quantizer):
         bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
             "input_act_obs_or_fq_ctr_map": {
-                input_node: _get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: _get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: _get_bias_obs_or_fq_ctr(quantization_config),
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
             },
-            "output_act_obs_or_fq_ctr": _get_act_obs_or_fq_ctr(quantization_config),
+            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
             "_annotated": True,
         }
 

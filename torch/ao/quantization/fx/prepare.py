@@ -547,7 +547,7 @@ def _get_output_act_obs_or_fq_ctr(
 def _get_arg_target_dtype_as_output(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
-) -> Optional[Union[torch.dtype, type]]:
+) -> Optional[torch.dtype]:
     arg_as_output_act_obs_or_fq_ctr = _get_output_act_obs_or_fq_ctr(arg, named_modules)
     arg_as_output_target_dtype, _ = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq_ctr)
     return arg_as_output_target_dtype
@@ -570,7 +570,8 @@ def _get_arg_as_input_act_obs_or_fq_ctr(
     # conv.meta[...] = {"input_act_obs_or_fq_ctr_map": {x: MinMaxObserver.with_args(dtype=torch.qint8)}, ...}
     #
     if "target_dtype_info" in node.meta and "input_act_obs_or_fq_ctr_map" in node.meta["target_dtype_info"]:
-        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr_map"].get(arg, _DEFAULT_FP32_OBS_OR_FQ_CTR)
+        input_act_obs_or_fq_ctr = \
+            node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr_map"].get(arg, _DEFAULT_FP32_OBS_OR_FQ_CTR)
         return input_act_obs_or_fq_ctr
 
     # we can remove the following path in the future if fx graph mode quantization is
@@ -819,9 +820,8 @@ def _maybe_insert_output_observer_for_node(
 
     If `node` does not need an output observer, returns None.
 
-    Note: inserting dynamic quantization ops for output is not supported yet
-    it can be supported if we deprecate the fx graph mode quantization path and
-    remove the is_zeroth_arg from _needs_obs_or_fq
+    Note: inserting dynamic quantization ops for output is not supported in fx graph mode
+    quantization code path right now
     """
     assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
