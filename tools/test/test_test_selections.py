@@ -3,7 +3,7 @@ import random
 import sys
 import unittest
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Set, Tuple
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -335,11 +335,11 @@ class TestCalculateShards(unittest.TestCase):
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
 
 
-def mocked_get_previously_failing_tests():
+def mocked_get_previously_failing_tests() -> Set[str]:
     return {"test4"}
 
 
-def mocked_get_modified_tests():
+def mocked_get_modified_tests() -> Set[str]:
     return {"test2", "test4"}
 
 
@@ -349,7 +349,7 @@ class TestParsePrevTests(unittest.TestCase):
             "": True,
         }
 
-        expected_failing_test_files = set()
+        expected_failing_test_files: Set[str] = set()
 
         found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
 
