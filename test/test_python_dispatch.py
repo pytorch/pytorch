@@ -814,7 +814,9 @@ class TestCustomOp(TestCase):
             del output_shape[dim]
             return x.new_empty(output_shape)
 
-        with self.assertRaisesRegex(RuntimeError, "already has a abstract impl"):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"already has a abstract impl.*at .*test_python_dispatch.py:\d+"):
             @foo.impl_abstract()
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
