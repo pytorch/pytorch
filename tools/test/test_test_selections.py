@@ -366,7 +366,7 @@ class TestParsePrevTests(unittest.TestCase):
         return {"test4"}
 
     @staticmethod
-    def mocked_get_modified_tests():
+    def mocked_get_modified_testss():
         return {"test2", "test4"}
 
     @mock.patch(
@@ -375,7 +375,7 @@ class TestParsePrevTests(unittest.TestCase):
     )
     @mock.patch(
         "tools.testing.test_selections._get_modified_tests",
-        side_effect=mocked_get_modified_tests,
+        side_effect=mocked_get_modified_testss,
     )
     def test_get_reordered_tests(
         self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
