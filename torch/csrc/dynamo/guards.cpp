@@ -546,10 +546,24 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
   guard->dict_version_tag = ((PyDictObject*)dict)->ma_version_tag;
 
   Py_ssize_t idx = 0;
-  for (const char* attr : module_guard_attrs) {
+  for (const char* name : module_guard_attrs) {
     auto& tag = guard->attr_tags[idx];
-    PyObject* attr_obj = PyDict_GetItemString(dict, attr);
+
+    PyObject* key = PyUnicode_FromString(name);
+    if (key == NULL) {
+      return NULL;
+    }
+
+    PyObject* attr_obj = PyDict_GetItemWithError(dict, key);
     if (attr_obj == NULL) {
+      if (!PyErr_Occurred()) {
+        // this module doesn't have the specific attribute
+        PyErr_Format(
+            PyExc_AttributeError,
+            "'%s' object has no attribute '%s'",
+            Py_TYPE(obj)->tp_name,
+            name);
+      }
       Py_DECREF(dict);
       Py_DECREF(guard);
       return NULL;

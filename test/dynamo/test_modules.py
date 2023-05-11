@@ -1132,6 +1132,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         pre = m(data)
         cnt.clear()
+        torch._dynamo.reset()
 
         with torch._dynamo.optimize(cnt, nopython=False):
             opt_pre = m(data)

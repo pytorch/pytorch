@@ -373,7 +373,14 @@ class GuardBuilder(GuardBuilderBase):
         # The module guard checks for modifications to the Module's type, __dict__,
         # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
         # This subsumes the check for Module.training.
-        g = torch._C._dynamo.guards.nn_module_guard(val)
+        try:
+            g = torch._C._dynamo.guards.nn_module_guard(val)
+        except AttributeError:
+            # We get an attribute error if the module is partially initialized. For example,
+            # we might be trying to install a guard before a super().__init__() call when
+            # the module is missing _parameters, _modules, and other attributes.
+            # For now, we skip installing the guard.
+            return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
         self._produce_guard_code(guard, [f"{name}()"])
 
