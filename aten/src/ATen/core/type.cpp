@@ -7,7 +7,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
