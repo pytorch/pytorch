@@ -692,7 +692,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             combined = set()
             internal_deps = set()
             external_deps = set()
-            external_writes = set()
+            external_writes_score = 0
             for node, order in ordering.items():
                 union = set(order.read_writes.reads_and_writes())
                 reuse_score += len(combined & union)
@@ -708,23 +708,17 @@ class FusedSchedulerNode(BaseSchedulerNode):
                         internal_deps.add(dep)
                     else:
                         external_deps.add(dep)
-                        external_writes.add(dep)
+                        external_writes_score -= int(order.permute_order is not None)
                 for dep in order.read_writes.index_exprs:
                     internal_deps.add(dep)
 
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(map(dep_contiguous_score, external_writes)),
+                external_writes_score,
                 sum(map(dep_symbols_score, external_deps)),
                 sum(map(dep_symbols_score, internal_deps)),
             )
-
-        def dep_contiguous_score(dep):
-            if dep.is_contiguous():
-                return 0
-            else:
-                return -1
 
         def dep_symbols_score(dep):
             """
