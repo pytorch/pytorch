@@ -1592,7 +1592,7 @@ class DimConstraints:
             # with their concrete values, we might end up comparing floats. Thus
             # we approximate floats with rationals using concrete values as hints.
             constants = [self._var_to_val[s] for s in free_symbols]
-            expr = type(expr)(*[sympy.nsimplify(arg, constants) for arg in expr.args])
+            expr = type(expr)(*(sympy.nsimplify(arg, constants) for arg in expr.args))
         if expr == sympy.true:
             return
         # `expr` should be consistent with concrete values
