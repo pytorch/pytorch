@@ -24,12 +24,10 @@ from torch._export.passes import AddRuntimeAssertionsForConstraintsPass
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
 Value = Any
 
-# TODO(angelayi): Move this to PassBase
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 ExportGraphModule = torch.fx.GraphModule
 EXPORT_METADATA = "_export_metadata_key"
 
