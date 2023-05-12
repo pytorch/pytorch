@@ -932,6 +932,48 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
+    def test_tracing_map_autograd_aot_functionalized(self):
+        def inner(x, y):
+            z = x - 1
+            z.add_(1)
+            return z * y
+
+        def f(xs, y):
+            res = control_flow.map(inner, xs, y)
+            grads = torch.autograd.grad(res, (xs, y), torch.ones_like(res))
+            return grads
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        example_inputs = (torch.ones(3, 2, 4, requires_grad=True), torch.ones(2, 4, requires_grad=True))
+        gm = make_fx(f, tracing_mode="symbolic")(*example_inputs)
+        fgm = make_fx(f_wrapper(f), tracing_mode="symbolic")(*example_inputs)
+        xs = torch.ones(3, 4, 5, requires_grad=True)
+        y = torch.ones(4, 5, requires_grad=True)
+
+        self.assertEqual(gm(xs, y), f(xs, y))
+
+        def count_mutable(gm):
+            c = 0
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    if node.target == torch.ops.map_impl:
+                        c += count_mutable(getattr(gm, str(node.args[0])))
+                    elif schema := getattr(node.target, "_schema", None):
+                        c += int(schema.is_mutable)
+            return c
+        self.assertEqual(count_mutable(fgm), 0)
+        # One for forward, one for recompuation logic in backward
+        self.assertEqual(count_mutable(gm), 2)
+
     def test_map_functionalized(self):
         def map_fn(x, y):
             z = x + y
