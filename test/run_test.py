@@ -1540,7 +1540,9 @@ def main():
     prioritized_tests = []
     remaining_tests = selected_tests
     if IS_CI:
-        (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests, REPO_ROOT)
+        (prioritized_tests, remaining_tests) = get_reordered_tests(
+            selected_tests, REPO_ROOT
+        )
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 

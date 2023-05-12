@@ -138,9 +138,7 @@ def _query_changed_test_files() -> List[str]:
 
 
 def _get_previously_failing_tests(repo_root: Path) -> Set[str]:
-    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = (
-        repo_root / ".pytest_cache/v/cache/lastfailed"
-    )
+    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = repo_root / ".pytest_cache/v/cache/lastfailed"
 
     if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
         print(f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH}")
