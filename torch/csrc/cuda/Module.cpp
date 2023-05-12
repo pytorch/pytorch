@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <c10/core/Device.h>
@@ -912,6 +913,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
             alloc_trace_max_entries,
             alloc_trace_record_context);
       });
+
+  m.def("_cuda_isHistoryEnabled", []() {
+    return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
 }
 
 // We choose to ignore certain blocks that are currently allocated
@@ -1082,6 +1087,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
+  m.def("_set_storage_access_error_msg", [](at::Tensor t, std::string s) {
+    t.unsafeGetTensorImpl()
+        ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+  });
+
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
@@ -1089,77 +1099,43 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
-  m.def(
-      "_map_Storage_Refs",
-      [](const py::sequence& outputs,
-         const py::list& outputs_persistent_storage,
-         py::list output_refs,
-         py::list output_data_ptrs) {
-        TORCH_CHECK(outputs.size() == outputs_persistent_storage.size());
+  m.def("_set_cached_tensors_enabled", [](bool enabled) {
+    at::caching::set_cached_tensors_enabled(enabled);
+  });
 
-        for (size_t i = 0, end = outputs.size(); i < end; ++i) {
-          if (!outputs_persistent_storage[i].is_none() ||
-              outputs[i].is_none()) {
-            output_refs.append(py::none());
-            output_data_ptrs.append(py::none());
-            continue;
-          }
+  m.def("_add_cached_tensor", [](const at::Tensor& t) {
+    at::caching::add_cached_tensor(t);
+  });
 
-          auto t = outputs[i].cast<at::Tensor>();
-          c10::StorageImpl* storage = t.storage().unsafeGetStorageImpl();
-          auto weak = c10::raw::intrusive_ptr::make_weak(storage);
-          output_refs.append(reinterpret_cast<size_t>(weak));
-          output_data_ptrs.append(
-              reinterpret_cast<size_t>(storage->data_ptr().get()));
-        }
-      });
+  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
+    at::caching::remove_cached_tensor(t);
+  });
+
+  m.def("_is_cached_tensor", [](const at::Tensor& t) {
+    return at::caching::is_cached_tensor(t);
+  });
+
+  m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+  });
 
   m.def(
-      "_construct_Tensors_From_Storage_and_Metadata",
-      [](const py::list& storages,
-         const py::list& metadatas,
-         py::list& outputs) {
-        TORCH_CHECK(storages.size() == metadatas.size());
-        for (size_t i = 0, end = storages.size(); i < end; ++i) {
-          const auto& maybe_metadata = metadatas[i];
+      "_construct_CUDA_Tensor_From_Storage_And_Metadata",
+      [](py::dict& metadata, c10::Storage s) {
+        auto dtype_arg = metadata["dtype"].ptr();
+        auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
 
-          if (maybe_metadata.is_none()) {
-            outputs.append(py::none());
-            continue;
-          }
+        constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
+        at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
+            std::move(s), cuda_dks, meta);
 
-          const py::dict& metadata = maybe_metadata.cast<py::dict>();
-          c10::Storage s;
-          if (storages[i].is_none()) {
-            s = c10::Storage(
-                c10::Storage::use_byte_size_t(),
-                metadata["nbytes"].cast<int64_t>(),
-                at::DataPtr(
-                    reinterpret_cast<void*>(
-                        metadata["data_ptr"].cast<size_t>()),
-                    metadata["device"].cast<c10::Device>()));
-          } else if (py::isinstance<py::int_>(storages[i])) {
-            s = outputs[storages[i].cast<int64_t>()]
-                    .cast<at::Tensor>()
-                    .storage();
-          } else {
-            s = storages[i].cast<c10::Storage>();
-          }
-
-          auto dtype_arg = metadata["dtype"].ptr();
-          auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
-
-          constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
-          at::Tensor tensor = at::detail::make_tensor_base<c10::TensorImpl>(
-              std::move(s), cuda_dks, meta);
-
-          tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
-              metadata["size"].cast<std::vector<int64_t>>(),
-              metadata["stride"].cast<std::vector<int64_t>>());
-          tensor.unsafeGetTensorImpl()->set_storage_offset(
-              metadata["storage_offset"].cast<int64_t>());
-          outputs.append(std::move(tensor));
-        }
+        tensor.unsafeGetTensorImpl()->set_sizes_and_strides(
+            metadata["size"].cast<std::vector<int64_t>>(),
+            metadata["stride"].cast<std::vector<int64_t>>());
+        tensor.unsafeGetTensorImpl()->set_storage_offset(
+            metadata["storage_offset"].cast<int64_t>());
+        return tensor;
       });
 
   m.def(
@@ -1180,6 +1156,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
   });
+
+  m.def(
+      "_cuda_checkPoolLiveAllocations",
+      [](int device,
+         at::cuda::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
 
   m.def(
       "_cuda_setCheckpointPoolState",

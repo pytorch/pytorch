@@ -1113,12 +1113,12 @@ class TestPrims(TestCase):
             torch.cuda.manual_seed(123)
             for idx in range(repeats):
                 seed, offset = rng_states[idx]
-                result = torch.ops.rngprims.philox_rand((size,),
-                                                        seed=seed,
-                                                        offset=offset,
-                                                        stride=None,
-                                                        device=device,
-                                                        dtype=dtype)
+                result, _ = torch.ops.rngprims.philox_rand((size,),
+                                                           seed=seed,
+                                                           offset=offset,
+                                                           stride=None,
+                                                           device=device,
+                                                           dtype=dtype)
                 results.append(result)
 
             for a, b in zip(references, results):
@@ -1178,6 +1178,14 @@ class TestRefs(TestCase):
         expect = torch.constant_pad_nd(a, pad=[1] * 8)
         self.assertEqual(actual.stride(), expect.stride())
         self.assertTrue(actual.is_contiguous())
+
+    def test_unbind(self):
+        # If unbind returns empty tuple, it breaks some assumptions in some backward tests in test_ops.py.
+        # So can't put this test into common_methods_invocations.py.
+        a = torch.rand([3, 0, 4])
+        actual = refs.unbind(a, 1)
+        expect = torch.unbind(a, 1)
+        self.assertEqual(actual, expect)
 
 
 instantiate_device_type_tests(TestRefs, globals())

@@ -37,6 +37,14 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+try:
+    import torch_np
+
+    HAS_NUMPY_TORCH_INTEROP = True
+except ModuleNotFoundError:
+    torch_np = None
+    HAS_NUMPY_TORCH_INTEROP = False
+
 import importlib
 
 import torch
@@ -261,7 +269,7 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
 def setup_compile_debug():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
         torch._logging.set_logs(
@@ -513,7 +521,7 @@ def clone_tensor(x):
     return y
 
 
-def clone_input(x):
+def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
     if isinstance(x, torch._subclasses.FakeTensor):
@@ -525,7 +533,9 @@ def clone_input(x):
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
-            y.grad = clone_input(x.grad)
+            y.grad = clone_input(x.grad, dtype=dtype)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
 
     with torch.no_grad():
@@ -539,7 +549,9 @@ def clone_input(x):
         if x.is_quantized:
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
-            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+            result = torch.empty(
+                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+            )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
@@ -549,12 +561,14 @@ def clone_input(x):
             if x.is_leaf:
                 result.requires_grad_(x.requires_grad)
             if x.is_leaf and x.grad is not None:
-                result.grad = clone_input(x.grad)
+                result.grad = clone_input(x.grad, dtype=dtype)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return result
 
 
@@ -722,7 +736,7 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(
+    return isinstance(v, (enum.Enum, type)) or istype(
         v,
         (
             types.CodeType,
@@ -737,7 +751,7 @@ def is_safe_constant(v):
             torch.device,
             torch.dtype,
         ),
-    ) or isinstance(v, enum.Enum)
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -792,11 +806,12 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
-def enum_repr(value):
+def enum_repr(value, local):
     enum_name = str(value)
 
     name, val = enum_name.split(".")
-    local_name = f'L["{name}"].{val}'
+    scope = "L" if local else "G"
+    local_name = f'{scope}["{name}"].{val}'
     return local_name
 
 
@@ -808,11 +823,11 @@ def dict_const_keys(value):
     return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
-def dict_const_keys_repr(const_keys):
+def dict_const_keys_repr(const_keys, *, local):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+        const_keys_str = f"{ {enum_repr(k, local=local) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -862,6 +877,8 @@ def same(
     equal_nan=False,
     exact_dtype=True,
     relax_numpy_equality=False,
+    ignore_non_fp=False,
+    log_error=log.error,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -878,6 +895,8 @@ def same(
                 equal_nan,
                 exact_dtype,
                 relax_numpy_equality,
+                ignore_non_fp,
+                log_error=log_error,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -886,7 +905,7 @@ def same(
         assert set(ref.keys()) == set(
             res.keys()
         ), f"keys mismatch {set(ref.keys())} == {set(res.keys())}"
-        for k in ref.keys():
+        for k in sorted(ref.keys()):
             if not (
                 same(
                     ref[k],
@@ -897,9 +916,11 @@ def same(
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                     relax_numpy_equality=relax_numpy_equality,
+                    ignore_non_fp=ignore_non_fp,
+                    log_error=log_error,
                 )
             ):
-                log.error("Accuracy failed for key name %s", k)
+                log_error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -913,9 +934,11 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
+                log_error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
+                if ignore_non_fp:
+                    return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
                     ref.to(dtype=torch.uint8),
@@ -925,7 +948,7 @@ def same(
                     equal_nan=equal_nan,
                 )
                 if not r:
-                    log.error("Accuracy failed: uint8 tensor did not match")
+                    log_error("Accuracy failed: uint8 tensor did not match")
                 return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
@@ -965,7 +988,7 @@ def same(
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
-                    log.error(
+                    log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
                         res_error,
                         ref_error,
@@ -974,17 +997,22 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error("Accuracy failed: allclose not within tol=%s", tol)
+            if ignore_non_fp:
+                return True
+
+            log_error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
+        if ignore_non_fp:
+            return True
         r = ref == res
         if not r:
-            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
+            log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error(
+            log_error(
                 "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
             )
         return r
@@ -995,7 +1023,7 @@ def same(
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): %s != %s", ref, res)
+            log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1023,6 +1051,8 @@ def same(
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
                 relax_numpy_equality=relax_numpy_equality,
+                ignore_non_fp=ignore_non_fp,
+                log_error=log_error,
             )
             for key in ref.__dict__.keys()
         )
@@ -1052,6 +1082,9 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# Keep a record of graph break reasons for logging
+graph_break_reasons = list()
+
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
 seen_code_map = ExactWeakKeyDictionary()
@@ -1077,6 +1110,14 @@ class CompileProfiler:
             if "call" in node.op:
                 self.op_count += 1
         return gm.forward
+
+    def __enter__(self):
+        self.old_report_guard_failure = config.report_guard_failures
+        config.report_guard_failures = True
+        return self
+
+    def __exit__(self, typ, val, traceback):
+        config.report_guard_failures = self.old_report_guard_failure
 
     def get_metrics(self):
         return {"guard_failures": guard_failures}
@@ -1243,10 +1284,11 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
+        # why don't we print the exception here?
         raise TorchRuntimeError() from e
 
 
-def run_node(output_graph, node, args, kwargs, nnmodule):
+def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
@@ -1255,7 +1297,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
 
-    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The tracer arg is only used for 'get_attr' ops
     Note: The nnmodule arg is only used for 'call_module' ops
 
     Nodes that are not call_function, call_method, call_module, or get_attr will
@@ -1271,7 +1313,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             assert nnmodule is not None
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
-            return output_graph.get_submodule(node.target)
+            return tracer.get_submodule(node.target)
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
@@ -1282,23 +1324,23 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     raise AssertionError(op)
 
 
-def get_real_value(node, output_graph):
+def get_real_value(node, tracer):
     """
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    cache = output_graph.real_value_cache
+    cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
 
     op = node.op
     args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
-        lambda n: get_real_value(n, output_graph),
+        lambda n: get_real_value(n, tracer),
     )
 
     if op == "call_module":
-        nn_module = output_graph.nn_modules[node.target]
+        nn_module = tracer.output_graph.nn_modules[node.target]
         if not is_lazy_module(nn_module):
             nn_module = copy.deepcopy(nn_module)
         else:
@@ -1309,7 +1351,7 @@ def get_real_value(node, output_graph):
         nn_module = None
 
     try:
-        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
         raise TorchRuntimeError() from e
@@ -1346,6 +1388,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifdynstaticdefault(count1, count2):
+    if torch._dynamo.config.assume_static_by_default:
         return count1
     else:
         return count2
@@ -1529,3 +1578,45 @@ def nnmodule_has_hooks(
             ]
         )
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+
+def to_numpy_helper(___tmp_0):
+    def convert(obj):
+        if isinstance(obj, torch_np.ndarray):
+            return obj.tensor.numpy()
+        else:
+            return obj
+
+    if isinstance(___tmp_0, tuple):
+        return tuple([convert(obj) for obj in ___tmp_0])
+    return convert(___tmp_0)
+
+
+def defake(x):
+    if not isinstance(x, FakeTensor):
+        return x
+    if x._has_symbolic_sizes_strides:
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
+    else:
+        size = x.size()
+        stride = x.stride()
+    y = torch.empty_strided(
+        size,
+        stride,
+        dtype=x.dtype,
+        device=x.device,
+        requires_grad=x.requires_grad,
+    )
+    y.zero_()
+    return y

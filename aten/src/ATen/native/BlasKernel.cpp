@@ -256,34 +256,34 @@ AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 
 namespace blas_impl {
 #if AT_BUILD_WITH_BLAS()
-float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
+static float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return sdot_(&n, x, &incx, y, &incy);
 }
 
-double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
+static double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
   return ddot_(&n, x, &incx, y, &incy);
 }
 
-c10::complex<float> vdot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> vdot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
   c10::complex<float> result;
   cdotc_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
   return result;
 }
 
-c10::complex<double> vdot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> vdot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
   c10::complex<double> result;
   zdotc_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
   return result;
 }
 
-c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
   c10::complex<double> result;
   zdotu_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
   return result;
 }
 
-c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
   c10::complex<float> result;
   cdotu_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
   return result;

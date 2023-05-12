@@ -16,6 +16,18 @@ from torch.testing._internal.common_cuda import (
 )
 
 
+class CutomizedCtxManager:
+    def __init__(self, mode):
+        self.prev = torch.is_grad_enabled()
+        self.mode = mode
+
+    def __enter__(self):
+        torch._C._set_grad_enabled(self.mode)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        torch._C._set_grad_enabled(self.prev)
+
+
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_no_grad(self):
         def fn1(a, b):
@@ -543,3 +555,129 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.torch.float16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_arguments_binding(self):
+        def f1(x):
+            with torch.cuda.amp.autocast(False):
+                x = torch.sin(x + 1)
+            return x
+
+        def f2(x):
+            with torch.cpu.amp.autocast(False):
+                x = torch.cos(x + 1)
+            return x
+
+        x = torch.rand([2, 3])
+        ref1 = f1(x)
+        ref2 = f2(x)
+        opt_f1 = torch.compile(backend="eager")(f1)
+        opt_f2 = torch.compile(backend="eager")(f2)
+        res1 = opt_f1(x)
+        res2 = opt_f2(x)
+        self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref2, res2))
+
+    def test_generic_context_manager(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                x = torch.relu(x)
+            return x - 1
+
+        with torch.no_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=6)
+
+        with torch.enable_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=6)
+
+    def test_nested_generic_context_manager(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                with CutomizedCtxManager(False):
+                    if torch.is_grad_enabled():
+                        x = x - 3
+                    x = x * 1.5
+                x = torch.relu(x)
+            return x - 1
+
+        with torch.no_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+
+        with torch.enable_grad():
+            torch._dynamo.testing.standard_test(self, fn=fn, nargs=1, expected_ops=9)
+
+    def test_generic_context_manager_with_graph_break(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                torch._dynamo.graph_break()
+                x = torch.relu(x)
+            return x - 1
+
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(cnts.op_count, 2)
+
+        with torch.enable_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 3)
+            self.assertEqual(cnts.op_count, 3)
+
+    def test_nested_generic_context_manager_with_graph_break(self):
+        def fn(x):
+            with CutomizedCtxManager(True):
+                x = x + 1
+                if torch.is_grad_enabled():
+                    x = x * 2
+                with CutomizedCtxManager(False):
+                    if torch.is_grad_enabled():
+                        x = x - 3
+                    torch._dynamo.graph_break()
+                    x = x * 1.5
+                x = torch.relu(x)
+            return x - 1
+
+        x = torch.rand(2, 3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(backend=cnts, fullgraph=False)(fn)
+
+        with torch.no_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+
+        with torch.enable_grad():
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+            self.assertEqual(cnts.frame_count, 3)
+            self.assertEqual(cnts.op_count, 3)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

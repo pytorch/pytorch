@@ -943,7 +943,12 @@ class NativeFunction:
         if (
             "rand" in str(self.func.name)
             or (
-                "dropout" in str(self.func.name)
+                (
+                    "dropout" in str(self.func.name)
+                    or any(
+                        "dropout" in arg.name for arg in self.func.arguments.flat_all
+                    )
+                )
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
                 and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
@@ -1373,7 +1378,7 @@ class FunctionSchema:
             len(mutable_returns) == 0 or len(immutable_returns) == 0
         ), f"NativeFunctions must have either only mutable returns, or only immutable returns. Found: {str(self)}"
         for ret in mutable_returns:
-            assert any([ret.annotation == arg.annotation for arg in out_and_self]), (
+            assert any(ret.annotation == arg.annotation for arg in out_and_self), (
                 'All mutable returns must be aliased either to a keyword argument, or to "self". '
                 "Did you forget to mark an out argument as keyword-only?"
             )

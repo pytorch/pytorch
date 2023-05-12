@@ -93,7 +93,7 @@ inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
 
 template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
-    scalar_t * input, scalar_t * output,
+    const scalar_t * input, scalar_t * output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -107,7 +107,7 @@ __global__ void reflection_pad1d_out_kernel(
 
 template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
-    scalar_t * grad_input, scalar_t * grad_output,
+    scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_w,
     int64_t pad_l, int64_t pad_r) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -122,7 +122,7 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
 template<typename scalar_t>
 __global__ void reflection_pad2d_out_kernel(
-    scalar_t * input, scalar_t * output,
+    const scalar_t * input, scalar_t * output,
     int64_t input_dim_x, int64_t input_dim_y,
     int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane) {
   auto output_xy = threadIdx.x + blockIdx.x * blockDim.x;
@@ -142,7 +142,7 @@ __global__ void reflection_pad2d_out_kernel(
 
 template <typename scalar_t>
 __global__ void reflection_pad2d_backward_out_kernel(
-    scalar_t * grad_input, scalar_t * grad_output,
+    scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_dim_x, int64_t input_dim_y,
     int pad_t, int pad_b, int pad_l, int pad_r, int y_shift, int z_shift, int nplane) {
   auto output_xy = threadIdx.x + blockIdx.x * blockDim.x;
@@ -346,7 +346,7 @@ void reflection_pad2d_out_template(
 
           reflection_pad2d_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+              input.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
               input_w, input_h,
               pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -418,7 +418,7 @@ void reflection_pad2d_backward_out_template(
 
           reflection_pad2d_backward_out_kernel<<<
             grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-              grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+              grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
               input_w, input_h,
               pad_t, pad_b, pad_l, pad_r, block_y, block_z, nplane);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -469,8 +469,8 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
             block_size,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
-            input.data_ptr<scalar_t>(),
-            output.data_ptr<scalar_t>(),
+            input.const_data_ptr<scalar_t>(),
+            output.mutable_data_ptr<scalar_t>(),
             input_w,
             pad_l,
             pad_r);
@@ -523,7 +523,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
+          grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }

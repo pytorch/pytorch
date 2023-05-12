@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -188,6 +189,7 @@ __all__ = [
     "amin",
     "prod",
     "sum",
+    "xor_sum",
     "var",
     #
     # Tensor Creation Prims
@@ -1403,7 +1405,9 @@ collapse_view = _make_prim(
 def _conj_meta(a: TensorLikeType) -> TensorLikeType:
     if not a.dtype.is_complex:
         raise RuntimeError("Expected complex dtype in prims.conj")
-    return a.as_strided(a.shape, a.stride(), a.storage_offset())
+    out = a.as_strided(a.shape, a.stride(), a.storage_offset())
+    torch._C._set_conj(out, not a.is_conj())
+    return out
 
 
 _conj_doc = """
@@ -1815,17 +1819,14 @@ def _as_strided_scatter_meta(
     utils.validate_shape(size)
     utils.validate_strides(stride)
 
-    input_size = input.untyped_storage().size()  # type: ignore[attr-defined]
-    required_view_size = input.element_size() * utils.compute_required_storage_length(
-        size, stride, storage_offset
-    )
+    required_size = utils.compute_required_storage_length(size, stride, storage_offset)
     utils.check(
-        input_size >= required_view_size,
+        input.numel() >= required_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
             f" and itemsize {input.element_size()} requiring a storage size of "
-            f"{required_view_size} are out of bounds "
-            f"for storage of size {input_size}"
+            f"{required_size * input.element_size()} are out of bounds "
+            f"for storage of size {input.numel() * input.element_size()}"
         ),
     )
     utils.check(
@@ -2306,6 +2307,10 @@ _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_xor_sum_doc = """
+    Computes the xor sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
 _prod_doc = """
     Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
@@ -2349,6 +2354,22 @@ sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
     doc=_sum_doc,
+)
+
+
+def _xor_sum_aten(
+    inp: TensorLikeType,
+    dims: Optional[DimsSequenceType],
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    raise NotImplementedError("xor_sum only implemented with inductor")
+
+
+xor_sum = _make_reduction_prim(
+    name="xor_sum",
+    impl_aten=_xor_sum_aten,
+    doc=_xor_sum_doc,
 )
 
 
@@ -2711,6 +2732,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA and not HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and is_cuda and torch.version.cuda and Vh.is_complex():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
@@ -2790,7 +2815,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2968,3 +2993,4 @@ fft_c2r = _make_prim(
 
 register_nvprims()
 register_rng_prims()
+register_debug_prims()

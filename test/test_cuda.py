@@ -1625,7 +1625,7 @@ except RuntimeError as e:
             'HSA_STATUS_ERROR_EXCEPTION',  # ROCm
             'Device-side assertion'  # ROCm
         ]
-        self.assertTrue(any([msg in out or msg in err for msg in expected_messages]))
+        self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
@@ -2531,6 +2531,56 @@ torch.cuda.synchronize()
                     if k == "step":
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
+
+    # Make sure that the parameters become nonsense when scaled gradients are finite
+    # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self):
+        for optimizer_ctor, optimizer_kwargs in product(
+            (torch.optim.Adam, torch.optim.AdamW),
+            (
+                {"foreach": False, "fused": False},
+                {"foreach": True, "fused": False},
+                {"foreach": False, "fused": True},
+            ),
+        ):
+            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
+                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
+
+    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
+        model, _, optimizer, _, data, loss_fn, _ = self._create_scaling_case(
+            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        )
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        for input, target in data:
+            optimizer.zero_grad()
+            with torch.autocast('cuda', enabled=True):
+                output = model(input)
+                loss = loss_fn(output, target)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+
+            # deliberately break grads
+            for j, param in enumerate(model.parameters()):
+                param.grad.copy_(torch.inf if j % 2 else torch.nan)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+        self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
+
+    def test_grad_scale_will_not_overflow(self):
+        model = torch.nn.Linear(5, 1).cuda()
+        optimizer = torch.optim.Adam(model.parameters())
+        scaler = torch.cuda.amp.GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
+        optimizer.zero_grad()
+        x = torch.randn(1, 5).cuda()
+        y = 1e-30 * torch.randn(1, 1).cuda()
+        l = ((model(x) - y)**2).mean()
+        scaler.scale(l).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        assert(scaler._scale != float('inf') and scaler._scale != float('nan'))
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -5580,6 +5630,27 @@ class TestBlockStateAbsorption(TestCase):
 
         inp = torch.rand([1, 3, 255, 255], device="cuda")
         self.checkFunction(m, [inp])
+
+    def test_check_pool_live_allocations(self):
+
+        def foo():
+            return torch.ones([4], device="cuda")
+
+        pool = torch.cuda.graph_pool_handle()
+        graph, outputs = cudagraphify(foo, [], pool=pool)
+
+        index = outputs[0].device.index
+
+        def check(live_dps):
+            return torch._C._cuda_checkPoolLiveAllocations(index, pool, live_dps)
+
+        self.assertTrue(check({outputs[0].data_ptr()}))
+
+        self.assertFalse(check({outputs[0].data_ptr(), 0}))
+        self.assertFalse(check(set()))
+
+        del outputs
+        self.assertTrue(check(set()))
 
 
     def test_allocate_in_thread_to_pool(self):
