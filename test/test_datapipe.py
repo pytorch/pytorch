@@ -858,7 +858,7 @@ class TestFunctionalIterDataPipe(TestCase):
         ]:
             docstring = pydoc.render_doc(thing=getattr(input_dp, dp_funcname))
             try:
-                assert f"(functional name: ``{dp_funcname}`` )" in docstring
+                assert f"(functional name: ``{dp_funcname}``)" in docstring
             except AssertionError:
                 print(dp_funcname)
                 print(docstring)
