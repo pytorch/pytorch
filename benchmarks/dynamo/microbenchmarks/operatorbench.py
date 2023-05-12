@@ -39,10 +39,7 @@ def compute_speedups(
 
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
-                median_ms, _, _ = triton.testing.do_bench(
-                    lambda: model(*example_inputs)
-                )
-                timings[rep, m] = median_ms
+                timings[rep, m] = triton.testing.do_bench(lambda: model(*example_inputs))
             else:
                 from torch._inductor.utils import timed
 
@@ -230,7 +227,7 @@ def benchmark(
                 print(f"error {operator}")
                 print(e)
                 # comment out this line to avoid blocking other tests
-                # raise e
+                #raise e
 
         if not timings:
             continue

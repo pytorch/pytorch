@@ -693,6 +693,7 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
+        self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         self.initialize_range_tree(pid_cache)
@@ -727,6 +728,11 @@ class TritonKernel(Kernel):
         # will need to recompile if we cross a larger power of 2 boundary
         V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
         return True
+
+    def set_last_usage(self, nodes):
+        if not self.inside_reduction or self.persistent_reduction:
+            return
+        self.last_usage = set(itertools.chain.from_iterable(n.last_usage for n in nodes if n is not EnableReduction))
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -1096,19 +1102,25 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index)
 
+
         # Keep the variable in cache if we are going to reuse it
         # TODO(lezcano) We could potentially do better
         # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        if self.mutations:
-            last_use = any(
-                name in self.current_node.last_usage for name in self.mutations
+        # Keep the variable in cache last if all the folowing hold
+        #  1) We are in a reduction loop
+        #  2) Its not its last use
+        #  3) This load will not be lifted to body the body
+        #  4) We are not broadcasting
+        if self.inside_reduction and not self.persistent_reduction:
+            names = self.mutations or {name}
+            last_use = len(names & self.last_usage) > 0
+            is_broadcasted = not set.issubset(
+                set(self.range_tree_nodes.keys()), original_index.free_symbols
             )
+            evict_last = not last_use and ("rmask" in mask or indirect_indexing) and not is_broadcasted
+            ep = ", eviction_policy='evict_last'" if evict_last else ""
         else:
-            last_use = name in self.current_node.last_usage
-        broadcasting = "rmask" in mask and "xmask" not in mask and not self.persistent_reduction
-        evict_last = not last_use or broadcasting
-        ep = ", eviction_policy='evict_last'" if evict_last else ""
-
+            ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -1880,6 +1892,7 @@ class TritonScheduling:
             return "tl.int32"
         return "tl.int64"
 
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
@@ -1905,6 +1918,10 @@ class TritonScheduling:
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
+        def current_reduction_nodes(nodes):
+            return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
+
+
         with TritonKernel(
             *tiled_groups,
             reduction_hint=reduction_hint_val,
@@ -1912,14 +1929,17 @@ class TritonScheduling:
             index_dtype=index_dtype,
         ) as kernel:
             stack = contextlib.ExitStack()
+            kernel.set_last_usage(current_reduction_nodes(node_schedule))
+
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
                     node.mark_run()
-            for node in node_schedule:
+            for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
+                    kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - mostly works but needs a couple fixes
                     if not dynamo_config.dynamic_shapes:
