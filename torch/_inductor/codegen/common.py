@@ -422,6 +422,7 @@ class KernelArgs:
         )
 
     def wrap_ptr_arg(self, buf, dtype):
+        breakpoint(0)
         return f"c_void_p({buf}.data_ptr())"
 
     def wrap_size_arg(self, size):

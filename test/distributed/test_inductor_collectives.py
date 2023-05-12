@@ -338,11 +338,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert counter.frame_count == 1
 
-        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        if torch._dynamo.config.dynamic_shapes:
-            self.assertEqual(counter.op_count, 3)
-        else:
-            self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.op_count, 2)
         assert same(out, correct)
 
     def test_dynamo_trace_all_gather_tensor(self):

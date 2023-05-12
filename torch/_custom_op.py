@@ -157,9 +157,9 @@ def custom_op(
             get_autograd_not_implemented_kernel(weakref.proxy(result))
         )
 
-        torch._C._dispatch_set_report_error_callback(
-            ophandle, functools.partial(report_error_callback, weakref.proxy(result))
-        )
+        # torch._C._dispatch_set_report_error_callback(
+        #     ophandle, functools.partial(report_error_callback, weakref.proxy(result))
+        # )
 
         return result
 
