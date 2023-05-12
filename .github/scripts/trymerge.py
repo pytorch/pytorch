@@ -86,7 +86,7 @@ class FlakyRule:
             )
         )
 
-    def __repr__(self)->str:
+    def __repr__(self) -> str:
         return f"FlakyRule[name='{self.name}', captures={self.captures}]"
 
 
