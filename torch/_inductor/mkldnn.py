@@ -248,8 +248,8 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         if isinstance(example_input, torch.Tensor)
     )
 
-    # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
+    # make sure the autograd and autocast are disabled.
+    if torch.is_grad_enabled() or torch.is_autocast_cpu_enabled():
         return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
@@ -314,6 +314,14 @@ def pack_module(gm: torch.fx.GraphModule):
                     or dynamo_config.dynamic_shapes
                     or len(node.args) > 1
                     or len(node.kwargs) > 0
+                    or any(
+                        not isinstance(output_padding, int)
+                        or not isinstance(stride, int)
+                        or output_padding >= stride
+                        for output_padding, stride in zip(
+                            cur_module.output_padding, cur_module.stride
+                        )
+                    )  # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
                 ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](

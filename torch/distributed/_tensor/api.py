@@ -7,7 +7,7 @@ import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -277,7 +277,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+        device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
         # convert the local tensor to desired device base on device mesh's device_type
         if not local_tensor.is_meta:
@@ -398,7 +398,7 @@ def distribute_tensor(
         A :class:`DTensor` object
     """
     # get default device mesh if there's nothing specified
-    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
@@ -489,8 +489,7 @@ def distribute_module(
         A module that contains parameters/buffers that are all `DTensor`s.
     """
 
-    if device_mesh is None:
-        device_mesh = get_global_device_mesh()
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
