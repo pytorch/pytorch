@@ -272,7 +272,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
       id<MTLComputePipelineState> stridedIndicesPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
