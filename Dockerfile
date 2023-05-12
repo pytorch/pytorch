@@ -8,7 +8,7 @@
 #       For reference:
 #           https://docs.docker.com/develop/develop-images/build_enhancements/
 ARG BASE_IMAGE=ubuntu:20.04
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.8
 
 FROM ${BASE_IMAGE} as dev-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -26,7 +26,7 @@ RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 ENV PATH /opt/conda/bin:$PATH
 
 FROM dev-base as conda
-ARG PYTHON_VERSION=3.10
+ARG PYTHON_VERSION=3.8
 # Automatically set by buildx
 ARG TARGETPLATFORM
 # translating Docker's TARGETPLATFORM into miniconda arches
