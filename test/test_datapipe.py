@@ -857,7 +857,14 @@ class TestFunctionalIterDataPipe(TestCase):
             "zip",
         ]:
             docstring = pydoc.render_doc(thing=getattr(input_dp, dp_funcname))
-            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            try:
+                assert f"(functional name: ``{dp_funcname}`` )" in docstring
+            except AssertionError:
+                print(dp_funcname)
+                print(docstring)
+                print(input_dp.__doc__)
+                raise ValueError(dp_funcname, "IterDataPipe docstring incorrect")
+
             assert "Args:" in docstring
             assert "Example:" in docstring or "Examples:" in docstring
 
