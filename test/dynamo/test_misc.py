@@ -5178,6 +5178,15 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
+    def test_builtin_hash(self):
+        def func(*args):
+            y = hash(args)
+            return y
+
+        eager_out = func("test_hash", 10)
+        compile_out = torch._dynamo.optimize("eager")(func)("test_hash", 10)
+        self.assertEqual(eager_out, compile_out)
+
     def test_nested_function_resuming_with_correct_globals(self):
         # https://github.com/pytorch/pytorch/issues/99665
         try:

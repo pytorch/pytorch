@@ -68,6 +68,7 @@ class BuiltinVariable(VariableTracker):
             str.format,
             sum,
             type,
+            hash,
             operator.pos,
             operator.neg,
             operator.not_,
