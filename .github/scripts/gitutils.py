@@ -146,7 +146,7 @@ class GitRepo:
     def show_ref(self, name: str) -> str:
         refs = self._run_git("show-ref", "-s", name).strip().split("\n")
         if not all(refs[i] == refs[0] for i in range(1, len(refs))):
-            raise RuntimeError(f"referce {name} is ambigous")
+            raise RuntimeError(f"reference {name} is ambiguous")
         return refs[0]
 
     def rev_parse(self, name: str) -> str:

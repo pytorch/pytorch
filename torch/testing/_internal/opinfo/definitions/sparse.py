@@ -569,19 +569,6 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
             sample,
             error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor",
         )
-    elif (
-        layout is torch.sparse_csr
-        and t_inp.dense_dim() > 0
-        and t_inp._nnz() == 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex=(
-                "Only tensors with two sparse dimensions can be converted to the SparseCsr layout"
-                ", got self with 3 sparse dimensions."
-            ),
-        )
     elif layout is torch.sparse_csc and t_args[0].ndim > 0:
         return ErrorInput(
             sample, error_regex="Expected result Tensor to be of format CSR"
