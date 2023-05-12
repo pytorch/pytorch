@@ -22,7 +22,6 @@ from torch._dynamo.debug_utils import (
     helper_for_dump_minify,
     InputReader,
     InputWriter,
-    MAX_CONSTANT_NUMEL_INLINE,
     minifier_dir,
     NNModuleToString,
     NopInputReader,
@@ -263,8 +262,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     # We should pass ints and look at the GraphModule placeholders
     # to resolve them to SymInt (if necessary)
     example_inputs = [
-        i.node.hint if isinstance(i, torch.SymInt) else i
-        for i in example_inputs
+        i.node.hint if isinstance(i, torch.SymInt) else i for i in example_inputs
     ]
 
     try:
