@@ -7,33 +7,40 @@ on:
   workflow_dispatch:
     inputs:
       training:
-        description: Whether to run training
+        description: Run training?
         required: false
-        default: "true"
+        type: boolean
+        default: true
       inference:
-        description: Whether to run inference
+        description: Run inference?
         required: false
-        default: "false"
+        type: boolean
+        default: false
       default:
-        description: Whether to run inductor_default
+        description: Run inductor_default?
         required: false
-        default: "true"
+        type: boolean
+        default: true
       dynamic:
-        description: Whether to run inductor_dynamic_shapes
+        description: Run inductor_dynamic_shapes?
         required: false
-        default: "true"
+        type: boolean
+        default: true
       cudagraphs:
-        description: Whether to run inductor_cudagraphs
+        description: Run inductor_cudagraphs?
         required: false
-        default: "true"
+        type: boolean
+        default: true
       cppwrapper:
-        description: Whether to run inductor_cpp_wrapper for inference
+        description: Run inductor_cpp_wrapper for inference?
         required: false
-        default: "false"
+        type: boolean
+        default: false
       maxautotune:
-        description: Whether to run inductor_max_autotune
+        description: Run inductor_max_autotune?
         required: false
-        default: "false"
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
