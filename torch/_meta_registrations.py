@@ -404,6 +404,30 @@ def checkInputsSolver(
     )
 
 
+def checkSameDevice(
+    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
+):
+    check(
+        result.device == input.device,
+        lambda: (
+            f"{fn_name}: Expected {result_name} and input tensors to be on the same device, but got "
+            f"{result_name} on {result.device} and input on {input.device}"
+        ),
+    )
+
+
+def checkLinalgCompatibleDtype(
+    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
+):
+    check(
+        torch.can_cast(input.dtype, result.dtype),
+        lambda: (
+            f"{fn_name}: Expected {result_name} to be safely castable from {input.dtype} dtype, but got "
+            f"{result_name} with dtype {result.dtype}"
+        ),
+    )
+
+
 def checkUplo(UPLO: str):
     UPLO_uppercase = UPLO.upper()
     check(
@@ -463,6 +487,110 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     # infos
     infos = A.new_empty(A_shape[0 : ndim - 2], dtype=torch.int32)
     return L, infos
+
+
+def householder_product_out_helper(
+    input: Tensor,
+    tau: Tensor,
+    result: Tensor,
+) -> Tensor:
+    assert input.ndim >= 2
+    assert input.size(-2) >= input.size(-1)
+    assert input.size(-1) >= tau.size(-1)
+
+    assert input.dtype == tau.dtype
+    assert input.device == tau.device
+
+    assert result.dtype == input.dtype
+    assert result.device == input.device
+
+    # if result has no elements we can modify it
+    if result.numel() == 0:
+        result = _maybe_resize_out(result, input.mT.shape)
+        result.transpose_(-2, -1)
+
+    # result tensor must be in batched column major order (Fortran contiguous)
+    assert result.mT.is_contiguous()
+    assert result.shape == input.shape
+
+    result.copy_(input)
+
+    return result
+
+
+@register_meta(
+    [aten.linalg_householder_product.default, aten.linalg_householder_product.out]
+)
+@out_wrapper()
+def linalg_householder_product(input: Tensor, tau: Tensor):
+    check(
+        input.ndim >= 2,
+        lambda: "torch.linalg.householder_product: input must have at least 2 dimensions.",
+    )
+    check(
+        input.size(-2) >= input.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-2] must be greater than or equal to input.shape[-1]",
+    )
+    check(
+        input.size(-1) >= tau.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-1] must be greater than or equal to tau.shape[-1]",
+    )
+
+    check(
+        input.ndim - tau.ndim == 1,
+        lambda: (
+            f"torch.linalg.householder_product: Expected tau to have one dimension less than input, "
+            f"but got tau.ndim equal to {tau.ndim} and input.ndim is equal to {input.ndim}"
+        ),
+    )
+    if input.ndim > 2:
+        expected_batch_tau_shape = input.shape[:-2]
+        actual_batch_tau_shape = tau.shape[:-1]
+        check(
+            actual_batch_tau_shape == expected_batch_tau_shape,
+            lambda: (
+                f"torch.linalg.householder_product: Expected batch dimensions of tau to be "
+                f"equal to input.shape[:-2], but got {actual_batch_tau_shape}"
+            ),
+        )
+
+    check(
+        tau.dtype == input.dtype,
+        lambda: (
+            f"torch.linalg.householder_product: tau dtype {tau.dtype}"
+            f" does not match input dtype {input.dtype}"
+        ),
+    )
+    checkSameDevice("torch.linalg.householder_product", tau, input, "tau")
+
+    result = input.new_empty([0])
+
+    checkSameDevice("torch.linalg.householder_product", result, input)
+    checkLinalgCompatibleDtype("torch.linalg.householder_product", result, input)
+
+    result_input_same_type = result.dtype == input.dtype
+    result_equal_expected_shape = result.shape == input.shape
+    is_batched_column_major = False
+    if result.ndim >= 2:
+        is_batched_column_major = result.mT.is_contiguous()
+
+    # if result is not empty and not in batched column major format
+    copy_needed = result.numel() != 0 and not is_batched_column_major
+    # or result does not have the same dtype as input
+    copy_needed |= not result_input_same_type
+    # or result does not have the expected shape
+    copy_needed |= result.numel() != 0 and not result_equal_expected_shape
+    # we have to allocate a temporary tensor
+    if copy_needed:
+        result_tmp = input.new_empty([0])
+        result_tmp = householder_product_out_helper(input, tau, result_tmp)
+        result = _maybe_resize_out(result, result_tmp.shape)
+        result.copy_(result_tmp)
+    else:
+        # use result's storage directly
+        result = householder_product_out_helper(input, tau, result)
+
+    return result
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
