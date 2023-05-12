@@ -2,8 +2,8 @@ name: inductor-A100-perf-nightly
 
 on:
   schedule:
-    - cron: 0 * * * 1,2,4,5,6
-    - cron: 0 * * * 0,3
+    - cron: 0 7 * * 1,2,4,5,6
+    - cron: 0 7 * * 0,3
   workflow_dispatch:
     inputs:
       training:
@@ -74,10 +74,11 @@ jobs:
     name: cuda11.8-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
-    if: github.event.schedule == '0 * * * 1,2,4,5,6'
+    if: github.event.schedule == '0 7 * * 1,2,4,5,6'
     with:
       # training only
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80-training-true-inference-false-default-true-dynamic-true-cudagraphs-true
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
+      dashboard-tag: training-true-inference-false-default-true-dynamic-true-cudagraphs-true
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
@@ -87,10 +88,11 @@ jobs:
     name: cuda11.8-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
-    if: github.event.schedule == '0 * * * 0,3'
+    if: github.event.schedule == '0 7 * * 0,3'
     with:
       # training + inference
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80-training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
@@ -102,7 +104,8 @@ jobs:
     needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80-training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-maxautotune-${{ inputs.maxautotune }}
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-maxautotune-${{ inputs.maxautotune }}
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
