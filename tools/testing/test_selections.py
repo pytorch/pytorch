@@ -143,6 +143,7 @@ def _get_previously_failing_tests() -> Set[str]:
     )
 
     if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
+        print(f"No pytorch cache found at {PYTORCH_FAILED_TESTS_CACHE_FILE_PATH}")
         return set()
 
     with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
@@ -154,6 +155,7 @@ def _get_previously_failing_tests() -> Set[str]:
 
 def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
     prioritized_tests = set()
+    print(f"Found {len(last_failed_tests)} test in cache file")
 
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
     # We just need the test_file part, without the extension
@@ -193,7 +195,7 @@ def get_reordered_tests(
     We prioritize running test files that were changed.
     """
 
-    def print_tests(tests: Set[str], test_group: str):
+    def print_tests(tests: Set[str], test_group: str) -> None:
         if not tests:
             return
 

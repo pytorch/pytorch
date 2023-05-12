@@ -1,3 +1,5 @@
+import io
+import json
 import pathlib
 import random
 import sys
@@ -11,7 +13,7 @@ try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
     from tools.testing.test_selections import (
-        _parse_prev_failing_test_files,
+        _get_previously_failing_tests,
         calculate_shards,
         get_reordered_tests,
         ShardedTest,
@@ -343,29 +345,50 @@ def mocked_get_modified_tests() -> Set[str]:
     return {"test2", "test4"}
 
 
-class TestParsePrevTests(unittest.TestCase):
-    def test_empty_cache(self) -> None:
-        last_failed_file_contents = {
-            "": True,
-        }
+def mocked_file_object(contents: Dict[Any, Any]) -> io.IOBase:
+    file_object = io.StringIO()
+    json.dump(contents, file_object)
+    file_object.seek(0)
+    return file_object
 
+
+class TestParsePrevTests(unittest.TestCase):
+    @mock.patch("pathlib.Path.exists", return_value=False)
+    def test_cache_does_not_exist(self, mock_exists: Any) -> None:
         expected_failing_test_files: Set[str] = set()
 
-        found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
+        found_tests = _get_previously_failing_tests()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
-    def test_dedupes_failing_test_files(self) -> None:
-        last_failed_file_contents = {
-            "test_car.py::TestCar::test_num[17]": True,
-            "test_car.py::TestBar::test_num[25]": True,
-            "test_far.py::TestFar::test_fun_copy[17]": True,
-            "test_bar.py::TestBar::test_fun_copy[25]": True,
-        }
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("builtins.open", return_value=mocked_file_object({"": True}))
+    def test_empty_cache(self, mock_exists: Any, mock_open: Any) -> None:
+        expected_failing_test_files: Set[str] = set()
 
+        found_tests = _get_previously_failing_tests()
+
+        self.assertSetEqual(expected_failing_test_files, found_tests)
+        mock_open.assert_called()
+
+    last_failed_file_contents_with_multiple_tests_per_file = {
+        "test_car.py::TestCar::test_num[17]": True,
+        "test_car.py::TestBar::test_num[25]": True,
+        "test_far.py::TestFar::test_fun_copy[17]": True,
+        "test_bar.py::TestBar::test_fun_copy[25]": True,
+    }
+
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch(
+        "builtins.open",
+        return_value=mocked_file_object(
+            last_failed_file_contents_with_multiple_tests_per_file
+        ),
+    )
+    def test_dedupes_failing_test_files(self, mock_exists: Any, mock_open: Any) -> None:
         expected_failing_test_files = {"test_car", "test_bar", "test_far"}
 
-        found_tests = _parse_prev_failing_test_files(last_failed_file_contents)
+        found_tests = _get_previously_failing_tests()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
