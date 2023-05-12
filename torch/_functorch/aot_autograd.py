@@ -3173,7 +3173,6 @@ def create_aot_dispatcher_function(
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
-                print("1")
                 fw_metadata = run_functionalized_fw_and_collect_metadata(
                     flat_fn,
                     keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
@@ -3223,7 +3222,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
         # You can put more passes here
 
-        print("2")
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
             # During export, we don't get back a callable - we get back the raw fx graph
@@ -3233,7 +3231,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
-        print("3")
+
         return compiled_fn
 
 
