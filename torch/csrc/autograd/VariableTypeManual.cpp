@@ -395,7 +395,9 @@ const Tensor& resize_(
     SymIntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   // Hold sizes to verify if we actually resize `self`.
-  auto org_size = self.sym_sizes();
+  // Explicitly copy data, since resizing can move original data
+  // and make references invalid.
+  auto org_size = self.sym_sizes().vec();
   {
     at::AutoDispatchBelowADInplaceOrView guard;
     at::redispatch::resize__symint(
@@ -417,7 +419,9 @@ const Tensor& resize_as_(
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   // Hold sizes to verify if we actually resize `self`.
-  auto org_size = self.sym_sizes();
+  // Explicitly copy data, since resizing can move original data
+  // and make references invalid.
+  auto org_size = self.sym_sizes().vec();
   {
     at::AutoDispatchBelowADInplaceOrView guard;
     at::redispatch::resize_as_(
