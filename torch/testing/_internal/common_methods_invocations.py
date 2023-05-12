@@ -15116,7 +15116,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('attn',
            aten_name=None,
-           dtype=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16),
            supports_out=False,
            supports_autograd=True,
            sample_inputs_func=sample_inputs_attn,
