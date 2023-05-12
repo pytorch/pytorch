@@ -9,6 +9,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_dist_composable import (
@@ -110,11 +112,13 @@ class TestModelCheckpointing(FSDPTest):
         on the composable path.
         """
         self.run_subtests(
-            {"ignore_modules": [False, True]},
+            {"ignore_modules": [False, True], "sharded_state_dict": [False, True]},
             self._test_save_dict_save_load_flow,
         )
 
-    def _test_save_dict_save_load_flow(self, ignore_modules: bool):
+    def _test_save_dict_save_load_flow(
+        self, ignore_modules: bool, sharded_state_dict: bool
+    ):
         local_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
@@ -138,9 +142,13 @@ class TestModelCheckpointing(FSDPTest):
         )
 
         # TODO: test state_dict_type after https://github.com/pytorch/pytorch/issues/90954 is resolved
+        if not sharded_state_dict:
+            FSDP.set_state_dict_type(save_model, StateDictType.FULL_STATE_DICT)
+        else:
+            FSDP.set_state_dict_type(save_model, StateDictType.SHARDED_STATE_DICT)
         state_dict = save_model.state_dict()
         local_state_dict = local_model.state_dict()
-        self._check_state_dict_parity(local_state_dict, state_dict)
+        self._check_state_dict_parity(local_state_dict, _gather_state_dict(state_dict))
 
         load_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -155,6 +163,10 @@ class TestModelCheckpointing(FSDPTest):
                 load_model.get_ignored_modules() if ignore_modules else []
             ),
         )
+        if not sharded_state_dict:
+            FSDP.set_state_dict_type(load_model, StateDictType.FULL_STATE_DICT)
+        else:
+            FSDP.set_state_dict_type(load_model, StateDictType.SHARDED_STATE_DICT)
         load_model.load_state_dict(state_dict)
         self._check_model_parity(load_model, save_model)
 

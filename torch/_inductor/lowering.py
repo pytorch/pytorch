@@ -86,7 +86,6 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
@@ -1414,7 +1413,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
 make_fallback(aten.view_as_complex.default, require_contiguous)
 
@@ -2685,11 +2683,17 @@ def reflection_pad2d_backward(grad_output, x, padding):
         bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
 
         # Accumulate gradients from different areas
-        grad = load_from_output(center_x, center_y)
-        accumulate(center_x, left_reflect_y, (y, 1, left))
-        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top))
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        # If some of the padding is negative, center load is not always valid
+        range_cx = (center_x, 0, h + top + bot)
+        range_cy = (center_y, 0, w + left + right)
+        cond = ops.and_(
+            index_range_condition(range_cx), index_range_condition(range_cy)
+        )
+        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
+        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
         accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
         accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
         accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))

@@ -2069,7 +2069,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'x' Tensor device index mismatch. Expected device index to be"
+            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -3556,6 +3556,10 @@ class CommonTemplate:
         template([1, 1, 8, 8], [0, 0, 0, 0])
         template([1, 1, 8, 8], [1, 1, 1, 1])
         template([1, 1, 8, 8], [1, 2, 3, 4])
+        template([1, 1, 8, 8], [0, -1, 2, 2])
+        template([1, 1, 8, 8], [-1, 0, 2, 2])
+        template([1, 1, 8, 8], [2, 2, 0, -1])
+        template([1, 1, 8, 8], [2, 2, -1, 0])
 
     def test_grid_sampler_2d(self):
         def fn(a, b):
@@ -5564,6 +5568,38 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @requires_cuda()
+    @torch._inductor.config.patch("shape_padding", True)
+    def test_shape_padding(self):
+        if torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("dynamic shapes do not support padding")
+
+        dtypes = [
+            torch.float16,
+            torch.float32,
+        ]
+
+        b, m, n, k = 7, 11, 13, 15
+
+        def gen(*shape, dtype=torch.float32):
+            return torch.randn(*shape, device="cuda", dtype=dtype) / k + 1.0
+
+        for dtype in dtypes:
+            x = gen(m, k, dtype=dtype)
+            y = gen(k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.mm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.addmm(z, x, y), (x, y, z))
+
+        for dtype in dtypes:
+            x = gen(b, m, k, dtype=dtype)
+            y = gen(b, k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.bmm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
@@ -6021,6 +6057,7 @@ class CommonTemplate:
 class TestFailure:
     suffixes: Tuple[str]
     is_skip: bool = False
+    __test__: bool = False
 
 
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
@@ -6165,7 +6202,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
-            inps = [torch.randn(2, 4, 16, 16).cuda()]
+            inps = [torch.randn(2, 4, 16, 16, device="cuda")]
             code = run_and_get_triton_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
@@ -6239,6 +6276,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_computed_indirect_mask(self):
+            def fn(x, n):
+                tmp = torch.arange(n, device=x.device)
+                return x[tmp] + 1
+
+            x = torch.randn(8, device="cuda")
+            fn_opt = torch.compile(fn)
+            code = run_and_get_triton_code(fn_opt, x, 8)
+            # load should be masked
+            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
+            self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")

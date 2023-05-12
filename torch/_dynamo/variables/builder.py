@@ -798,7 +798,7 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
-            assert type(value) in (torch.Tensor, torch.nn.Parameter)
+            assert type(value) in (torch.Tensor, torch.nn.Parameter), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -867,6 +867,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and not isinstance(self.get_source(), RandomValueSource)
             ):
                 if value < 0 or torch._dynamo.config.specialize_int:
                     # Negative values don't create_symbol correctly,
@@ -882,7 +883,28 @@ class VariableBuilder:
 
                 shape_env = self.tx.output.shape_env
 
-                dynamic_dim = DimDynamic.DYNAMIC
+                name = self.source.name()
+                if name not in self.tx.output.frame_state:
+                    curr_size = value
+                else:
+                    curr_size = self.tx.output.frame_state[name]
+                    if curr_size != value:
+                        curr_size = None
+                self.tx.output.frame_state[name] = curr_size
+
+                # TODO: This should be dynamic, as we in general do not
+                # know if bare integers are actually going to be sizevars
+                # and it is inappropriate to eagerly duck size them with
+                # real sizevars
+                if curr_size is None or not config.assume_static_by_default:
+                    dynamic_dim = DimDynamic.DYNAMIC
+                else:  # assume_static_by_default
+                    # TODO: dynamic_dim = DimDynamic.STATIC should work but
+                    # for some reason it doesn't
+                    return ConstantVariable(
+                        value=value,
+                        guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
+                    )
 
                 wrapped_value = shape_env.create_symintnode(
                     # TODO: This is wrong wrong wrong, create_symbol will
@@ -1261,7 +1283,7 @@ def wrap_to_fake_tensor_and_record(
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
-                if marked_dynamic:
+                if curr_sizes and marked_dynamic:
                     curr_sizes[i] = None
 
                 # We will process constraints first, as they will imply that we
