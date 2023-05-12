@@ -145,7 +145,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
         duduce_logger(opt_ctx.dtype, False)
         duduce_logger(opt_ctx.vec_dtype, True)
         _node.meta[OptimizationContext.key] = opt_ctx
-        return True
+        return opt_ctx.dtype is not None
 
     new_node_propogated = False
     for node in sub_graph.nodes:
