@@ -320,11 +320,11 @@ test_perf_for_dashboard() {
     modes+=(inference)
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-  local targets=(accuray performance)
+  local targets=(accuracy performance)
 
   for mode in "${modes[@]}"; do
     for target in "${targets[@]}"; do
-      target_flag="--${target}"
+      local target_flag="--${target}"
       if [[ "$target" == "performance" ]]; then
         target_flag+=" --cold-start-latency"
       fi

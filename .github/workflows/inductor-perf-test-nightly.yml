@@ -41,7 +41,7 @@ concurrency:
 
 jobs:
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-build:
-    name: cuda11.8-py3.10-gcc7
+    name: cuda11.8-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
@@ -63,7 +63,7 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-5days:
+  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-5days:
     name: cuda11.8-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
