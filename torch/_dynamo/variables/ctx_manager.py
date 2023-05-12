@@ -196,21 +196,32 @@ class AutocastModeVariable(ContextWrappingVariable):
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ]
-        # device_type : str,
-        # dtype : Optional[_dtype] = None,
-        # enabled : bool = True,
-        # cache_enabled : Optional[bool] = None):cache_enabled
+        # torch.amp.autocast_mode.autocast arguments and default vallues
+        #  - device_type : str,
+        #  - dtype : Optional[_dtype] = None,
+        #  - enabled : bool = True,
+        #  - cache_enabled : Optional[bool] = None):cache_enabled
+        arg_names1 = ["device_type", "dtype", "enabled", "cache_enabled"]
+        # torch.{cuda/cpu}.amp.autocast arguments and default vallues
+        #  - enabled : bool = True,
+        #  - dtype : torch.dtype = torch.float16(for cuda) or torch.bfloat16(for cpu)
+        #  - cache_enabled : bool = True
+        arg_names2 = ["enabled", "dtype", "cache_enabled"]
+        arg_names = (
+            arg_names1 if func is torch.amp.autocast_mode.autocast else arg_names2
+        )
+
         bound_args = inspect.signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
         kwargs.clear()
 
-        for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+        for key in arg_names:
             if key == "device_type" and func in [
                 torch.cuda.amp.autocast,
                 torch.cpu.amp.autocast,
             ]:
-                arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
+                continue
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
@@ -218,47 +229,55 @@ class AutocastModeVariable(ContextWrappingVariable):
             else:
                 target_values.append(arg)
 
+        kwargs["func"] = func
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
         mode = kwargs.pop("mode", None)
+        func = kwargs.pop("func", None)
+        assert func is not None
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.target_values = target_values
         self.mode = mode
+        self.func = func
 
     def exit(self, tx, *args):
         self.mode = (
-            exit_functional_autocast(self.mode[0]),
-            tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
-            ),
+            exit_autocast(self.mode[0]),
+            tx.output.create_node("call_function", exit_autocast, (self.mode[1],), {}),
         )
 
     def enter(self, tx):
         self.mode = (
-            enter_functional_autocast(*self.target_values),
+            get_enter_autocast(self.func)(*self.target_values),
             tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
+                "call_function",
+                get_enter_autocast(self.func),
+                (*self.target_values,),
+                {},
             ),
         )
 
     def module_name(self):
-        return "torch.amp.autocast_mode"
+        return self.func.__module__
 
     def fn_name(self):
         return "autocast"
 
 
-def enter_functional_autocast(*vals):
-    mode = torch.amp.autocast(*vals)
-    mode.__enter__()
-    return mode
+def get_enter_autocast(func):
+    def enter_autocast(*vals):
+        mode = func(*vals)
+        mode.__enter__()
+        return mode
+
+    return enter_autocast
 
 
-def exit_functional_autocast(mode):
+def exit_autocast(mode):
     mode.__exit__(None, None, None)
 
 
