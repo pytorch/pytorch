@@ -5,7 +5,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta,
+    instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta, skipCUDAIfRocm,
     onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -143,6 +143,17 @@ class TestTorchDlPack(TestCase):
         with torch.cuda.stream(torch.cuda.default_stream()):
             x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
             from_dlpack(x)
+
+    @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_convert_default_stream(self, device):
+        x = torch.zeros(2**30, device=device)
+        torch.cuda.default_stream().synchronize()
+        self.assertTrue(torch.cuda.default_stream().query())
+        d = x.__dlpack__(1)
+        # check that the default stream has work
+        self.assertFalse(torch.cuda.default_stream().query())
 
     @skipMeta
     @onlyNativeDeviceTypes
