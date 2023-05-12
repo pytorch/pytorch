@@ -620,5 +620,15 @@ std::string OperatorEntry::dumpState() const {
   return oss.str();
 }
 
+std::unordered_set<c10::OperatorName>& get_opname_override_allowlist() {
+  static std::unordered_set<c10::OperatorName> opname_array;
+  return opname_array;
+}
+
+bool check_opname_in_allowlist(const c10::OperatorName& name) {
+  auto opname_array = get_opname_override_allowlist();
+  return opname_array.count(name) > 0;
+}
+
 }
 }

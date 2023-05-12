@@ -305,14 +305,9 @@ private:
   const AnnotatedKernel* getKernelForDispatchKey(DispatchKey dispatch_key) const;
 };
 
-std::unordered_set<c10::string_view>& get_opname_override_allowlist() {
-  static std::unordered_set<c10::string_view> opname_array;
-  return opname_array;
-}
+TORCH_API std::unordered_set<c10::OperatorName>& get_opname_override_allowlist();
 
-bool check_opname_in_allowlist(c10::string_view) {
-  auto opname_array = get_opname_allow_override();
-  return opname_array.count(string_view) > 0;
-}
+TORCH_API bool check_opname_in_allowlist(const c10::OperatorName& name);
+
 } // namespace impl
 } // namespace c10
