@@ -303,10 +303,6 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
-if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-  export TORCHINDUCTOR_MAX_AUTOTUNE=1
-fi
-
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -314,62 +310,52 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  dtype=amp
-  backend=inductor
-  for mode in inference training; do
-    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    # Run accuracy test for inductor with different configs
-    # --disable-cudagraphs is the default inductor behavior
-    # TODO: update here once cudagraphs is turned on as default
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      fi
-    fi
+  local dtype=amp
+  local backend=inductor
+  local modes=()
+  if [[ "$BUILD_ENVIRONMENT" == *training-true* ]]; then
+    modes+=(training)
+  fi
+  if [[ "$BUILD_ENVIRONMENT" == *inference-true* ]]; then
+    modes+=(inference)
+  fi
+  # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
+  local targets=(accuracy performance)
 
-    # Run performance test
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" \
-            --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_performance.csv"
+  for mode in "${modes[@]}"; do
+    for target in "${targets[@]}"; do
+      local target_flag="--${target}"
+      if [[ "$target" == "performance" ]]; then
+        target_flag+=" --cold-start-latency"
       fi
-    fi
+
+      if [[ "$BUILD_ENVIRONMENT" == *default-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "$target_flag" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$BUILD_ENVIRONMENT" == *cudagraphs-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "$target_flag" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$BUILD_ENVIRONMENT" == *dynamic-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "$target_flag" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            --dynamic-batch-only --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$BUILD_ENVIRONMENT" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "$target_flag" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$BUILD_ENVIRONMENT" == *maxautotune-true* ]]; then
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
+            "$target_flag" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+    done
   done
 }
 
