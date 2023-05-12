@@ -2710,8 +2710,6 @@ def forward(self, x):
             functionalize=True,
         )
 
-        gm.print_readable()
-
         count = 0
         for node in gm.graph.nodes:
             if node.target == torch.ops.aten.add_.Tensor:
