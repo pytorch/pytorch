@@ -313,10 +313,10 @@ test_perf_for_dashboard() {
   local dtype=amp
   local backend=inductor
   local modes=()
-  if [[ "$BUILD_ENVIRONMENT" == *training-true* ]]; then
+  if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
     modes+=(training)
   fi
-  if [[ "$BUILD_ENVIRONMENT" == *inference-true* ]]; then
+  if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
     modes+=(inference)
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
@@ -329,28 +329,28 @@ test_perf_for_dashboard() {
         target_flag+=" --cold-start-latency"
       fi
 
-      if [[ "$BUILD_ENVIRONMENT" == *default-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "$target_flag" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
-      if [[ "$BUILD_ENVIRONMENT" == *cudagraphs-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "$target_flag" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
-      if [[ "$BUILD_ENVIRONMENT" == *dynamic-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "$target_flag" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
             --dynamic-batch-only --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
-      if [[ "$BUILD_ENVIRONMENT" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
         python "benchmarks/dynamo/$suite.py" \
             "$target_flag" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
-      if [[ "$BUILD_ENVIRONMENT" == *maxautotune-true* ]]; then
+      if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
         TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
             "$target_flag" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
