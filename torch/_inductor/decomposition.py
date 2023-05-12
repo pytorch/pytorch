@@ -374,17 +374,6 @@ def all_dim(input, dim, keepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
-# NB: this decomposition is not stride accurate, do not put it in the main
-# library
-@register_decomposition(aten.copy)
-def copy(self, src, non_blocking=False):
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        return aten.expand_copy.default(intermediate, self.size())
-    else:
-        return intermediate
-
-
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
