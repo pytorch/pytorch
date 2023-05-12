@@ -436,6 +436,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+def _internal_assert(cond):
+    if not cond:
+        raise AssertionError(
+            "Something went unexpectedly wrong in activation checkpoint. "
+            "Please report this bug by filing an issue to PyTorch."
+        )
+
 # NOTE [ Nestable Checkpoint ]
 #
 # The semantics of nested checkpoint can be defined by two basic rules.
@@ -509,10 +516,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #
 # Rule 6. We support doing backward inside checkpoint context
 #
-# This section is just a bunch of random examples that we'd like to support,
-# and comments on how that forced us to make certain design decisions.
-#
-# [ Basic case ]
+# [ retain_graph is True]
 #
 # def fn(x):
 #   y = x.sin()
@@ -542,7 +546,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # - If there are multiple .grad()/.backward() calls, we would perform backward
 #   on the recomputed graph even if early-stop is enabled (see the example below)
 #
-# [ Multiple backwards ]
+# [ retain_graph is False ]
 #
 # The example below shows what happens if during recomputation we find that some
 # of the tensors we are trying to recompute have already been cleared.
@@ -553,24 +557,22 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #   y = x.sin()                           # (1)
 #   z = y.cos()                           # (2)
 #   gx, = torch.autograd.grad(z, x)       # (3)
-#   w = x.sin()                           # (4)
-#   v = w.cos()                           # (5)
-#   gx2, = torch.autograd.grad(v, x)      # (6)
-#   return x * gx * gx2
+#   return x.cos() * gx                   # (4)
 #
 # out = checkpoint(fn)(inp)
+# out.backward()                          # (5)
 #
-# In the code above fn is computed (potentially partially) 4 times in total.
-#
-# 1. Don't save x and y since we are inside a checkpoint.
-# 2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
-# 3. If early stop is enabled, stop at (2)
-# 4. Continue original forward at (4), not saving x and w.
-# 5. (5) triggers a recompute of fn
-# 6. During recompute, we see that in the original graph, gx has already
-#    cleared x and y since backward is run at (3) without retain_graph=True
-#    We save x and w, however.
-# 7. Continue with returning
+# 1, 2. Don't save x and y since we are inside a checkpoint.
+# 3. Trigger a recompute of fn since x and y weren't saved.
+#    And depending on whether early stop is enabled, either stop at (2) or
+#    continue running the function.
+#    Because we are running backward with retain_graph=False, we clear x and y's
+#    holders.
+# 4. Don't save x since we are inside a checkpoint.
+# 5. Calling backward triggers another recompute of fn. During recompute, we see
+#    that x and y have already been cleared in the original graph as indicated
+#    by holder=None. We skip over them. We still save x at (4) (since its holder
+#    is still alive.)
 
 _enable_checkpoint_early_stop = True
 
@@ -669,7 +671,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: int):
         def pack_hook(x):
             target_frame = target_frame_ref()
-            assert target_frame is not None
+            assert target_frame is not None  # appease mypy
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
 
@@ -679,21 +681,22 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                 return x.detach()
             holder = target_frame.weak_holders[recomp_idx]()
 
+            # This holder may have been cleared because someone may have called
+            # backward within forward. If so, we don't need to save.
             if holder is not None:
-                # See Rule 6: [ Multiple backwards ] above
-                if holder.handles.get(gid, None) is None:
-                    holder.handles[gid] = _Handle()
+                _internal_assert(holder.handles.get(gid, None) is None)
+                holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
             if target_frame.early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
-            # See Rule 6: [ Basic case ] above
+            # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 
         def unpack_hook(x):
-            # See Rule 6: [ Basic case ] above for an example of when the graph
-            # created during recomputation could be backwarded.
+            # See Rule 6: [ retain_graph is True ] above for an example of when
+            # the graph created during recomputation could be backwarded.
             return x
 
         super().__init__(pack_hook, unpack_hook)
@@ -727,15 +730,12 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
             if holder.handles[gid] is None:
                 raise RuntimeError(
-                    "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
-                    "Otherwise please open an issue with details on your use case."
+                    "torch.utils.checkpoint: unpack is being triggered for a tensor that was either "
+                    "never recomputed, or already unpacked once. If you are calling ctx.saved_tensors "
+                    "in backward, make sure to do so only once. Otherwise please open an issue with "
+                    "details on your use case."
                 )
-            if holder.handles[gid] not in frame.recomputed[gid]:
-                raise RuntimeError(
-                    "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                    " recomputation being triggered in between, this is not currently supported. Please"
-                    " open an issue with details on your use case."
-                )
+            _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
             holder.handles[gid] = None
             return ret
