@@ -1088,11 +1088,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        # TODO: There is some bug here where corrects ends up with
-        # a Tensor in element 0.  We graph break on that (reflected here)
-        # but really we shouldn't have gotten a Tensor at all, as
-        # the operation is between an int and an item() result
-        self.assertEqual(cnt.frame_count, ifunspec(6, 5))
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertEqual(cnt.frame_count, 5)
+        else:
+            self.assertEqual(cnt.frame_count, 6)
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1238,6 +1237,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_test_fn = torch._dynamo.optimize(cnt)(test_fn)
         opt_test_fn()
+
+    # See https://github.com/pytorch/pytorch/issues/100067
+    def test_copy_weird_strides(self):
+        # This test requires inductor's copy() decomp to preserve strides properly.
+        def test_fn(a):
+            b = torch.zeros(48, 4, 256, 513)
+            b[:, 0, 1:256, 1:256] = a
+            c = b.view(4, 12, 1024, 513)
+            d = c.transpose(2, 1)
+            d.add_(1)
+            return d
+
+        sh, st, dt, dev, rg = (
+            (48, 255, 255),
+            (787968, 513, 1),
+            torch.float16,
+            "cpu",
+            True,
+        )
+        a = rand_strided(sh, st, dt, dev).requires_grad_(rg)
+        compiled_f = torch.compile(test_fn, backend="aot_eager_decomp_partition")
+        out1 = test_fn(a)
+        out2 = compiled_f(a)
+        self.assertEqual(out1, out2)
 
     def test_indexing_with_list(self):
         def test_fn():
@@ -3167,6 +3190,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = check_type(torch.randn(4), [torch.Tensor])
         res = opt_check_type(torch.randn(4), [torch.Tensor])
         self.assertEqual(ref, res)
+
+    def test_kwargs_out_list_variable(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, param):
+                z = torch.frexp(**param)
+                return z
+
+        model = Repro()
+        params = {"input": torch.tensor([[0.0, 1, 2, 4]])}
+        params["out"] = [
+            torch.empty(0, dtype=torch.float32),  # mantissa
+            torch.empty(0, dtype=torch.int32),  # exponent
+        ]
+
+        model = torch.compile(model, backend="eager")
+        mantissa, exponent = model(params)
+        ref_mantissa = torch.tensor([[0.0000, 0.5000, 0.5000, 0.5000]])
+        ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
+        self.assertEqual(ref_mantissa, mantissa)
+        self.assertEqual(ref_exponent, exponent)
 
 
 if __name__ == "__main__":

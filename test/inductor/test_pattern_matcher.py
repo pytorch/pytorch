@@ -151,6 +151,24 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
+        # Verify we fallback to non-optimal path for negative `end`.
+        def fn(a, b):
+            cat_1 = torch.ops.aten.cat.default([a, b], 1)
+            slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
+            slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, -1)
+            return torch.ops.aten.cat.default([cat_1, slice_2], 1)
+
+        counters.clear()
+        args = [
+            torch.randn(2, 8, device="cuda"),
+            torch.randn(2, 16, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
     def test_pointless_convert(self):
         def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)

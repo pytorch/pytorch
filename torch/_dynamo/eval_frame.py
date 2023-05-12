@@ -23,6 +23,7 @@ from unittest.mock import patch
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+import torch.utils.checkpoint
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -478,11 +479,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -786,8 +782,6 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
-    call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-    original_signature = inspect.signature(call_to_inspect)
 
     if functionalize and not aten_graph:
         raise UserError(
@@ -891,7 +885,7 @@ def export(
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
-        msg = dim_constraints.prettify_results(original_signature)
+        msg = dim_constraints.prettify_results(inspect.signature(f))
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
@@ -1075,7 +1069,10 @@ def export(
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
-        fullargspec = signature_to_fullargspec(original_signature)
+        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+
+        sig = inspect.signature(call_to_inspect)
+        fullargspec = signature_to_fullargspec(sig)
 
         # 1. Map `args` 1-to-1 to positional arguments in original signature.
         input_strs = fullargspec.args[: len(args)]
@@ -1268,6 +1265,18 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
+
+        # TorchDynamo does not step inside utils.checkpoint function.  The flow
+        # looks likes this
+        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+        #     speculatively checking if the forward function is safe to trace.
+        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+        #  3) If not, then TorchDynamo falls back to eager by performing a graph
+        #     break. And here, the following disable wrapper ensures that
+        #     TorchDynamo does not trigger again on the frames created by
+        #     utils.checkpoint innards.
+        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

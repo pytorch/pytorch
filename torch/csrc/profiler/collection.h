@@ -604,6 +604,9 @@ class TORCH_API RecordQueue {
   std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
 
+TORCH_API bool get_record_concrete_inputs_enabled();
+TORCH_API void set_record_concrete_inputs_enabled(bool);
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
