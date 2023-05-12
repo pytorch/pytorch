@@ -121,7 +121,7 @@ class _lazy_property_and_property(lazy_property, property):
     * lazy_property when Distribution validate_args looks
     """
     def __init__(self, wrapped):
-        return property.__init__(self, wrapped)
+        property.__init__(self, wrapped)
 
 
 def tril_matrix_to_vec(mat, diag=0):
