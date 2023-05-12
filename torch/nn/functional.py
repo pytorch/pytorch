@@ -2,6 +2,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
+import importlib
 
 import torch
 from torch import _VF
@@ -3991,6 +3992,15 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         assert align_corners is not None
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions').upsample_bilinear2d_vec(
+                    input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None

@@ -17,7 +17,6 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/DispatchKeySet.h>
-#include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
