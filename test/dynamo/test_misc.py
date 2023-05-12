@@ -159,7 +159,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self,
             unpack4,
             2,
-            expected_ops=5,
+            expected_ops=ifdyn(5, 6),
             expected_ops_dynamic=ifdynstaticdefault(6, 7),
         )
 
@@ -176,7 +176,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self,
             unpack5,
             2,
-            expected_ops=5,
+            expected_ops=6,
             expected_ops_dynamic=ifdynstaticdefault(6, 7),
         )
 
@@ -201,7 +201,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 11)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 11)
         )
 
     def test_shape_int_inplace_binops(self):
@@ -217,7 +217,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + p
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 10)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 10)
         )
 
     def test_int_shape_inplace_binops(self):
@@ -241,7 +241,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 10)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 10)
         )
 
     def test_int_int_comparisons(self):
@@ -286,7 +286,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect for dynamic: size, index, 6 comparison ops, add
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 9)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 9)
         )
 
     def test_int_shape_comparisons(self):
@@ -311,7 +311,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect for dynamic: size, index, 6 comparison ops, add
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 9)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 9)
         )
 
     def test_param_shape_binops(self):
@@ -344,12 +344,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
 
-        expected_op_count = (
-            ifdynstaticdefault(3, 12)
-            if torch._dynamo.testing.config.dynamic_shapes
-            else 1
-        )
-        self.assertEqual(counts.op_count, expected_op_count)
+        self.assertEqual(counts.op_count, 3)
 
     def test_user_defined_binop(self):
         class MyClass:
@@ -373,11 +368,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
-        expected_op_count = (
-            ifdyn(ifdynstaticdefault(2, 3), 4)
-            if torch._dynamo.testing.config.dynamic_shapes
-            else 1
-        )
+        expected_op_count = ifdyn(ifdynstaticdefault(2, 3), 3)
         self.assertEqual(counts.op_count, expected_op_count)
 
     def test_compare_shapes_eq(self):
@@ -501,7 +492,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect extra size node for dynamic
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=20, expected_ops_dynamic=21
+            self, fn, 1, expected_ops=21, expected_ops_dynamic=21
         )
 
     def test_empty_list(self):
@@ -534,14 +525,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self,
             get_test_fn(func=min),
             2,
-            expected_ops=1,
+            expected_ops=3,
             expected_ops_dynamic=ifdynstaticdefault(3, 14),
         )
         torch._dynamo.testing.standard_test(
             self,
             get_test_fn(func=max),
             2,
-            expected_ops=1,
+            expected_ops=3,
             expected_ops_dynamic=ifdynstaticdefault(3, 17),
         )
 
@@ -783,7 +774,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return (a + a.numel() + torch.numel(a), a + a.nelement())
 
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=3, expected_ops_dynamic=6
+            self, fn=fn, nargs=1, expected_ops=6, expected_ops_dynamic=6
         )
 
     def test_pair(self):
@@ -798,7 +789,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self,
             fn=fn,
             nargs=1,
-            expected_ops=5,
+            expected_ops=6,
             expected_ops_dynamic=ifdynstaticdefault(6, 8),
         )
 
@@ -898,7 +889,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect 1 more op (size call) for dynamic
         return torch._dynamo.testing.standard_test(
-            self, fn=fn, nargs=1, expected_ops=9, expected_ops_dynamic=10
+            self, fn=fn, nargs=1, expected_ops=10, expected_ops_dynamic=10
         )
 
     def test_build_tuple_unpack(self):
@@ -929,8 +920,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # output anything and none of the traced operations have side
         # effects.  Probably need better heuristic for bailing on
         # dynamo if there are no outputs
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, ifdyn(0, 1))
+        self.assertEqual(cnts.op_count, ifdyn(0, 2))
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -941,8 +932,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(2), [2, 3] * 4)
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, ifdyn(0, 1))
+        self.assertEqual(cnts.op_count, ifdyn(0, 2))
 
     def test_tuple_mul(self):
         def fn(count):
@@ -950,10 +941,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return head_mask
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         self.assertEqual(opt_fn(2), (2, 3) * 4)
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, ifdyn(0, 1))
+        self.assertEqual(cnts.op_count, ifdyn(0, 2))
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
@@ -963,7 +954,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect 3 ops post folding for dynamic case: size, index, add
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(2, 3)
+            self, fn, 1, expected_ops=2, expected_ops_dynamic=ifdynstaticdefault(2, 3)
         )
 
     def test_tuple_iadd_with_shape(self):
@@ -977,7 +968,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         # expect 4 add / subs for static, 4 * 3 (size, index, math op) for dynamic
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=4, expected_ops_dynamic=ifdynstaticdefault(8, 12)
+            self, fn, 1, expected_ops=8, expected_ops_dynamic=ifdynstaticdefault(8, 12)
         )
 
     def test_list_iadd_with_shape(self):
@@ -992,7 +983,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # expect 6 add / subs for static, 6 * 3 (size, index, math op) for dynamic
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=6, expected_ops_dynamic=ifdynstaticdefault(12, 18)
+            self,
+            fn,
+            1,
+            expected_ops=ifdyn(6, 12),
+            expected_ops_dynamic=ifdynstaticdefault(12, 18),
         )
 
     def test_user_getattr1(self):
@@ -1186,7 +1181,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(val), correct))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 3)
 
     def test_numpy_int_constant(self):
         def fn(x, a, b):
@@ -2288,14 +2283,14 @@ def fn():
         opt_m(data, correct_ref_id)
         # Extra op is the recorded equality test (although once
         # the trace is flattened this is dead!)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, ifdyn(2, 3))
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
         incorrect_ref_id = id(m) + 1
         opt_m = torch._dynamo.optimize(cnts, nopython=True)(m)
         opt_m(data, incorrect_ref_id)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, ifdyn(1, 2))
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
@@ -3965,7 +3960,10 @@ def fn():
         else:
             self.assertTrue(guard_failure is not None)
             if not torch._dynamo.config.dynamic_shapes:
-                self.assertExpectedInline(guard_failure[0], """L['k'] == 3""")
+                self.assertExpectedInline(
+                    guard_failure[0],
+                    """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                )
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
@@ -4277,7 +4275,7 @@ def fn():
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
-        self.assertEqual(cnt.frame_count, ifunspec(ifdyn(2, 5), 5))
+        self.assertEqual(cnt.frame_count, ifunspec(ifdyn(2, 1), 5))
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):

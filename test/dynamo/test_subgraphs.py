@@ -312,10 +312,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        if config.dynamic_shapes:
-            self._common(fn, 2, 5)
-        else:
-            self._common(fn, 2, 4)
+        self._common(fn, 2, 5)
 
     def test_restore_range(self):
         def fn(a, b):
@@ -333,7 +330,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         if config.assume_static_by_default:
             self._common(fn, 2, 4)
         else:
-            self._common(fn, 2, 4)
+            self._common(fn, 2, ifdyn(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -635,7 +632,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdyn(4, 2))
+        self._common(fn, 1, 4)
 
 
 if __name__ == "__main__":

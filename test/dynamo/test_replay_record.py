@@ -47,7 +47,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
         cls._exit_stack.close()
 
     def check_replay(self, fn, *args, exp_exc_name=None):
-        raise unittest.SkipTest("Errors used in this class have been fixed, todo: re-enable")
+        raise unittest.SkipTest(
+            "Errors used in this class have been fixed, todo: re-enable"
+        )
         fn_opt = torch._dynamo.optimize("eager")(fn)
         with self.assertLogs(logger="torch._dynamo", level=logging.ERROR) as log_orig:
             try:

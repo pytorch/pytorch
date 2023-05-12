@@ -450,7 +450,7 @@ class BuiltinVariable(VariableTracker):
         )
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
-        
+
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable

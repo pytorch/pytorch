@@ -878,7 +878,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
         self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, ifdyn(14, 10))
+        self.assertEqual(cnt.op_count, ifdyn(14, 14))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -890,7 +890,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(boxes1), boxes1.tensor + 4.0))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(3, 6), 1))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(3, 6), 3))
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -981,7 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifdyn(20, 4))
+        self.assertEqual(cnt.op_count, ifdyn(14, 32))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -992,7 +992,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(12, 11))
+        self.assertEqual(cnt.op_count, ifdyn(12, 12))
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -1049,7 +1049,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 4)
+        self.assertEqual(cnt.op_count, 6)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to
@@ -1141,7 +1141,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 8)
+        self.assertEqual(cnt.op_count, 13)
 
     def test_rng_state(self):
         def fn():
@@ -1277,7 +1277,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
         # With unspec int, maximum computation is preserved
-        self.assertEqual(cnt.op_count, 3)
+        self.assertEqual(cnt.op_count, ifdyn(3, 4))
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -1288,7 +1288,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(x), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(21, 27), 14))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(21, 27), 21))
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132

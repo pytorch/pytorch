@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import operator
 import types
 from typing import Dict, List
@@ -217,9 +216,7 @@ class TensorVariable(VariableTracker):
         return result
 
     def has_unpack_var_sequence(self, tx):
-        return (self.size is not None and len(self.size) > 0) or (
-            self.size is None
-        )
+        return (self.size is not None and len(self.size) > 0) or (self.size is None)
 
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy

@@ -997,15 +997,15 @@ static PyObject* THPModule_vmapmode_decrement_nesting(
 }
 
 bool PyBoolOrZeroOne_Check(PyObject* obj) {
-    if (PyBool_Check(obj)) {
-        return true;  // Object is a boolean value
-    } else if (PyLong_CheckExact(obj)) {
-        long value = PyLong_AsLong(obj);
-        if (value == 0 || value == 1) {
-            return true;  // Object is an integer with value 0 or 1
-        }
+  if (PyBool_Check(obj)) {
+    return true; // Object is a boolean value
+  } else if (PyLong_CheckExact(obj)) {
+    long value = PyLong_AsLong(obj);
+    if (value == 0 || value == 1) {
+      return true; // Object is an integer with value 0 or 1
     }
-    return false;  // Object is not a boolean or integer 0 or 1
+  }
+  return false; // Object is not a boolean or integer 0 or 1
 }
 
 static PyObject* THPModule_set_display_vmap_fallback_warnings_mode(

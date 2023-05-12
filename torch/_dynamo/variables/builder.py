@@ -47,7 +47,6 @@ from ..utils import (
     global_key_name,
     HAS_NUMPY,
     is_namedtuple,
-    is_numpy_int_type,
     is_typing,
     istype,
     np,

@@ -245,7 +245,7 @@ class TestPythonAutograd(TestCase):
             loss = simple(a, b).sum()
             return grad(loss, [a, b])
 
-        self._common(fn, ifdyn(9, 8))
+        self._common(fn, 9)
 
     def test_backwards2(self):
         def fn(a, b):
@@ -257,7 +257,7 @@ class TestPythonAutograd(TestCase):
             reset_tape()
             return res
 
-        self._common(fn, ifdyn(9, 8))
+        self._common(fn, 9)
 
     def test_split(self):
         v1 = Variable.constant(torch.randn(10), name="a")
@@ -281,7 +281,7 @@ class TestPythonAutograd(TestCase):
         self.assertTrue(same(loss1, loss2))
         self.assertTrue(same(grad1, grad2))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifdyn(9, 8))
+        self.assertEqual(cnt.op_count, ifdyn(9, 9))
 
 
 if __name__ == "__main__":

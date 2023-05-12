@@ -73,7 +73,13 @@ class TestPaternMatcher(TestCase):
                     ),
                 ]
                 if not dynamic:
-                    args_list.append((4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")))
+                    args_list.append(
+                        (
+                            4,
+                            torch.randn(16, 16, device="cuda"),
+                            torch.randn(16, 16, device="cuda"),
+                        )
+                    )
                 for args in args_list:
                     counters.clear()
                     e1, e2 = fn(*args)
