@@ -93,9 +93,6 @@ def mps_ops_grad_modifier(ops):
         'histogramdd': [torch.float16, torch.float32],
         # derivative for aten::histogram is not implemented
         'histogram': [torch.float16, torch.float32],
-        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        '__rpow__': [torch.float16],
-        'pow': [torch.float16],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
