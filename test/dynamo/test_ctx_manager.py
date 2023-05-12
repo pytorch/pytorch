@@ -675,3 +675,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
             self.assertEqual(cnts.frame_count, 3)
             self.assertEqual(cnts.op_count, 3)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

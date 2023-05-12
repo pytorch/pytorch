@@ -796,7 +796,7 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
-            assert type(value) in (torch.Tensor, torch.nn.Parameter)
+            assert type(value) in (torch.Tensor, torch.nn.Parameter), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -1281,7 +1281,7 @@ def wrap_to_fake_tensor_and_record(
 
                 # Reflect the user directive in the frame_state
                 # For dynamic, apply None always
-                if marked_dynamic:
+                if curr_sizes and marked_dynamic:
                     curr_sizes[i] = None
 
                 # We will process constraints first, as they will imply that we
