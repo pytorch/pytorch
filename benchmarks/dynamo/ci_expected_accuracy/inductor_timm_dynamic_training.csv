@@ -2,9 +2,8 @@ name,accuracy,graph_breaks
 adv_inception_v3,pass,9
 beit_base_patch16_224,pass,9
 botnet26t_256,pass,11
-cait_m36_384,pass,9
 coat_lite_mini,pass,9
-convit_base,fail_to_run,8
+convit_base,pass,12
 convmixer_768_32,pass,6
 convnext_base,pass,9
 crossvit_9_240,pass,9
@@ -28,7 +27,6 @@ hrnet_w18,pass,6
 inception_v3,pass,9
 jx_nest_base,pass,9
 lcnet_050,pass,11
-levit_128,pass,9
 mixer_b16_224,pass,9
 mixnet_l,pass,11
 mnasnet_100,pass,11
@@ -47,7 +45,6 @@ res2next50,pass,9
 resmlp_12_224,pass,9
 resnest101e,pass,9
 rexnet_100,pass,11
-sebotnet33ts_256,pass,11
 selecsls42b,pass,9
 spnasnet_100,pass,11
 swin_base_patch4_window7_224,pass,9

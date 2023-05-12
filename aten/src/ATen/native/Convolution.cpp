@@ -247,7 +247,8 @@ bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, int str
 }
 
 
-bool xnnpack_use_convolution2d(
+#if defined(C10_MOBILE)
+static bool xnnpack_use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
     const at::OptionalIntArrayRef bias_sizes_opt,
@@ -259,7 +260,7 @@ bool xnnpack_use_convolution2d(
   return xnnpack::use_convolution2d(input, weight, bias_sizes_opt, padding, stride, dilation, groups, transposed);
 }
 
-bool xnnpack_use_convolution2d(
+static bool xnnpack_use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
     const at::OptionalSymIntArrayRef bias_sizes_opt,
@@ -271,6 +272,7 @@ bool xnnpack_use_convolution2d(
   // Never use xnnpack for symbolic tracing
   return false;
 }
+#endif
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 // This struct is templated so that we can run backend selection in a dynamic
@@ -1332,7 +1334,7 @@ ConvBackend select_conv_backend(
 }
 
 // For BC reasons, have a copy that does not require bias_opt
-ConvBackend select_conv_backend(
+static ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const at::OptionalIntArrayRef bias_sizes_opt,
@@ -1341,7 +1343,7 @@ ConvBackend select_conv_backend(
   return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params);
 }
 
-at::Tensor _convolution_nogroup_backend(
+static at::Tensor _convolution_nogroup_backend(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -1910,7 +1912,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_backend(
+static std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_backend(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,

@@ -22,8 +22,7 @@ import torch._dynamo.logging
 
 # LOL if you don't remember to import this, then the op isn't registered and it hits
 # the no-op C++ kernel that i am forced to implement despite not using it
-import torch.distributed._functional_collectives
-
+import torch.distributed._functional_collectives as _functional_collectives
 
 @requires_nccl()
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -311,23 +310,24 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
             .check("buf0 = empty_strided(") \
-            .check("buf2 = empty_strided") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf2") \
+            .check("buf3 = empty_strided") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf3") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("_register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf1)") \
-            .check("buf3 = buf1") \
-            .check("return (buf3, buf2, buf4") \
+            .check("buf2 = buf1") \
+            .check("return (buf2, buf3, buf4") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct)
 
     def test_dynamo_trace_allreduce(self):
+
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -336,7 +336,43 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert counter.frame_count == 1
-        assert counter.op_count == 1
+
+        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        assert counter.op_count == 2
+        assert same(out, correct)
+
+    def test_dynamo_trace_all_gather_tensor(self):
+
+        def func(inp, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_gather_tensor(inp, 0, ranks, tag)
+            return ar
+
+        inputs = torch.ones(4, 4, device="cuda")
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        assert counter.op_count == 2
+        assert same(out, correct)
+
+    def test_dynamo_trace_reduce_scatter_tensor(self):
+
+        def func(inp, *, tag, ranks, group_size):
+            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, ranks, tag)
+            return ar
+
+        inputs = torch.ones(4, 4, device="cuda")
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        assert counter.op_count == 2
         assert same(out, correct)
 
     def test_backwards(self):
@@ -346,7 +382,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         However, I wanted to at least see if it was possible to support it as a design goal.
         """
         def func(inp, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
+            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)

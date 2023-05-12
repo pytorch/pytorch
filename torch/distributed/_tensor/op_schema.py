@@ -54,17 +54,58 @@ class PlacementStrategy(object):
         return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
 
 
-@dataclass
-class StrategyList(object):
+class StrategyType(object):
     """
-    List of placement strategies associated with an op
+    Base class type for op strategy, We have two StrategyType:
+        OpStrategy and TupleStrategy
     """
 
-    strategies: List[PlacementStrategy]
+    pass
+
+
+class OpStrategy(StrategyType):
+    """
+    OpStrategy that consists of a list of placement strategies associated with the op
+    """
+
+    def __init__(self, strategies: List[PlacementStrategy]) -> None:
+        super().__init__()
+        self.strategies: List[PlacementStrategy] = strategies
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        return f"StrategyList: [{strategy_list_str}]"
+        return f"OpStrategy: [{strategy_list_str}]"
+
+    def max_num_shards(self) -> int:
+        """
+        Returns the max number of shards across all placement strategies
+        """
+        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+
+
+class TupleStrategy(StrategyType):
+    """
+    TupleStrategy represents the output strategy of this op is a tuple
+    of strategy, i.e. If the output of this op is a tuple of tensors, we should
+    return a TupleStrategy that contains a tuple of OpStrategy.
+
+    NOTE: if the output of the op is a List[Tensor], it's likely we should return
+    OpStrategy directly in all cases.
+    """
+
+    def __init__(self, childs: Tuple[StrategyType, ...]) -> None:
+        super().__init__()
+        self.childs: Tuple[StrategyType, ...] = childs
+
+    def __str__(self) -> str:
+        tuple_strategies_str = "TupleStrategy: "
+        child_strategies_str = "\n".join(
+            [
+                f" tuple idx: {idx}, strategy: {str(strat)}"
+                for idx, strat in enumerate(self.childs)
+            ]
+        )
+        return f"{tuple_strategies_str}\n{child_strategies_str}"
 
 
 @dataclass
@@ -168,6 +209,19 @@ class OpSchema:
         return tree_map_only(
             DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
         )
+
+    def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
+        suggestion_args_spec = self.args_spec
+        new_arg_schema: List[object] = []
+        idx_of_args_spec = 0
+        for arg in origin_schema.args_schema:
+            if isinstance(arg, DTensorSpec):
+                new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
+                idx_of_args_spec += 1
+            else:
+                new_arg_schema.append(arg)
+        self.args_schema = tuple(new_arg_schema)
+        self.kwargs_schema = origin_schema.kwargs_schema
 
 
 @dataclass

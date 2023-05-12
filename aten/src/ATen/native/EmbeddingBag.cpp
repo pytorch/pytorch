@@ -179,16 +179,17 @@ void fbgemm_spmdm_report_error_(
           0 <= idx && idx < N,
           "Index ",
           i,
-          " is out of bounds: ",
+          " of input takes value ",
           idx,
-          ", range 0 to ",
-          N);
+          " which is not in the valid range [0, ",
+          N,
+          ")");
     }
   }
   TORCH_CHECK(
       offsets[output_size] == index_size,
-      "Yout input seems to be incorrect: the last offset value should be "
-      "the size of the indices tensor, but it appears not.");
+      "Your input appears to be incorrect: the last offset value should be "
+       "the size of the indices tensor, but it seems not to be the case.");
 }
 } // namespace
 
@@ -330,7 +331,7 @@ index_select_add(
     auto numel = add_indices.numel();
 
     Tensor src_fp32 = at::empty({ddim}, src.options().dtype(at::kFloat));
-    auto* src_data_fp32 = src_fp32.data_ptr<float>();
+    auto* src_data_fp32 = src_fp32.mutable_data_ptr<float>();
 
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
@@ -603,7 +604,7 @@ index_select_scale_add(
     }
 
     Tensor scale_fp32 = at::empty(scale.sizes(), scale.options().dtype(at::kFloat));
-    auto* scale_data_fp32 = scale_fp32.data_ptr<float>();
+    auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
     bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
@@ -1188,7 +1189,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 
 // Assumes all input tensors except for `weight` are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
+static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
     const Tensor& indices_,
     const Tensor& offsets_,
@@ -1751,15 +1752,6 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
             scalar_t>(
             grad, weight, indices, offsets, offset2bag, mode, padding_idx);
       });
-}
-
-Tensor _embedding_bag_sparse_backward(
-    const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
-    const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
-    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
-    int64_t padding_idx) {
-    return at::native::_embedding_bag_sparse_backward_symint(grad_, indices, offsets, offset2bag, bag_size_, std::move(num_weights),
-        scale_grad_by_freq, mode, per_sample_weights_opt, padding_idx);
 }
 
 Tensor _embedding_bag_sparse_backward_symint(

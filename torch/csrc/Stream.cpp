@@ -43,6 +43,22 @@ static PyObject* THPStream_pynew(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPStream_Wrap(const c10::Stream& stream) {
+  HANDLE_TH_ERRORS
+  auto type = (PyTypeObject*)THPStreamClass;
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    throw python_error();
+  }
+
+  THPStream* self = (THPStream*)ptr.get();
+  self->stream_id = stream.id();
+  self->device_index = stream.device_index();
+  self->device_type = static_cast<int64_t>(stream.device_type());
+  return ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static void THPStream_dealloc(THPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }

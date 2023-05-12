@@ -8,6 +8,7 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -28,6 +29,8 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandle,
+    _named_parameters_with_duplicates,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
@@ -433,6 +436,7 @@ class FlatParamHandle:
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
+        self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -523,8 +527,10 @@ class FlatParamHandle:
         param_extensions: List[Any] = []
         is_padding_mask: List[bool] = []
         total_numel = total_numel_without_padding = 0
-        for submodule_name, submodule in module.named_modules():
-            for param_name, param in submodule.named_parameters(recurse=False):
+        for submodule_name, submodule in module.named_modules(remove_duplicate=False):
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
+            ):
                 if param not in params_set:
                     continue
                 if param in shared_param_memo:  # shared reference
@@ -553,7 +559,8 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    param, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)
@@ -1287,7 +1294,7 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, torch.cuda.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1558,7 +1565,9 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
+        _no_dispatch_record_stream(
+            unsharded_flat_param, self._device_handle.current_stream()
+        )
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
@@ -1763,14 +1772,21 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape or param.dtype != view.dtype:
-                # NOTE: This is a hack using `.data` to side step the
-                # check that parameter/gradient sizes and dtypes match. Here,
-                # `param` can have the sharded size, and `grad` can have the
-                # unsharded size. Orthogonally, `param` can have the full
-                # precision dtype from `reshard()`, and `grad` can have the
-                # parameter low precision dtype. Both of these mismatches
-                # happen when running in `no_sync()`.
+            if (
+                param.shape != view.shape
+                or param.dtype != view.dtype
+                or param.device != view.device
+            ):
+                # NOTE: This is a hack using `.data` to side step the check
+                # that parameter/gradient sizes/dtypes/devices match. From
+                # calling `reshard()`, `param` has the sharded size, has the
+                # full precision dtype, and if CPU offloading is enabled, is on
+                # CPU. Thus, one or more of the following cases can hold when
+                # in `no_sync()`, where `view` is the original parameter's
+                # gradient:
+                # 1. `view` can have the unsharded size.
+                # 2. `view` can have the parameter low precision dtype.
+                # 3. `view` can be on GPU.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
                 param.grad.data = view
@@ -1793,6 +1809,7 @@ class FlatParamHandle:
             if (
                 param.shape != prim_param.grad.shape
                 or param.dtype != prim_param.grad.dtype
+                or param.device != prim_param.grad.device
             ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
@@ -2038,6 +2055,12 @@ class FlatParamHandle:
                 # For `NO_SHARD` + CPU offloading, `_cpu_grad` is always in
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
+                if not self.uses_sharded_strategy and self._offload_params:
+                    # Explicitly continue to handle the case of `no_sync()`,
+                    # where `param.grad` is a view into the GPU gradient
+                    # referenced by `flat_param.grad`, while `flat_param_grad`
+                    # is `flat_param._cpu_grad`, which is on CPU
+                    continue
                 needs_grad_writeback = (
                     flat_param_grad is None
                     or not _same_storage_as_data_ptr(
