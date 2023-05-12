@@ -856,7 +856,9 @@ class TestFunctionalIterDataPipe(TestCase):
             "unbatch",
             "zip",
         ]:
-            docstring = pydoc.render_doc(thing=getattr(input_dp, dp_funcname))
+            docstring = pydoc.render_doc(
+                thing=getattr(input_dp, dp_funcname), forceload=True
+            )
             try:
                 assert f"(functional name: ``{dp_funcname}``)" in docstring
             except AssertionError:
