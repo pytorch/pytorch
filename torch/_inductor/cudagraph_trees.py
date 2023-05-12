@@ -40,6 +40,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import logging
 import sys
 import threading
 import traceback
@@ -92,6 +93,8 @@ else:
     def _set_cached_tensors_enabled(enabled):
         pass
 
+
+log = logging.getLogger(__name__)
 
 from . import config
 
@@ -268,10 +271,22 @@ local.tree_manager_containers = {}
 local.tree_manager_locks = defaultdict(threading.Lock)
 
 
+# only incremented by user call of mark_step_begin
+class MarkStepBox:
+    mark_step_counter = 0
+
+
 # We need to register this as an object that will be copied over as TLS when new
 # threads are created in autograd
 torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
 torch._C._stash_obj_in_tls("tree_manager_locks", local.tree_manager_locks)
+
+
+def mark_step_begin():
+    "Indicates that a new iteration of inference or training is about to begin."
+
+    # iterate down to distinguish from GenerationTracking counter
+    MarkStepBox.mark_step_counter -= 1
 
 
 def reset_cudagraph_trees():
@@ -289,6 +304,8 @@ def reset_cudagraph_trees():
 
     _set_cached_tensors_enabled(False)
     container_dict.clear()
+
+    MarkStepBox.mark_step_counter = 0
 
 
 def get_obj(local, attr_name):
@@ -1548,6 +1565,9 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces: Dict[FunctionID, StackTraces] = {}
 
         self.warmed_up_functions: Set[FunctionID] = set()
+        # if we fail to increment generation, and are stuck warming up,
+        # only warn on each function once
+        self.warned_functions: Set[FunctionID] = set()
         torch._C._set_cached_tensors_enabled(True)
 
         # NB: cuda caching allocator will remember the stream a segment is allocated to
@@ -1639,10 +1659,10 @@ class CUDAGraphTreeManager:
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
         if self.in_recording:
-            self.try_end_curr_recording()
+            self.try_end_curr_recording(function_id)
 
         if self.in_warmup:
-            self.try_end_curr_warmup()
+            self.try_end_curr_warmup(function_id)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
@@ -1717,10 +1737,16 @@ class CUDAGraphTreeManager:
         self.current_node = None
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
+        graph_id = self.new_graph_id()
+        log.debug(
+            "Recording function %d of graph recording id %d",
+            function_id.id,
+            graph_id.id,
+        )
         torch.cuda.synchronize()
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
-            self.new_graph_id(),
+            graph_id,
             self.current_node,
             new_inputs,
             self.cuda_graphs_thread_pool,
@@ -1748,6 +1774,13 @@ class CUDAGraphTreeManager:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         already_warm = function_id in self.warmed_up_functions
+        if not already_warm:
+            log.debug("Running warmup of function %d", function_id.id)
+        else:
+            log.debug(
+                "Running eager of function %d because ancestor needed to warm up",
+                function_id.id,
+            )
         self.warmed_up_functions.add(function_id)
         node = CUDAWarmupNode(
             self.ids_to_funcs[function_id],
@@ -1763,9 +1796,6 @@ class CUDAGraphTreeManager:
         self.path_state = ExecutionState.WARMUP
         self.update_generation()
         return node.run(new_inputs)
-
-    def update_generation(self):
-        self.current_gen = self.get_curr_generation()
 
     def new_graph_id(self) -> GraphID:
         return GraphID(next(self.graph_counter))
@@ -1813,16 +1843,33 @@ class CUDAGraphTreeManager:
         if value is None:
             self.path_state = ExecutionState.NONE
 
+    def update_generation(self):
+        self.current_gen = self.get_curr_generation()
+
     @staticmethod
     def get_curr_generation() -> int:
+        if MarkStepBox.mark_step_counter != 0:
+            return MarkStepBox.mark_step_counter
+
         return GenerationTracker.generation
 
+    @staticmethod
+    def user_invoked_mark_step():
+        return MarkStepBox.mark_step_counter != 0
+
     def can_start_new_generation(self) -> bool:
-        if self.running_forwards_with_pending_backwards:
+        if not self.in_new_torch_compile_invocation():
             return False
+
+        if self.user_invoked_mark_step():
+            return True
+
+        return not self.running_forwards_with_pending_backwards
+
+    def in_new_torch_compile_invocation(self):
         return self.current_gen != self.get_curr_generation()
 
-    def try_end_curr_recording(self) -> None:
+    def try_end_curr_recording(self, function_id: FunctionID) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
         previously recorded node are dead or because it was executed in a different
@@ -1840,6 +1887,8 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
             return
+
+        self.check_warn_on_unable_to_start_executing(function_id)
 
     def try_end_curr_execution(self) -> None:
         """
@@ -1859,7 +1908,7 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.clear_current_path_state_and_set_to_none()
 
-    def try_end_curr_warmup(self):
+    def try_end_curr_warmup(self, function_id: FunctionID):
         if self.can_start_new_generation():
             self.dealloc_current_path_weakrefs()
             self.current_node = None
@@ -1868,6 +1917,41 @@ class CUDAGraphTreeManager:
         if self.current_node.all_outputs_are_dead():
             self.current_node = None
             return
+
+        self.check_warn_on_unable_to_start_executing(function_id)
+
+    def check_warn_on_unable_to_start_executing(self, function_id: FunctionID):
+        "Warn if we in a potential loop where we are unable to hit fast path"
+        if (
+            function_id in self.warned_functions
+            or not self.in_new_torch_compile_invocation()
+        ):
+            return
+
+        existing_nodes = [
+            node
+            for node in self.current_node._path_from_root
+            if node.wrapped_function.id == function_id
+        ]
+
+        if len(existing_nodes) <= 1:
+            return
+
+        # repeated same pattern
+        parents = {
+            n.parent.wrapped_function.id
+            for n in itertools.chain(existing_nodes, (self.current_node,))
+            if n.parent is not None
+        }
+        if len(parents) == len(existing_nodes):
+            return
+
+        self.warned_functions.add(function_id)
+        warnings.warn(
+            "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
+            "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
+            "before each model invocation"
+        )
 
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
@@ -1910,6 +1994,11 @@ class CUDAGraphTreeManager:
         additional cudagraph recordings can be made respecting existent live storages.
         """
         self.debug_checkpointing_counter += 1
+        log.debug(
+            "Checkpointing cuda caching allocator state. Number of checkpoints %d",
+            self.debug_checkpointing_counter,
+        )
+
         state = self.current_node.checkpointed_caching_state
         device = self.current_node.device
         assert state is not None and device is not None

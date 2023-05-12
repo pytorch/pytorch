@@ -92,7 +92,7 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
 
 if _has_triton():
 
-    @functools.cache
+    @functools.lru_cache(None)
     def _get_bsr_strided_dense_rowspace_kernel():
         import triton
         import triton.language as tl

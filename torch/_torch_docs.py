@@ -1302,18 +1302,18 @@ Example::
     >>> a.data_ptr() == c.data_ptr()
     False
 
-    >>> a = torch.tensor([1, 2, 3], requires_grad=True).float()
+    >>> a = torch.tensor([1., 2., 3.], requires_grad=True)
     >>> b = a + 2
     >>> b
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
     >>> # Shares memory with tensor 'b', with no grad
     >>> c = torch.asarray(b)
     >>> c
-    tensor([1., 2., 3.])
+    tensor([3., 4., 5.])
     >>> # Shares memory with tensor 'b', retaining autograd history
     >>> d = torch.asarray(b, requires_grad=True)
     >>> d
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
 
     >>> array = numpy.array([1, 2, 3])
     >>> # Shares memory with array 'array'
@@ -1322,7 +1322,7 @@ Example::
     True
     >>> # Copies memory due to dtype mismatch
     >>> t2 = torch.asarray(array, dtype=torch.float32)
-    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    >>> array.__array_interface__['data'][0] == t2.data_ptr()
     False
 
     >>> scalar = numpy.float64(0.5)

@@ -89,9 +89,6 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
-        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        '__rpow__': [torch.float16],
-        'pow': [torch.float16],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
@@ -119,6 +116,9 @@ def mps_ops_grad_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -644,6 +644,9 @@ def mps_ops_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     UNDEFINED_XFAILLIST = {
@@ -7227,6 +7230,18 @@ class TestNLLLoss(TestCaseMPS):
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
+        # Check it works for different dtypes
+        for dtype in [torch.float16, torch.int8, torch.int16, torch.int32, torch.int64]:
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype).bernoulli(0.5)
+            # Check that output is not all zeros or ones
+            if product_version > 13.0:
+                uniq = mps_out.unique()
+                # TODO: remove cast after arange is fixed for integral types
+                self.assertEqual(uniq.to(dtype=torch.float32), torch.arange(2, device='mps', dtype=torch.float32))
+            else:
+                self.assertEqual(mps_out.min().item(), 0.)
+                self.assertEqual(mps_out.max().item(), 1.)
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -10352,6 +10367,12 @@ class TestConsistency(TestCaseMPS):
         'linalg.vector_norm',
         'addr', 'var_mean',
         'var_mean_unbiased',
+        'acosh', 'asinh', 'asin',
+        'masked.std',
+        'nn.functional.normalize',
+        'nn.functional.triplet_margin_loss',
+        'nn.functional.triplet_margin_with_distance_loss',
+        'round', 'xlogy',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

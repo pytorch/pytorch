@@ -6209,6 +6209,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        # See https://github.com/pytorch/pytorch/issues/100348
+        def test_inductor_detach_view(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                a = x * 2
+                return a, a.detach()
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inp = torch.ones(2, 2, requires_grad=True, device="cuda")
+            inp_ref = inp.clone().detach().requires_grad_(True)
+            out_ref = fn(inp_ref)
+            out = fn_opt(inp)
+            out_ref[0].sum().backward()
+            out[0].sum().backward()
+            self.assertEqual(inp.grad, inp_ref.grad)
+
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
