@@ -169,6 +169,7 @@ class FrameStateSizeEntry:
     scalar: Optional[int]
     size: Optional[List[int]]
 
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -888,6 +889,10 @@ class VariableBuilder:
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
+                    # Note - this esentially means that if this name gets reused as a tensor,
+                    # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
+                    # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
+                    # sure that is necessary for now.
                     frame_state_entry = FrameStateSizeEntry(scalar=value, size=None)
                 else:
                     frame_state_entry = self.tx.output.frame_state[name]
@@ -899,7 +904,10 @@ class VariableBuilder:
                 # know if bare integers are actually going to be sizevars
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
-                if frame_state_entry.scalar is None or not config.assume_static_by_default:
+                if (
+                    frame_state_entry.scalar is None
+                    or not config.assume_static_by_default
+                ):
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
