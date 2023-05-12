@@ -1238,6 +1238,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_test_fn = torch._dynamo.optimize(cnt)(test_fn)
         opt_test_fn()
 
+    # See https://github.com/pytorch/pytorch/issues/100067
+    def test_copy_weird_strides(self):
+        # This test requires inductor's copy() decomp to preserve strides properly.
+        def test_fn(a):
+            b = torch.zeros(48, 4, 256, 513)
+            b[:, 0, 1:256, 1:256] = a
+            c = b.view(4, 12, 1024, 513)
+            d = c.transpose(2, 1)
+            d.add_(1)
+            return d
+
+        sh, st, dt, dev, rg = (
+            (48, 255, 255),
+            (787968, 513, 1),
+            torch.float16,
+            "cpu",
+            True,
+        )
+        a = rand_strided(sh, st, dt, dev).requires_grad_(rg)
+        compiled_f = torch.compile(test_fn, backend="aot_eager_decomp_partition")
+        out1 = test_fn(a)
+        out2 = compiled_f(a)
+        self.assertEqual(out1, out2)
+
     def test_indexing_with_list(self):
         def test_fn():
             def run_test(tensor, *idx):
