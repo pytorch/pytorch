@@ -439,6 +439,16 @@ class TensorVariable(VariableTracker):
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
         else:
+            # Convert x.new(torch.Size) into x.new_empty(torch.Size),
+            # as Tensor.new acts differently with a Size input versus a tuple input.
+            # TODO(voz): Fix this to work without rewriting it as new_empty.
+            if (
+                name == "new"
+                and len(args) == 1
+                and isinstance(args[0], (SizeVariable, ShapeVariable))
+                and not config.dynamic_shapes
+            ):
+                name = "new_empty"
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
