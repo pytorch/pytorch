@@ -78,8 +78,6 @@ elif [[ "$image" == *linter* ]]; then
   DOCKERFILE="linter/Dockerfile"
 fi
 
-BUILD_TORCHVISION=0
-
 # CMake 3.18 is needed to support CUDA17 language variant
 CMAKE_VERSION=3.18.5
 
@@ -103,21 +101,6 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
-    ;;
-    pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7-inductor-benchmark)
-    CUDA_VERSION=12.1.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    BUILD_TORCHBENCH=yes
     ;;
   pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
     CUDA_VERSION=11.8.0
