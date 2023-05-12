@@ -551,11 +551,21 @@ class TestSparseCompressed(TestCase):
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_validate(self, layout, device, dtype):
+        def make_zero_batched(t):
+            return torch.empty(*((0,) + t.shape), dtype=t.dtype, device=t.device)
+
         for index_dtype in [torch.int32, torch.int64]:
             for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(
                     layout, device=device, dtype=dtype, index_dtype=index_dtype, output_tensor=False):
                 size = kwargs['size']
                 torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, values, size, layout)
+
+                # check empty batch
+                torch._validate_sparse_compressed_tensor_args(
+                    *(make_zero_batched(t) for t in (compressed_indices, plain_indices, values)),
+                    (0,) + size,
+                    layout
+                )
 
     def _generate_invalid_input(self, layout, device):
         from functools import partial
@@ -3347,8 +3357,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
     @skipIfRocm
-    @dtypes(torch.half, torch.bfloat16)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [])
+    @dtypes(torch.half, torch.bfloat16, torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
