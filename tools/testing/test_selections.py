@@ -138,16 +138,16 @@ def _query_changed_test_files() -> List[str]:
 
 
 def _get_previously_failing_tests(repo_root: Path) -> Set[str]:
-    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = (
-        repo_root / ".pytorch_cache/v/cache/lastfailed"
+    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = (
+        repo_root / ".pytest_cache/v/cache/lastfailed"
     )
 
-    if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
-        print(f"No pytorch cache found at {PYTORCH_FAILED_TESTS_CACHE_FILE_PATH}")
+    if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
+        print(f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH}")
         print(f"cwd is {os.getcwd()}")
         return set()
 
-    with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
+    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
