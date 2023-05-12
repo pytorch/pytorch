@@ -78,6 +78,15 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16]
 
 
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
+
+
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
@@ -5064,8 +5073,10 @@ class CommonTemplate:
 
         torch.manual_seed(1234)
         weight.grad.zero_()
-        r2 = run(ones)
-        r2.sum().backward()
+        r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5095,12 +5106,9 @@ class CommonTemplate:
 
         torch._inductor.metrics.generated_kernel_count = 0
 
-        def run_with_bw():
-            result = run(torch.randn([8, 32], device=self.device))
-            result.sum().backward()
-            return result
-
-        result, (fw_code, bw_code) = run_and_get_code(run_with_bw)
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(
+            lambda: run(torch.randn([8, 32], device=self.device))
+        )
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
@@ -5595,6 +5603,38 @@ class CommonTemplate:
             fn,
             [torch.randn((4, 2)), torch.randn((4))],
         )
+
+    @requires_cuda()
+    @torch._inductor.config.patch("shape_padding", True)
+    def test_shape_padding(self):
+        if torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("dynamic shapes do not support padding")
+
+        dtypes = [
+            torch.float16,
+            torch.float32,
+        ]
+
+        b, m, n, k = 7, 11, 13, 15
+
+        def gen(*shape, dtype=torch.float32):
+            return torch.randn(*shape, device="cuda", dtype=dtype) / k + 1.0
+
+        for dtype in dtypes:
+            x = gen(m, k, dtype=dtype)
+            y = gen(k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.mm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.addmm(z, x, y), (x, y, z))
+
+        for dtype in dtypes:
+            x = gen(b, m, k, dtype=dtype)
+            y = gen(b, k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.bmm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_int_input_dynamic_shapes(self):

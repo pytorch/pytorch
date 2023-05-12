@@ -14,6 +14,7 @@ import traceback
 import typing
 import unittest
 import unittest.mock as mock
+import warnings
 import weakref
 from unittest.mock import patch
 
@@ -24,7 +25,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_analysis, bytecode_transformation
+from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
@@ -4914,6 +4915,26 @@ def fn():
             return x * x
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_anomaly_aot_autograd(self):
+        @allow_in_graph
+        def h(a):
+            r = a.sum()
+            # Trigger an exception in backwards
+            r.register_hook(lambda x: x + x.item())
+            return r
+
+        @torch.compile(backend="aot_eager")
+        def f(a):
+            return h(a)
+
+        with warnings.catch_warnings(record=True) as w, self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed
+        ):
+            f(torch.randn(2, 2, requires_grad=True))
+
+        self.assertEqual(len(w), 1)
+        self.assertIn("forward call that caused the error", str(w[0].message))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
