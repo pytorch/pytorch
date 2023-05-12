@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-
 import torch
 
 from torch.distributed._tensor.ops.common_rules import (

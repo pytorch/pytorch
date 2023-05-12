@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
 

@@ -2308,7 +2308,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
-        numel_called = [False]
+
         class NumelDefaultReturn(torch.Tensor):
             @staticmethod
             def __new__(cls, data, wrapper):
@@ -2322,6 +2322,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                     numel_called[0] = True
                     return None
                 return NotImplemented
+
         for use_wrapper_subclass in (False, True):
             numel_called = [False]
             e = NumelDefaultReturn(torch.randn(2, 2), use_wrapper_subclass)
