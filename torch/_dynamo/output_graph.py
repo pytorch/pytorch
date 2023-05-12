@@ -28,6 +28,7 @@ from torch._guards import (
     Source,
     TracingContext,
 )
+from torch._subclasses import fake_tensor
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
 
@@ -57,7 +58,6 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
-    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -220,6 +220,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         frame_state,
         local_scope: Scope,
         global_scope: Scope,
+        fake_mode: fake_tensor.FakeTensorMode = None,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -232,7 +233,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
+        fake_mode = fake_mode or torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
@@ -857,7 +858,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
-        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
