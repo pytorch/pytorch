@@ -1,5 +1,6 @@
 #include <c10/util/AbortHandler.h>
-
+#include <string>
+#include <algorithm>
 namespace c10 {
 void set_terminate_handler() {
   bool use_custom_terminate = false;
