@@ -29,6 +29,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group) -> __torch__.torch.classes.c10d.Work");
   m.def(
+      "allgather_into_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group) -> __torch__.torch.classes.c10d.Work");
+  m.def(
       "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(
       "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor, __torch__.torch.classes.c10d.Work)");
@@ -487,6 +489,21 @@ c10::intrusive_ptr<c10d::Work> allgather_coalesced_privateuse1_(
           input_list_vec);
 }
 
+#define IMPL_ALLGATHER_INTO_TENSOR_COALESCED(DEV)                          \
+  c10::intrusive_ptr<c10d::Work> allgather_into_tensor_coalesced_##DEV##_( \
+      at::TensorList outputs,                                              \
+      at::TensorList inputs,                                               \
+      const c10::intrusive_ptr<ProcessGroup>& process_group) {             \
+    auto output_vec = outputs.vec();                                       \
+    auto input_vec = inputs.vec();                                         \
+    return process_group->getBackend(c10::DeviceType::DEV)                 \
+        ->allgather_into_tensor_coalesced(output_vec, input_vec);          \
+  }
+
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>
 reduce_scatter_cpu_(
     const at::TensorList& output_tensors,
@@ -837,6 +854,12 @@ void monitored_barrier_cpu_(
 
 // register functions to dispatcher
 namespace {
+
+#define REGISTER_C10D_OP(FUNC, DEV)  \
+  TORCH_LIBRARY_IMPL(c10d, DEV, m) { \
+    m.impl(#FUNC, FUNC##DEV##_);     \
+  }
+
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("send", send_cpu);
 }
@@ -966,6 +989,10 @@ TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
 TORCH_LIBRARY_IMPL(c10d, PrivateUse1, m) {
   m.impl("allgather_coalesced_", allgather_coalesced_privateuse1_);
 }
+
+REGISTER_C10D_OP(allgather_into_tensor_coalesced_, CPU)
+REGISTER_C10D_OP(allgather_into_tensor_coalesced_, CUDA)
+REGISTER_C10D_OP(allgather_into_tensor_coalesced_, PrivateUse1)
 
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
   m.impl("reduce_scatter_", reduce_scatter_cpu_);
