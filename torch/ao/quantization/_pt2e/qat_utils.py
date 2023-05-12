@@ -358,7 +358,7 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     replacement_pattern = _get_aten_graph_module(_folded_quantized_qat_conv2d_bn_pattern, example_inputs)
 
     # TODO: use the public replace_pattern API once it also returns replacement nodes
-    match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern, ignore_literals=True)
+    match_and_replacement = replace_pattern_with_filters(m, match_pattern, replacement_pattern, ignore_literals=True)
     m.recompile()
 
     for mr in match_and_replacement:
