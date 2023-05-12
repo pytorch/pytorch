@@ -454,18 +454,20 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
         }
 
         class M(torch.nn.Module):
-            def __init__(self, dim):
+            def __init__(self, dim: int, bias: bool):
                 super().__init__()
-                self.conv = dim_to_module[dim](3, 6, 2, stride=2, padding=0, dilation=1)
+                self.conv = dim_to_module[dim](3, 6, 2, stride=2, padding=0, dilation=1, bias=bias)
 
             def forward(self, x):
-                return self.conv(x)
+                return nn.functional.gelu(self.conv(x))
 
         conv_dims = [1, 2, 3]
+        use_bias_list = [True, False]
         with override_quantized_engine("x86"):
             with torch.no_grad():
-                for dim in conv_dims:
-                    m = M(dim).eval()
+                cases = itertools.product(conv_dims, use_bias_list)
+                for dim, use_bias in cases:
+                    m = M(dim, use_bias).eval()
                     input_shape = (2, 3, *([6] * dim))
                     example_inputs = (torch.randn(input_shape),)
                     # program capture

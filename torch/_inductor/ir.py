@@ -3909,7 +3909,10 @@ class QConv(ExternKernelAlloc):
             output_padding,
         )
         # swap padding and stride to align with functional conv arg order
-        constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
+        if bias is None:
+            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
+        else:
+            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
         input_qparams = [x_scale, x_zp]
         weight_qparams = [w_scale, w_zp, w_axis]
         output_qparams = [output_scale, output_zero_point, output_dtype]
