@@ -54,7 +54,7 @@ jobs:
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.0
         with:
           fetch-depth: 1
           submodules: false
@@ -78,7 +78,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.0
         with:
           no-sudo: true
 
