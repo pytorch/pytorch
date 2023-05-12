@@ -765,14 +765,15 @@ class CppWrapperCodeCache:
 
     @classmethod
     def load(cls, source_code, func_name, key, cuda):
-        from torch.utils import cpp_extension
+        cpp_wrapper_dir = os.path.join(cache_dir(), "cpp_wrapper")
+        if not os.path.exists(cpp_wrapper_dir):
+            os.makedirs(cpp_wrapper_dir)
 
-        # cpp_wrapper_dir = os.path.join(cache_dir(), "cpp_wrapper")
-        cpp_wrapper_dir = cpp_extension.get_default_build_root()
         name = f"inline_extension_{key}"
         EXT = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{EXT}")
         log.debug("Cpp wrapper code path %s", filepath)
+
         if key not in cls.cache:
             log.debug("Cpp wrapper cache miss for %s", filepath)
             from filelock import FileLock
@@ -781,9 +782,8 @@ class CppWrapperCodeCache:
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
                 if not os.path.exists(filepath):
-                    if not os.path.exists(cpp_wrapper_dir):
-                        os.makedirs(cpp_wrapper_dir)
                     log.debug("Cpp wrapper building %s", filepath)
+
                     cpp_flags_ = cpp_flags()
                     opt_flags = optimization_flags()
                     shared = get_shared()
