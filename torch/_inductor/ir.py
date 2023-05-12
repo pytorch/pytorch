@@ -3838,9 +3838,6 @@ class QConv(ExternKernelAlloc):
         super().__init__(layout, inputs, constant_args)
         self.dim = dim
         self.kernel = self.kernels[dim]
-        self.input_qparams = input_qparams
-        self.weight_qparams = weight_qparams
-        self.output_qparams = output_qparams
 
     def codegen(self, wrapper):
         # args = [x, w, b?, x_scale, x_zp, w_scale, w_zp, o_scale, o_zp]

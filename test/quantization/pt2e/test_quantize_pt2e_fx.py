@@ -469,9 +469,7 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     input_shape = (2, 3, *([6] * dim))
                     example_inputs = (torch.randn(input_shape),)
                     # program capture
-                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
-                    # https://github.com/pytorch/pytorch/issues/96274
-                    export_module, guards = torchdynamo.export(
+                    exported_model, guards = torchdynamo.export(
                         m,
                         *copy.deepcopy(example_inputs),
                         aten_graph=True,
@@ -480,15 +478,34 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
 
                     qconfig = get_default_qconfig("x86")
                     qconfig_mapping = QConfigMapping().set_global(qconfig)
-                    backend_config = get_x86_inductor_pt2e_backend_config()
-                    prepare_module = prepare_pt2e(
-                        export_module, qconfig_mapping, example_inputs, backend_config
+                    backend_config_inductor = get_x86_inductor_pt2e_backend_config()
+                    prepared_model = prepare_pt2e(
+                        exported_model,
+                        qconfig_mapping,
+                        example_inputs,
+                        backend_config_inductor
                     )
-                    prepare_module(*example_inputs)
-                    convert_module = convert_pt2e(prepare_module)
+                    prepared_model(*example_inputs)
+                    converted_model = convert_pt2e(prepared_model)
 
-                    run = compile_fx(convert_module, example_inputs)
-                    run(*example_inputs)
+                    run = compile_fx(converted_model, example_inputs)
+                    result_inductor = run(*example_inputs)
+
+                    m_copy = copy.deepcopy(m)
+                    backend_config_fx = get_x86_backend_config()
+                    prepared_model_fx = prepare_fx(
+                        m_copy,
+                        qconfig_mapping,
+                        example_inputs,
+                        backend_config=backend_config_fx,
+                    )
+                    prepared_model_fx(*example_inputs)
+                    converted_model_fx = convert_fx(
+                        prepared_model_fx, backend_config=backend_config_fx
+                    )
+                    result_fx = converted_model_fx(*example_inputs)
+
+                    self.assertEqual(result_inductor, result_fx)
 
 
 class TestQuantizePT2EFXModels(QuantizationTestCase):
