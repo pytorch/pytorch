@@ -117,10 +117,8 @@ def calculate_shards(
 def _query_changed_test_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     merge_base = (
-        subprocess.check_output(
-            ["git", "merge-base", default_branch, "HEAD"], capture_output=True
-        )
-        .stdout.decode()
+        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
+        .decode()
         .strip()
     )
     proc = subprocess.run(
