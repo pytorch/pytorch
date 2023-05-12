@@ -1027,7 +1027,9 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
 
         def replace(expr: str) -> Tuple[List[str], str]:
             return csepass.replace(expr)
+
     else:
+
         def replace(expr: str) -> Tuple[List[str], str]:
             return [], expr
 
