@@ -1468,6 +1468,13 @@ Arguments:
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "allgather_into_tensor_coalesced",
+              &::c10d::ProcessGroup::allgather_into_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "gather",
               &::c10d::ProcessGroup::gather,
               py::arg("output_tensors"),
