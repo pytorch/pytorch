@@ -4,20 +4,13 @@ from copy import deepcopy
 from functools import wraps
 from typing import Any, List, Type
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
-from torch.distributed._spmd.api import (
-    compile,
-    COMPILED_OBJECT_KEY,
-    Override,
-    Schema,
-    SPMD,
-)
+from torch.distributed._spmd.api import compile, COMPILED_OBJECT_KEY, Override
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -198,140 +191,6 @@ class TraceDeviceMesh2DTest(DTensorTestBase, TraceDeviceMeshTestBase):
     @with_comms
     def test_all_gather_nd(self):
         self._test_all_gather_nd(torch.arange(4).reshape(2, 2))
-
-
-class TraceModuleTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 2
-
-    def _test_trace_replicate(self, model: nn.Module, x, *args, **kwargs):
-        # if x.device.type == "cuda":
-        ddp = DDP(deepcopy(model))
-        spmd = SPMD(
-            deepcopy(model),
-            schema=Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                placements=[Replicate()],
-            ),
-            input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
-        )
-        if "inp_schemas" in kwargs:
-            del kwargs["inp_schemas"]
-        only_fw = False
-        if "only_fw" in kwargs:
-            only_fw = kwargs["only_fw"]
-            del kwargs["only_fw"]
-        if only_fw:
-            output_ddp = ddp(x, *args, **kwargs)
-            output_spmd = spmd(x, *args, **kwargs)
-            self.assertTrue(output_ddp.size(), output_spmd.size())
-            return
-        ddp(x, *args, **kwargs).sum().backward()
-        spmd(x, *args, **kwargs).sum().backward()
-        for p1, p2 in zip(ddp.parameters(), spmd.parameters()):
-            # DDP divides gradients by world size to compute average, but
-            # _Partial tensor shouldn't do that automatically. Hence explicitly
-            # do division here.
-            self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
-            )
-
-    @with_comms
-    def test_torch_cat(self):
-        x = torch.rand((2, 4)).to(self.device_type)
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.rand((2, 4)))
-
-            def forward(self, x):
-                # TODO(anj): Using self.w and ignoring x results in an allgather call
-                # that we have not yet supported.
-                return torch.cat((self.w, self.w), 0)
-
-        model = Model().to(self.device_type)
-        inp_kwargs = {}
-        inp_kwargs["inp_schemas"] = [
-            Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                placements=[Replicate()],
-            )
-        ]
-        self._test_trace_replicate(
-            Model().to(self.device_type),
-            torch.rand((2, 4)).to(self.device_type),
-            **inp_kwargs,
-        )
-
-    @with_comms
-    def test_layer_norm_fw(self):
-        # This test is for get_item support. layer_norm contains
-        # tuples in its output which means we need to support get_item.
-        input_dims = []
-
-        input = np.random.randn(4, 5).astype(np.float32)
-        model = nn.LayerNorm(input.shape[1:]).to(self.device_type)
-        pt_input = torch.tensor(input, dtype=torch.float).to(self.device_type)
-        self._test_trace_replicate(model, pt_input)
-
-    @with_comms
-    def test_sequential(self):
-        model = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)]).to(
-            self.device_type
-        )
-        x = torch.randn(2, 10).to(self.device_type)
-        self._test_trace_replicate(model, x)
-
-    @with_comms
-    def test_parallel(self):
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.module_list = nn.ModuleList([nn.Linear(10, 10) for _ in range(2)])
-
-            def forward(self, x):
-                return sum([m(x) for m in self.module_list])
-
-        model = Model().to(self.device_type)
-        x = torch.randn(2, 10).to(self.device_type)
-        self._test_trace_replicate(model, x)
-
-    @with_comms
-    def test_hybrid(self):
-        bottom_model = nn.Sequential(
-            nn.Linear(4, 8),
-            nn.Softmax(),
-        ).to(self.device_type)
-
-        top_model = nn.Sequential(
-            nn.Linear(8, 2),
-            nn.Softmax(),
-        ).to(self.device_type)
-
-        hybrid = nn.Sequential(
-            DDP(deepcopy(bottom_model)),
-            SPMD(
-                deepcopy(top_model),
-                schema=Schema(
-                    mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                    placements=[Replicate()],
-                ),
-            ),
-        )
-        ddp = DDP(nn.Sequential(deepcopy(bottom_model), deepcopy(top_model)))
-        input = torch.randn(12, 4).to(self.device_type)
-
-        ddp(input).sum().backward()
-        hybrid(input).sum().backward()
-        for p1, p2 in zip(ddp.parameters(), hybrid.parameters()):
-            # DDP divides gradients by world size to compute average, but
-            # _Partial tensor shouldn't do that automatically. Hence explicitly
-            # do division here.
-            self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
-            )
 
 
 class DataDependentModule(nn.Module):

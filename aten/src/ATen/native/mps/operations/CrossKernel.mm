@@ -157,7 +157,7 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       }
 
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
       TORCH_CHECK(
