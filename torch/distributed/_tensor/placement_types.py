@@ -184,11 +184,11 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return tensor
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
@@ -219,11 +219,11 @@ class Shard(Placement):
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
 
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
+
         # check if it needs to pad input tensor before all_gather
         full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
         chunk_sizes = [
@@ -411,6 +411,14 @@ class DTensorSpec:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return len(self.tensor_meta.shape)
+
+    @property
+    def num_shards(self) -> int:
+        num_shards = 1
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                num_shards *= self.mesh.size(i)
+        return num_shards
 
     @property
     def dim_map(self) -> List[int]:

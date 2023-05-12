@@ -3815,21 +3815,25 @@ class TestAsArray(TestCase):
                     check(same_dtype=False, dtype=other, copy=True)
 
     @skipMeta
+    @skipIfTorchDynamo("hangs on 3.11 when running full suite for unknown reason")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
     @onlyCPU
+    @skipIfTorchDynamo("hangs on 3.11 when running full suite for unknown reason")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_numpy(self, device, dtype):
         self._test_copy_with_cvt(to_numpy, device, dtype)
 
     @skipMeta
+    @skipIfTorchDynamo("hangs on 3.11 when running full suite for unknown reason")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
 
     @onlyCPU
+    @skipIfTorchDynamo("hangs on 3.11 when running full suite for unknown reason")
     @dtypes(*set(numpy_to_torch_dtype_dict.values()))
     def test_copy_from_buffer(self, device, dtype):
         self._test_copy_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)

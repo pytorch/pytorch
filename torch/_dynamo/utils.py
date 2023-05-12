@@ -48,12 +48,16 @@ except ModuleNotFoundError:
 import importlib
 
 import torch
+import torch._functorch.config
+import torch._higher_order_ops.wrap
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -521,7 +525,7 @@ def clone_tensor(x):
     return y
 
 
-def clone_input(x):
+def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
     if isinstance(x, torch._subclasses.FakeTensor):
@@ -533,7 +537,7 @@ def clone_input(x):
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
-            y.grad = clone_input(x.grad)
+            y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
             y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
@@ -549,7 +553,9 @@ def clone_input(x):
         if x.is_quantized:
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
-            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+            result = torch.empty(
+                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+            )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
@@ -559,7 +565,7 @@ def clone_input(x):
             if x.is_leaf:
                 result.requires_grad_(x.requires_grad)
             if x.is_leaf and x.grad is not None:
-                result.grad = clone_input(x.grad)
+                result.grad = clone_input(x.grad, dtype=dtype)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
@@ -1080,6 +1086,9 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# Keep a record of graph break reasons for logging
+graph_break_reasons = list()
+
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
 seen_code_map = ExactWeakKeyDictionary()
@@ -1279,6 +1288,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
+        # why don't we print the exception here?
         raise TorchRuntimeError() from e
 
 
@@ -1584,3 +1594,76 @@ def to_numpy_helper(___tmp_0):
     if isinstance(___tmp_0, tuple):
         return tuple([convert(obj) for obj in ___tmp_0])
     return convert(___tmp_0)
+
+
+def defake(x):
+    if not isinstance(x, FakeTensor):
+        return x
+    if x._has_symbolic_sizes_strides:
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
+    else:
+        size = x.size()
+        stride = x.stride()
+    y = torch.empty_strided(
+        size,
+        stride,
+        dtype=x.dtype,
+        device=x.device,
+        requires_grad=x.requires_grad,
+    )
+    y.zero_()
+    return y
+
+
+# NB: The dictionary has to be created lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+@functools.lru_cache(None)
+def higher_order_op_converter():
+    return {
+        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
+    }
+
+
+def requires_higher_order_op(obj):
+    return obj in higher_order_op_converter()
+
+
+def get_higher_order_op(obj):
+    if (
+        obj is torch.utils.checkpoint.checkpoint
+        and not torch._functorch.config.functionalize_rng_ops
+    ):
+        from .exc import unimplemented
+
+        # TODO - functionalize_rng_ops flags cannot be turned ON by default
+        # because 1) Performance concerns - seed and offset are read and passed
+        # to each AOT graph 2) Inductor has rand-specific optimizations and
+        # there is work remaining to compose them together with
+        # functionalization.
+        #
+        # Until we make it ON by default, we will have to ask users to turn on
+        # this flag manually.  TODO - Revisit if there is a simpler way to
+        # resolve this problem.
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
+        unimplemented(
+            "torch.compile requires functioanlization of rng ops to be turned on"
+        )
+    return higher_order_op_converter().get(obj)
