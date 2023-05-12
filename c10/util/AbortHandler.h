@@ -58,7 +58,7 @@ void terminate_handler() {
 }
 } // namespace detail
 
-inline void set_terminate_handler() {
+C10_ALWAYS_INLINE void set_terminate_handler() {
   bool use_custom_terminate = false;
 #ifdef _WIN32
   use_custom_terminate = true;
