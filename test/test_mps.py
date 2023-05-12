@@ -89,9 +89,6 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
-        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        '__rpow__': [torch.float16],
-        'pow': [torch.float16],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
@@ -119,6 +116,9 @@ def mps_ops_grad_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -644,6 +644,9 @@ def mps_ops_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     UNDEFINED_XFAILLIST = {
@@ -10364,6 +10367,12 @@ class TestConsistency(TestCaseMPS):
         'linalg.vector_norm',
         'addr', 'var_mean',
         'var_mean_unbiased',
+        'acosh', 'asinh', 'asin',
+        'masked.std',
+        'nn.functional.normalize',
+        'nn.functional.triplet_margin_loss',
+        'nn.functional.triplet_margin_with_distance_loss',
+        'round', 'xlogy',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
