@@ -1261,9 +1261,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         for i in range(e.dim()):
             # NB: mark dynamic has precedence over static
             marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-            marked_weak_dynamic = i in getattr(
-                e, "_dynamo_weak_dynamic_indices", set()
-            )
+            marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
             marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
             # NB: both static and dynamic have precedence over
