@@ -41,6 +41,8 @@ aten = torch.ops.aten
         aten.contiguous.default,
         aten.copy_.default,
         aten.detach.default,
+        aten.equal.default,
+        aten.is_same_size.default,
         aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
     ]
 )
@@ -149,7 +151,8 @@ def gen_slice_strategy(
     """
     input_node = cast(Node, node.args[0])
     input_ndim = input_node.meta["val"].ndim
-    slice_dim = normalize_dim(node.args[1], input_ndim) if len(node.args) > 1 else 0
+    slice_dim = cast(int, node.args[1]) if len(node.args) > 1 else 0
+    slice_dim = normalize_dim(slice_dim, input_ndim)
     input_strategy = node_to_strategy[input_node]
     assert isinstance(input_strategy, OpStrategy)
 
@@ -209,7 +212,8 @@ def gen_slice_scatter_strategy(
 
     input_node = cast(Node, node.args[0])
     input_ndim = input_node.meta["val"].ndim
-    slice_dim = normalize_dim(node.args[2], input_ndim) if len(node.args) > 2 else 0
+    slice_dim = cast(int, node.args[2]) if len(node.args) > 2 else 0
+    slice_dim = normalize_dim(slice_dim, input_ndim)
     input_strategy = node_to_strategy[input_node]
     assert isinstance(input_strategy, OpStrategy)
 
