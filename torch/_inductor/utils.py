@@ -895,7 +895,9 @@ def is_cpu_device(inputs):
 
 
 def get_sympy_Expr_dtype(val):
-    assert isinstance(val, sympy.Expr)
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
     if val.is_integer:
         return torch.int64
     else:
