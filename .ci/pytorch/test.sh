@@ -889,6 +889,7 @@ test_bazel() {
       //:torch_dist_autograd_test \
       //:torch_include_test \
       //:transformer_test \
+      //:test_bazel \
       //c10/cuda/test:test \
       //c10/test:core_tests \
       //c10/test:typeid_test \
