@@ -8,11 +8,11 @@
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
 #include <Metal/Metal.h>
-typedef id<MTLCommandBuffer> MTLCommandBuffer_t;
-typedef dispatch_queue_t DispatchQueue_t;
+using  MTLCommandBuffer_t = id<MTLCommandBuffer>;
+using DispatchQueue_t =  dispatch_queue_t;
 #else
-typedef void* MTLCommandBuffer_t;
-typedef void* DispatchQueue_t;
+using  MTLCommandBuffer_t = void*;
+using  DispatchQueue_t = void*;
 #endif
 
 namespace torch {
