@@ -44,7 +44,7 @@ class AbortHandlerHelper {
 };
 
 namespace detail {
-void terminate_handler() {
+C10_ALWAYS_INLINE void terminate_handler() {
   std::cout << "Unhandled exception caught in c10/util/AbortHandler.h"
             << std::endl;
   auto backtrace = get_backtrace();
