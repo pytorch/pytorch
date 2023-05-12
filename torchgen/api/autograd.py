@@ -310,19 +310,30 @@ def is_foreach_func(f: NativeFunction) -> bool:
     return f.func.name.name.base.startswith("_foreach_")
 
 
+# note(crcrpar): Most foreach functions can reference an out-place `torch` function whose schema kind
+# is functional for their backward derivatives (and forward derivatives in the future), i.e.,
+# they would find such one in `functional_info_by_signature`. There however are some exceptions:
+_foreach_with_inplace_ref = {"_foreach_zero_"}
+
+
 # Checks if `function_schema` is a native, non-foreach function which `f`, a foreach function
 # reference to generate derivatives.
 def is_reference_for_foreach(
     f: NativeFunction,
     function_schema: FunctionSchema,
 ) -> bool:
-    return f.func.name.name.base.split("_foreach_")[
-        -1
-    ] == function_schema.name.name.base and all(
-        ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
-        for arg, ref_arg in zip(
-            f.func.arguments.flat_non_out,
-            function_schema.arguments.flat_non_out,
+    return (
+        f.func.name.name.base.split("_foreach_")[-1] == function_schema.name.name.base
+        and (
+            not function_schema.name.name.inplace
+            or str(f.func.name) in _foreach_with_inplace_ref
+        )
+        and all(
+            ref_arg.type in (arg.type, getattr(arg.type, "elem", None))
+            for arg, ref_arg in zip(
+                f.func.arguments.flat_non_out,
+                function_schema.arguments.flat_non_out,
+            )
         )
     )
 
@@ -355,7 +366,7 @@ def gen_foreach_derivativeinfo(
     if (
         ref_diff_info is None
         and foreach_function.func.kind() == SchemaKind.inplace
-        and str(foreach_function.func.name) in {"_foreach_zero_"}
+        and str(foreach_function.func.name) in _foreach_with_inplace_ref
     ):
         for function_schema, diff_info in non_functional_info_by_signature.items():
             if not is_reference_for_foreach(foreach_function, function_schema):
