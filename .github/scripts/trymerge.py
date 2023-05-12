@@ -86,6 +86,9 @@ class FlakyRule:
             )
         )
 
+    def __repr__(self) -> str:
+        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
+
 
 GH_PR_REVIEWS_FRAGMENT = """
 fragment PRReviews on PullRequestReviewConnection {
