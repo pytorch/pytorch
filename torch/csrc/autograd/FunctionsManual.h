@@ -1057,6 +1057,11 @@ mkldnn_rnn_layer_differentiable_backward(
     bool batch_first,
     const at::Tensor& workspace);
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(
+      const variable_list& grads,
+      const Tensor& query,
+      const Tensor& key,
+      const Tensor& value);
 } // namespace details
 } // namespace generated
 } // namespace autograd

@@ -14842,3 +14842,5 @@
 
 - func: attn(Tensor query, Tensor key, Tensor value) -> (Tensor, Tensor)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: attn
