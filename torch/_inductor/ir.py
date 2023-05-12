@@ -11,7 +11,18 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from inspect import signature
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -41,7 +52,6 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
-    pad_listlike,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -91,7 +101,7 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (List, Tuple)):
+        if isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         else:
@@ -147,11 +157,11 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def get_stride_order(seq):
+def get_stride_order(seq: Sequence[int]):
     """
     Convert strides to stride order
     """
-    sorted_idx = argsort(seq)
+    sorted_idx: List[int] = argsort(seq)
     out = [None for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
@@ -311,12 +321,30 @@ class IRNode:
     def get_numel(self):
         return sympy_product(self.get_size())
 
+    def realize(self):
+        """
+        If the IRNode refers to data which has not been materialized (e.g.,
+        it is a Pointwise/Reduction that could potentially have more
+        compute fused into it), realize the IRNode into physical memory,
+        ending the possibility of fusing into it, but allowing, e.g., multiple
+        users to access the data without having to recompute.
+
+        Check StorageBox.realize for a particularly notable implementation.
+
+        TODO(ezyang): I think, in principle, every IRNode should have an
+        implementation of this, and most of the time no-op is OK, but you
+        really do have to audit each IRNode for this, so for now, raise
+        an error if it's not implemented.  Note that some code in graph.py
+        will catch this thrown error and suppress it with a warning.
+        """
+        raise NotImplementedError(f"realize NYI on {type(self)}")
+
 
 @dataclasses.dataclass
 class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
-    inner_fn: Callable
+    inner_fn: Callable[..., Any]
     ranges: List[Expr]
 
     def __str__(self, names=("ranges",)):
@@ -461,11 +489,12 @@ class Reduction(Loops):
     reduction_hint: ReductionHint
 
     def __str__(self):
-        return Loops.__str__(
+        return Loops.__str__(  # type: ignore[call-arg]
             self, names=("ranges", "reduction_ranges", "reduction_type")
         )
 
-    __repr__ = __str__
+    def __repr__(self):
+        return self.__str__()
 
     def get_reduction_size(self):
         return self.reduction_ranges
@@ -788,12 +817,12 @@ class Reduction(Loops):
             return fn
 
     @classmethod
-    def create(
+    def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
-        inner_fn: Callable,
+        inner_fn: Callable[..., Any],
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
@@ -958,7 +987,7 @@ class Reduction(Loops):
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
-        inner_fn: Callable,
+        inner_fn: Callable[..., Any],
         ranges: List[Expr],
         reduction_ranges: List[Expr],
         reduction_type: str,
@@ -1320,7 +1349,7 @@ class SqueezeView(BaseView):
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: List[sympy.Expr]) -> List[sympy.Expr]:
+        def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
             new_index = [sympy.Integer(0)] * length
             for idx, s in zip(not_one, index):
@@ -1336,7 +1365,7 @@ class SqueezeView(BaseView):
 @dataclasses.dataclass
 class View(BaseView):
     size: List[Expr]
-    reindex: Callable
+    reindex: Callable[..., Any]
 
     def make_indexer(self):
         base_indexer = self.data.make_indexer()
@@ -1402,7 +1431,7 @@ class View(BaseView):
             return ReinterpretView(storage, new_layout)
 
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        return cls(x, tuple(new_size), reindex)
+        return cls(x, list(new_size), reindex)
 
     @staticmethod
     def resolve_negative_size(old_size, new_size):
@@ -1743,7 +1772,7 @@ class Layout(IRNode):
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
         # reorder the stride given order
-        stride_ordered = [None] * len(order)
+        stride_ordered = [-1] * len(order)
         for i in range(len(order)):
             stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
         # check if it is in ascending order
@@ -2005,7 +2034,9 @@ class MutationLayout(Layout):
 
 @dataclasses.dataclass
 class Buffer(IRNode):
-    name: str
+    # Name is sometimes None; e.g., ForceInPlace, where there isn't
+    # a meaningful name
+    name: Optional[str]
     layout: Layout
 
     def __post_init__(self):
@@ -2250,7 +2281,7 @@ class ComputedBuffer(Buffer):
             *body.writes_name2expr.values(),
         ]
         index_vars = []
-        reduce_vars = []
+        reduce_vars: List[Any] = []
         index_size = []
         reduce_size = []
         for v, s in var_ranges.items():
@@ -2269,7 +2300,7 @@ class ComputedBuffer(Buffer):
             if isinstance(reads_buf, ComputedBuffer) and hasattr(
                 reads_buf, "iter_reordering_reindex"
             ):
-                reordering_reindex[i] = reads_buf.iter_reordering_reindex
+                reordering_reindex[i] = reads_buf.iter_reordering_reindex  # type: ignore[has-type]
 
         def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
@@ -2503,7 +2534,7 @@ class ConcatKernel(NopKernel):
                     output_stride = make_channels_last_strides_for(new_size)
                     break
 
-        kernel = ConcatKernel(
+        concat_kernel = ConcatKernel(
             name=None,
             layout=FixedLayout(
                 device=device,
@@ -2513,7 +2544,7 @@ class ConcatKernel(NopKernel):
             ),
             inputs=[],
         )
-        kernel = StorageBox(kernel)
+        kernel = StorageBox(concat_kernel)
         for i in range(len(inputs)):
             kernel.data.inputs.append(
                 cls.realize_into(
@@ -2616,8 +2647,8 @@ class ExternKernel(InputsKernel):
                     result.append(next(it_tensors))
                 else:
                     result.append(next(it_non_tensors))
-            result = pytree.tree_unflatten(result, args_spec)
-            return result.get("args", []), result.get("kwargs", {})
+            r = pytree.tree_unflatten(result, args_spec)
+            return r.get("args", []), r.get("kwargs", {})
 
         tensor_args = [cls.realize_input(x) for x in tensor_args]
 
@@ -2996,12 +3027,13 @@ class ScatterFallback(ExternKernel):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
         self.kernel = fn
         self.src_is_tensor = isinstance(src, TensorBox)
+        constant_args: Tuple[Any, ...]
         if self.src_is_tensor:
             tensors = [self.realize_input(t) for t in [x, index, src]]
-            constant_args = [dim]
+            constant_args = (dim,)
         else:
             tensors = [self.realize_input(t) for t in [x, index]]
-            constant_args = [dim, src]
+            constant_args = (dim, src)
         super().__init__(
             None,
             MutationLayout(x),
@@ -3027,8 +3059,8 @@ class IndexPutFallback(ExternKernel):
             else:
                 indices.append(V.graph.wrapper_code.none_str)
 
-        indices = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
-        args = [x, indices, values, *self.codegen_const_args()]
+        indices_str = f"{V.graph.wrapper_code.open_bracket}{', '.join(indices)}{V.graph.wrapper_code.closed_bracket}"
+        args = [x, indices_str, values, *self.codegen_const_args()]
         wrapper.writeline(wrapper.wrap_kernel_call(self.kernel, args))
 
     def should_allocate(self):
@@ -3042,7 +3074,7 @@ class IndexPutFallback(ExternKernel):
             None,
             MutationLayout(x),
             self.unwrap_storage(tensors),
-            [accumulate],
+            (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
         self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
@@ -3239,7 +3271,7 @@ class MultiOutput(ExternKernel):
         V.graph.wrapper_code.writeline(line)
         self.codegen_size_asserts(V.graph.wrapper_code)
 
-    def __init__(self, layout, input, indices: List[Tuple]):
+    def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         self.indices = indices
@@ -3253,12 +3285,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding: List[int],
-    stride: List[int],
-    dilation: List[int],
+    padding_: List[int],
+    stride_: List[int],
+    dilation_: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding: List[int] = None,
+    output_padding_: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3313,24 +3345,16 @@ def _prepare_convolution_fusion_create(
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
 
+    stride = tuple(stride_)
+    padding = tuple(padding_)
+    dilation = tuple(dilation_)
+    assert isinstance(groups, int)
+    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     x.realize()
     weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
-        dims = len(x_fake.size()) - 2
-        assert 0 < len(padding) <= dims
-        assert 0 < len(dilation) <= dims
-        assert 0 < len(stride) <= dims
-        padding = pad_listlike(padding, dims)
-        dilation = pad_listlike(dilation, dims)
-        stride = pad_listlike(stride, dims)
-        if output_padding is None:
-            output_padding = pad_listlike([0], dims)
-        else:
-            assert 0 < len(output_padding) <= dims
-            output_padding = pad_listlike(output_padding, dims)
-        assert isinstance(groups, int)
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
@@ -3469,7 +3493,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List],
+        unary_scalars: Optional[List[Any]],
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
@@ -3534,7 +3558,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         binary_attr: str,
         binary_alpha: Optional[float],
         unary_attr: Optional[str],
-        unary_scalars: Optional[List],
+        unary_scalars: Optional[List[Any]],
         unary_algorithm: Optional[str],
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise_.binary"
@@ -3825,6 +3849,9 @@ class MutableBox(IRNode):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
 
+    def realize(self):
+        return self.data.realize()
+
     @property
     def layout(self):
         return self.data.layout
@@ -4057,9 +4084,11 @@ class LoopBody:
         if str(old) == str(new):
             return
         self.indirect_new[old] = new
+        assert self.indexing is not None
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):
+        assert self.indexing is not None
         return self.indexing[name]
 
     def __call__(self, *indices):
@@ -4084,7 +4113,7 @@ class LoopBodyBlock:
     operations will manifest as an extra LoopBodyBlock.
     """
 
-    def __init__(self, body: LoopBody, fn: Callable, args: List[Any]):
+    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: List[Any]):
         self.body = body
 
         def add_index(expr, category, buf_name=None):
@@ -4119,7 +4148,7 @@ class LoopBodyBlock:
                 return self._inner.index_expr(index, dtype)
 
             @staticmethod
-            def masked(mask_proxy, masked_body: Callable, other_proxy):
+            def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
                 """
                 Recursively capture the masked out body in another LoopBodyBlock
                 """
@@ -4326,7 +4355,7 @@ class AllReduceCoalesced(ExternKernel):
         ranks: List[int],
         group_size: int,
     ):
-        res = []
+        res: List[IRNode] = []
 
         def wrap_input(var):
             nonlocal res
