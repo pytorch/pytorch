@@ -1562,7 +1562,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
     def test_with_nested_modes(self):
         class ErrorA(RuntimeError):
             def __init__(self, msg):
-                return super().__init__(msg)
+                super().__init__(msg)
 
         class A(TorchDispatchMode):
             def __init__(self, msg):
