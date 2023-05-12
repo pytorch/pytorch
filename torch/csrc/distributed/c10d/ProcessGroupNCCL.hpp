@@ -151,7 +151,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
-    bool checkTimeout();
+    bool checkTimeout(c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -366,6 +366,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   c10::intrusive_ptr<Work> reduce_scatter(

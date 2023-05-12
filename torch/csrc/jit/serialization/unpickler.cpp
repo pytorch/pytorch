@@ -532,7 +532,8 @@ PickleOpCode Unpickler::readInstruction() {
       const std::string& key = args.at(2).toStringRef();
 
       at::Device device(args.at(3).toStringRef());
-      if (device_) {
+      // remap device location if it's not meta
+      if (device_ && !device.is_meta()) {
         device = *device_;
       }
 
