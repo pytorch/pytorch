@@ -13,6 +13,22 @@ def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
     return string[:idx] + new_char + string[idx + 1 :]
 
 
+def _inplace_rewrap_schema_suggestion(
+    suggestion: OpSchema, input_schema: OpSchema
+) -> None:
+    suggestion_args_spec = suggestion.args_spec
+    new_arg_schema: List[object] = []
+    idx_of_args_spec = 0
+    for arg in input_schema.args_schema:
+        if isinstance(arg, DTensorSpec):
+            new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
+            idx_of_args_spec += 1
+        else:
+            new_arg_schema.append(arg)
+    suggestion.args_schema = tuple(new_arg_schema)
+    suggestion.kwargs_schema = input_schema.kwargs_schema
+
+
 def _gen_reshard_suggestions(
     op_schema: OpSchema,
     input_dims: List[str],
@@ -32,7 +48,7 @@ def _gen_reshard_suggestions(
             )
         )
     suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
-    suggested_schema._inplace_rewrap_schema_suggestion(op_schema)
+    _inplace_rewrap_schema_suggestion(suggested_schema, op_schema)
     return OutputSharding(
         None,
         schema_suggestions=[suggested_schema],
@@ -334,7 +350,7 @@ def reduction_rule(
                 input_spec.mesh, reshard_dim_map, [], tensor_meta=input_spec.tensor_meta
             )
             schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
-            schema_suggestion._inplace_rewrap_schema_suggestion(op_schema)
+            _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
             return OutputSharding(
                 output_spec=None, schema_suggestions=[schema_suggestion]
             )

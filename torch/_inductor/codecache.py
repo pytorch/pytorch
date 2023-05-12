@@ -7,7 +7,6 @@ import json
 import logging
 import multiprocessing
 import os
-import pathlib
 import re
 import shutil
 import signal
@@ -15,7 +14,6 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -230,14 +228,11 @@ def write(source_code, ext, extra=""):
 
 
 def write_atomic(path: str, source_code: str):
-    # Write into temporary file first to avoid conflicts between threads
-    # Avoid using a named temporary file, as those have restricted permissions
-    path = pathlib.Path(path)
-    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
-    with tmp_path.open("w") as f:
+    # use a temp file for thread safety
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w") as f:
         f.write(source_code)
-
-    tmp_path.rename(path)
+    os.rename(tmp_path, path)
 
 
 def cpp_compiler():

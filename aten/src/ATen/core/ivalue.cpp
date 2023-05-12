@@ -467,10 +467,6 @@ bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
 }
 
-bool IValue::isSymIntList() const {
-  return isListOf<c10::SymIntType>();
-}
-
 bool IValue::isBoolList() const {
   return isListOf<c10::BoolType>();
 }

@@ -22,7 +22,6 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/FunctionRef.h>
-#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -1963,14 +1962,6 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
-      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
-}
-inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
-  AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
-      "called toSymIntVector on null intrusive_ptr IValue");
-  return createVectorFromList<c10::SymInt>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline at::DimVector IValue::toDimVector() const {
