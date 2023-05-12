@@ -400,7 +400,6 @@ if _has_triton():
         f_name = "sampled_addmm"
 
         input_broadcasted = broadcast_batch_dims_bsr(f_name, input, mat1, mat2)
-        
 
         if not skip_checks:
             check_bsr_layout(f_name, input)
@@ -414,33 +413,15 @@ if _has_triton():
             # TODO: insert all checks
         # TODO: insert out checks
 
-        if input_broadcasted.numel() == 0 or input_broadcasted._nnz() == 0:
-            return input_broadcasted.clone()
+        if out is None:
+            out = input_broadcasted.clone()
+
+        if out.numel() == 0 or out._nnz() == 0:
+            return out
 
         if alpha == 0.0:
-            if beta != 0.0:
-                # alpha is zero and beta is not zero.
-                if out is None:
-                    res = input_broadcasted.clone()
-                    res.values().mul_(beta)
-                    return res
-                else:
-                    if out is input:
-                        out.values().mul_(beta)
-                    else:
-                        out.copy_(input_broadcasted)
-                        out.values().mul_(beta)
-                    return out
-            else:
-                if out is None:
-                    # zero_like is broken, see https://github.com/pytorch/pytorch/issues/101078.
-                    # TODO: replace with zero_like once fixed.
-                    res = input_broadcasted.clone()
-                    res.values().zero_()
-                    return res
-                else:
-                    out.values().zero_()
-                    return out
+            out.values().mul_(beta)
+            return out
 
         blocksize = input.values().shape[-2:]
         m = mat1.size(-2)
@@ -496,13 +477,11 @@ if _has_triton():
 
         # Allocate out
         if out is None:
-            out = dense.new_zeros(original_batch_dims_broadcasted + (m, n))
-        else:
-            out.zero_()
+            out = dense.new_empty(original_batch_dims_broadcasted + (m, n))
 
         # Short circuit if lhs is zero
         if bsr._nnz() == 0:
-            return out
+            return out.zero_()
 
         blocksize = bsr.values().shape[-2:]
 
