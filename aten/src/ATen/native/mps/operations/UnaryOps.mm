@@ -259,7 +259,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output) {
     auto oneTensor = [mpsGraph constantWithScalar:1.0 dataType:dataType];
     auto twoTensor = [mpsGraph constantWithScalar:2.0 dataType:dataType];
 
-    // Aprpoximation #1 for |y| <= .7
+    // Approximation #1 for |y| <= 0.7
     auto A0 = [mpsGraph constantWithScalar:0.886226899 dataType:dataType];
     auto A1 = [mpsGraph constantWithScalar:-1.645349621 dataType:dataType];
     auto A2 = [mpsGraph constantWithScalar:0.914624893 dataType:dataType];
@@ -288,7 +288,8 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output) {
                                                                              secondaryTensor:dem
                                                                                         name:nil]
                                                     name:nil];
-    // calculate 2nd approximation for |y| > 0.7
+    // Approximation #2 for |y| > 0.7
+    // #2 approximation returns absolute value so need to add sign back later
     auto C0 = [mpsGraph constantWithScalar:-1.970840454 dataType:dataType];
     auto C1 = [mpsGraph constantWithScalar:-1.624906493 dataType:dataType];
     auto C2 = [mpsGraph constantWithScalar:3.429567803 dataType:dataType];
@@ -321,7 +322,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output) {
                             falsePredicateTensor:x_2
                                             name:nil];
 
-    // fix infinity if input was 1
+    // Fix infinity if input was 1
     auto isOne = [mpsGraph equalWithPrimaryTensor:y_abs
                                   secondaryTensor:[mpsGraph constantWithScalar:1.0 dataType:dataType]
                                              name:nil];
