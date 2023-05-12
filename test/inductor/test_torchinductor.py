@@ -224,7 +224,6 @@ def check_model(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
-    dynamic=False,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -278,13 +277,10 @@ def check_model(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    with patch.object(torch._dynamo.config, "dynamic_shapes", dynamic):
-        run = torch._dynamo.optimize(
-            compile_fx_wrapper, nopython=nopython, dynamic=dynamic
-        )(run)
+    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=nopython)(run)
 
-        torch.manual_seed(0)
-        actual = run(*example_inputs, **kwargs)
+    torch.manual_seed(0)
+    actual = run(*example_inputs, **kwargs)
     # if not called:
     #     exp = torch._dynamo.explain(run, *example_inputs)
     #     print("Explain:", exp[0])
@@ -390,11 +386,7 @@ def check_model_cuda(
     reference_in_float=True,
     assert_equal=True,
     check_gradient=False,
-    dynamic=None,
 ):
-    if dynamic is None:
-        dynamic = torch._dynamo.config.dynamic_shapes
-
     kwargs = kwargs or {}
     if hasattr(model, "to"):
         model = model.to("cuda")
@@ -416,7 +408,6 @@ def check_model_cuda(
         reference_in_float=reference_in_float,
         assert_equal=assert_equal,
         check_gradient=check_gradient,
-        dynamic=dynamic,
     )
 
     if check_lowp:

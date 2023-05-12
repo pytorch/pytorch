@@ -3055,9 +3055,6 @@ def forward(self, x):
             )
 
     def test_byte_tensor_does_not_crash(self):
-        if not torch._dynamo.config.dynamic_shapes:
-            raise unittest.SkipTest("Segfault")
-
         # See https://github.com/pytorch/pytorch/issues/100455
         def func(text):
             tensor = torch.ByteTensor(list(bytes(text, "utf8")))

@@ -588,7 +588,6 @@ class TestInductorOpInfo(TestCase):
                         "copy_to_cuda": False,
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
-                        "dynamic": True,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
                     self.check_model_cuda(
@@ -603,7 +602,6 @@ class TestInductorOpInfo(TestCase):
                         "nopython": True,
                         # skip checking gradient on CPU for now
                         "check_gradient": False,
-                        "dynamic": True,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
 
