@@ -38,6 +38,7 @@ from gitutils import (
     get_git_repo_dir,
     GitRepo,
     patterns_to_regex,
+    retries_decorator,
 )
 from label_utils import (
     gh_add_labels,
@@ -1386,16 +1387,12 @@ def checks_to_markdown_bullets(
     ]
 
 
-def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
-    try:
-        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
-    except Exception as e:
-        print(f"Could not download {url} because: {e}.")
-        if num_retries > 0:
-            return _get_flaky_rules(url, num_retries=num_retries - 1)
-        return []
+@retries_decorator(rc=[])
+def _get_flaky_rules(url: str) -> List[FlakyRule]:
+    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
 
 
+@retries_decorator()
 def save_merge_record(
     collection: str,
     comment_id: int,
@@ -1414,7 +1411,6 @@ def save_merge_record(
     ignore_current: bool = False,
     error: str = "",
     workspace: str = "commons",
-    num_retries: int = 3,
 ) -> None:
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
@@ -1460,35 +1456,9 @@ def save_merge_record(
         print("Rockset is missing, no record will be saved")
         return
 
-    except Exception as e:
-        if num_retries > 0:
-            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
-            return save_merge_record(
-                collection=collection,
-                comment_id=comment_id,
-                pr_num=pr_num,
-                owner=owner,
-                project=project,
-                author=author,
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                last_commit_sha=last_commit_sha,
-                merge_base_sha=merge_base_sha,
-                merge_commit_sha=merge_commit_sha,
-                is_failed=is_failed,
-                dry_run=dry_run,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=ignore_current,
-                error=error,
-                workspace=workspace,
-                num_retries=num_retries - 1,
-            )
-        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
-
-def get_rockset_results(
-    head_sha: str, merge_base: str, num_retries: int = 3
-) -> List[Dict[str, Any]]:
+@retries_decorator(rc=[])
+def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     query = f"""
 SELECT
     w.name as workflow_name,
@@ -1514,13 +1484,6 @@ where
         return cast(List[Dict[str, Any]], res.results)
     except ModuleNotFoundError:
         print("Could not use RockSet as rocket dependency is missing")
-        return []
-    except Exception as e:
-        print(f"Could not download rockset data because: {e}.")
-        if num_retries > 0:
-            return get_rockset_results(
-                head_sha, merge_base, num_retries=num_retries - 1
-            )
         return []
 
 
