@@ -31,7 +31,7 @@ static_weight_shapes = True
 cse = True
 
 # Restricts the amount of computation AOTAutograd can do.
-max_dist_from_bw = 6
+max_dist_from_bw = 5
 
 
 from .._dynamo.config_utils import install_config_module
