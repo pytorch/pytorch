@@ -719,7 +719,6 @@ def run_functionalized_fw_and_collect_metadata(
         torch._enable_functionalization(reapply_views=True)
         try:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
-            breakpoint()
             flat_f_outs = f(*flat_f_args)
         finally:
             torch._disable_functionalization()
