@@ -1,19 +1,20 @@
-from typing import Tuple, Sequence
-from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor.placement_types import Shard, Placement
+from typing import Sequence, Tuple
+
 from torch._prims_common import ShapeType
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.placement_types import Placement, Shard
 
 
 def compute_local_shape(
-    global_shape: ShapeType,
-    mesh: DeviceMesh,
-    placements: Sequence[Placement]
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
     """
     Compute the shape of a local shard of the given DTensor on its current
     coordinate of the mesh.
     """
-    if mesh.get_coordinate() is None:
+    my_coordinate = mesh.get_coordinate()
+
+    if my_coordinate is None:
         # if rank not in the mesh, return empty shape
         return ()
     else:
@@ -21,8 +22,6 @@ def compute_local_shape(
         ndim = len(global_shape)
         for idx, placement in enumerate(placements):
             mesh_dim_size = mesh.size(idx)
-            my_coordinate = mesh.get_coordinate()
-            assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
                 assert (
@@ -38,16 +37,16 @@ def compute_local_shape(
 
 
 def compute_local_offset(
-    global_shape: ShapeType,
-    mesh: DeviceMesh,
-    placements: Sequence[Placement]
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
     """
     Compute the offsets of a local shard of the given DTensor on its current
     global rank. This is mostly used by distributed checkpointing to know the
     exact offsets of the local shard.
     """
-    if mesh.get_coordinate() is None:
+    my_coordinate = mesh.get_coordinate()
+
+    if my_coordinate is None:
         # if rank not in the mesh, return empty offset
         return ()
     else:
@@ -56,12 +55,10 @@ def compute_local_offset(
 
         for idx, placement in enumerate(placements):
             mesh_dim_size = mesh.size(idx)
-            my_coordinate = mesh.get_coordinate()
-            assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
-                assert (
-                    shard_dim < len(local_shape)
+                assert shard_dim < len(
+                    local_shape
                 ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],

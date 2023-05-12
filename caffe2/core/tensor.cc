@@ -11,7 +11,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_KNOWN_TYPE(Tensor, Caffe2Tensor);
 
 TensorPrinter::TensorPrinter(
     // NOLINTNEXTLINE(modernize-pass-by-value)

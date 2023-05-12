@@ -7,6 +7,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/utils/byte_order.h>
 #include <string>
 #include <type_traits>
 
@@ -232,17 +233,17 @@ void Pickler::pushInt(int64_t n) {
       n >= std::numeric_limits<uint16_t>::min() &&
       n <= std::numeric_limits<uint16_t>::max()) {
     push<PickleOpCode>(PickleOpCode::BININT2);
-    push<uint16_t>(n);
+    push<uint16_t>(to_le16(n));
   } else if (
       n >= std::numeric_limits<int32_t>::min() &&
       n <= std::numeric_limits<int32_t>::max()) {
     push<PickleOpCode>(PickleOpCode::BININT);
-    push<int32_t>(n);
+    push<int32_t>(to_le32(n));
   } else {
     // Push 8 byte integer
     push<PickleOpCode>(PickleOpCode::LONG1);
     push<uint8_t>(8);
-    push<int64_t>(n);
+    push<int64_t>(to_le64(n));
   }
 }
 
@@ -263,9 +264,15 @@ void Pickler::pushBinGet(uint32_t memo_id) {
 
 // unmemoized encoding of a string
 void Pickler::pushStringImpl(const std::string& string) {
-  push<PickleOpCode>(PickleOpCode::BINUNICODE);
-  push<uint32_t>(string.size());
-  pushBytes(string);
+  if (string.size() <= UINT_MAX) {
+    push<PickleOpCode>(PickleOpCode::BINUNICODE);
+    push<uint32_t>(to_le32(string.size()));
+    pushBytes(string);
+  } else {
+    push<PickleOpCode>(PickleOpCode::BINUNICODE8);
+    push<int64_t>(to_le64(string.size()));
+    pushBytes(string);
+  }
 }
 
 void Pickler::pushString(const std::string& string) {
@@ -328,12 +335,16 @@ void Pickler::pushBytes(const std::string& string) {
 }
 
 void Pickler::pushGlobal(
-    const std::string& module_name,
-    const std::string& class_name) {
+    c10::string_view module_name,
+    c10::string_view class_name) {
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
-  key.append(module_name).append("\n").append(class_name).append("\n");
-  auto memo_entry = memoized_globals_map_.find(key);
+  key.append(module_name.data(), module_name.size());
+  key.push_back('\n');
+  key.append(class_name.data(), class_name.size());
+  key.push_back('\n');
+
+  const auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
     pushBytes(key);
@@ -538,8 +549,12 @@ static inline double swapDouble(double value) {
 
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
+#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+  push<double>(value);
+#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();

@@ -2,6 +2,7 @@
 #define THP_UTILS_H
 
 #include <ATen/ATen.h>
+#include <torch/csrc/Storage.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -169,7 +170,7 @@ TORCH_PYTHON_API void THPUtils_invalidArguments(
 bool THPUtils_checkIntTuple(PyObject* arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg);
 
-void THPUtils_addPyMethodDefs(
+TORCH_PYTHON_API void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
     PyMethodDef* methods);
 
@@ -178,7 +179,7 @@ int THPUtils_getCallable(PyObject* arg, PyObject** result);
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
 typedef class THPPointer<THPStorage> THPStoragePtr;
 
-std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
+TORCH_PYTHON_API std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg);
 PyObject* THPUtils_dispatchStateless(
     PyObject* tensor,
     const char* name,

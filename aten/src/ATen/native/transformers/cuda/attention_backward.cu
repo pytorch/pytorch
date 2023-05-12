@@ -4,6 +4,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/bit_cast.h>
 
 #include <c10/core/TensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
@@ -85,8 +86,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const int64_t philox_seed,
-    const int64_t philox_offset,
+    const Tensor& philox_seed,
+    const Tensor& philox_offset,
     c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
@@ -105,9 +106,6 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   Tensor dv = at::empty_like(value);
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
-
-  uint64_t unsigned_philox_seed = sdp::bit_cast<uint64_t>(philox_seed);
-  uint64_t unsigned_philox_offset = sdp::bit_cast<uint64_t>(philox_offset);
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
           contiguous_grad_out,
@@ -128,8 +126,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
           false, /*zero_tensors = false for all calls here*/
           is_causal,
           num_splits,
-          unsigned_philox_seed,
-          unsigned_philox_offset
+          philox_seed,
+          philox_offset
   );
   return std::make_tuple(dq, dk, dv);
 #endif
@@ -201,24 +199,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   bool grad_kv_needs_init = causal && N > M;
   at::Tensor grad_q, grad_k, grad_v;
   int8_t gQKV_strideM_multiplier = 1;
-  if (chunk_grad_outputs) {
-    // Create one big contiguous chunk
-    // This is because q, k and v usually come from a single
-    // output of a linear layer that is chunked.
-    // Creating the gradients with the right layout saves us
-    // a `torch.cat` call in the backward pass
-    at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
-    grad_q = chunk.select(2, 0);
-    grad_k = chunk.select(2, 1);
-    grad_v = chunk.select(2, 2);
-    gQKV_strideM_multiplier=3;
-  } else {
-    grad_q = at::empty(query.sizes(), query.options());
-    grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
-                                : at::empty(key.sizes(), key.options());
-    grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
-                                : at::empty(value.sizes(), value.options());
-  }
+  grad_q = at::empty(query.sizes(), query.options());
+  grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
+                              : at::empty(key.sizes(), key.options());
+  grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
+                              : at::empty(value.sizes(), value.options());
+
 
   auto launchKernel = [&](auto _k, int computeCapability) {
     using Kernel = decltype(_k);
@@ -344,8 +330,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    const int64_t philox_seed,
-    const int64_t philox_offset,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
     c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
