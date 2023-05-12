@@ -510,6 +510,22 @@ class DTensorMeshTest(DTensorTestBase):
             [dt.to_local() for dt in dtensor_list],
         )
 
+    @with_comms
+    def test_redistribute_sub_mesh(self):
+        mesh = DeviceMesh(self.device_type, [0, 2])
+
+        # test redistribute on a submesh
+        local_tensor1 = torch.ones(4, 3)
+        sharded_dtensor = DTensor.from_local(local_tensor1, mesh, [Shard(0)])
+        replicated_dtensor = sharded_dtensor.redistribute(placements=[Replicate()])
+        self.sub_mesh_assert_equal(
+            mesh.mesh, torch.ones(8, 3), torch.tensor([]), replicated_dtensor.to_local()
+        )
+        sharded_again = replicated_dtensor.redistribute(placements=[Shard(0)])
+        self.sub_mesh_assert_equal(
+            mesh.mesh, torch.ones(4, 3), torch.tensor([]), sharded_again.to_local()
+        )
+
 
 if __name__ == "__main__":
     run_tests()

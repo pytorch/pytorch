@@ -701,7 +701,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchHigherOrderOperator(VariableTracker):
+class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -719,7 +719,10 @@ class TorchHigherOrderOperator(VariableTracker):
         )
         from .builder import wrap_fx_proxy
 
-        assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
+        assert (
+            all(isinstance(value, ConstantVariable) for value in kwargs.values())
+            or not kwargs
+        ), "only constant kwargs are supported"
 
         def make_attr(name):
             node = tx.output.create_proxy(
@@ -1117,7 +1120,7 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
             p_args = (lowered_node,) + p_args
-        elif self.value.__name__ == "wrap":
+        elif self.value.__name__ in ("wrap", "wrap_activation_checkpoint"):
             # See NOTE [HigherOrderOperator tracing design] for more details
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
@@ -1148,6 +1151,8 @@ class TorchHigherOrderOperator(VariableTracker):
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
+
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -1155,7 +1160,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs={},
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )
