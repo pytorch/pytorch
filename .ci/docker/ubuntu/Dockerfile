@@ -36,12 +36,14 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
 ARG CONDA_CMAKE
+ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-COPY requirements-ci.txt /opt/conda/requirements-ci.txt
+ENV DOCS=$DOCS
+COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -86,20 +88,20 @@ ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
-COPY ./common/install_vision.sh install_vision.sh
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
 # (optional) Install Android NDK
 ARG ANDROID
 ARG ANDROID_NDK
 ARG GRADLE_VERSION
-COPY ./common/install_android.sh install_android.sh
+COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 COPY ./android/AndroidManifest.xml AndroidManifest.xml
 COPY ./android/build.gradle build.gradle
 RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh
+RUN rm install_android.sh cache_vision_models.sh common_utils.sh
 RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
@@ -133,6 +135,21 @@ RUN bash ./install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 ENV OPENSSL_DIR /opt/openssl
 RUN rm install_openssl.sh
+
+ARG TRITON
+# Install triton, this needs to be done before sccache because the latter will
+# try to reach out to S3, which docker build runners don't have access
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton.txt triton.txt
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton.txt
+
+ARG ONNX
+# Install ONNX dependencies
+COPY ./common/install_onnx.sh ./common/common_utils.sh ./
+RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
+RUN rm install_onnx.sh common_utils.sh
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh

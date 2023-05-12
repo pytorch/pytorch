@@ -1,6 +1,6 @@
 import unittest
 
-from torchgen.selective_build.operator import *
+from torchgen.selective_build.operator import *  # noqa: F403
 from torchgen.model import Location, NativeFunction
 from torchgen.selective_build.selector import (
     combine_selective_builders,

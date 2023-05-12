@@ -2293,6 +2293,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::device.with_index(str type, int index) -> Device"),
+        device_with_index,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::percentFormat(str self, ...) -> str"),
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
@@ -2424,6 +2429,24 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::nbytes(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto nbytes = static_cast<int64_t>(a.nbytes());
+          push(stack, nbytes);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::itemsize(Tensor a) -> int"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          const auto itemsize = static_cast<int64_t>(a.itemsize());
+          push(stack, itemsize);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::index(Device self) -> int?"),
         [](Stack& stack) {
           auto d = pop(stack).toDevice();
@@ -2511,7 +2534,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           pop(stack, input, shape);
           shape = shape.contiguous();
           AT_ASSERT(shape.ndimension() == 1);
-          at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
+          at::IntArrayRef shape_list(
+              shape.const_data_ptr<int64_t>(), shape.size(0));
           push(stack, input.reshape(shape_list));
         },
         aliasAnalysisSpecialCase()),
@@ -3011,7 +3035,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (const auto i : c10::irange(t.size(0))) {
-            elems.push_back(*t[i].data_ptr<int32_t>());
+            elems.push_back(*t[i].const_data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
         },

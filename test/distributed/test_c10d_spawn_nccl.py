@@ -13,7 +13,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -30,8 +30,8 @@ if sys.version_info < (3, 9):
             store = c10d.FileStore(filename, world_size)
             return c10d.ProcessGroupNCCL(store, rank, world_size)
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-        @sandcastle_skip_if(NO_NCCL, "NCCL needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
         def test_shared_broadcast_nccl(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_broadcast_process,
@@ -40,8 +40,8 @@ if sys.version_info < (3, 9):
                 1,
             )
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-        @sandcastle_skip_if(NO_NCCL, "NCCL needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
         def test_shared_allreduce_nccl(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allreduce_process,
@@ -63,8 +63,8 @@ if sys.version_info < (3, 9):
                 c2p.put((rank, torch.ones(2, 2), x.to("cpu")))
             p2c.get()
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-        @sandcastle_skip_if(NO_NCCL, "NCCL needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
         def test_shared_reduce_nccl(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_reduce_process,
@@ -73,8 +73,8 @@ if sys.version_info < (3, 9):
                 1,
             )
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
-        @sandcastle_skip_if(NO_NCCL, "NCCL needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(NO_NCCL, "NCCL needed")
         def test_shared_allgather_nccl(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allgather_process,
@@ -91,7 +91,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         # Test Common Ops First.
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(
+        @skip_but_pass_in_sandcastle_if(
             not _torch_dist_nn_available, "torch.distributed.nn is not available"
         )
         def test_broadcast(self):
@@ -99,38 +99,38 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_reduce(self):
             self._test_reduce("nccl")
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_allreduce(self):
             self._test_allreduce("nccl")
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_gather(self):
             self._test_all_gather("nccl")
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_to_all(self):
             self._test_all_to_all("nccl")
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_to_all_single(self):
             self._test_all_to_all_single("nccl")
 
         # Test Ops only supported in NCCL.
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_reduce_scatter(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
@@ -156,7 +156,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_reduce_scatter_non_contiguous(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
@@ -184,7 +184,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_gather_base(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')

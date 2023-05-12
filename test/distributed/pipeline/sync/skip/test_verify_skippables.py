@@ -10,6 +10,7 @@ import pytest
 from torch import nn
 
 from torch.distributed.pipeline.sync.skip import Namespace, skippable, verify_skippables
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_matching():
@@ -152,3 +153,7 @@ def test_double_stash_pop_but_isolated():
     verify_skippables(
         nn.Sequential(Layer1().isolate(ns1), Layer2().isolate(ns1), Layer3().isolate(ns2), Layer4().isolate(ns2),)
     )
+
+
+if __name__ == "__main__":
+    run_tests()

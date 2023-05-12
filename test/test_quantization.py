@@ -75,8 +75,11 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 # Quantization for PyTorch 2.0 Export path
-    from quantization.fx.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
-    from quantization.fx.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXX86Inductor  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
@@ -133,6 +136,9 @@ try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
 except ImportError:
     pass
+
+# Experimental functionality
+from quantization.core.experimental.test_bits import TestBits  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()

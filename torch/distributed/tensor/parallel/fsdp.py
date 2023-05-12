@@ -122,9 +122,9 @@ def _get_box_for(tensor: DistributedTensor, idx: int) -> Tuple[torch.Size, torch
 
 def _get_local_box(tensor: DistributedTensor) -> Tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    dim_0_coord = device_mesh.get_coordinate_on_dim(0)
-    assert dim_0_coord is not None
-    return _get_box_for(tensor, dim_0_coord)
+    coord = device_mesh.get_coordinate()
+    assert coord is not None
+    return _get_box_for(tensor, coord[0])
 
 
 def _create_shard_md_from_dt(dt: DistributedTensor, current_rank: int) -> ShardMetadata:

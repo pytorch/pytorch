@@ -7,6 +7,9 @@ import operator
 import traceback
 import collections
 
+from dataclasses import is_dataclass, fields
+
+
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
@@ -120,7 +123,7 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
@@ -130,19 +133,15 @@ class TracerBase:
         if fx_traceback.has_preserved_node_meta():
             current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
 
-            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
-            # If other meta fields are needed, they can be added here
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
                 node.stack_trace = stack_trace
-
-            nn_module_stack = current_meta.get("nn_module_stack")
-            if nn_module_stack:
-                node.meta["nn_module_stack"] = nn_module_stack
-
-            source_fn = current_meta.get("source_fn")
-            if source_fn:
-                node.meta["source_fn"] = source_fn
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
+            for field in copy_meta_fields:
+                if field in current_meta:
+                    node.meta[field] = current_meta[field]
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
@@ -180,9 +179,9 @@ class TracerBase:
         if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy
@@ -205,7 +204,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back
@@ -261,6 +261,11 @@ class TracerBase:
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
+
+        if is_dataclass(a):
+            kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
+            return self.create_node("call_function", a.__class__, (), kwargs)
+
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
@@ -444,9 +449,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if isinstance(orig_method, torch._ops.PyOperator):
-                # TODO: Define how to symbolically trace PyOperators
-                raise RuntimeError("Unable to symbolically trace PyOperators")
+            if isinstance(orig_method, torch._ops.HigherOrderOperator):
+                # TODO: Define how to symbolically trace HigherOrderOperators
+                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

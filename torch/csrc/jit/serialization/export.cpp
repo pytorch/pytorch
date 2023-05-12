@@ -21,7 +21,9 @@
 #include <torch/version.h>
 #include <atomic>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
+C10_DIAGNOSTIC_POP()
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
@@ -503,7 +505,8 @@ GraphEncoder::GraphEncoder(
   model_proto_.set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&
-          onnx_opset_version < kOpsetVersionToIRVersion.size() &&
+          static_cast<size_t>(onnx_opset_version) <
+              kOpsetVersionToIRVersion.size() &&
           kOpsetVersionToIRVersion[onnx_opset_version] != kInvalidOpsetVersion,
       "Unsupported onnx_opset_version: ",
       onnx_opset_version);
