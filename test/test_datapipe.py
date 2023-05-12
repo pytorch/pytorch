@@ -860,9 +860,9 @@ class TestFunctionalIterDataPipe(TestCase):
             try:
                 assert f"(functional name: ``{dp_funcname}``)" in docstring
             except AssertionError:
-                print(dp_funcname)
+                print("***Begin docstring for", dp_funcname)
                 print(docstring)
-                print(input_dp.__doc__)
+                print("***End docstring for", dp_funcname)
                 raise ValueError(dp_funcname, "IterDataPipe docstring incorrect")
 
             assert "Args:" in docstring
