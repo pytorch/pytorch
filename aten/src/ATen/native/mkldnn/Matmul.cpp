@@ -130,23 +130,25 @@ void mkldnn_matmul(
               (mat1.dim() == 1 && mat2.dim() == 1),  // aten::dot
               "mkldnn_matmul:  unsupported dims for mat and mat2");
 
+#if defined(__aarch64__)
+  // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
+  // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
+  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
+              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  // device needs to support bf16 if the inputs are of bf16 type
+  if (mat1.scalar_type() == at::kBFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
+                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+  }
+#else
   TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
 
-#if defined(__aarch64__)
-  if (mkldnn_bf16_device_check_arm()) {
-     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-     TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
-                 ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
-                 "mkldnn_matmul:  only enabled for fp32 and bf16 path");
-  } else
+   TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
+               mat2.scalar_type() == at::kBFloat16 &&
+               result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
 #endif
-  {
-     TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
-                 mat2.scalar_type() == at::kBFloat16 &&
-                 result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
-  }
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
@@ -177,6 +179,17 @@ void mkldnn_matmul(
   // Will remove this "contiguous" after mkldnn have fully supported
   Tensor mat1_ = is_mkldnn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
   Tensor mat2_ = is_mkldnn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
+  // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
+  auto mat1_sizes = mat1_.sizes();
+  IntArrayRef mat1_default_contiguous_strides = c10::contiguous_strides(mat1_sizes);
+  if (mat1_.is_contiguous() && mat1_.strides() != mat1_default_contiguous_strides) {
+     mat1_ = mat1_.as_strided(mat1_sizes, mat1_default_contiguous_strides);
+  }
+  auto mat2_sizes = mat2_.sizes();
+  IntArrayRef mat2_default_contiguous_strides = c10::contiguous_strides(mat2_sizes);
+  if (mat2_.is_contiguous() && mat2_.strides() != mat2_default_contiguous_strides) {
+    mat2_ = mat2_.as_strided(mat2_sizes, mat2_default_contiguous_strides);
+  }
 
   // mkldnn_matmul only proceed CPU tensor
   const ideep::tensor x = itensor_view_from_dense(mat1_);

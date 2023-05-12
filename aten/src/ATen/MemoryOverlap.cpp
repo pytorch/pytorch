@@ -42,7 +42,7 @@ MemOverlapStatus get_overlap_status(const TensorBase& a, const TensorBase& b) {
   return get_overlap_status(a.unsafeGetTensorImpl(), b.unsafeGetTensorImpl());
 }
 
-MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
+MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a == b) return MemOverlapStatus::Full;
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
@@ -57,9 +57,9 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   // which we will miss.
   auto a_storage = a->unsafe_storage();
   if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
-    const auto a_begin = static_cast<char*>(a->data());
+    const auto a_begin = static_cast<const char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();
-    const auto b_begin = static_cast<char*>(b->data());
+    const auto b_begin = static_cast<const char*>(b->data());
     const auto b_end = b_begin + b->numel() * b->itemsize();
 
     if (a_begin == b_begin && a_end == b_end) {

@@ -2,20 +2,20 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
-from torch.utils._pytree import tree_map_only
 from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.utils._pytree import tree_map_only
 
 
 # Common type aliases
 ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
-# be the same set of possiblities.
+# be the same set of possibilities.
 OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
-    """"
+    """ "
     This is used to propagate tensor metadata, must be under fake mode
     """
     assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
@@ -23,8 +23,90 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
-        requires_grad=arg.tensor_meta.requires_grad
+        requires_grad=arg.tensor_meta.requires_grad,
     )
+
+
+@dataclass
+class PlacementStrategy(object):
+    """
+    A placement strategy describes an acceptable sharding placements of the output
+    and the tensor arguments of an operation.
+    """
+
+    output_spec: DTensorSpec
+    input_specs: Optional[Sequence[DTensorSpec]] = None
+
+    def pretty_print_placements(self, placements):
+        return "".join([str(p) for p in placements])
+
+    def __str__(self) -> str:
+        if self.input_specs is None:
+            input_specs_str = ""
+        else:
+            input_specs_str = ", ".join(
+                [
+                    self.pretty_print_placements(spec.placements)
+                    for spec in self.input_specs
+                ]
+            )
+        output_spec_str = self.pretty_print_placements(self.output_spec.placements)
+        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
+
+
+class StrategyType(object):
+    """
+    Base class type for op strategy, We have two StrategyType:
+        OpStrategy and TupleStrategy
+    """
+
+    pass
+
+
+class OpStrategy(StrategyType):
+    """
+    OpStrategy that consists of a list of placement strategies associated with the op
+    """
+
+    def __init__(self, strategies: List[PlacementStrategy]) -> None:
+        super().__init__()
+        self.strategies: List[PlacementStrategy] = strategies
+
+    def __str__(self) -> str:
+        strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
+        return f"OpStrategy: [{strategy_list_str}]"
+
+    def max_num_shards(self) -> int:
+        """
+        Returns the max number of shards across all placement strategies
+        """
+        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+
+
+class TupleStrategy(StrategyType):
+    """
+    TupleStrategy represents the output strategy of this op is a tuple
+    of strategy, i.e. If the output of this op is a tuple of tensors, we should
+    return a TupleStrategy that contains a tuple of OpStrategy.
+
+    NOTE: if the output of the op is a List[Tensor], it's likely we should return
+    OpStrategy directly in all cases.
+    """
+
+    def __init__(self, childs: Tuple[StrategyType, ...]) -> None:
+        super().__init__()
+        self.childs: Tuple[StrategyType, ...] = childs
+
+    def __str__(self) -> str:
+        tuple_strategies_str = "TupleStrategy: "
+        child_strategies_str = "\n".join(
+            [
+                f" tuple idx: {idx}, strategy: {str(strat)}"
+                for idx, strat in enumerate(self.childs)
+            ]
+        )
+        return f"{tuple_strategies_str}\n{child_strategies_str}"
+
 
 @dataclass
 class OpSchema:
@@ -83,7 +165,7 @@ class OpSchema:
             with NO non-DTensor positional arguments (i.e. int/float/tuple, etc)
             mainly used by sharding propagation to propagate the output spec
         """
-        # filter out non-relavant values from args schema to get a clean spec list
+        # filter out non-relevant values from args schema to get a clean spec list
         # this would mainly be used by sharding propagation rules
         return tuple(item for item in self.args_schema if isinstance(item, DTensorSpec))
 
@@ -114,7 +196,9 @@ class OpSchema:
             by sharding propagation rules to generate fake args for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema)
+        return tree_map_only(
+            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.args_schema
+        )
 
     def gen_fake_kwargs(self) -> KwargsType:
         """
@@ -122,7 +206,22 @@ class OpSchema:
             by sharding propagation rules to generate fake kwargs for the operator
             to run the local tensor operator and get the output spec.
         """
-        return tree_map_only(DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema)
+        return tree_map_only(
+            DTensorSpec, _rebuild_tensor_from_dtensor_meta, self.kwargs_schema
+        )
+
+    def _inplace_rewrap_schema_suggestion(self, origin_schema: "OpSchema") -> None:
+        suggestion_args_spec = self.args_spec
+        new_arg_schema: List[object] = []
+        idx_of_args_spec = 0
+        for arg in origin_schema.args_schema:
+            if isinstance(arg, DTensorSpec):
+                new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
+                idx_of_args_spec += 1
+            else:
+                new_arg_schema.append(arg)
+        self.args_schema = tuple(new_arg_schema)
+        self.kwargs_schema = origin_schema.kwargs_schema
 
 
 @dataclass

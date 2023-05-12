@@ -54,12 +54,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual void startCoalescing() {
-    // no-op for backends that have not implemented startCoalescing
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not implement startCoalescing"));
   }
 
-  virtual void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
-    // no-op for backends that have not implemented endCoalescing
+  virtual c10::intrusive_ptr<Work> endCoalescing() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not implement endCoalescing"));
   }
 
   // Subclasses must override this method to return the backend name
@@ -140,6 +143,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ",
             getBackendName(),
             "does not support allgather_coalesced"));
+  }
+
+  // This function is a coalesced version of `allgather_into_tensor` (currently
+  // still named as `_allgather_base`). Each tensor in the vector corresponds to
+  // an input/output of one `allgather_into_tensor` operation.
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& /* outputs */,
+      std::vector<at::Tensor>& /* inputs */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            "does not support allgather_into_tensor_coalesced"));
   }
 
   virtual c10::intrusive_ptr<Work> gather(

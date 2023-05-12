@@ -3,6 +3,7 @@ from collections import defaultdict
 from warnings import warn
 
 import torch
+
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
 
@@ -55,6 +56,30 @@ except ImportError:
                     return func(*args, **kwargs)
 
             return wrapped
+
+def _enable_dynamo_cache_lookup_profiler(enable: bool):
+    from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
+        clear_profiler_hooks,
+        set_profiler_hooks,
+    )
+    """
+    Registers a hook within dynamo eval_frame.c called before and after
+    the lookup process, which runs guards associated with each cached frame.
+
+    Clear deregisters the hooks, saving overhead.
+    """
+
+    if enable:
+
+        def _profiler_start(name):
+            return torch.ops.profiler._record_function_enter_new(name, None)
+
+        def _profiler_end(record):
+            torch.ops.profiler._record_function_exit._RecordFunction(record)
+        set_profiler_hooks(_profiler_start, _profiler_end)
+    else:
+        clear_profiler_hooks()
+
 
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
@@ -211,6 +236,7 @@ class profile:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
+        _enable_dynamo_cache_lookup_profiler(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -226,6 +252,7 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        _enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()

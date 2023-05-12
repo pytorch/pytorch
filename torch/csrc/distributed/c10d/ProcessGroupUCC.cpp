@@ -172,9 +172,6 @@ void read_config() {
   // barrier is always blocking
   torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
 
-  // barrier is always blocking
-  torch_ucc_config.blocking_wait[(std::uint8_t)OpType::BARRIER] = true;
-
   torch_ucc_config.use_future =
       std::stoi(torch_ucc_envs_map.at("TORCH_UCC_USE_FUTURE"));
   torch_ucc_config.shared_comm =

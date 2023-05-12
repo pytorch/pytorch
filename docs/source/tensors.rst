@@ -199,6 +199,8 @@ Tensor class reference
     Tensor.ndim
     Tensor.real
     Tensor.imag
+    Tensor.nbytes
+    Tensor.itemsize
 
     Tensor.abs
     Tensor.abs_

@@ -6,10 +6,11 @@ from typing import Any, List, Optional
 import torch
 from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
-from torch._dynamo.utils import deepcopy_to_fake_tensor, fake_mode_from_tensors
+from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
+ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
 
 def args_str(args):
@@ -45,9 +46,11 @@ def pretty_print_buckets(buckets: List[Bucket]):
     try:
         from tabulate import tabulate
 
+        # TODO: Do you really want to log.info this?  It would get
+        # suppressed if log level is too low
         log.info(
-            "\nDDPOptimizer bucket assignments\n"
-            + tabulate(rows, headers=headers, tablefmt="simple_grid")
+            "\nDDPOptimizer bucket assignments\n%s",
+            tabulate(rows, headers=headers, tablefmt="simple_grid"),
         )
     except ImportError:
         log.info(
@@ -147,7 +150,7 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
-        fake_mode = fake_mode_from_tensors(example_inputs)
+        fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -193,7 +196,8 @@ class DDPOptimizer:
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
         log.info(
-            f"DDPOptimizer used bucket cap {self.bucket_bytes_cap} and produced the following buckets:"
+            "DDPOptimizer used bucket cap %s and produced the following buckets:",
+            self.bucket_bytes_cap,
         )
         pretty_print_buckets(buckets)
 
@@ -220,7 +224,7 @@ class DDPOptimizer:
                 # only print the submod graphs, not their children
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
-        log.debug(debug_str)
+        ddp_graph_log.debug(debug_str)
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
@@ -295,58 +299,59 @@ class DDPOptimizer:
             # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
             # to match what aot_autograd expects. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
-                with self._set_current_node(n):
-                    args, kwargs = self.fetch_args_kwargs_from_env(n)
-                    new_args = []
-                    assert fake_mode
-                    for arg in args:
-                        if isinstance(arg, torch.Tensor) and not isinstance(
-                            arg, torch._subclasses.FakeTensor
-                        ):
-                            new_args.append(fake_mode.from_tensor(arg))
-                        else:
-                            new_args.append(arg)
-
-                    log.debug(f"run_node {n.op}, {n.target} got args {args_str(args)}")
-                    assert isinstance(args, tuple)
-                    assert isinstance(kwargs, dict)
-
-                    if n.op == "call_module":
-                        real_mod = self.fetch_attr(n.target)
-                        if fake_mode:
-                            curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
-                        else:
-                            curr_submod = real_mod
-
-                        log.debug(
-                            f"\n---{n.target} graph---\n" + str(curr_submod.graph)
-                        )
-
-                        # When calling the compiler on the submod, inputs (new_args) are expected to
-                        # be FakeTensors already since Dynamo would have made them FakeTensors in the
-                        # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
-                        # since this wrapping happens during compilation
-                        compiled_submod_real = self.compile_submod(
-                            real_mod, new_args, kwargs
-                        )
-
-                        # We update the original (outer) graph with a call into the compiled module
-                        # instead of the uncompiled one.
-                        self.module.delete_submodule(n.target)
-                        n.target = "compiled_" + n.target
-                        self.module.add_submodule(n.target, compiled_submod_real)
-
-                        # Finally, we have to produce inputs for use compiling the next submodule,
-                        # and these need to be FakeTensors, so we execute the module under fake_mode
-                        with fake_mode:
-                            return curr_submod(*new_args, **kwargs)
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                new_args = []
+                assert fake_mode
+                for arg in args:
+                    if isinstance(arg, torch.Tensor) and not isinstance(
+                        arg, torch._subclasses.FakeTensor
+                    ):
+                        new_args.append(fake_mode.from_tensor(arg))
                     else:
-                        # placeholder or output nodes don't need to get compiled, just executed
-                        return getattr(self, n.op)(n.target, new_args, kwargs)
+                        new_args.append(arg)
+
+                log.debug("run_node %s, %s got args %s", n.op, n.target, args_str(args))
+                assert isinstance(args, tuple)
+                assert isinstance(kwargs, dict)
+
+                if n.op == "call_module":
+                    real_mod = self.fetch_attr(n.target)
+                    if fake_mode:
+                        curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
+                    else:
+                        curr_submod = real_mod
+
+                    ddp_graph_log.debug(
+                        "\n---%s graph---\n%s", n.target, curr_submod.graph
+                    )
+
+                    # When calling the compiler on the submod, inputs (new_args) are expected to
+                    # be FakeTensors already since Dynamo would have made them FakeTensors in the
+                    # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
+                    # since this wrapping happens during compilation
+                    compiled_submod_real = self.compile_submod(
+                        real_mod, new_args, kwargs
+                    )
+
+                    # We update the original (outer) graph with a call into the compiled module
+                    # instead of the uncompiled one.
+                    self.module.delete_submodule(n.target)
+                    n.target = "compiled_" + n.target
+                    self.module.add_submodule(n.target, compiled_submod_real)
+
+                    # Finally, we have to produce inputs for use compiling the next submodule,
+                    # and these need to be FakeTensors, so we execute the module under fake_mode
+                    with fake_mode:
+                        return curr_submod(*new_args, **kwargs)
+                else:
+                    # placeholder or output nodes don't need to get compiled, just executed
+                    return getattr(self, n.op)(n.target, new_args, kwargs)
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        log.debug("\n---final graph---\n" + str(split_gm.graph) + "\n---------------\n")
+        ddp_graph_log.debug(
+            "\n---final graph---\n%s\n---------------\n", split_gm.graph
+        )
         return split_gm

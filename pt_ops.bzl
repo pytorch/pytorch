@@ -1,3 +1,4 @@
+load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:expect.bzl", "expect")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
@@ -37,6 +38,40 @@ def pt_operator_library(
     labels = kwargs.pop("labels", [])
     visibility = kwargs.pop("visibility", ["PUBLIC"])
 
+    # Sanity check the model name and versions.  While the input to both is an array, the
+    # codegen script only ever outputs a single item in the array so we can just assume that
+    # here. If you ever need to depends on more than one assets, just break it up into a separate
+    # BUCK targets.
+    if model_assets or model_versions:
+        if len(model_assets) != 1:
+            fail("Model assets must be of size 1")
+        if len(model_versions) != 1:
+            fail("Model versions must be of size 1")
+
+    # Is this a traced operator therefore has a YAML file with ops?
+    yaml_option = ""
+    if model_assets and len(model_assets) > 0:
+        # We know these lists are only of length 1 via earlier assert.
+        model_asset = model_assets[0]
+        model_version = model_versions[0]
+
+        # Pass the YAML file from this asset to the genrule below.
+        yaml_dep = "{}_v{}_yaml".format(model_asset, model_version)
+        fb_native.filegroup(
+            name = yaml_dep,
+            srcs = [
+                model_asset + ".yaml",
+            ],
+            # The visibility is not set to PUBLIC as this an internal detail.  If you see this error
+            # in your buck build flow, you are trying to use a hand-crafted "pt_operator_library" that
+            # with parameters not supported outside of codegen targets!
+        )
+
+        # Since all selective traced ops are created by automation, we can assume they
+        # have a YAML file at this very location.  If it doesn't exist, it means the targets
+        # was hand-crafted which is not a support workflow for traced ops.
+        yaml_option = "--models_yaml_path $(location fbsource//xplat/pytorch_models/build/{}/v{}:{})/{}.yaml".format(model_name, model_version, yaml_dep, model_asset)
+
     fb_xplat_genrule(
         name = name,
         out = "model_operators.yaml",
@@ -48,7 +83,7 @@ def pt_operator_library(
             "--output_path \"${{OUT}}\" " +
             "--model_name {model_name} " +
             "--dep_graph_yaml_path {dep_graph_yaml} " +
-            "--models_yaml_path {models_yaml} " +
+            "{optionally_model_yamls} " +
             "{optionally_model_versions} " +
             "{optionally_model_assets} " +
             "{optionally_model_traced_backends} " +
@@ -58,7 +93,7 @@ def pt_operator_library(
             rule_name = name,
             model_name = model_name,
             dep_graph_yaml = "none" if IS_OSS else "$(location fbsource//xplat/caffe2:pytorch_op_deps)/fb/pytorch_op_deps.yaml ",
-            models_yaml = "none" if IS_OSS else "$(location fbsource//xplat/pytorch_models:all_mobile_model_configs)/build/all_mobile_model_configs.yaml ",
+            optionally_model_yamls = "" if (IS_OSS or yaml_option == None) else yaml_option,
             optionally_root_ops = "--root_ops " + (",".join(ops)) if len(ops) > 0 else "",
             optionally_training_root_ops = "--training_root_ops " + (",".join(ops)) if len(ops) > 0 and train else "",
             optionally_model_versions = "--model_versions " + (",".join(model_versions)) if model_versions != None else "",
