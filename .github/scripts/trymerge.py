@@ -1189,7 +1189,8 @@ def read_merge_rules(
             rc = yaml.safe_load(fp)
         return [MergeRule(**x) for x in rc]
 
-
+ 
+@lru_cache(maxsize=None)
 def read_flaky_rules() -> List[FlakyRule]:
     # NOTE: This is currently hardcoded, can be extended to do per repo rules
     FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
