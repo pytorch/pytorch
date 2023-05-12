@@ -424,7 +424,6 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
-
 class PythonKeyTracer(Tracer):
     def __init__(self):
         super().__init__(autowrap_modules=())

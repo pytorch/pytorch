@@ -24,6 +24,7 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
+from .virtualized import V
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -96,10 +97,13 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
-            trace_fn(replacement_fn, [arg.meta["val"] for arg in args]),
+            replacement,
             args,
         )
 
@@ -819,6 +823,16 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
 def inference_graph(fn, args):
     """Build a normalized inference graph, for use with fx_to_pattern"""
     gm = make_fx(fn, select_decomp_table())(*args)
+    gm.graph.eliminate_dead_code()
+    gm.recompile()
+    return gm
+
+
+@torch.no_grad()
+def symbolic_inference_graph(fn, args):
+    """Build a normalized inference graph, for use with fx_to_pattern"""
+    with V.get_fake_mode():
+        gm = make_fx(fn, select_decomp_table(), tracing_mode="fake")(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
