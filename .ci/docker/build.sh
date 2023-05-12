@@ -131,6 +131,20 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+    pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmark)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
   pytorch-linux-focal-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.9
     CLANG_VERSION=7
@@ -213,6 +227,17 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-focal-py3.8-gcc7)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    DOCS=yes
+    ;;
+    pytorch-linux-focal-py3.8-gcc7-inductor-benchmark)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=7
     PROTOBUF=yes
