@@ -1850,7 +1850,6 @@ class CppVecKernelChecker(CppVecKernel):
         # and replace it with a dummy wrapper_code and then restore to the
         # original one as long as the checker is finished.
         self._orig_wrapper_code = V.graph.wrapper_code
-        breakpoint()
         V.graph.wrapper_code = WrapperCodeGen()
 
         class VecCheckerProxy:
