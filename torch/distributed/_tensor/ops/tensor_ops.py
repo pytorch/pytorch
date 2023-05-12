@@ -244,6 +244,15 @@ def gen_slice_scatter_strategy(
     return slice_scatter_strategy
 
 
+@register_op_strategy(aten._local_scalar_dense.default)
+def replica_only_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    """Only allow replication on the input/ouput"""
+    replicate_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+    return OpStrategy([PlacementStrategy(replicate_spec)])
+
+
 @register_prop_rule(aten.index_select.default)
 def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     values_spec, dim, indices_spec = op_schema.args_schema
