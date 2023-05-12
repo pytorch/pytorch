@@ -30,7 +30,7 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox, CollectiveKernel
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -623,7 +623,44 @@ class GraphLowering(torch.fx.Interpreter):
         from .debug import create_fx_from_snodes, draw_buffers
         # draw_buffers(self.nodes, True)
         fx_graph = create_fx_from_snodes(self.scheduler.nodes)
-        def get_greedy_topo_ordering(fx_graph):
+        comm_nodes = []
+        for node in fx_graph.nodes:
+            if 'fusion_meta' in node.meta and isinstance(node.meta['fusion_meta'].snode.node, CollectiveKernel):
+                comm_nodes.append(node)
+
+        def get_ancestors(node):
+            ancestors = set()
+            cur_nodes = [node]
+            while len(cur_nodes) > 0:
+                new_nodes = []
+                for node in cur_nodes:
+                    for inp in node.args:
+                        if inp not in ancestors:
+                            ancestors.add(inp)
+                            new_nodes.append(inp)
+                cur_nodes = new_nodes
+            return ancestors
+
+        def get_descendants(node):
+            descendants = set()
+            cur_nodes = [node]
+            while len(cur_nodes) > 0:
+                new_nodes = []
+                for node in cur_nodes:
+                    for inp in node.users:
+                        if inp not in descendants:
+                            descendants.add(inp)
+                            new_nodes.append(inp)
+                cur_nodes = new_nodes
+            return descendants
+
+        def tuple_sorted(x):
+            return sorted(tuple(x), key=lambda x: x.name)
+
+        def order_heuristic(fx_graph):
+            comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
+            comm_descendants = {node: get_descendants(node) for node in comm_nodes}
+
             new_nodes = [node for node in fx_graph.nodes if 'fusion_meta' in node.meta]
             indeg = {k: 0 for k in new_nodes}
             from collections import defaultdict
@@ -635,61 +672,149 @@ class GraphLowering(torch.fx.Interpreter):
                 for user in node.users:
                     if user in indeg:
                         indeg[user] += 1
+            free_nodes = set([node for node in new_nodes if indeg[node] == 0])
+
             result = []
-            while len(indeg) > 0:
-                indeg_snodes = set([i.meta['fusion_meta'].snode for i in tuple(indeg.keys())])
-                removable_bufs = set()
-                for i in buf_uses.keys():
-                    if len(buf_uses[i] & indeg_snodes) == 1:
-                        removable_bufs.add(i)
-
-                def score_candidate(candidate):
-                    snode = candidate.meta['fusion_meta'].snode
-                    def any_is_comm(node, depth=1):
-                        for user in node.users:
-                            if isinstance(node.meta['fusion_meta'].snode, (ir.AllGatherIntoTensor, ir.ReduceScatterTensor, ir.AllReduce)):
-                                return True
-                        if depth <= 0:
-                            return False
-                        return any(any_is_comm(user, depth-1) for user in node.users)
-
-                    if isinstance(snode.node, ir.Wait):
-                        return 10
-                    elif isinstance(snode.node, (ir.AllGatherIntoTensor, ir.ReduceScatterTensor, ir.AllReduce)):
-                        return 0
-                    elif any_is_comm(node, 1):
-                        return 1
-                    elif any_is_comm(node, 2):
-                        return 2
-
-                    return 3
-
-                candidates = [k for k in indeg.keys() if indeg[k] == 0]
-                candidates = sorted(candidates, key=score_candidate)
-                k = candidates[0]
-                result.append(k)
-                for user in k.users:
+            unused_nodes = set([node for node in fx_graph.nodes if 'fusion_meta' in node.meta])
+            def add_node(node):
+                assert node in unused_nodes
+                assert node in free_nodes
+                print2(f"adding {node}" )
+                free_nodes.remove(node)
+                unused_nodes.remove(node)
+                result.append(node)
+                for user in node.users:
                     if user in indeg:
                         indeg[user] -= 1
-                del indeg[k]
+                        if indeg[user] == 0:
+                            free_nodes.add(user)
+
+
+            def add_all_nodes(nodes):
+                all_nodes = set(nodes)
+                if all_nodes - unused_nodes:
+                    print2(all_nodes - unused_nodes)
+                assert all([node in unused_nodes for node in all_nodes])
+                while len(all_nodes) > 0:
+                    for node in tuple_sorted(all_nodes):
+                        if node in free_nodes:
+                            add_node(node)
+                            all_nodes.remove(node)
+
+            add_all_nodes(list(comm_ancestors[comm_nodes[0]]) + [comm_nodes[0]])
+            def get_runtime(node):
+                if node.name == 'buf45':
+                    return 35
+                if isinstance(node.meta['fusion_meta'].snode.node, ir.AllReduce):
+                    return 5
+                if isinstance(node.meta['fusion_meta'].snode.node, CollectiveKernel):
+                    return 10
+                if isinstance(node.meta['fusion_meta'].snode.node, ir.MultiOutput):
+                    return 0
+                if isinstance(node.meta['fusion_meta'].snode.node, ir.Wait):
+                    return 0
+                if isinstance(node.meta['fusion_meta'].snode.node, ir.ExternKernel):
+                    return 10
+                return 1
+
+            # for node in new_nodes:
+            #     print(node, get_runtime(node))
+            for idx in range(1, len(comm_ancestors)):
+                is_comm_blocking = len(comm_descendants[comm_nodes[idx - 1]] & comm_ancestors[comm_nodes[idx]]) > 0
+                print2(f"Start {comm_nodes[idx - 1]} -> {comm_nodes[idx]} ({is_comm_blocking})")
+                priority1 = unused_nodes & (comm_ancestors[comm_nodes[idx]] - comm_descendants[comm_nodes[idx - 1]])
+                total_cost = sum([get_runtime(node) for node in priority1])
+                comm_cost = get_runtime(comm_nodes[idx - 1])
+                print2("Priority 1")
+                add_all_nodes(tuple_sorted(priority1))
+                print2("Priority 2")
+                if total_cost > comm_cost:
+                    pass
+                else:
+                    while total_cost < comm_cost:
+                        compute_overlap_node = None
+                        for node in tuple_sorted(free_nodes - comm_descendants[comm_nodes[idx - 1]]):
+                            if not isinstance(node.meta['fusion_meta'].snode.node, ir.CollectiveKernel):
+                                compute_overlap_node = node
+                                break
+                        if compute_overlap_node is None:
+                            break
+
+                        add_node(compute_overlap_node)
+                        total_cost += get_runtime(compute_overlap_node)
+                print2(f"{comm_nodes[idx-1]} overlap: {total_cost}/{comm_cost}")
+                # if is_local():
+                #     print(f"{comm_nodes[idx - 1]} -> {comm_nodes[idx]}", total_cost, comm_cost)
+                print2("priority 3")
+                priority3 = unused_nodes & comm_ancestors[comm_nodes[idx]]
+                add_all_nodes(list(priority3) + [comm_nodes[idx]])
+                print2()
+
+
+            # if is_local():
+            #     breakpoint()
+            add_all_nodes(unused_nodes)
+            # print2(result)
+            def sink_waits(result):
+                new_result = []
+                cur_waits = set()
+                for node in result:
+                    if isinstance(node.meta['fusion_meta'].snode.node, ir.Wait):
+                        cur_waits.add(node)
+                    else:
+                        for wait in tuple_sorted(cur_waits):
+                            if node in wait.users:
+                                new_result.append(wait)
+                                cur_waits.remove(wait)
+
+                        new_result.append(node)
+                for node in tuple_sorted(cur_waits):
+                    new_result.append(node)
+                return new_result
+
+            def raise_comms(result):
+                new_result = []
+                cur_comms = []
+                for node in reversed(result):
+                    if isinstance(node.meta['fusion_meta'].snode.node, ir.CollectiveKernel):
+                        cur_comms.append(node)
+                    else:
+                        while len(cur_comms) > 0 and any([node in comm.args for comm in cur_comms]):
+                            comm = cur_comms.pop(0)
+                            new_result.append(comm)
+                        new_result.append(node)
+                assert len(cur_comms) <= 1
+                for node in tuple_sorted(cur_comms):
+                    new_result.append(node)
+                result = new_result[::-1]
+                return result
+
+            result = sink_waits(result)
+            result = raise_comms(result)
+
+            print2(result)
             return [node.meta['fusion_meta'].snode for node in result]
 
 
-        if is_local():
-            for idx, node in enumerate(self.scheduler.nodes):
-                print2(idx, node.get_name(), type(node.node))
-        new_nodes = get_greedy_topo_ordering(fx_graph)
-        self.scheduler.nodes = new_nodes
-        if is_local():
-            for idx, node in enumerate(self.scheduler.nodes):
-                print2(idx, node.get_name(), type(node.node))
+
+        # output_result = order_heuristic(fx_graph)
+        # self.scheduler.nodes = output_result
+
+        # if is_local():
+        #     for idx, node in enumerate(self.scheduler.nodes):
+        #         print2(idx, node.get_name(), type(node.node))
+        # new_nodes = get_greedy_topo_ordering(fx_graph)
+        # self.scheduler.nodes = new_nodes
+        # if is_local():
+        #     for idx, node in enumerate(self.scheduler.nodes):
+        #         print2(idx, node.get_name(), type(node.node))
         self.scheduler.compute_last_usage()
         # import os
         # if os.environ.get('LOCAL_RANK', -1) == '0':
         #     breakpoint()
-        # from .debug import draw_buffers
-        # if os.environ.get('LOCAL_RANK', -1) == '0':
-        #     draw_buffers(self.nodes, fname="graph_diagram.svg")
+        from .debug import draw_buffers
+        if is_local():
+            draw_buffers(self.scheduler.nodes, fname="post_fused.svg")
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
@@ -747,8 +872,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        if config.benchmark_kernel:
-            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
+        # if config.benchmark_kernel:
+        from .utils import print2
+        print2(f"Compiled module path: {mod.__file__}")
+
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod

@@ -149,7 +149,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     # create edges between nodes
     for snode in snodes:
         name = snode.get_name()
-        deps = snode.read_writes.reads
+        deps = snode.unmet_dependencies
 
         fx_node = buf_to_fx_node[name]
         new_args = []

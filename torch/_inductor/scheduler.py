@@ -55,6 +55,7 @@ class BaseSchedulerNode:
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
+        self.additional_dependencies = set()
         self.set_read_writes(node.get_read_writes())
         self.recursive_predecessors: Optional[Set[str]] = None
         self.min_order: Optional[int] = None
@@ -132,6 +133,7 @@ class BaseSchedulerNode:
         }
 
     def prune_deps(self):
+        old = set(self.unmet_dependencies)
         self.unmet_dependencies = {
             dep
             for dep in self.unmet_dependencies
@@ -665,14 +667,23 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         from .debug import draw_buffers
 
-        if is_local():
-            draw_buffers(self.nodes, print_graph=True, fname='pre_fusion.svg')
+
+        comm_nodes = [n for n in self.nodes if isinstance(n.node, ir.CollectiveKernel)]
+        for i in range(1, len(comm_nodes)):
+            comm_nodes[i].unmet_dependencies.add(StarDep(comm_nodes[i - 1].get_name()))
+        self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
+        comm_nodes = [n for n in self.nodes if isinstance(n.node, ir.CollectiveKernel)]
+        for i in range(1, len(comm_nodes)):
+            comm_nodes[i].unmet_dependencies.add(StarDep(comm_nodes[i - 1].get_name()))
+        # if is_local():
+        #     draw_buffers(self.nodes, fname='post_fused.svg')
         self.debug_draw_graph()
 
         # used during codegen:

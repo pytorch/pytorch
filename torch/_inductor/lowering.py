@@ -4040,6 +4040,7 @@ try:
 
     @register_lowering(c10d_functional.wait_tensor)
     def wait(input):
+        from .utils import is_local
         return TensorBox.create(ir.Wait.create(input))
 
     @register_lowering(c10d_functional.all_reduce)
