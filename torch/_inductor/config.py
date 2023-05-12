@@ -236,7 +236,7 @@ class triton:
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     # cudagraph_trees = not is_fbcode()
-    cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "1") == "1"
+    cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "0") == "1"
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
