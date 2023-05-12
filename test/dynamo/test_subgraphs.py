@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit
+from torch._dynamo.utils import disable_cache_limit, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -326,7 +326,11 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 x = x + i
             return x
 
-        self._common(fn, 2, 4)
+        # We don't specialize on range with dynamic shapes, which
+        # means we fail to unroll the loop.
+        # TODO: Consider forcing specialization when we iterate over
+        # the loop
+        self._common(fn, 2, ifunspec(1, 4))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -375,6 +379,19 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
+    @patch("torch._dynamo.config.dynamic_shapes", True)
+    @patch("torch._dynamo.config.assume_static_by_default", False)
+    def test_dynamic_getitem(self):
+        def fn(a, b):
+            return a[b.size(0) - 1]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        for i in range(3, 12):
+            opt_fn(torch.randn(i), torch.randn(i))
+        # just one graph
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_dynamic_kwarg(self):
         def fn(a, b):
             return a - b * 10
@@ -389,17 +406,8 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             opt_fn(torch.randn(i), torch.randn(i))
 
         if config.assume_static_by_default:
-            # We run with `dynamic`, but assume_static_by_default will produce the same number
-            # of breaks as without dynamic, since no tensors were marked dyn.
-            self.assertEqual(cnt_dynamic.frame_count, steps)
-
-            torch._dynamo.reset()
-            # Reset the counter
-            cnt_dynamic = torch._dynamo.testing.CompileCounter()
-            opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=False)(fn)
-            for i in range(start, end):
-                opt_fn(torch.randn(i), torch.randn(i))
-            self.assertEqual(cnt_dynamic.frame_count, steps)
+            # 2 graph breaks - 1 static, 1 made dynamic via automatic
+            self.assertEqual(cnt_dynamic.frame_count, 2)
         else:
             # just one graph
             self.assertEqual(cnt_dynamic.frame_count, 1)

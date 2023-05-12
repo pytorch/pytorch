@@ -2,18 +2,23 @@ import functools
 import logging
 import math
 import numbers
+from itertools import chain
 
 import torch
 import torch._decomp as decomp
+import torch.ao.quantization.fx._decomposed
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
+quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
     [
@@ -40,8 +45,21 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 def register_decomposition(ops):
     for op in [ops] if callable(ops) else ops:
         if op in decompositions:
-            log.warning(f"duplicate decomp: {ops}")
+            log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten._unsafe_view.default)
+def _unsafe_view(self, size):
+    # this makes pattern matching easier
+    return self.view(size)
+
+
+# TODO: for now, inductor doesn't handle asserts
+# because the condition is symbool -> tensor in the graph.
+@register_decomposition([aten._assert_async.msg])
+def assert_async_msg_decomp(tensor, msg):
+    return
 
 
 @register_decomposition([aten.clamp])
@@ -86,6 +104,13 @@ def check_device(a: Tensor, b: Tensor):
     return a.is_cuda and b.is_cuda
 
 
+def is_symbolic(a: Tensor, b: Tensor):
+    return any(
+        isinstance(x, torch.SymInt)
+        for x in chain(a.size(), a.stride(), b.size(), b.stride())
+    )
+
+
 def get_padded_length(x, alignment_size):
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
@@ -104,6 +129,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.addmm, input=input)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -146,7 +172,15 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 def should_pad_bench(mat1, mat2, op, input=None):
     assert utils.has_triton()
-    from triton.testing import do_bench
+
+    import triton.testing
+
+    do_bench = functools.partial(
+        triton.testing.do_bench,
+        warmup=5,
+        rep=100,
+        fast_flush=True,
+    )
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
@@ -169,14 +203,14 @@ def should_pad_bench(mat1, mat2, op, input=None):
         rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
-                lambda: op(mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+                lambda: op(mat1, mat2),
+            )
         else:
             if input is not None:
                 input = torch.randn_like(input)
             ori_time = do_bench(
-                lambda: op(input, mat1, mat2), warmup=warmup, rep=rep, fast_flush=True
-            )[0]
+                lambda: op(input, mat1, mat2),
+            )
 
         mat1_pad = torch.randn_like(mat1)
         mat2_pad = torch.randn_like(mat2)
@@ -194,10 +228,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
-            )[0]
+            )
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
                 lambda: pad_mm(
@@ -207,10 +238,7 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
-            )[0]
+            )
         else:
             pad_time = do_bench(
                 lambda: pad_bmm(
@@ -220,13 +248,10 @@ def should_pad_bench(mat1, mat2, op, input=None):
                     k_padded_length,
                     n_padded_length,
                 ),
-                warmup=warmup,
-                rep=rep,
-                fast_flush=True,
-            )[0]
+            )
 
-        # Shape padding introduces addtional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from addtional memory ops
+        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         return ori_time > pad_time * 1.1
 
@@ -236,6 +261,7 @@ def mm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.mm)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -267,6 +293,7 @@ def bmm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
     ):
         m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
@@ -343,8 +370,8 @@ def all(input):
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keeepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+def all_dim(input, dim, keepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 # NB: this decomposition is not stride accurate, do not put it in the main
@@ -363,9 +390,18 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
+    if beta == 0:
+        return result
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
+
+
+@register_decomposition([aten.cat.default])
+def cat(tensors, dim=0):
+    if len(tensors) == 1:
+        return tensors[0].clone()
+    return NotImplemented
 
 
 @register_decomposition([aten.conj_physical])
@@ -385,42 +421,102 @@ def bernoulli(self, *, generator=None):
     return torch.rand_like(self, dtype=torch.float32) < self
 
 
-"""
-Some decomps result in differences from eager related to randomness.
-We put these decomps in a separate table `extra_random_decomps` to allow
-turning them on and off via `config.fallback_random`.
-"""
-extra_random_decomps = get_decompositions(
-    [
-        aten.native_dropout,
-        aten.cauchy,
-        aten.cauchy_,
-        aten.exponential,
-        aten.exponential_,
-        aten.geometric,
-        aten.geometric_,
-        aten.normal,
-        aten.normal_,
-        aten.normal_functional,
-        aten.log_normal,
-        aten.log_normal_,
-        aten.uniform_,
-    ]
-)
-register_extra_random_decomp = functools.partial(
-    decomp.register_decomposition, registry=extra_random_decomps
-)
+@register_decomposition([aten.fmin, prims.fmin])
+def fmin(self, other):
+    return torch.where(torch.isnan(other) | (other > self), self, other)
 
 
-@register_extra_random_decomp([aten.bernoulli_])
-def bernoulli_(self, p=0.5):
-    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+@register_decomposition([aten.fmax, prims.fmax])
+def fmax(self, other):
+    return torch.where(torch.isnan(other) | (other < self), self, other)
 
 
-@register_extra_random_decomp([aten.bernoulli.p])
-def bernoulli_p(self, p=0.5, *, generator=None):
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < p
+@register_decomposition([aten.narrow_copy])
+def narrow_copy(self, dim, start, length):
+    return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
+
+
+@register_decomposition([aten.view_copy.default])
+def view_copy_default(self, size):
+    return aten.view(self, size).clone()
+
+
+@register_decomposition([aten.view_copy.dtype])
+def view_copy_dtype(self, dtype):
+    return self.to(dtype).clone()
+
+
+@register_decomposition([aten.native_dropout])
+def native_dropout(input: Tensor, p: float, train: bool):
+    if not train or p == 0:
+        return (input, torch.ones_like(input, dtype=torch.bool))
+    if p == 1:
+        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    # intentionally don't decompose to improve pattern matching
+    return NotImplemented
+
+
+# The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.quantize_per_tensor.default)
+def quantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+# The difference between dequantize_per_tensor.default and dequantize_per_tensor.tensor is
+# scale and zero_point is scalar or scalar tensor
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.default)
+def dequantize_per_tensor_default_decomp_impl(
+    input: torch.Tensor,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition(quantized_decomposed.quantize_per_tensor.tensor)
+def quantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    inv_scale = 1.0 / scale
+    return torch.clamp(
+        torch.round(input * inv_scale) + zero_point, quant_min, quant_max
+    ).to(dtype)
+
+
+@register_decomposition(quantized_decomposed.dequantize_per_tensor.tensor)
+def dequantize_per_tensor_tensor_decomp_impl(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    zero_point: torch.Tensor,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return (input.to(torch.float32) - zero_point) * scale
 
 
 @functools.lru_cache(None)

@@ -93,6 +93,19 @@ void gemm_and_bias(
     Dtype* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+
+void int8_gemm(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

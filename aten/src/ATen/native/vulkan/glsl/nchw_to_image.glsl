@@ -21,9 +21,11 @@ uBuffer;
  * Params Buffer
  */
 layout(set = 0, binding = 2) uniform PRECISION restrict Block {
-  // Extents of the output texture
+  // xyz contain the extents of the output texture, w contains HxW to help
+  // calculate buffer offsets
   ivec4 out_extents;
-  // Number of texels spanned by one channel
+  // x: number of texels spanned by one channel
+  // y: number of channels
   ivec2 c_info;
 }
 uBlock;
@@ -49,21 +51,17 @@ void main() {
   const ivec4 buf_indices =
       base_index + ivec4(0, 1, 2, 3) * uBlock.out_extents.w;
 
-  float val_x = 0;
-  if (c_index < uBlock.c_info.y) {
-    val_x = uBuffer.data[buf_indices.x];
-  }
-  float val_y = 0;
-  if (c_index + 1 < uBlock.c_info.y) {
-    val_y = uBuffer.data[buf_indices.y];
-  }
-  float val_z = 0;
-  if (c_index + 2 < uBlock.c_info.y) {
-    val_z = uBuffer.data[buf_indices.z];
-  }
-  float val_w = 0;
-  if (c_index + 3 < uBlock.c_info.y) {
-    val_w = uBuffer.data[buf_indices.w];
+  float val_x = uBuffer.data[buf_indices.x];
+  float val_y = uBuffer.data[buf_indices.y];
+  float val_z = uBuffer.data[buf_indices.z];
+  float val_w = uBuffer.data[buf_indices.w];
+
+  vec4 texel = ivec4(val_x, val_y, val_z, val_w);
+
+  if (c_index + 3 >= uBlock.c_info.y) {
+    ivec4 c_ind = ivec4(c_index) + ivec4(0, 1, 2, 3);
+    vec4 valid_c = vec4(lessThan(c_ind, ivec4(uBlock.c_info.y)));
+    texel = texel * valid_c;
   }
 
   imageStore(uImage, pos, vec4(val_x, val_y, val_z, val_w));

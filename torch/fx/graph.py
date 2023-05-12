@@ -219,7 +219,7 @@ class PythonCode:
     """
     # Python source code for the forward function definition.
     src: str
-    # Values in global scope during exection of `src_def`.
+    # Values in global scope during execution of `src_def`.
     globals: Dict[str, Any]
 
 
@@ -451,26 +451,20 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
 
                         lines = node.stack_trace.strip().split('\n')
-                        idx = 0
-                        while idx < len(lines):
+                        # stacktrace should have innermost frame last, so we
+                        # iterate backwards to find the first line that starts
+                        # with 'File '
+                        summary_str = ""
+                        for idx in range(len(lines) - 2, -1, -1):
                             line = lines[idx].strip()
-                            if line.startswith('File '):
-                                break
-                            idx += 1
-
-                        summary_lines = []
-                        if idx + 1 < len(lines):
-                            matches = pattern.match(lines[idx].strip())
+                            matches = pattern.match(line)
                             if matches:
                                 file = matches.group(1)
                                 lineno = matches.group(2)
-                                lineage = f'File: {file}:{lineno}'
-                                summary_lines.append(lineage)
-
-                            code = f"code: {lines[idx + 1].strip()}"
-                            summary_lines.append(code)
-
-                        summary_str = ', '.join(summary_lines)
+                                # next line should be the code
+                                code = lines[idx + 1].strip()
+                                summary_str = f'File: {file}:{lineno}, code: {code}'
+                                break
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
@@ -873,6 +867,9 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase._erased:
+            warnings.warn(f"erase_node({to_erase}) on an already erased node")
+            return
 
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes

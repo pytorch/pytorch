@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import os
 import sys
 import warnings
 from collections import namedtuple
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Tuple
 
@@ -19,6 +20,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
+from torch.distributed.fsdp.flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
@@ -369,7 +371,7 @@ class TestFSDPMisc(FSDPTest):
         context = (
             self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
             NestedWrappedModule.init(
@@ -425,7 +427,7 @@ class TestFSDPMisc(FSDPTest):
                 )
             )
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
             module = FSDP(no_params, device_id=0)
@@ -637,6 +639,60 @@ class TestFSDPMiscWorldSize1(FSDPTest):
             "when offloading parameters.",
         ):
             fsdp_model(inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_unsafe_setattr(self):
+        """
+        Tests that the environment variable for using unsafe setattr gates as
+        expected.
+        """
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_unsafe_setattr,
+        )
+
+    def _test_unsafe_setattr(self, use_orig_params: bool):
+        called_setattr_override = False
+
+        class SetattrLinear(nn.Module):
+            def __init__(self, in_dim: int, out_dim: int, device: torch.device) -> None:
+                super().__init__()
+                self.weight = nn.Parameter(
+                    torch.randn((in_dim, out_dim), device=device)
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x @ self.weight
+
+            def __setattr__(self, name: str, value: Any) -> None:
+                nonlocal called_setattr_override
+                called_setattr_override = True
+                return super().__setattr__(name, value)
+
+        # Construct FSDP module without changing any environment variables and
+        # run forward, which triggers both unsharded and sharded view setting
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        inp = torch.randn((8, 5), device=torch.device("cuda"))
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertTrue(called_setattr_override)
+
+        # Repeat with unsafe setattr explicitly enabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "1"
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertFalse(called_setattr_override)
+
+        # Repeat with unsafe setattr explicitly disabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "0"
+        module = SetattrLinear(5, 5, torch.device("cuda"))
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
+        called_setattr_override = False
+        fsdp_module(inp)
+        self.assertTrue(called_setattr_override)
 
 
 instantiate_parametrized_tests(TestFSDPMisc)

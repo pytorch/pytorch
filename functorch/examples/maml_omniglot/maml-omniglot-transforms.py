@@ -113,8 +113,8 @@ def main():
 # Trains a model for n_inner_iter using the support and returns a loss
 # using the query.
 def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
-    params = {k: v for k, v in net.named_parameters()}
-    buffers = {k: v for k, v in net.named_buffers()}
+    params = dict(net.named_parameters())
+    buffers = dict(net.named_buffers())
     querysz = x_qry.size(0)
 
     def compute_loss(new_params, buffers, x, y):
@@ -139,8 +139,8 @@ def loss_for_task(net, n_inner_iter, x_spt, y_spt, x_qry, y_qry):
 
 
 def train(db, net, device, meta_opt, epoch, log):
-    params = {k: v for k, v in net.named_parameters()}
-    buffers = {k: v for k, v in net.named_buffers()}
+    params = dict(net.named_parameters())
+    buffers = dict(net.named_buffers())
     n_train_iter = db.x_train.shape[0] // db.batchsz
 
     for batch_idx in range(n_train_iter):
@@ -186,8 +186,8 @@ def test(db, net, device, epoch, log):
     # Most research papers using MAML for this task do an extra
     # stage of fine-tuning here that should be added if you are
     # adapting this code for research.
-    params = {k: v for k, v in net.named_parameters()}
-    buffers = {k: v for k, v in net.named_buffers()}
+    params = dict(net.named_parameters())
+    buffers = dict(net.named_buffers())
     n_test_iter = db.x_test.shape[0] // db.batchsz
 
     qry_losses = []

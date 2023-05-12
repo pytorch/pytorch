@@ -6,6 +6,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
@@ -18,8 +19,8 @@
 
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
-#include <c10/core/SymIntArrayRef.h>
 #include <ATen/core/TensorAccessor.h>
+#include <ATen/StorageUtils.h>
 
 namespace c10 {
 class Scalar;
@@ -341,6 +342,25 @@ class TORCH_API TensorBase {
     return impl_->storage().is_alias_of(other.storage());
   }
 
+  // Move the storage backend to shm based
+  // to enable memory sharing across processes.
+  //
+  // NB1: the ideal behavior of this API still requires further discussion
+  // but for now we are inclined to keep it consistent with existing THP behavior
+  // https://github.com/pytorch/pytorch/blob/4dca9bde0552afc67b5b74f4a0696fe6055709c4/torch/storage.py#L196-L212
+  // so we don't assert on anything here and rely on caller knowing
+  // what it's doing.
+  //
+  // NB2: this currently provides Linux fd based shm support only
+  // to simplify the storage lifetime management logic in ATen
+  // and similarly for now we are not adding support for file system based
+  // shm support like in THP due to additional GC manager support needed
+  // to prevent leaks.
+  // As such, calling this from non supported systems (e.g. Windows) would fail.
+  void share_memory_() {
+    at::share_memory_(*this);
+  }
+
   inline bool _is_zerotensor() const {
     return impl_->_is_zerotensor();
   }
@@ -540,12 +560,39 @@ class TORCH_API TensorBase {
                           .layout(layout());
   }
 
-  void* data_ptr() const {
+  const void* const_data_ptr() const {
     return this->unsafeGetTensorImpl()->data();
   }
 
+  void* mutable_data_ptr() const {
+    return this->unsafeGetTensorImpl()->mutable_data();
+  }
+
+  // TODO(#97856) Make this return a const pointer. This currently
+  //              returns a non-const pointer because of the large
+  //              number of clients that we still want to audit before
+  //              migrating to mutable_data_ptr().
+  void* data_ptr() const {
+    return mutable_data_ptr();
+  }
+
   template <typename T>
-  T * data_ptr() const;
+  const T* const_data_ptr() const;
+
+  template <typename T>
+  T* mutable_data_ptr() const;
+
+  // Legacy interface during the migration to indicate that a callsite
+  // has not been audited for mutability.
+  //
+  // Do not add new uses of this, use const_data_ptr() if possible,
+  // mutable_data_ptr() otherwise.
+  //
+  // TODO(#97856) Make this return a const pointer. This is currently
+  //              const because of the vast number of clients that
+  //              rely on this.
+  template <typename T>
+  T* data_ptr() const;
 
   // Purposely not defined here to avoid inlining
   void print() const;

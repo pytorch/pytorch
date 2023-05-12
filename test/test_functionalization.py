@@ -197,7 +197,7 @@ def forward(self, arg0_1):
     view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [16, 64, 128, 128]);  view_copy_2 = None
     view_copy_4 = torch.ops.aten.view_copy.default(clone, [16, 64, 128, 128]);  clone = None
     sum_1 = torch.ops.aten.sum.default(view_copy_3)
-    ones_like = torch.ops.aten.ones_like.default(sum_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
     view_copy_5 = torch.ops.aten.view_copy.default(expand_copy, [1, 1024, 128, 128]);  expand_copy = None
     new_empty_strided = torch.ops.aten.new_empty_strided.default(view_copy_5, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
@@ -1445,6 +1445,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_4);  arg2_1 = alias_4 = None
     return view_5
     """)  # noqa: B950
+
+    def test_mutation_overlapping_mem(self):
+        def fn(x):
+            # x: (1, 5)
+            t1 = torch.add(x, x)
+            t2 = t1.unfold(1, 3, 2)
+            t3 = t2.abs_()
+            return t3
+
+        with self.assertRaisesRegex(RuntimeError, r'encountered a tensor being mutated that has internal overlap'):
+            x = torch.ones(1, 5)
+            out = _functionalize(fn, reapply_views=True, crossref=False)(x)
 
 
     def test_batch_norm(self):

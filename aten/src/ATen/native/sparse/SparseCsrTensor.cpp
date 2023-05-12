@@ -56,8 +56,7 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::sparse_csr;
 
@@ -214,7 +213,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   DimVector compressed_indices_batchsize = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
   DimVector plain_indices_batchsize = DimVector(plain_indices.sizes().slice(0, batch_ndim));
   DimVector values_batchsize = DimVector(values.sizes().slice(0, batch_ndim));
-  const int values_nnz = (values.numel() ? values.size(batch_ndim) : 0);
+  const int values_nnz = values.size(batch_ndim);
   DimVector values_blocksize = DimVector(values.sizes().slice(batch_ndim + 1, block_ndim));
   DimVector values_densesize = DimVector(values.sizes().slice(batch_ndim + 1 + block_ndim, dense_ndim));
   TORCH_CHECK(
@@ -1125,5 +1124,4 @@ Tensor select_copy_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
   return select_sparse_csr_worker<false, true>(self, dim, index);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

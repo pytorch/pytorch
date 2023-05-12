@@ -60,6 +60,7 @@ out = csv.DictWriter(
 out.writeheader()
 out.writerow({"explain": gist_url})
 
+
 # Sometimes backtraces will be in third party code, which results
 # in very long file names.  Delete the absolute path in this case.
 def normalize_file(f):

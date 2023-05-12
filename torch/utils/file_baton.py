@@ -11,7 +11,7 @@ class FileBaton:
 
         Args:
             lock_file_path: The path to the file used for locking.
-            wait_seconds: The seconds to periorically sleep (spin) when
+            wait_seconds: The seconds to periodically sleep (spin) when
                 calling ``wait()``.
         '''
         self.lock_file_path = lock_file_path

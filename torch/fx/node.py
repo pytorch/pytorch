@@ -12,7 +12,7 @@ from .._ops import ops as _ops
 if TYPE_CHECKING:
     from .graph import Graph
 
-__all__ = ['Node', 'map_arg', 'map_aggregate']
+__all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
 BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
                           torch.Tensor, torch.device, torch.memory_format, torch.layout]
@@ -32,9 +32,19 @@ Argument = Optional[Union[
 
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
+    torch._assert_async,
+    _ops.aten._assert_async.msg,
+    _ops.aten.copy_.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
     _ops.profiler._record_function_exit}
+
+
+@compatibility(is_backward_compatible=False)
+def has_side_effect(fn: Callable) -> None:
+    _side_effectful_functions.add(fn)
+    return fn
+
 
 # this is fixed on master, WAR for 1.5
 def _find_module_of_method(orig_method: Callable[..., Any]) -> str:
@@ -363,9 +373,13 @@ class Node:
     def stack_trace(self) -> Optional[str]:
         """
         Return the Python stack trace that was recorded during tracing, if any.
-        This property is usually populated by `Tracer.create_proxy`. To record
-        stack traces during tracing for debug purposes, set
-        `record_stack_traces = True` on the `Tracer` instance.
+        When traced with fx.Tracer, this property is usually populated by
+        `Tracer.create_proxy`. To record stack traces during tracing for debug purposes,
+        set `record_stack_traces = True` on the `Tracer` instance.
+        When traced with dynamo, this property will be populated by default by
+        `OutputGraph.create_proxy`.
+
+        stack_trace would have the innermost frame at the end of the string.
         """
         return self.meta.get("stack_trace", None)
 
@@ -400,7 +414,7 @@ class Node:
         Make target printouts more user-friendly.
         1) builtins will be printed as `builtins.xyz`
         2) operators will be printed as `operator.xyz`
-        3) other callables will be printed with qualfied name, e.g. torch.add
+        3) other callables will be printed with qualified name, e.g. torch.add
         """
         if isinstance(target, str):
             return target

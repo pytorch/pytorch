@@ -340,6 +340,9 @@ bool isBlockListedSchema(const FunctionSchema& schema) {
   if (schema.name() == "aten::max" && schema.overload_name() == "unary_out") {
     return true;
   }
+  if (schema.name() == "aten::min" && schema.overload_name() == "unary_out") {
+    return true;
+  }
   return false;
 }
 

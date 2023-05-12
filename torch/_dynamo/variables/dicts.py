@@ -37,8 +37,8 @@ class ConstDictVariable(VariableTracker):
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    codegen.create_load_python_module(collections),
-                    create_instruction("LOAD_METHOD", "OrderedDict"),
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
                 ]
             )
         # instructions to build the dict keys and values
@@ -54,12 +54,12 @@ class ConstDictVariable(VariableTracker):
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             return [
-                create_instruction("BUILD_MAP", len(self.items)),
-                create_instruction("CALL_METHOD", 1),
+                create_instruction("BUILD_MAP", arg=len(self.items)),
+                *create_call_function(1, False),
             ]
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", len(self.items))]
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -236,6 +236,13 @@ class DefaultDictVariable(ConstDictVariable):
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
+
+    def is_python_constant(self):
+        # Return false for unsupported defaults. This ensures that a bad handler
+        # path is not taken in BuiltinVariable for getitem.
+        if self.default_factory not in [list, tuple, dict] and not self.items:
+            return False
+        return super().is_python_constant()
 
     def call_method(
         self,
@@ -449,3 +456,6 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
