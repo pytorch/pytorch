@@ -344,6 +344,26 @@ class DTensorMeshTest(DTensorTestBase):
                 replica_tensor.size(), torch.Size([3 * self.world_size, 3])
             )
 
+        with DeviceMesh(self.device_type, torch.arange(self.world_size)):
+            shard_spec = [Shard(0)]
+            global_shape = torch.Size([3 * self.world_size, 3])
+            global_tensor = torch.randn(global_shape)
+            sharded_tensor = distribute_tensor(global_tensor, placements=shard_spec)
+            self.assertEqual(sharded_tensor.to_local().shape, torch.Size([3, 3]))
+
+            mesh_2d = DeviceMesh(
+                self.device_type, torch.arange(self.world_size).reshape(2, 4)
+            )
+
+            with mesh_2d:
+                shard_2d_spec = [Shard(0), Replicate()]
+                tensor_2d = distribute_tensor(global_tensor, placements=shard_2d_spec)
+
+                self.assertEqual(tensor_2d.to_local().shape, torch.Size([3 * 4, 3]))
+
+            sharded_after_2d = distribute_tensor(global_tensor, placements=shard_spec)
+            self.assertEqual(sharded_after_2d.to_local().shape, torch.Size([3, 3]))
+
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)

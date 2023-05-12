@@ -1058,6 +1058,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        def test_warn_on_pending_backward(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            warnings.resetwarnings()
+            with warnings.catch_warnings(record=True) as w:
+                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            FileCheck().check(
+                "Unable to hit fast path of CUDAGraphs because of pending"
+            ).run(str(w[0]))
+            self.assertTrue(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
