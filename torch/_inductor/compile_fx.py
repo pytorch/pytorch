@@ -76,6 +76,15 @@ def index_expanded_dims(t, expanded_dims):
     return t
 
 
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default
+
+
 def complex_memory_overlap(t):
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
@@ -158,6 +167,19 @@ def compile_fx_inner(
     is_inference=False,
     boxed_forward_device_index=None,
 ):
+    # Convert view to reshape if we are doing layout optimization.
+    # It's needed because when we do layout optimization, an contiguous tensor
+    # in eager mode may becomes a channels last tensor. A view op previously
+    # can be applied to the contiguous tensor may not be able to be applied
+    # on the channels tensor any more. An error like
+    #   RuntimeError: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+    # will be printed.
+    #
+    # Replace view op to reshape op in this case.
+    # As an example, timm_resnest will fail if we don't do this.
+    if config.layout_opt:
+        view_to_reshape(gm)
+
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 
@@ -605,13 +627,6 @@ def compile_fx_aot(
 
 _graph_counter = itertools.count(0)
 
-def view_to_reshape(gm):
-    """
-    Needed for timm_resnest
-    """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
 
 def compile_fx(
     model_: torch.fx.GraphModule,
@@ -621,7 +636,6 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
-
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
@@ -689,11 +703,6 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
-        if config.layout_opt:
-            view_to_reshape(model)
-            with open("/tmp/fwd.fx", "w") as f:
-                f.write(model.print_readable(False))
-
         return inner_compile(
             model,
             example_inputs,
@@ -720,10 +729,6 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if config.layout_opt:
-            view_to_reshape(model)
-            with open("/tmp/bwd.fx", "w") as f:
-                f.write(model.print_readable(False))
         with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
             fixed = count_tangents(model)
             return inner_compile(
@@ -739,7 +744,6 @@ def compile_fx(
     with overrides.patch_functions():
         if decompositions is None:
             decompositions = select_decomp_table()
-
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
         # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
         # once torchdynamo is merged into pytorch

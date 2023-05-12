@@ -176,7 +176,7 @@ class GraphLowering(torch.fx.Interpreter):
         # E.g.
         # Conv with arguments {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 58}
         # get 1.86x speedup with channels last layout.
-        # 
+        #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
         if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 and n.args[1].meta['val'].size(1) > 1 for n in gm.graph.nodes):
@@ -617,7 +617,7 @@ class GraphLowering(torch.fx.Interpreter):
                     stride_order = ir.get_stride_order(strides)
 
                     if len(result.get_size()) == 4 and (n in self.nodes_prefer_channels_last):
-                        if not (config.force_mix_layout and n.target == torch.ops.aten.convolution.default): 
+                        if not (config.force_mix_layout and n.target == torch.ops.aten.convolution.default):
                             stride_order = ir.NHWC_STRIDE_ORDER
 
                     result = ir.ExternKernel.require_stride_order(

@@ -1112,6 +1112,7 @@ def maybe_init_distributed(should_init_distributed, port="6789", rank=0, world_s
         if should_init_distributed:
             torch.distributed.destroy_process_group()
 
+
 class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None

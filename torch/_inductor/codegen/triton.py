@@ -1949,7 +1949,7 @@ class TritonScheduling:
                         # breakpiont() # TODO
                         return
             print(colorama.Fore.GREEN + "PASS UNIFORM LAYOUT CHECK FOR ONE TRITON KERNEL" + colorama.Fore.RESET)
-   
+
         if config.verify_uniform_layouts:
             verify_uniform_layouts()
 

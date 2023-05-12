@@ -335,7 +335,7 @@ def convolution(
 
     x.realize()
     weight.realize()
-    
+
     # ndim can be 1 for demucs
     if config.layout_opt and groups == 1 and ndim == 2:
         print("FORCE CHANNELS LAST INPUT FOR CONV")

@@ -607,6 +607,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
      *
      * Disable this line for now to unblock. Work with Elias to figure out the
      * correct fix.
+     *
+     * UPDATE: fix from elias is here https://github.com/pytorch/pytorch/pull/101038.
+     * I'll rebase and remove this part after elias's PR is in.
      */
     if (std::getenv("CONV_EMPTY_CACHE")) {
         c10::cuda::CUDACachingAllocator::emptyCache();
