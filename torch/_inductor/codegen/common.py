@@ -60,12 +60,15 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "eq",
             "ne",
         ]
+        ops_to_float_with_vec = [
+            "le",
+            "lt",
+            "ge",
+            "gt",
+            "eq",
+            "ne",
+        ]
         ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
-        reduction_to_dtype = {
-            "any": torch.bool,
-            "argmin": torch.int64,
-            "argmax": torch.int64,
-        }
         ops_without_dtype = ["ops", "get_index"]
         if _node.target in ops_without_dtype:
             return False
@@ -77,24 +80,27 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             return False
         if _node.target in ops_to_bool:
             opt_ctx.dtype = torch.bool
+            if _node.target in ops_to_float_with_vec:
+                opt_ctx.vec_dtype = torch.float
         elif _node.target in ops_with_dtype_arg:
             opt_ctx.dtype = _node.args[-1]
         elif _node.target == "reduction":
-            reduction_type = _node.args[4]
-            if reduction_type in reduction_to_dtype:
-                opt_ctx.dtype = reduction_to_dtype[reduction_type]
+            opt_ctx.dtype = _node.args[2]
         elif _node.target == "load":
             opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
         if opt_ctx.dtype is not None:
+            if opt_ctx.vec_dtype is None:
+                opt_ctx.vec_dtype = opt_ctx.dtype
             data_type_logger(
-                f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
+                f"for node.target = {_node.target}, "
+                + f"dtype is propagated to {opt_ctx.dtype}, "
+                + f"vec_dtype is propagated to {opt_ctx.vec_dtype}"
             )
             _node.meta[OptimizationContext.key] = opt_ctx
             return True
 
         # node.target not belong to any ops which can directly get the dtype
         # need propogate dtype with it's input node
-        dtype = None
         inputs = node.all_input_nodes
         input_nodes = [
             n
@@ -103,26 +109,41 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
         ]
         if len(input_nodes) == 0:
             return False
-        all_input_nodes_propogated = all(
-            OptimizationContext.key in n.meta
-            and n.meta[OptimizationContext.key].dtype is not None
-            for n in input_nodes
-        )
-        if not all_input_nodes_propogated:
-            return False
-        # all input nodes have propogated dtype, we will promot to dtype with highest precision
-        dtype = functools.reduce(
-            torch.promote_types,
-            [n.meta[OptimizationContext.key].dtype for n in input_nodes],
-        )
-        opt_ctx.dtype = dtype
-        msg = f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}, "
-        input_msg = "inputs dtypes: "
-        for n in input_nodes:
-            input_msg += (
-                f"input {n.name}.dtype = {n.meta[OptimizationContext.key].dtype}"
+
+        def deduce_dtype_by_inputs(input_nodes, vec_dtype=False):
+            attr_name = "vec_dtype" if vec_dtype else "dtype"
+            dtype = None
+            all_input_nodes_propogated = all(
+                OptimizationContext.key in n.meta
+                and getattr(n.meta[OptimizationContext.key], attr_name) is not None
+                for n in input_nodes
             )
-        data_type_logger(msg + input_msg)
+            if not all_input_nodes_propogated:
+                return dtype
+            # all input nodes have propogated dtype, we will promot to dtype with highest precision
+            dtype = functools.reduce(
+                torch.promote_types,
+                [
+                    getattr(n.meta[OptimizationContext.key], attr_name)
+                    for n in input_nodes
+                ],
+            )
+            return dtype
+
+        opt_ctx.dtype = deduce_dtype_by_inputs(input_nodes, False)
+        opt_ctx.vec_dtype = deduce_dtype_by_inputs(input_nodes, True)
+
+        def duduce_logger(dtype, vec_dtype=False):
+            attr_name = "vec_dtype" if vec_dtype else "dtype"
+            if dtype is not None:
+                msg = f"for node.target = {_node.target}, dtype is propagated to {getattr(opt_ctx, attr_name)}, "
+                input_msg = "inputs {attr_name}s: "
+                for n in input_nodes:
+                    input_msg += f"input {n.name}.{attr_name} = {getattr(n.meta[OptimizationContext.key], attr_name)} "
+                data_type_logger(msg + input_msg)
+
+        duduce_logger(opt_ctx.dtype, False)
+        duduce_logger(opt_ctx.vec_dtype, True)
         _node.meta[OptimizationContext.key] = opt_ctx
         return True
 
@@ -813,6 +834,10 @@ class OptimizationContext:
     is_load_as_mask: bool = False
 
     dtype: torch.dtype = None
+    # for Vec kernel, the dtpe will be different:
+    # For example, a > b return bool dtype
+    # But, vec_a > vec_b return float dtype
+    vec_dtype: torch.dtype = None
     ops_name: str = ""
     is_most_inner_loop_irrevelant: bool = False
 

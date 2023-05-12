@@ -602,13 +602,19 @@ class CppVecOverrides(OpOverrides):
         assert node
         opt_ctx_x = get_opt_ctx(node.args[1])
         assert opt_ctx_x
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+        if opt_ctx_x.vec_dtype in (torch.float, torch.float32) and dtype == torch.bool:
             return f"vec_convert_to_mask({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+        if opt_ctx_x.vec_dtype == torch.bool and dtype in (torch.float, torch.float32):
             return f"mask_convert_to_float({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bfloat16:
+        if (
+            opt_ctx_x.vec_dtype in (torch.float, torch.float32)
+            and dtype == torch.bfloat16
+        ):
             return f"cvt_fp32_to_bf16({x})"
-        if opt_ctx_x.dtype == torch.bfloat16 and dtype in (torch.float, torch.float32):
+        if opt_ctx_x.vec_dtype == torch.bfloat16 and dtype in (
+            torch.float,
+            torch.float32,
+        ):
             return f"cvt_bf16_to_fp32({x})"
         # TODO(jgong5): support conversion for other types
         # currently we only allow load/store torch.uint8 and handle conversion there
