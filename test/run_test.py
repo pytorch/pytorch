@@ -1528,7 +1528,7 @@ def check_pip_packages() -> None:
     for package in packages:
         if package not in installed_packages:
             print(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt"
+                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
             )
             sys.exit(1)
 
