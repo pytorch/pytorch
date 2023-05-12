@@ -115,7 +115,7 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
 }
 
 inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
-    const at::vec::Vectorized<bfloat16> src) {
+    at::vec::Vectorized<bfloat16> src) {
   at::vec::Vectorized<float> res_vec1(0);
   at::vec::Vectorized<float> res_vec2(0);
   std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
@@ -123,7 +123,7 @@ inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
 }
 
 inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
-    const at::vec::Vectorized<float> src) {
+    at::vec::Vectorized<float> src) {
   auto res = at::vec::convert_float_bfloat16(src, src);
   return res;
 }

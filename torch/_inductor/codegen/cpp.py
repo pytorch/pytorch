@@ -2154,17 +2154,17 @@ class CppKernelProxy(CppKernel):
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
+            assert isinstance(_node._body, ir.LoopBody)
             node: SchedulerNode = _node
 
-            def is_memory_copy_schedulernode(node: SchedulerNode):
+            def is_memory_copy_scheduler_node(node: SchedulerNode):
                 op_counts = node.read_writes.op_counts
                 return (
                     len(op_counts) == 2 and "load" in op_counts and "store" in op_counts
                 )
 
-            should_add_to_dtype = not is_memory_copy_schedulernode(node)
-
-            if should_add_to_dtype and isinstance(node._body, ir.LoopBody):
+            should_legalize = not is_memory_copy_scheduler_node(node)
+            if should_legalize:
                 body: ir.LoopBody = node._body
                 _legalize_bf16(body)
 
