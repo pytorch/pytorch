@@ -3624,7 +3624,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None, device=Non
         async_op (bool, optional): Whether this op should be an async op
         device_ids ([int], optional): List of device/GPU ids. Valid only
             for NCCL backend when argument device is None.
-        device (device or string): the device to barrier.
+        device (torch.device or str, optional): the device to barrier.
 
     Returns:
         Async work handle, if async_op is set to True.
