@@ -1213,6 +1213,21 @@ RecordQueue::getRecords(
   return {out, std::move(trace)};
 }
 
+namespace {
+std::atomic<bool>& record_concrete_inputs_enabled() {
+  static std::atomic<bool> val{true};
+  return val;
+}
+} // namespace
+
+bool get_record_concrete_inputs_enabled() {
+  return record_concrete_inputs_enabled();
+}
+
+void set_record_concrete_inputs_enabled(bool val) {
+  record_concrete_inputs_enabled() = val;
+}
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
