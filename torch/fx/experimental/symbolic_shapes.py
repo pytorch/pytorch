@@ -1153,6 +1153,9 @@ def wrap_node(x):
         return SymFloat(x)
     elif x.is_bool():
         return SymBool(x)
+    elif isinstance(x, SymNode) and x.pytype == tuple[int]:
+        # hackery for array-backed SymInts
+        return SymInt(x)
     else:
         raise AssertionError(f"unrecognized return type {x}")
 
@@ -1628,7 +1631,7 @@ class ShapeEnv:
             if hint is not None:
                 assert int(sym) == hint
             return int(sym)
-        if isinstance(sym, sympy.Array):
+        if isinstance(sym, sympy.Array) or (hint is not None and isinstance(hint, (list, tuple))):
             return SymInt(SymNode(sym, self, tuple[int], hint))
         return SymInt(SymNode(sym, self, int, hint))
 
@@ -1892,7 +1895,6 @@ class ShapeEnv:
                             f"{source.name()} is actually a non-atomic symbolic expression "
                             f"{s}.  {hint()}"
                         ))
-
                 input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
@@ -1919,8 +1921,22 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss, constraint[i])
+
+                # TODO: Fix this hackery; assume contiguous for NT and avoid guarding
+                if t.is_nested:
+                    input_guards.pop()
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
+
+                # TODO: Fix this hackery; assume contiguous for NT and avoid guarding
+                if t.is_nested:
+                    input_guards.pop()
+
+            if t.is_nested:
+                # also track the jagged format of the NT
+                # TODO: Fix source
+                property_source = TensorPropertySource(source, TensorProperty.SIZE, 0)
+                track_symint(property_source, t.jagged_sizes[0], None)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
@@ -1986,6 +2002,10 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
+                if not symbol.is_integer:
+                    # for the NT case
+                    continue
+
                 r = self.var_to_range[symbol]
 
                 for c in symbol_to_constraints[symbol]:

@@ -1218,6 +1218,13 @@ def wrap_to_fake_tensor_and_record(
                 e, tx, source.name(), static_shapes
             )
 
+        if e.is_nested:
+            if tx.output.shape_env is None:
+                unimplemented("Dynamic shapes must be enabled for nested tensors")
+
+            if not e.is_contiguous():
+                unimplemented("Only contiguous nested tensors are supported for now")
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,

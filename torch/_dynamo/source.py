@@ -216,9 +216,9 @@ class TensorPropertySource(Source):
 
     def name(self):
         if self.prop is TensorProperty.SIZE:
-            return f"{self.base.name()}.size()[{self.idx}]"
+            return f"{self.base.name()}.size({self.idx})"
         elif self.prop is TensorProperty.STRIDE:
-            return f"{self.base.name()}.stride()[{self.idx}]"
+            return f"{self.base.name()}.stride({self.idx})"
         elif self.prop is TensorProperty.STORAGE_OFFSET:
             assert self.idx is None
             return f"{self.base.name()}.storage_offset()"

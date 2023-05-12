@@ -14,14 +14,24 @@ class NestedTensor(Tensor):
     @staticmethod
     def __new__(cls, buffer, *args, **kwargs):
         # Put in obvious garbage; we don't ever want to actually hit the C++ side of this thing
-        return Tensor._make_subclass(cls, torch.empty(0))
+        return Tensor._make_subclass(cls, torch.empty(0, device=buffer.device))
 
     # sizes should be a list of SymInts for the dynamic shapes case
-    def __init__(self, buffer: Tensor, sizes: List[Union[int, List[int], SymInt]]):
+    def __init__(
+            self,
+            buffer: Tensor,
+            sizes: List[Union[int, List[int], SymInt]],
+            jagged_sizes: List[Union[int, List[int], SymInt]],
+            acting_as_nt=True,
+    ):
         self.buffer = buffer
         self.sizes = sizes
         self.n_tensors = self.sizes[0]
         self.total_dim = len(self.sizes)
+        # True if this should act as a NT (return is_nested=True).
+        # It's useful to disable this if it's in JT format.
+        self.acting_as_nt = acting_as_nt
+        self.jagged_sizes = jagged_sizes
 
     @classmethod
     def _sizes_from_shape_list(cls, shape_list: Union[Tensor, List[torch.Size]]):
@@ -78,9 +88,10 @@ class NestedTensor(Tensor):
 
     # nt.shape calls here as well
     def size(self, dim=None):
+        size_to_index = self.sizes if self.acting_as_nt else self.jagged_sizes
         if dim is None:
-            return self.sizes
-        return self.sizes[dim]
+            return size_to_index
+        return size_to_index[dim]
 
     def stride(self, dim=None):
         def _calc_contiguous_strides(sizes):
@@ -91,7 +102,7 @@ class NestedTensor(Tensor):
                 curr *= sizes[i]
             return strides[::-1]
 
-        strides = _calc_contiguous_strides(self.sizes)
+        strides = _calc_contiguous_strides(self.size())
         if dim is None:
             return strides
         return strides[dim]
@@ -107,6 +118,11 @@ class NestedTensor(Tensor):
         return torch.Size(component_size)
 
     def unbind(self) -> List[torch.Tensor]:
+        from torch._subclasses.fake_tensor import DataDependentOutputException
+
+        if isinstance(self.n_tensors, SymInt):
+            raise DataDependentOutputException(torch.ops.aten.unbind)
+
         output = []
         offset = 0
         for i in range(self.n_tensors):
@@ -134,7 +150,9 @@ class NestedTensor(Tensor):
 
     def __getattribute__(self, key):
         if key == "is_nested":
-            return True
+            return self.acting_as_nt
+        if key == "ndim":
+            return self.dim()
         if key == "shape":
             return self.size()
 
@@ -149,21 +167,39 @@ class NestedTensor(Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        print('DISPATCH:', func)
+        print('DISPATCH:', func, args)
+
+        # Handle NT <-> JT conversion
+        if func is torch.ops.aten._nested_view_as_jagged.default:
+            nt = args[0]
+            assert isinstance(nt, NestedTensor)
+            # TODO: Make sure this is right!
+            # Assume for now that the NT is already in jagged format, so just return itself but
+            # don't act like a NT anymore.
+            return NestedTensor(nt.buffer, nt.sizes, nt.jagged_sizes, acting_as_nt=False)
+
+        if func is torch.ops.aten._nested_get_jagged_offsets.default:
+            nt = args[0]
+            assert isinstance(nt, NestedTensor)
+            # TODO: Do we ever need to return a real jagged_offsets?
+            # Return a fake version of jagged_offsets; should be batch size + 1 offsets
+            return nt.buffer.new_empty(nt.n_tensors + 1, dtype=torch.int64)
 
         # Call fallback. Currently assuming for simplicity that all arguments are NestedTensors
         def unwrap(t):
             return t.buffer if isinstance(t, NestedTensor) else t
 
         # TODO: Fix this; the size is certainly wrong and we can't always naively operate
-        # on the buffer and rewrap.
+        # on the buffer and rewrap. Need to graph break if we're not calling a pointwise func.
         out = NestedTensor(
             func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)),
-            args[0].sizes)
+            args[0].sizes,
+            args[0].jagged_sizes)
 
         return out
 
     __torch_function__ = torch._C._disabled_torch_function_impl
+
 
 class UnaryTest(TestCase):
     def test_multiplies(self):

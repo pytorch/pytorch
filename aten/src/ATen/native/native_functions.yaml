@@ -1293,6 +1293,7 @@
   dispatch:
     SparseCPU, SparseCUDA: cat_sparse
     QuantizedCPU: cat_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: cat_nested
   tags: core
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
@@ -5830,6 +5831,55 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
+
+- func: _nested_view_from_buffer.cont(Tensor(a) self, Tensor nested_size) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_view_from_buffer_cont
+
+- func: _nested_view_from_buffer_copy.cont(Tensor self, Tensor nested_size) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy_cont
+  autogen: _nested_view_from_buffer_copy.cont_out
+
+- func: _nested_view_from_jagged(Tensor(a) x, Tensor x_offsets) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_view_from_jagged
+
+- func: _nested_view_from_jagged_copy(Tensor x, Tensor x_offsets) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_jagged_copy
+  autogen: _nested_view_from_jagged_copy.out
+
+- func: _nested_view_as_jagged(Tensor(a) self) -> Tensor(a)
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_view_as_jagged
+  autogen: _nested_view_as_jagged.out
+
+- func: _nested_view_as_jagged_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_as_jagged_copy
+  autogen: _nested_view_as_jagged_copy.out
+
+# Only works for contiguous NTs in (B, *, D) format.
+- func: _nested_get_jagged_offsets(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_jagged_offsets
+  autogen: _nested_get_jagged_offsets.out
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:

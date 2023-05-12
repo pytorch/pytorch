@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import re
+import sys
 import textwrap
 from contextlib import nullcontext
 from enum import Enum
@@ -163,6 +164,33 @@ def ir_node_to_tensor(x, guard_shape=True):
         shape_fn = V.graph.sizevars.size_hint
     else:
         shape_fn = identity
+    if is_storage_and_layout(x) and x.get_layout().full_nested_size is not None:
+        # NB: This is only used for fallbacks; no need to touch this for pointwise fusion.
+
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        # Handle nested tensors
+        dtype = x.get_dtype()
+        device = x.get_device()
+        buffer_size = V.graph.sizevars.shape_env.create_unbacked_symint()
+        constrain_range(buffer_size, min=2, max=sys.maxsize - 1)
+        buffer = torch.empty(buffer_size, device=device, dtype=dtype)
+
+        size = [shape_fn(s) for s in x.get_size()]
+        full_nested_size = x.get_layout().full_nested_size
+
+        sym_sizes = convert_shape_to_symint(full_nested_size)
+        sym_jagged_sizes = convert_shape_to_symint(size)
+
+        from torch.nested._nested_tensor import NestedTensor
+        from torch.utils._mode_utils import no_dispatch
+
+        # Need no_dispatch() to avoid trying to fake-ify the NestedTensor
+        with no_dispatch():
+            nt = NestedTensor(buffer, sym_sizes, sym_jagged_sizes)
+
+        return nt
+
     size = [shape_fn(s) for s in x.get_size()]
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]
@@ -348,7 +376,7 @@ class Loops(IRNode):
             # the relevant symbol has is_integer=False to indicate a ragged dim.
             sympy.Integer(0)
             if s == 1
-            else sympy_symbol(f"{prefix}{n}", integer=s.is_integer)
+            else sympy_symbol(f"{prefix}{n}", integer=(isinstance(s, int) or s.is_integer))
             for n, s in enumerate(ranges)
         ]
 
@@ -377,6 +405,23 @@ class Loops(IRNode):
 
 
 class Pointwise(Loops):
+    def __init__(
+        self,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: List[Expr],
+        ranges: List[Expr],
+        # Indicates whether we're operating on a NT
+        full_nested_size: List[Expr] = None,
+    ):
+        self.full_nested_size = full_nested_size
+        super().__init__(device, dtype, inner_fn, ranges)
+
+    def __str__(self):
+        return super().__str__() + ("" if self.full_nested_size is None else "[nested]")
+
+    __repr__ = __str__
+
     def make_loader(self):
         return self.inner_fn
 
@@ -1625,6 +1670,7 @@ class Layout(IRNode):
         size: List[Expr],
         stride: List[Expr],
         offset: Expr = Integer(0),
+        full_nested_size = None
     ):
         assert stride is None or len(size) == len(
             stride
@@ -1635,10 +1681,15 @@ class Layout(IRNode):
         self.size = size
         self._stride = stride
         self.offset = offset
+        self.full_nested_size = full_nested_size
 
     @property
     def stride(self):
         return self._stride
+
+    @property
+    def has_std_size(self):
+        return all([sz.is_integer if isinstance(sz, sympy.Expr) else True for sz in self.size])
 
     def __str__(self):
         offset = ""
@@ -1736,6 +1787,7 @@ class FixedLayout(Layout):
         size: List[Expr],
         stride: List[Expr] = None,
         offset: Expr = Integer(0),
+        full_nested_size: List[Expr] = None
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -1745,6 +1797,7 @@ class FixedLayout(Layout):
             size,
             stride,
             offset,
+            full_nested_size
         )
 
     def make_indexer(self):
@@ -1753,8 +1806,7 @@ class FixedLayout(Layout):
         def indexer(index):
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
-            has_std_size = any([not sz.is_integer for sz in self.size])
-            if has_std_size:
+            if self.has_std_size:
                 for idx, stride, sz in zip(index, self.stride, self.size):
                     if sz != 1:
                         result = result + idx * stride
@@ -1863,6 +1915,7 @@ class FlexibleLayout(Layout):
         )
 
     def __init__(self, device, dtype, size, stride_order=None):
+        # TODO: Add something for NTs here
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
@@ -2021,6 +2074,10 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self):
+        full_nested_size = getattr(self.layout, "full_nested_size", None)
+        is_nested = (full_nested_size is not None)
+        # if is_nested:
+        #     breakpoint()
         return self.get_name()
 
     def decide_layout(self):
@@ -2103,6 +2160,10 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    def __init__(self, data, *args, **kwargs):
+        self.data = data
+        super().__init__(*args, **kwargs)
+
     @cache_on_self
     def get_read_writes(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -2133,7 +2194,8 @@ class ComputedBuffer(Buffer):
                       value and try to do global graph-level layout optimization.
                       This is also something just begging to be autotuned.
         """
-        if isinstance(self.layout, FlexibleLayout):
+        # TODO: Hackery here; fix this
+        if isinstance(self.layout, FlexibleLayout) and self.layout.has_std_size:
             _, (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 self.data.get_size(), self.data.get_reduction_size()
             )
@@ -2164,6 +2226,11 @@ class ComputedBuffer(Buffer):
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
+            # TODO: Hackery here
+            if not self.layout.has_std_size:
+                self.freeze_layout()
+                return
+
             order = self.get_fill_order()
             if order:
                 self.freeze_layout_with_fill_order(order)
@@ -3125,16 +3192,31 @@ class FallbackKernel(ExternKernelAlloc):
                     for i in range(len(output))
                 )
             elif isinstance(output, torch.Tensor):
-                return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        convert_shape_to_inductor(output.size()),
-                        convert_shape_to_inductor(output.stride()),
-                    ),
-                    packed,
-                    index,
-                )
+                if output.is_nested:
+                    full_nested_size = output.size()
+                    output = torch.ops.aten._nested_view_as_jagged(output)
+                    return MultiOutput(
+                        FixedLayout(
+                            output.device,
+                            output.dtype,
+                            convert_shape_to_inductor(output.size()),
+                            convert_shape_to_inductor(output.stride()),
+                            full_nested_size=convert_shape_to_inductor(full_nested_size)
+                        ),
+                        packed,
+                        index,
+                    )
+                else:
+                    return MultiOutput(
+                        FixedLayout(
+                            output.device,
+                            output.dtype,
+                            convert_shape_to_inductor(output.size()),
+                            convert_shape_to_inductor(output.stride()),
+                        ),
+                        packed,
+                        index,
+                    )
             elif isinstance(output, int):
                 return output
             else:
@@ -3744,6 +3826,16 @@ class TensorBox(MutableBox):
         return TensorBox(StorageBox(data))
 
 
+class JaggedTensorBox(TensorBox):
+    jagged_offsets = None
+
+    @staticmethod
+    def create(data, jagged_offsets):
+        jt = JaggedTensorBox(StorageBox(data))
+        jt.jagged_offsets = jagged_offsets
+        return jt
+
+
 class StorageBox(MutableBox):
     def is_input_buffer(self):
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
@@ -3763,13 +3855,23 @@ class StorageBox(MutableBox):
         ):
             return self.data.get_name()
         assert isinstance(self.data, (Pointwise, Reduction)), type(self.data)
-        self.data = ComputedBuffer(
-            name=None,
+        full_nested_size = getattr(self.data, "full_nested_size", None)
+        if full_nested_size is not None:
+            layout = FixedLayout(
+                device=self.data.get_device(),
+                dtype=self.data.get_dtype(),
+                size=self.data.get_size(),
+                full_nested_size=full_nested_size,
+            )
+        else:
             layout=FlexibleLayout(
                 device=self.data.get_device(),
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
-            ),
+            )
+        self.data = ComputedBuffer(
+            name=None,
+            layout=layout,
             data=self.data,
         )
         self.data.name = V.graph.register_buffer(self.data)

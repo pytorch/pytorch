@@ -12,6 +12,7 @@ import sympy
 import torch
 import torch._logging
 import torch.fx
+import torch.utils._pytree as pytree
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import (
@@ -31,13 +32,14 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox, JaggedTensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
     layout_constraints,
     lowerings,
+    nested_lowerings,
     make_fallback,
     needs_realized_inputs,
     unsupported_output_tensor,
@@ -340,12 +342,37 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                target,
-                FixedLayout(example.device, example.dtype, sizes, strides),
+        nested_sizes = None
+        if example.is_nested:
+            # Treat as jagged
+            nested_sizes, nested_strides = sizes, strides
+            jt = torch.ops.aten._nested_view_as_jagged(example)
+            sizes, strides = self.symbolic_sizes_strides(jt)
+            jagged_offsets = torch.ops.aten._nested_get_jagged_offsets(example)
+            offset_sizes, offset_strides = self.symbolic_sizes_strides(jagged_offsets)
+            jagged_offsets_tensor = TensorBox.create(
+                InputBuffer(
+                    f"{target}_jagged_offsets",
+                    FixedLayout(jagged_offsets.device, jagged_offsets.dtype,
+                                offset_sizes, offset_strides)
+                )
             )
-        )
+            tensor = JaggedTensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides,
+                                full_nested_size=nested_sizes),
+                ),
+                jagged_offsets=jagged_offsets_tensor
+            )
+        else:
+            tensor = TensorBox.create(
+                InputBuffer(
+                    target,
+                    FixedLayout(example.device, example.dtype, sizes, strides,
+                                full_nested_size=nested_sizes),
+                )
+            )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
@@ -359,6 +386,36 @@ class GraphLowering(torch.fx.Interpreter):
         if hasattr(target, "_inductor_lowering_function"):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
+
+        args_flat, _ = pytree.tree_flatten(args)
+        has_nested = any(
+            [
+                isinstance(arg, ir.TensorBox)
+                and isinstance(arg.data, ir.StorageBox)
+                and (
+                        (
+                            hasattr(arg.data.data, "layout")
+                            and arg.data.data.layout.full_nested_size is not None
+                        ) or (
+                            isinstance(arg.data.data, Pointwise)
+                            and arg.data.data.full_nested_size is not None
+                        )
+                    )
+                for arg in args_flat
+            ]
+        )
+
+        nested_whitelist = {torch.ops.aten.mul.Tensor, torch.ops.aten.add.Tensor}
+
+        if has_nested and target not in nested_whitelist:
+            if target not in nested_lowerings:
+                make_fallback(target, lowerings_dict=nested_lowerings)
+            try:
+                out = nested_lowerings[target](*args, **kwargs)
+                return out
+            except Exception as e:
+                raise LoweringException(e, target, args, kwargs) from e
+
 
         if target not in lowerings:
             base_name = target.name().split(".")[0]

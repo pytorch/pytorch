@@ -54,9 +54,11 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
             if not skip_symbolic:
                 assert_eq(m1.stride(), m2.stride())
                 assert_eq(m1.storage_offset(), m2.storage_offset())
-            assert_eq(m1._is_view(), m2._is_view())
-            if m1._is_view():
-                go(m1._base, m2._base)
+            # TODO: Fix this once we figure out how to deal with NT views of T
+            if not m1.is_nested:
+                assert_eq(m1._is_view(), m2._is_view())
+                if m1._is_view():
+                    go(m1._base, m2._base)
         # TODO: test if is resizable (no direct query for this atm)
         # TODO: audit AutogradMeta to see if it matches
         # TODO: test forward AD
@@ -272,6 +274,21 @@ class MetaConverter:
                     ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
 
+                    # Only support contiguous (B, *, D) format for now.
+                    try:
+                        supported_format = (
+                            t.is_contiguous() and
+                            t.dim() == 3 and
+                            t.size(2) > 0
+                        )
+                    except Exception:
+                        supported_format = False
+
+                    if not supported_format:
+                        from torch._dynamo.exc import unimplemented
+
+                        unimplemented("Only supports (B, *, D) jagged format for now")
+
                     from torch._dynamo.source import (
                         TensorProperty,
                         TensorPropertySource,
@@ -285,8 +302,33 @@ class MetaConverter:
                         lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
                     )
 
-                    # Construct symbolic sizes
+                    # Construct jagged symbolic sizes: (sum(*), D) as (s0, s1) for (B, *, D)
                     sizes = NestedTensor._sizes_from_shape_list(t._nested_tensor_size())
+                    collapsed_size = sum(sizes[1])
+                    sym_jagged_sizes = [
+                        shape_env.create_symintnode(
+                            shape_env.create_symbol(
+                                collapsed_size,
+                                # TODO: Fix the number if it matters
+                                TensorPropertySource(
+                                    source, TensorProperty.SIZE, 42
+                                ),
+                            ),
+                            hint=collapsed_size,
+                        ),
+                        shape_env.create_symintnode(
+                            shape_env.create_symbol(
+                                sizes[-1],
+                                # TODO: Fix the number if it matters
+                                TensorPropertySource(
+                                    source, TensorProperty.SIZE, 223
+                                ),
+                            ),
+                            hint=sizes[-1],
+                        ),
+                    ]
+
+                    # Construct symbolic sizes: (s0, s1, s2) for (B, *, D)
                     sym_sizes = []
                     for i, size in enumerate(sizes):
                         if isinstance(size, list):
@@ -298,7 +340,7 @@ class MetaConverter:
                                 shape_env.create_symbol(
                                     size,
                                     TensorPropertySource(
-                                        source, TensorProperty.SIZE, i
+                                        source, TensorProperty.SIZE, 222
                                     ),
                                 ),
                                 hint=size,
@@ -307,7 +349,7 @@ class MetaConverter:
 
                     # NB: callback isn't called here to avoid fake-ifying the NT itself.
                     # Rather, we return a NestedTensor with a fake buffer and symbolic sizes.
-                    r = NestedTensor(buffer, sym_sizes)
+                    r = NestedTensor(buffer, sym_sizes, sym_jagged_sizes)
 
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:

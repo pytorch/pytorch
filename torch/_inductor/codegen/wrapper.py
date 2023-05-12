@@ -320,8 +320,17 @@ class WrapperCodeGen(CodeGen):
     def codegen_cuda_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs, nt_input_name):
+        # TODO: Fix this hack. For now, assume same nested structure as the input.
         if output_refs:
+            if nt_input_name is not None:
+                offset_name = f"torch.ops.aten._nested_get_jagged_offsets({nt_input_name})"
+                output_refs = [f"torch.ops.aten._nested_view_from_jagged({out}, {offset_name})"
+                               for out in output_refs]
+
+                # Get rid of "del arg0_1" line
+                self.wrapper_call._lines.pop()
+
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
@@ -402,7 +411,10 @@ class WrapperCodeGen(CodeGen):
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("end_graph()")
 
-            self.generate_return(output_refs)
+            # TODO: Hack to rebuild as NT if there was an NT input.
+            # There needs to be a better way to do this, but it's hard
+            # with how shitty this codegen logic is.
+            self.generate_return(output_refs, self._find_nt_input())
 
         self.append_precomputed_sizes_to_prefix()
         result.splice(self.prefix)
@@ -416,6 +428,15 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvaluewithlinemap()
 
+    def _find_nt_input(self) -> bool:
+        for name, inp in V.graph.graph_inputs.items():
+            try:
+                if inp.data.data.layout.full_nested_size is not None:
+                    return name
+            except Exception:
+                pass
+        return None
+
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
         if self.need_seed:
@@ -424,11 +445,23 @@ class WrapperCodeGen(CodeGen):
             )
 
         @functools.lru_cache(None)
-        def sizeof(name):
+        def sizeof(name, is_nested=False):
+            # Need to view as jagged format for this to work correctly
+            rhs_name = name
+            if is_nested:
+                rhs_name = f"torch.ops.aten._nested_view_as_jagged({name})"
             code.writeline(
-                f"{self.declare}{name}_size = {name}.{self.size}{self.ending}"
+                f"{self.declare}{name}_size = {rhs_name}.{self.size}{self.ending}"
             )
             return f"{name}_size"
+
+        @functools.lru_cache(None)
+        def jagged_offsets_of(name):
+            offsets_name = f"{name}_jagged_offsets"
+            code.writeline(
+                f"{self.declare}{offsets_name} = torch.ops.aten._nested_get_jagged_offsets({name})"
+            )
+            return offsets_name
 
         @functools.lru_cache(None)
         def strideof(name):
@@ -457,13 +490,18 @@ class WrapperCodeGen(CodeGen):
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
+            try:
+                is_nested = value.data.data.layout.full_nested_size is not None
+            except Exception:
+                is_nested = False
+
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(
-                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
+                        f"{self.declare}{shape} = {sizeof(name, is_nested)}[{dim}]{self.ending}"
                     )
 
         for name, value in graph_inputs_tensors:

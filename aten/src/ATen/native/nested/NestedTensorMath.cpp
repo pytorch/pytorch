@@ -13,8 +13,10 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <ATen/NamedTensorUtils.h>
 
 #include <tuple>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -857,6 +859,78 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
+Tensor _nested_view_from_buffer_cont(
+    const Tensor& buffer,
+    const Tensor& nested_sizes) {
+  TORCH_INTERNAL_ASSERT(
+      !buffer.is_nested(),
+      "Can only a create Nested Tensor from a normal tensor buffer");
+  TORCH_INTERNAL_ASSERT(buffer.dim() == 1, "The input buffer must be flat");
+  TORCH_INTERNAL_ASSERT(nested_sizes.dim() == 2, "Expected the nested size tensor to be two dimensional.");
+  uint64_t num_elements_nested_size = at::prod(nested_sizes, 1).sum().item<int64_t>();
+  uint64_t buffer_storage_size = buffer.storage().nbytes()/buffer.dtype().itemsize();
+  TORCH_INTERNAL_ASSERT(
+      buffer_storage_size == num_elements_nested_size,
+      "The number of elements in the buffer must equal the nested tensor size but buffer size: ",
+      buffer_storage_size,
+      " and nested tensor size: ",
+      num_elements_nested_size,
+      ".");
+
+  return at::detail::make_tensor<NestedTensorImpl>(
+    c10::TensorImpl::VIEW,
+    buffer,
+    nested_sizes);
+}
+
+Tensor _nested_view_from_jagged(
+    const Tensor& x,
+    const Tensor& x_offsets) {
+  TORCH_INTERNAL_ASSERT(
+      !x.is_nested() && x.dim() == 2,
+      "Expected non-nested 2D input tensor for jagged data");
+  TORCH_INTERNAL_ASSERT(
+      x_offsets.dim() == 1,
+      "Expected 1D input tensor for offsets.");
+
+  // NB: Must be on CPU for now.
+  auto nested_size = x_offsets.new_empty({x_offsets.size(0) - 1, 2},
+      x_offsets.options().dtype(kLong).device(kCPU));
+  nested_size.select(1, 0).copy_(x_offsets.diff());
+  nested_size.select(1, 1).fill_(x.size(1));
+
+  return at::detail::make_tensor<NestedTensorImpl>(
+    c10::TensorImpl::VIEW,
+    x.view(-1),
+    nested_size);
+}
+
+void _check_nested_is_jagged(const Tensor& self) {
+  TORCH_CHECK(self.is_nested(), "Expected a NT");
+  auto nt_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(self.is_contiguous() &&
+      self.dim() == 3 &&
+      nt_impl->opt_size(1) == c10::nullopt &&
+      nt_impl->opt_size(2) != c10::nullopt,
+      "Expected NT to be contiguous and in (B, *, D) format");
+}
+
+Tensor _nested_view_as_jagged(const Tensor& self) {
+  _check_nested_is_jagged(self);
+  auto nt_impl = get_nested_tensor_impl(self);
+  auto buffer = nt_impl->get_buffer();
+  auto nt_view = buffer.view({-1, self.size(2)});
+  return nt_view;
+}
+
+Tensor _nested_get_jagged_offsets(const Tensor& self) {
+  _check_nested_is_jagged(self);
+  auto nt_impl = get_nested_tensor_impl(self);
+  auto nt_size = nt_impl->get_nested_sizes();
+  auto jagged_offsets = at::cat({nt_size.new_zeros({1}), nt_size.select(1, 0).cumsum(0)}, 0);
+  return jagged_offsets;
+}
+
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
@@ -912,6 +986,41 @@ Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Gene
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.normal_(mean, std, gen);
   return self;
+}
+
+static Tensor cat_nested_impl(
+    const MaterializedITensorListRef& tensors,
+    int64_t dim) {
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
+  TORCH_CHECK(
+      wrapped == 0,
+      "NestedTensors can only be concatenated along dimension 0. Got ",
+      dim,
+      " instead.");
+  std::vector<at::Tensor> buffers;
+  std::vector<at::Tensor> sizes;
+  for (const auto i : c10::irange(tensors.size())) {
+    const Tensor& t = tensors[i];
+    TORCH_CHECK(
+        t.is_nested(), "Expected each tensor in given list to be nested.");
+    TORCH_CHECK(
+        t.is_contiguous(),
+        "Expected each tensor in given list to be contiguous.");
+    auto t_ptr = get_nested_tensor_impl(t);
+    buffers.push_back(t_ptr->get_buffer().view({-1}));
+    sizes.push_back(t_ptr->get_nested_sizes());
+  }
+  return at::detail::make_tensor<NestedTensorImpl>(
+      at::cat(buffers).view({-1}), at::cat(sizes, 0));
+}
+
+Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
+  auto materialized = tensors.materialize();
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
+  auto result =
+      cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
 }
 
 } // namespace native

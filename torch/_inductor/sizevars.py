@@ -343,6 +343,9 @@ class SizeVarAllocator:
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
         out = sympy_subs(expr, self.var_to_val)
+        if isinstance(out, sympy.ImmutableDenseNDimArray):
+            # Handle NT case
+            return tuple(out)
         try:
             return int(out)
         except Exception:

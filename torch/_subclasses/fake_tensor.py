@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import sys
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -378,6 +379,29 @@ def constructors(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
+
+
+# Force graph breaks for all these NT creation ops.
+# TODO: Revisit this.
+_nested_constructors = (
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
+)
+
+
+@register_op_impl(lambda fn: fn in _nested_constructors)
+def nested_constructor(fake_mode, func, *args, **kwargs):
+    raise DataDependentOutputException(func)
+
+
+@register_op_impl(aten._nested_view_from_buffer.default)
+def nested_view_from_buffer(fake_mode, func, *args, **kwargs):
+    raise DataDependentOutputException(func)
+
+
+@register_op_impl(aten._nested_view_from_buffer.cont)
+def nested_view_from_buffer(fake_mode, func, *args, **kwargs):
+    raise DataDependentOutputException(func)
 
 
 @register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
