@@ -1689,7 +1689,7 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
 if sys.executable != 'torch_deploy':
     class _TritonLibrary(object):
         lib = torch.library.Library("triton", "DEF")
-        ops_table = {}
+        ops_table: Dict[str, Callable] = {}
 
         @classmethod
         def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
