@@ -696,7 +696,7 @@ class GitHubPR:
         return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_merge_base(self) -> str:
-        return self.info['baseRefOid']
+        return cast(str, self.info["baseRefOid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
