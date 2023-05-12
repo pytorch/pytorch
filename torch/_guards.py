@@ -449,7 +449,7 @@ having to plumb complex subsystems across multiple verticals.
 Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
-to plumb objects back up to where frame interpretation happend.
+to plumb objects back up to where frame interpretation happened.
 """
 
 
