@@ -724,8 +724,13 @@ class TestOptim(TestCase):
                 params_with_flags = deepcopy(params)
                 params_with_flags[flag] = flag_value
 
+                # foreach/fused optimizers should be tested with a param_groups['params'] with
+                # zero_size tensor as its last param.
+                # ref: https://github.com/pytorch/pytorch/issues/100701
+                empty_params = [torch.empty((), device=device, dtype=torch.float64)]
+
                 optimizer = optimizer_constructor(
-                    model.parameters(), **params_with_flags
+                    list(model.parameters()) + empty_params, **params_with_flags
                 )
 
                 for i in range(kIterations):
