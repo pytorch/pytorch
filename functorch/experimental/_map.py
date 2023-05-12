@@ -7,6 +7,7 @@ from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functiona
 from torch._functorch.aot_autograd import create_joint
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
@@ -30,6 +31,59 @@ class MapWrapper(HigherOrderOperator):
 
 map = MapWrapper("map")
 map_impl = HigherOrderOperator("map_impl")
+
+def create_fw_bw_graph(f, num_mapped_args, *args):
+    mapped_xs = args[:num_mapped_args]
+    pos_args = args[num_mapped_args:]
+
+    with disable_proxy_modes_tracing():
+        def from_fun(t):
+            # We create "clean" inputs by disabling all dispatch keys between Autograd and Backend
+            with suspend_functionalization():
+                if isinstance(t, torch.Tensor):
+                    return torch.empty_strided(t.size(), t.stride(), requires_grad=t.requires_grad)
+                return t
+
+        example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+        example_pos_args = [from_fun(arg) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
+        example_flat_out = pytree.tree_map(from_fun, f(*example_xs, *example_pos_args))
+        example_grad = [from_fun(torch.ones_like(out)) for out in example_flat_out if out is not None and out.requires_grad]
+
+
+    with suspend_functionalization():
+        fw_graph = make_fx(f)(*example_xs, *example_pos_args)
+
+    def joint_f(*example_args):
+        joint_mapped_args = example_args[:joint_num_mapped]
+        args = example_args[joint_num_mapped:]
+
+        mapped_input = joint_mapped_args[:num_mapped_args]
+        mapped_grads = joint_mapped_args[num_mapped_args:]
+
+        def fw_with_masks(*args):
+            fw_out = f(*args)
+            return fw_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in fw_out]
+
+        joint = create_joint(fw_with_masks)
+        _, grads = joint(list(mapped_input) + list(args), list(mapped_grads))
+
+        # In order to keep map functional for backward graph,
+        # we do clone outputs that are aliasing inputs
+        input_storage = {StorageWeakRef(arg._typed_storage()) for arg in example_args if isinstance(arg, torch.Tensor)}
+
+        def maybe_clone(t):
+            if isinstance(t, torch.Tensor) and StorageWeakRef(t._typed_storage()) in input_storage:
+                return t.clone()
+            return t
+        return pytree.tree_map(maybe_clone, grads)
+
+    joint_num_mapped = len(example_grad) + len(example_xs)
+
+    with suspend_functionalization():
+        joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
+
+    return fw_graph, joint_graph
+
 
 def map_wrapper(f, xs, *args):
     flat_xs, xs_spec = pytree.tree_flatten(xs)
@@ -116,10 +170,7 @@ def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {},
                                                name="map_impl")
-    ret = track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
-    print("map out ids:", [id(o) for o in ret])
-    print("end of map tracked ids:", [id(t) for t in proxy_mode.tracer.tensor_tracker.keys()])
-    return ret
+    return track_tensor_tree(expanded_outs, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
@@ -165,52 +216,8 @@ def map_dense(f, num_mapped_args, *args):
 
 @map_impl.py_impl(DispatchKey.Autograd)
 def map_autograd(f, num_mapped_args, *args):
-    mapped_xs = args[:num_mapped_args]
-    pos_args = args[num_mapped_args:]
-
-    with disable_proxy_modes_tracing():
-        # By constructing the example inputs with detach then requires_grad_, we
-        # make them leaves of autograd graph so that grad_fn is not required.
-
-        def from_fun(t):
-            with suspend_functionalization():
-                return torch.empty_strided(t.size(), t.stride(), requires_grad=t.requires_grad)
-
-        def detach(t, requires_grad):
-            t = t.detach()
-            return t if not requires_grad else t.requires_grad_()
-
-        example_xs = [detach(from_fun(xs), mapped_xs[i].requires_grad) for i, xs in enumerate(_unstack_pytree(mapped_xs)[0])]
-        example_pos_args = [detach(from_fun(arg), arg.requires_grad) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
-        example_flat_out = pytree.tree_map(from_fun, f(*example_xs, *example_pos_args))
-        example_grad = [detach(from_fun(torch.ones_like(out)), out.requires_grad) for out in example_flat_out if out is not None and out.requires_grad]
-    
-    with suspend_functionalization():
-        fw_graph = make_fx(f)(*example_xs, *example_pos_args)
-    print("create forward graph")
-    fw_graph.print_readable()
-
-    def joint_f(*example_args):
-        joint_mapped_args = example_args[:joint_num_mapped]
-        args = example_args[joint_num_mapped:]
-
-        mapped_input = joint_mapped_args[:num_mapped_args]
-        mapped_grads = joint_mapped_args[num_mapped_args:]
-
-        def fw_with_masks(*args):
-            fw_out = f(*args)
-            return fw_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in fw_out]
-
-        joint = create_joint(fw_with_masks)
-        _, grads = joint(list(mapped_input) + list(args), list(mapped_grads))
-        return grads
-
-    joint_num_mapped = len(example_grad) + len(example_xs)
-    with suspend_functionalization():
-        joint_graph = make_fx(joint_f)(*example_xs, *example_grad, *example_pos_args)
-    print("corresponding backward graph")
-    joint_graph.print_readable()
-    flat_out = MapAutogradOp.apply(fw_graph, joint_graph, num_mapped_args, *args)
+    fw_graph, bw_graph = create_fw_bw_graph(f, num_mapped_args, *args)
+    flat_out = MapAutogradOp.apply(fw_graph, bw_graph, num_mapped_args, *args)
     return flat_out
 
 
@@ -250,10 +257,10 @@ def map_func(f, num_mapped, *args):
                 "torch.map is mutating the input!"
             )
 
-        #if _has_potential_branch_input_alias(f, inputs):
-        #    raise UnsupportedAliasMutationException(
-        #        "torch.map is aliasing the input!"
-        #    )
+        if _has_potential_branch_input_alias(f, example_inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is aliasing the input!"
+            )
 
         map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=0)
@@ -285,10 +292,10 @@ def map_functionalize(interpreter, f, num_mapped, *args):
                 "torch.map is mutating the input!"
             )
 
-        #if _has_potential_branch_input_alias(functional_map_fn, example_inputs):
-        #    raise UnsupportedAliasMutationException(
-        #        "torch.map is aliasing the input!"
-        #    )
+        if _has_potential_branch_input_alias(f, example_inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is aliasing the input!"
+            )
 
         map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
