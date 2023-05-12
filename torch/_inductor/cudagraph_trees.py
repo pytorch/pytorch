@@ -1047,7 +1047,7 @@ class CUDAGraphNode:
 
             check(
                 o.is_cuda,
-                lambda: "Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}"
+                lambda: f"Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}",
             ),
 
             ref = static_input_persistent_storage_ptrs.get(
