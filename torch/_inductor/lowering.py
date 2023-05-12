@@ -1255,18 +1255,7 @@ def inductor_seed(device: torch.device):
 @register_lowering(inductor_prims.seeds, type_promotion_kind=None)
 def inductor_seeds(count, device):
     warn_triton_random()
-    limits = torch.iinfo(torch.int64)
-    # TODO(jansel): we should switch to the out variant here
-    return TensorBox.create(
-        ir.FallbackKernel.create(
-            aten.randint,
-            limits.min,
-            limits.max,
-            [count],
-            device=device,
-            dtype=torch.int64,
-        )
-    )
+    return TensorBox.create(ir.RandomSeeds(count, decode_device(device)))
 
 
 @register_lowering(inductor_prims.lookup_seed, type_promotion_kind=None)
