@@ -1,8 +1,8 @@
 import json
 import math
 import os
-import pathlib
 import subprocess
+from pathlib import Path
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -137,13 +137,14 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def _get_previously_failing_tests() -> Set[str]:
-    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = pathlib.Path(
-        ".pytorch_cache/v/cache/lastfailed"
+def _get_previously_failing_tests(repo_root: Path) -> Set[str]:
+    PYTORCH_FAILED_TESTS_CACHE_FILE_PATH = (
+        repo_root / ".pytorch_cache/v/cache/lastfailed"
     )
 
     if not PYTORCH_FAILED_TESTS_CACHE_FILE_PATH.exists():
         print(f"No pytorch cache found at {PYTORCH_FAILED_TESTS_CACHE_FILE_PATH}")
+        print(f"cwd is {os.getcwd()}")
         return set()
 
     with open(PYTORCH_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
@@ -189,6 +190,7 @@ def _get_modified_tests() -> Set[str]:
 
 def get_reordered_tests(
     tests: List[ShardedTest],
+    repo_root: Path,
 ) -> Tuple[List[ShardedTest], List[ShardedTest]]:
     """
     Get the reordered test filename list based on github PR history or git changed file.
@@ -205,7 +207,7 @@ def get_reordered_tests(
 
     prioritized_tests: Set[str] = set()
 
-    pri_test = _get_previously_failing_tests()
+    pri_test = _get_previously_failing_tests(repo_root)
     print_tests(pri_test, "Prioritizing these tests since they previously failed")
     prioritized_tests |= pri_test
 
