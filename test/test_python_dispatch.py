@@ -2388,6 +2388,29 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
 
+    def test_data_ptr_respects_numel_slow_path(self):
+        data = torch.randn(6, 2)
+
+        class NumelDefaultReturn(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, wrapper):
+                return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func.overloadpacket == torch.ops.aten.dim:
+                    return data.dim()
+                if func.overloadpacket == torch.ops.aten.sym_numel:
+                    numel_called[0] = True
+                    return None
+                return NotImplemented
+
+        for use_wrapper_subclass in (False, True):
+            numel_called = [False]
+            e = NumelDefaultReturn(torch.randn(2, 2), use_wrapper_subclass)
+            e.data_ptr()
+            self.assertTrue(numel_called[0])
+
     def test_layout_slow_path(self):
         for use_wrapper_subclass in [True, False]:
             data = torch.randn(6, 2)
