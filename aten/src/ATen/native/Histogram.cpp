@@ -308,7 +308,7 @@ Tensor _histogramdd(const Tensor& self, TensorList bins,
 /* Versions of histogramdd in which bins is an int[]
  * defining the number of bins in each dimension.
  */
-std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayRef bin_ct,
+std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         std::vector<Tensor>& bin_edges_out) {
@@ -337,7 +337,7 @@ std::vector<Tensor> histogramdd_bin_edges(const Tensor& self, IntArrayRef bin_ct
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
     std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
-    return histogramdd_bin_edges_out_cpu(self, bin_ct, range, weight, density, bin_edges_out);
+    return histogramdd_bin_edges_out(self, bin_ct, range, weight, density, bin_edges_out);
 }
 
 Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
