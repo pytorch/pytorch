@@ -46,6 +46,7 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_dtype_size,
+    get_sympy_Expr_dtype,
     sympy_product,
 )
 from .virtualized import V
@@ -81,10 +82,7 @@ def may_get_constant_buffer_dtype(constant_buffer):
         return torch.int64
 
     if isinstance(constant_buffer, sympy.Expr):
-        if constant_buffer.is_integer:
-            return torch.int64
-        else:
-            return torch.float64
+        return get_sympy_Expr_dtype(constant_buffer)
 
     if constant_buffer.is_integer:
         return torch.int64
