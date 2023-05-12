@@ -31,7 +31,7 @@ torch.backends.cuda
 
 .. autofunction::  torch.backends.cuda.is_built
 
-.. automodule:: torch.backends.cuda.matmul
+.. currentmodule:: torch.backends.cuda.matmul
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
@@ -45,17 +45,13 @@ torch.backends.cuda
 
     A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
 
-.. automodule:: torch.backends.cuda
-    :noindex:
-
+.. currentmodule:: torch.backends.cuda
 .. attribute::  cufft_plan_cache
 
     ``cufft_plan_cache`` contains the cuFFT plan caches for each CUDA device.
     Query a specific device `i`'s cache via `torch.backends.cuda.cufft_plan_cache[i]`.
 
-    .. automodule:: torch.backends.cuda.cufft_plan_cache
-        :noindex:
-
+    .. currentmodule:: torch.backends.cuda.cufft_plan_cache
     .. attribute::  size
 
         A readonly :class:`int` that shows the number of plans currently in a cuFFT plan cache.
