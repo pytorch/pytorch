@@ -2226,9 +2226,10 @@ class TestCase(expecttest.TestCase):
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        if TEST_WITH_TORCHINDUCTOR:
+        # TODO remove version check once dynamo supports 3.11
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
             super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_TORCHDYNAMO:
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
 
