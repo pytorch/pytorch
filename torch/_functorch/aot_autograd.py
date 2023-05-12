@@ -1046,6 +1046,7 @@ class AOTConfig:
     aot_id: int
     keep_inference_input_mutations: bool
     is_export: bool = False
+    no_tangents: bool = False
     dynamic_shapes: bool = False
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
@@ -1195,7 +1196,7 @@ def fn_prepped_for_autograd(
 #     otherwise, when we compute autograd.grad(), we will not take those input mutations into account
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(
-    fn: Callable,
+    fn: Callable, *, aot_config: AOTConfig
 ) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
@@ -1235,8 +1236,9 @@ def create_joint(
         # Call the backwards pass
         if grad_primals:
             with fx_traceback.preserve_node_meta():
-                # If our output is a scalar loss, we don't need to pass in tangents.
-                if len(needed_tangents) == 1 and needed_tangents[0].numel() == 1:
+                # for full graph export, we always export a joint graph where we assume no tangents are needed.
+                if aot_config.no_tangents:
+                    assert len(needed_tangents) == 1 and needed_tangents[0].numel() == 1
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -2628,7 +2630,7 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
         flat_fn,
         fw_metadata,
     )
-    joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
+    joint_fn_to_trace = create_joint(fn_prepared_for_autograd, aot_config=aot_config)
 
     fx_g = create_functionalized_graph(
         joint_fn_to_trace,
@@ -3485,6 +3487,7 @@ def aot_function(
         dynamic_shapes=dynamic,
         aot_autograd_arg_pos_to_source=None,
         is_export=False,
+        no_tangents=False,
         enable_log=enable_log,
     )
     cached_res = None
@@ -3658,6 +3661,7 @@ def aot_module_simplified(
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
+        no_tangents=False,
     )
 
     compiled_fn = create_aot_dispatcher_function(
@@ -3797,6 +3801,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             full_args,
             decompositions=decompositions,
             num_params_buffers=len(params_and_buffers_flat),
+            no_tangents=True,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -3934,6 +3939,14 @@ def _aot_export_function(
     *,
     num_params_buffers: int = 0,
     decompositions: Optional[Dict] = None,
+    # If we're exporting a joint graph and we don't want any tangent inputs in the graph
+    # (because we are backpropping through a scalar 1 loss),
+    # we need to explicitly specify not to include tangents in the graph.
+    # It's not enough just to check that our tangent is a scalar, since we also
+    # need to know if it is a 1 (no need to make it a graph input), or something else
+    # (requiring it to be a graph input).
+    # We don't know this info at trace time though, so we need to make it an explicit config.
+    no_tangents: bool = False,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -3962,6 +3975,7 @@ def _aot_export_function(
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
+        no_tangents=no_tangents,
     )
 
     fx_g, meta = create_aot_dispatcher_function(
