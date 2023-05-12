@@ -1144,8 +1144,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
-    @unittest.expectedFailure  # "SymIntArrayRef expected to contain only concrete integers"
+    @patch.object(torch._dynamo.config, "assume_static_by_default", True)
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
