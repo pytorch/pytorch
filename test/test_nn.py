@@ -9697,11 +9697,10 @@ class TestNNDeviceType(NNTestCase):
         input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
-        if non_contig is not False:
-            if non_contig == "sliced":
-                input_ui8 = input_ui8[:, :, 10:-10, 10:-10]
-            elif non_contig == "restrided":
-                input_ui8 = input_ui8[:, :, ::2, ::2]
+        if non_contig == "sliced":
+            input_ui8 = input_ui8[:, :, 10:-10, 10:-10]
+        elif non_contig == "restrided":
+            input_ui8 = input_ui8[:, :, ::2, ::2]
 
         if batch_size == 1 and check_as_unsqueezed_3d_tensor:
             input_ui8 = input_ui8[0, ...]

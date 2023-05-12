@@ -321,6 +321,12 @@ void upsample_avx_bilinear_uint8(
 
   at::Tensor input = input_;
   if (!(input.is_contiguous() || input.is_contiguous(at::MemoryFormat::ChannelsLast))) {
+    // If input is not contiguous with memory format channels first or channels last,
+    // we explicitly convert the input to contiguous channels last memory format.
+    // This simplifies the rest of the code and let us assume that the format is only contiguous channels first or channels last,
+    // Most tensors going through this `if` block won't need to go through unpacking, but those having C < 3 may
+    // have to (this means 2 copies are made). We could avoid the extra copy by handling non-contiguous input
+    // directly within unpack_rgb() and pack_rgb(), but initial attempts showed that this is fairly complex.
     input = input.contiguous(at::MemoryFormat::ChannelsLast);
   }
 
