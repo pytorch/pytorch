@@ -464,10 +464,6 @@ class StorageWeakRefWrapper:
             return f"StorageWeakRefWrapper to {self.data_ptr()}; alive"
 
 
-def is_cuda_tensor(x):
-    return isinstance(x, torch.Tensor) and x.device.type == "cuda"
-
-
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(device, mem_pool, stream):
     """
@@ -579,9 +575,11 @@ class CUDAWarmupNode:
 
         assert len(new_inputs) == 0
 
+        # sdpa returns cpu tensors when not recording cuda graph
         def add_ref(o):
             return (
                 o is not None
+                and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
             )
 
@@ -1056,6 +1054,11 @@ class CUDAGraphNode:
             if o is None:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
+
+            check(
+                o.is_cuda,
+                lambda: f"Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}",
+            ),
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
