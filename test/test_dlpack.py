@@ -152,7 +152,7 @@ class TestTorchDlPack(TestCase):
         torch.cuda.default_stream().synchronize()
         self.assertTrue(torch.cuda.default_stream().query())
         d = x.__dlpack__(1)
-        # check that the default stream has work
+        # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 
     @skipMeta
