@@ -1509,6 +1509,7 @@ def get_native_function_definitions(
         symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+        custom_code_callback=None,
     )
     anonymous_gen = dest.RegisterDispatchKey(
         backend_idx,
@@ -1518,6 +1519,7 @@ def get_native_function_definitions(
         symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+        custom_code_callback=None,
     )
     reg_gen = dest.RegisterDispatchKey(
         backend_idx,
@@ -1527,6 +1529,7 @@ def get_native_function_definitions(
         symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+        custom_code_callback=None,
     )
     for f in grouped_native_functions:
         kernel_namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
@@ -1607,6 +1610,7 @@ def get_namespaced_declaration(
         class_method_name=None,
         skip_dispatcher_op_registration=False,
         symint=symint,
+        custom_code_callback=None,
     )
     for f in grouped_native_functions:
         namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
@@ -1932,6 +1936,7 @@ def gen_per_operator_headers(
                         symint=True,
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
+                        custom_code_callback=None,
                     ),
                     grouped_functions,
                 )

@@ -445,6 +445,7 @@ def gen_dispatcher_registrations(
                 symint=True,
                 class_method_name=f"{class_name}",
                 skip_dispatcher_op_registration=False,
+                custom_code_callback=None,
             ),
             grouped_native_functions,
         )
@@ -512,6 +513,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                                 symint=True,
                                 class_method_name=f"{class_name}",
                                 skip_dispatcher_op_registration=False,
+                                custom_code_callback=None,
                             ),
                             grouped_native_functions,
                         )

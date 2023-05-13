@@ -98,6 +98,7 @@ def gen_custom_ops_registration(
                         symint=False,
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
+                        custom_code_callback=None,
                     ),
                     functions,
                 )
@@ -118,6 +119,7 @@ TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
                     symint=False,
                     class_method_name=None,
                     skip_dispatcher_op_registration=False,
+                    custom_code_callback=None,
                 ),
                 native_functions,
             )

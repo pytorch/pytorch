@@ -1,7 +1,7 @@
 import itertools
 import textwrap
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple, Union
+from typing import Callable, List, Literal, Optional, Tuple, Union
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -253,6 +253,11 @@ class RegisterDispatchKey:
     # operators into JIT op registry, thus we need to avoid generating code to register into the dispatcher.
     skip_dispatcher_op_registration: bool
 
+    # This function will be called when generating the unstructured code.
+    custom_code_callback: Optional[
+        Callable[[NativeFunction, Optional[NativeFunctionsGroup]], str]
+    ]
+
     @staticmethod
     def gen_device_check(
         type: DeviceCheckType, args: List[Argument], method_name: str
@@ -373,6 +378,7 @@ class RegisterDispatchKey:
             self.symint,
             self.class_method_name,
             self.skip_dispatcher_op_registration,
+            self.custom_code_callback,
             g,
         )
         return list(mapMaybe(structured_gen.gen_one, g.functions()))
@@ -533,6 +539,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                         )
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+                        custom_code = (
+                            self.custom_code_callback(f, g)
+                            if self.custom_code_callback is not None
+                            else ""
+                        )
 
                 return f"""\
 namespace {{
@@ -541,6 +552,7 @@ namespace {{
   {device_check}
 
   {device_guard}
+  {custom_code}
   return {impl_name}({args_exprs_str});
 }}
 
