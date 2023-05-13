@@ -165,7 +165,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
-        self.wrapper_code = None
+        self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
@@ -210,6 +210,20 @@ class GraphLowering(torch.fx.Interpreter):
         m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
         if m:
             return self.get_dtype(m.group(1))
+        raise KeyError(f"could not find {buffer_name}")
+
+    def get_numel(self, buffer_name: str):
+        from .ir import MultiOutputLayout
+
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].numel()
+        if buffer_name in self.name_to_buffer:
+            buf = self.name_to_buffer[buffer_name]
+            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+                return 1
+            return buf.get_numel()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
     def random_seed_buffer(self, device: torch.device):
@@ -436,6 +450,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+        value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(value, (TensorBox, sympy.Expr))
             if not isinstance(value, TensorBox):
@@ -479,6 +494,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -562,6 +584,31 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
+        # This is not complete, but it doesn't have to be: origin_node
+        # tracking is best effort.  The logic here critically relies on direct
+        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+        # to get views to work.  Feel free to add any extra cases as needed.
+        #
+        # Note: we can't YOLO tree_map over this result, because if there are
+        # buffers or a view involved, we might not be able to validly assign
+        # the origin_node here.
+        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
+            if isinstance(result.data.data, ir.Loops):
+                result.data.data.origin_node = n
+            elif isinstance(result.data.data, ir.Buffer):
+                result.data.data.origin_node = n
+                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
+                    result.data.data.data, ir.Loops
+                ):
+                    result.data.data.data.origin_node = n
+                # Not really multi-output, can straightforwardly recurse in
+                elif (
+                    isinstance(result.data.data, ir.MultiOutput)
+                    and not result.data.data.indices
+                ):
+                    if isinstance(result.data.data.inputs[0], ir.Buffer):
+                        result.data.data.inputs[0].origin_node = n
 
         return result
 

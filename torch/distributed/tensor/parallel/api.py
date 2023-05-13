@@ -30,7 +30,7 @@ __all__ = [
 
 # switch the DTensor propagator to use the caching propagator to speed up
 # the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
+DTensor._propagator = _CachingPropagator(DTensor._propagator)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
@@ -263,7 +263,7 @@ def _parallelize_linear(
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
-    if isinstance(parallel_style, RowwiseParallel):
+    if isinstance(parallel_style, (RowwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -271,7 +271,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, ColwiseParallel):
+    elif isinstance(parallel_style, (ColwiseParallel)):
         distribute_module(
             module,
             device_mesh,
