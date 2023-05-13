@@ -206,6 +206,35 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 
+class StackDataset(Dataset[Tuple[T_co, ...]]):
+    r"""Dataset as a stacking of multiple datasets.
+
+    This class is useful to assemble different parts of complex input data, given as datasets.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> images = ImagesDataset()
+        >>> texts = TextDataset()
+        >>> multimodal = StackDataset(images, texts)
+        >>> multimodal[0] == (images[0], texts[0])
+
+    Args:
+        *datasets (Dataset[T_co]): Datasets for stacking that have the same size.
+    """
+    datasets: Tuple[Dataset[T_co], ...]
+
+    def __init__(self, *datasets: Dataset[T_co]) -> None:
+        assert len(datasets) > 0, "At least one dataset should be passed"
+        assert all(len(datasets[0]) == len(dataset) for dataset in datasets), "Size mismatch between datasets"  # type: ignore[arg-type]
+        self.datasets = datasets
+
+    def __getitem__(self, index):
+        return tuple(dataset[index] for dataset in self.datasets)
+
+    def __len__(self):
+        return len(self.datasets[0])  # type: ignore[arg-type]
+
+
 class ConcatDataset(Dataset[T_co]):
     r"""Dataset as a concatenation of multiple datasets.
 
