@@ -1316,6 +1316,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
+    @config.patch({"cpp.descriptive_names": "original_aten"})
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
@@ -1330,7 +1331,7 @@ class CPUReproTests(TestCase):
 
         kernel_profile_events = []
         for e in prof.profiler.function_events:
-            if "kernel_cpp_0" in e.name:
+            if "cpp_fused_add_0" in e.name:
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 
