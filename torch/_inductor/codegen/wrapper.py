@@ -10,13 +10,14 @@ from typing import Any, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+import torch
+from torch._dynamo.utils import counters, dynamo_timed
+from torch.fx.experimental.symbolic_shapes import SymTypes
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
-    has_triton,
     LineContext,
     sympy_dot,
     sympy_product,
@@ -129,7 +130,7 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        if key in state:
+        if key in state and False:
             free_line = state.pop(key)
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
@@ -210,6 +211,7 @@ class WrapperCodeGen(CodeGen):
         self.size = "size()"
         self.stride = "stride()"
         self.first_device_guard = True
+        self.supports_intermediate_hooks = True
 
         self.write_header()
         self.write_prefix()
@@ -225,7 +227,7 @@ class WrapperCodeGen(CodeGen):
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
 
-        self.write_get_cuda_stream = functools.lru_cache(None)(
+        self.write_get_cuda_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_cuda_stream
         )
 
@@ -245,6 +247,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
                 from torch import empty_strided, as_strided, device
@@ -258,15 +261,16 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-        if has_triton():
-            self.header.splice(
-                """
-                import triton
-                import triton.language as tl
-                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                """
-            )
+    @cache_on_self
+    def write_triton_header_once(self):
+        self.header.splice(
+            """
+            import triton
+            import triton.language as tl
+            from torch._inductor.triton_heuristics import grid, start_graph, end_graph
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            """
+        )
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -312,6 +316,7 @@ class WrapperCodeGen(CodeGen):
             self.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
+        self.write_triton_header_once()
         name = f"stream{index}"
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
@@ -337,10 +342,19 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
+        if (
+            self.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and origin_node is not None
+        ):
+            counters["inductor"]["intermediate_hooks"] += 1
+            self.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+            )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
@@ -371,12 +385,14 @@ class WrapperCodeGen(CodeGen):
             if config.profiler_mark_wrapper_call:
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
+                self.write_triton_header_once()
                 self.wrapper_call.writeline("start_graph()")
 
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
-                and self.lines[-1].node.name not in out_names
+                # TODO: this seems legit, NullLine has no node
+                and self.lines[-1].node.name not in out_names  # type: ignore[attr-defined]
             ):
                 # these lines will be pointless
                 self.lines.pop()
@@ -603,7 +619,10 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_str(self, s):
-        return repr(s)
+        if isinstance(s, SymTypes):
+            return pexpr(sympy.expand(repr(s)))
+        else:
+            return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
@@ -672,6 +691,10 @@ class WrapperCodeGen(CodeGen):
     def codegen_free(self, buffer):
         name = buffer.get_name()
 
+        if not config.allow_buffer_reuse:
+            self.writeline(self.make_buffer_free(buffer))
+            return
+
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
             self.writeline(self.make_buffer_free(buffer))
@@ -735,6 +758,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.stride = "strides()"
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
+        self.supports_intermediate_hooks = False
 
     def seed(self):
         """
@@ -931,19 +955,29 @@ class CppWrapperCodeGen(WrapperCodeGen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
         )
 
+    def codegen_device(self, device):
+        from .cpp import DEVICE_TO_ATEN
+
+        return (
+            f"at::device(c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index}))"
+            if device.index is not None
+            else f"at::device({DEVICE_TO_ATEN[device.type]})"
+        )
+
     def make_buffer_allocation(self, buffer):
-        from .cpp import DEVICE_TO_ATEN, DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN
 
         # TODO: map layout here
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
+        device_str = self.codegen_device
         return (
             f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"at::device({DEVICE_TO_ATEN[device.type]})"
+            f"{self.codegen_device(device)}"
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
@@ -973,18 +1007,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
-    def val_to_str(self, s):
-        if s is None:
+    def val_to_str(self, val):
+        from .cpp import DTYPE_TO_ATEN
+
+        if val is None:
             return self.none_str
-        elif isinstance(s, bool):
-            return "true" if s else "false"
-        elif isinstance(s, str):
-            return f'"{s}"'
-        elif isinstance(s, (List, Tuple)):
-            vals = ", ".join(list(map(self.val_to_str, s)))
-            return f"{{{vals}}}"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
+        elif isinstance(val, str):
+            return f'"{val}"'
+        elif isinstance(val, torch.device):
+            return self.codegen_device(val)
+        elif isinstance(val, torch.dtype):
+            return DTYPE_TO_ATEN[val]
+        elif isinstance(val, (list, tuple)):
+            return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
         else:
-            return repr(s)
+            return repr(val)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):

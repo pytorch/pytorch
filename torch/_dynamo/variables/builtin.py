@@ -19,8 +19,10 @@ from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    get_higher_order_op,
     istype,
     proxy_args_kwargs,
+    requires_higher_order_op,
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -992,6 +994,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchHigherOrderOperatorVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1059,7 +1062,11 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if is_allowed(member):
+            if requires_higher_order_op(member):
+                return TorchHigherOrderOperatorVariable(
+                    get_higher_order_op(member), **options
+                )
+            elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
@@ -1263,11 +1270,16 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
+        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
+            return ConstantVariable(op(left.value, right.value))
+
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -1280,7 +1292,9 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(

@@ -149,7 +149,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     # create edges between nodes
     for snode in snodes:
         name = snode.get_name()
-        deps = snode.read_writes.reads
+        deps = snode.unmet_dependencies
 
         fx_node = buf_to_fx_node[name]
         new_args = []
@@ -170,7 +170,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
 
