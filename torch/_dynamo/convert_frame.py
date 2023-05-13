@@ -507,8 +507,7 @@ def _compile(
         raise
     except Exception as e:
         exception_handler(e, code, frame)
-        # TODO: Why???  Why not raise the original exception as is
-        raise InternalTorchDynamoError() from e
+        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
