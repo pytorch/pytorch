@@ -183,6 +183,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nameWithOwner
       }
       baseRefName
+      baseRefOid
       baseRepository {
         nameWithOwner
         isPrivate
@@ -695,27 +696,8 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def fetch(self, branch_name: Optional[str] = None) -> None:
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        if branch_name is None:
-            branch_name = f"__pull-request-{self.pr_num}__init__"
-        try:
-            r = repo._run_git("rev-parse", branch_name)
-            if r.strip() == self.last_commit()["oid"]:
-                return
-        except Exception:
-            pass
-        repo.fetch(f"pull/{self.pr_num}/head", branch_name)
-
     def get_merge_base(self) -> str:
-        if self.merge_base is not None:
-            return self.merge_base
-        self.fetch()
-        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base(
-            REMOTE_MAIN_BRANCH, self.last_commit()["oid"]
-        )
-        return self.merge_base
+        return cast(str, self.info["baseRefOid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -1121,7 +1103,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            self.fetch(pr_branch_name)
+            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
             return []
