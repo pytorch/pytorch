@@ -175,7 +175,7 @@ def _get_modified_tests() -> Set[str]:
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 
-    return _python_test_file_to_test_name(Set(changed_files))
+    return _python_test_file_to_test_name(set(changed_files))
 
 
 def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
