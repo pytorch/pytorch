@@ -15,7 +15,7 @@ def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
                       args=(make_arg(1, low=0.1, high=2), make_arg(1, low=0.1, high=2)))
 
 def inner_f(x, y0, y1):
-    return [x[0] + y0, x[1] + y1]
+    return [x[0].cos() * y0, x[1] + y1.sin()]
 
 def simple_map(xs, y0, y1):
     def f(x, y0, y1):
