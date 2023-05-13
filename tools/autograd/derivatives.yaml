@@ -3013,6 +3013,6 @@
 - name: _foreach_maximum.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   self: at::where(self[i] == scalars[i], grads[i] / 2, grads[i]).masked_fill_(self[i] < scalars[i], 0)
 
-- name: attn(Tensor query, Tensor key, Tensor value) -> (Tensor, Tensor)
-  output_differentiability: [True, True]
-  query, key, value: attn_backward(grads, query, key, value)
+- name: attn(Tensor query, Tensor key, Tensor value) -> (Tensor o, Tensor a, Tensor x)
+  output_differentiability: [True, True, True]
+  query, key, value: attn_backward(grads, query, key, value, a, x)

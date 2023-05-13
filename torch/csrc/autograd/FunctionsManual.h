@@ -1061,7 +1061,9 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
       const variable_list& grads,
       const Tensor& query,
       const Tensor& key,
-      const Tensor& value);
+      const Tensor& value,
+      const Tensor& a,
+      const Tensor& x);
 } // namespace details
 } // namespace generated
 } // namespace autograd

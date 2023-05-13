@@ -6920,17 +6920,14 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const variable_list& grads,
     const Tensor& query,
     const Tensor& key,
-    const Tensor& value) {
-  // FIXME Is there a way to pass x and attn without computing them here?
-  // Maybe I can also return x in forward function and access attn, x via
-  // result1, result2?
-  auto x = at::matmul(query, key.transpose(-2, -1));
-  auto attn = at::tanh(x);
+    const Tensor& value,
+    const Tensor& a,
+    const Tensor& x) {
 
-  // grads[0] - grad_o, grads[1] - grad_a
+  // grads[0] - grad_o, grads[1] - grad_a, grads[2] - grad_x
   auto grad_a = grads[1] + at::matmul(grads[0], value.transpose(1, 0));
-  auto grad_v = at::matmul(attn.transpose(1, 0), grads[0]);
-  auto grad_x = grad_a / (at::cosh(x) * at::cosh(x));
+  auto grad_v = at::matmul(a.transpose(1, 0), grads[0]);
+  auto grad_x = grads[2] + grad_a / (at::cosh(x) * at::cosh(x));
   auto grad_q = at::matmul(grad_x, key);
   auto grad_k = at::matmul(query.transpose(1, 0), grad_x).transpose(1, 0);
 

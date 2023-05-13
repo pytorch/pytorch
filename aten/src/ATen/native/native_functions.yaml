@@ -14840,7 +14840,7 @@
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
 
-- func: attn(Tensor query, Tensor key, Tensor value) -> (Tensor, Tensor)
+- func: attn(Tensor query, Tensor key, Tensor value) -> (Tensor o, Tensor a, Tensor x)
   variants: function
   dispatch:
     CompositeExplicitAutograd: attn
