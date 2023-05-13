@@ -474,7 +474,9 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable(int(sym_num))
+            if isinstance(sym_num, sympy.Integer):
+                sym_num = int(sym_num)
+            return ConstantVariable(sym_num)
 
         return SymNodeVariable(proxy, sym_num, **options)
 
