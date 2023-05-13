@@ -67,7 +67,7 @@ kernel void histogramdd(constant T  * input_            [[buffer(0)]],
                   constant uint8_t  & has_weight        [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
 
-  constexpr T eps = 8e-7;
+  constexpr T eps = 8e-6;
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
