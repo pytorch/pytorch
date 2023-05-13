@@ -4861,7 +4861,7 @@ class TestSparseAny(TestCase):
         for (batch_shape, m, n, k, add_bias, activation) in \
                 itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
             if activation == "silu" and dtype == torch.int8:
-                continue # SiLU not supported for integer inputs
+                continue  # SiLU not supported for integer inputs
 
             m = 2 ** m * 32
             n = 2 ** n * 32
