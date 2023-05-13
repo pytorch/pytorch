@@ -12,6 +12,7 @@ import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import InputReader, InputWriter, save_graph_repro
 
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils._traceback import report_compile_source_on_error
 
 
@@ -20,6 +21,7 @@ def strip_trailing_whitespace(r):
 
 
 class TestAfterAot(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(IS_FBCODE, "NotImplementedError")
     def test_save_graph_repro(self):
         # TODO: This triggers CUDA context initialization, even though
         # it is CPU only
