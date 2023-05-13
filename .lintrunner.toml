@@ -150,7 +150,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.23.1',
     'expecttest==0.1.3',
-    'mypy==0.960',
+    'mypy==1.30',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',

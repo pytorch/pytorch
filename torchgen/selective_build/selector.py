@@ -110,10 +110,10 @@ class SelectiveBuilder:
         et_kernel_metadata: Dict[str, List[List[str]]] = {}
 
         custom_classes = data.get("custom_classes", [])
-        custom_classes = set(custom_classes)  # type: ignore[arg-type]
+        custom_classes = set(custom_classes)  # type: ignore[arg-type,call-overload]
 
         build_features = data.get("build_features", [])
-        build_features = set(build_features)  # type: ignore[arg-type]
+        build_features = set(build_features)  # type: ignore[arg-type,call-overload]
 
         include_all_non_op_selectives = data.get("include_all_non_op_selectives", False)
         assert isinstance(include_all_non_op_selectives, bool)
