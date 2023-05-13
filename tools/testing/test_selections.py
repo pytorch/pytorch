@@ -149,7 +149,7 @@ def _get_previously_failing_tests() -> Set[str]:
         last_failed_tests = json.load(f)
 
     prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
-    return prioritized_tests
+    return _python_test_file_to_test_name(prioritized_tests)
 
 
 def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
@@ -157,9 +157,9 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
     print(f"Found {len(last_failed_tests)} test in cache file")
 
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
-    # We just need the test_file part, without the extension
+    # We just need the test_file part
     for test in last_failed_tests:
-        parts = test.split(".py::")  # For now, only support reordering python tests.
+        parts = test.split("::")
         if len(parts) > 1:
             test_file = parts[0]
             print(f"Adding part: {test_file}. Parts had len {len(parts)}")
@@ -175,15 +175,16 @@ def _get_modified_tests() -> Set[str]:
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 
-    prefix = f"test{os.path.sep}"
-    # TODO: Make prioritization work with C++ test as well
-    prioritized_tests = {
-        f for f in changed_files if f.startswith(prefix) and f.endswith(".py")
-    }
-    prioritized_tests = {f[len(prefix) :] for f in prioritized_tests}
-    prioritized_tests = {f[: -len(".py")] for f in prioritized_tests}
+    return _python_test_file_to_test_name(Set(changed_files))
 
-    return prioritized_tests
+
+def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
+    prefix = f"test{os.path.sep}"
+    valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
+    valid_tests = {f[len(prefix) :] for f in valid_tests}
+    valid_tests = {f[: -len(".py")] for f in valid_tests}
+
+    return valid_tests
 
 
 def get_reordered_tests(
