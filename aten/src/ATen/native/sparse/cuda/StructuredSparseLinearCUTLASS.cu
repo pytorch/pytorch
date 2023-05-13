@@ -553,7 +553,7 @@ std::tuple<Tensor, Tensor> _structured_sparse_linear(
                 using ElementInputB = cutlass::half_t;
                 using ElementOutput = cutlass::half_t;
                 using ElementAccumulator = float;
-                using ElementComputeEpilogue = cutlass::half_t;
+                using ElementComputeEpilogue = float;
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
