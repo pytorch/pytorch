@@ -7236,8 +7236,7 @@ class TestNLLLoss(TestCaseMPS):
             # Check that output is not all zeros or ones
             if product_version > 13.0:
                 uniq = mps_out.unique()
-                # TODO: remove cast after arange is fixed for integral types
-                self.assertEqual(uniq.to(dtype=torch.float32), torch.arange(2, device='mps', dtype=torch.float32))
+                self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
             else:
                 self.assertEqual(mps_out.min().item(), 0.)
                 self.assertEqual(mps_out.max().item(), 1.)
