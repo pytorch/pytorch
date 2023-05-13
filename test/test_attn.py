@@ -32,8 +32,6 @@ class TestAutogradAttn(TestCase):
             @staticmethod
             def backward(ctx, grad_o, grad_a, grad_x):
                 q, k, v, a, x = ctx.saved_tensors
-                # TODO Figure out why we need to add `grad_a` here or `grad_x` in next step
-                # More boradly, what is `grad_a` and how gradcheck works.
                 dL_da = grad_a + torch.matmul(grad_o, v.transpose(1, 0))
                 dL_dv = torch.matmul(a.transpose(1, 0), grad_o)
 
