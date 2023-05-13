@@ -337,7 +337,7 @@ class TestCalculateShards(unittest.TestCase):
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
 
 
-def mocked_get_previously_failing_tests(input: pathlib.Path) -> Set[str]:
+def mocked_get_previously_failing_tests() -> Set[str]:
     return {"test4"}
 
 
@@ -357,7 +357,7 @@ class TestParsePrevTests(unittest.TestCase):
     def test_cache_does_not_exist(self, mock_exists: Any) -> None:
         expected_failing_test_files: Set[str] = set()
 
-        found_tests = _get_previously_failing_tests(pathlib.Path(""))
+        found_tests = _get_previously_failing_tests()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
@@ -366,7 +366,7 @@ class TestParsePrevTests(unittest.TestCase):
     def test_empty_cache(self, mock_exists: Any, mock_open: Any) -> None:
         expected_failing_test_files: Set[str] = set()
 
-        found_tests = _get_previously_failing_tests(pathlib.Path(""))
+        found_tests = _get_previously_failing_tests()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
         mock_open.assert_called()
@@ -388,7 +388,7 @@ class TestParsePrevTests(unittest.TestCase):
     def test_dedupes_failing_test_files(self, mock_exists: Any, mock_open: Any) -> None:
         expected_failing_test_files = {"test_car", "test_bar", "test_far"}
 
-        found_tests = _get_previously_failing_tests(pathlib.Path(""))
+        found_tests = _get_previously_failing_tests()
 
         self.assertSetEqual(expected_failing_test_files, found_tests)
 
@@ -414,9 +414,7 @@ class TestParsePrevTests(unittest.TestCase):
         expected_prioritized_tests = {"test4", "test2"}
         expected_remaining_tests = {"test1", "test3", "test5"}
 
-        prioritized_tests, remaining_tests = get_reordered_tests(
-            tests, repo_root=pathlib.Path("")
-        )
+        prioritized_tests, remaining_tests = get_reordered_tests(tests)
 
         # Just want to check the names of the tests
         prioritized_tests_name = {test.name for test in prioritized_tests}
