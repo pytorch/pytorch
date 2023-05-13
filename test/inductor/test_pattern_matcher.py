@@ -52,9 +52,11 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
 
-        for dynamic in [True, False]:
+        for dynamic in [False, True]:
             torch._dynamo.reset()
-            with torch._dynamo.config.patch(dynamic_shapes=dynamic):
+            with torch._dynamo.config.patch(
+                dynamic_shapes=dynamic, specialize_int=True
+            ):
                 args_list = [
                     (
                         torch.randn(16, 16, device="cuda"),
@@ -71,15 +73,12 @@ class TestPaternMatcher(TestCase):
                         torch.randn(16, 16, device="cuda"),
                         torch.randn(16, 16, device="cuda"),
                     ),
+                    (
+                        4,
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                    ),
                 ]
-                if not dynamic:
-                    args_list.append(
-                        (
-                            4,
-                            torch.randn(16, 16, device="cuda"),
-                            torch.randn(16, 16, device="cuda"),
-                        )
-                    )
                 for args in args_list:
                     counters.clear()
                     e1, e2 = fn(*args)
