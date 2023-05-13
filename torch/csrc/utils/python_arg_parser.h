@@ -494,12 +494,12 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline PyObject* toPyObject(c10::SymInt symint) {
-  if (symint.is_symbolic()) {
+  if (auto m = symint.maybe_as_int()) {
+    return THPUtils_packInt64(*m);
+  } else {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
-  } else {
-    return THPUtils_packInt64(symint.as_int_unchecked());
   }
 }
 

@@ -6,13 +6,13 @@ import operator
 
 import re
 import types
-from types import FunctionType
+import warnings
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -25,51 +25,14 @@ from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validat
 from torch.utils import _pytree
 
 
-def _onnx_function_diagnose_call_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> str:
-    if len(args) > 0 and isinstance(args[0], onnxscript.OnnxFunction):
-        onnx_function: onnxscript.OnnxFunction = args[0]  # self
-        return f"{onnx_function.name}: {onnxscript.OnnxFunction}"
-    return f"{fn.__name__}: {fn}"
-
-
-def _onnx_function_diagnose_call_append_symbolic_source_location(
-    diagnostic: diagnostics.infra.Diagnostic,
-    fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
-    return_values: Any,
-) -> None:
-    # TODO(bowbao): Record source location of symbolic.
-    # Need this separate step because normally only the source location of
-    # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
-
-
-# TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.
-_diagnose_onnx_function = diagnostics.diagnose_call(
-    rule=diagnostics.rules.atenlib_symbolic_function,
-    diagnostic_message_formatter=_onnx_function_diagnose_call_message_formatter,
-    diagnostic_modifier=_onnx_function_diagnose_call_append_symbolic_source_location,
-)
-for key, onnx_function in function_dispatcher._ATENLIB_FUNCTIONS.items():
-    if isinstance(onnx_function, FunctionType):
-        function_dispatcher._ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(
-            onnx_function
-        )
-onnxscript.OnnxFunction.__call__ = _diagnose_onnx_function(
-    onnxscript.OnnxFunction.__call__
-)
-
-
 @_beartype.beartype
 def _fx_node_to_onnx_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    fn: Callable,
+    diagnostic_context: diagnostics.DiagnosticContext,
+    node: torch.fx.Node,
+    *args,
+    **kwargs,
 ) -> str:
-    assert len(args) > 0
-    node = args[0]
-    assert isinstance(node, torch.fx.Node)
     return f"FX Node: {node.op}:{node.target}[name={node.name}]"
 
 
@@ -115,7 +78,11 @@ def _location_from_fx_stack_trace(
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ):
@@ -199,7 +166,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()
@@ -220,6 +189,7 @@ def _fill_tensor_meta(
         torch.SymInt,
         torch.SymFloat,
         List[fake_tensor.FakeTensor],
+        Tuple[fake_tensor.FakeTensor, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -294,7 +264,11 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ) -> Tuple[tuple, dict]:
@@ -311,15 +285,20 @@ def _wrap_fx_args_as_onnxscript_args(
 
 @_beartype.beartype
 @diagnostics.diagnose_call(
-    rule=diagnostics.rules.fx_node_to_onnx,
+    diagnostics.rules.fx_node_to_onnx,
     exception_report_level=diagnostics.levels.ERROR,
     diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
 )
 def _export_fx_node_to_onnxscript(
+    diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
@@ -328,7 +307,7 @@ def _export_fx_node_to_onnxscript(
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
     if node_stack_trace:
-        diagnostic = diagnostics.export_context().inflight_diagnostic(
+        diagnostic = diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_node_to_onnx
         )
         diagnostic.with_additional_message(
@@ -458,17 +437,29 @@ def _export_fx_node_to_onnxscript(
             and node.target != torch.ops.aten.sym_size
             and not isinstance(node.target, types.BuiltinFunctionType)
         ):
-            node_with_static_shape = node.meta["node_with_static_shape"]
             (
                 node_with_fixed_shape_args,
                 node_with_fixed_shape_kwargs,
-            ) = _fill_in_default_kwargs(node_with_static_shape)
-            torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
-                node_with_fixed_shape_args, node_with_fixed_shape_kwargs
-            )
-            op_validation.validate_op_between_ort_torch(
-                node_with_static_shape, symbolic_fn, torch_args, torch_kwargs
-            )
+            ) = _fill_in_default_kwargs(node)
+            try:
+                torch_args, torch_kwargs = op_validation.wrap_fx_args_as_torch_args(
+                    node_with_fixed_shape_args, node_with_fixed_shape_kwargs
+                )
+            except ValueError as value_error:
+                warnings.warn(
+                    f"\nFound unsupported input types on PyTorch Op {node.target} with "
+                    f"ValueError: \n{value_error}.\n"
+                )
+                diagnostic = diagnostic_context.inflight_diagnostic()
+                diagnostic.with_additional_message(
+                    f"### Op level debug fails due to unsupported input types\n"
+                    f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
+                )
+                diagnostic.level = diagnostics.levels.ERROR
+            else:
+                op_validation.validate_op_between_ort_torch(
+                    diagnostic_context, node, symbolic_fn, torch_args, torch_kwargs
+                )
         fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
         if isinstance(node.args[0], torch.fx.Node):
@@ -519,6 +510,7 @@ def _export_fx_node_to_onnxscript(
 @_beartype.beartype
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
+    diagnostic_context: diagnostics.DiagnosticContext,
     fx_module_with_metadata: torch.fx.GraphModule,
     options: ResolvedExportOptions,
 ):
@@ -553,6 +545,7 @@ def export_fx_to_onnxscript(
     # node_fixed_shape is only used on op_level_debug purpose.
     for node in fx_module_with_metadata.graph.nodes:
         _export_fx_node_to_onnxscript(
+            diagnostic_context,
             node,
             onnxscript_graph,
             fx_name_to_onnxscript_value,

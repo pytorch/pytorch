@@ -18,6 +18,7 @@ from torch.utils import _pytree
 
 @_beartype.beartype
 def validate_op_between_ort_torch(
+    diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
     symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
     torch_args: tuple,
@@ -59,7 +60,7 @@ def validate_op_between_ort_torch(
                 f"IndexError: \n{index_error}.\n This is possibly raised by "
                 f"unsupported input args of randomnized dim/indices(INT64).\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
@@ -71,7 +72,7 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on PyTorch Op {node.target} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on PyTorch\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
@@ -101,7 +102,7 @@ def validate_op_between_ort_torch(
                 f"ValueError: \n{value_error}.\n This is possibly raised by "
                 f"unsupported input args due to lack of Opschema.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
@@ -113,7 +114,7 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on ONNX Op {function_name} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on ONNXRUNTIME:\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
@@ -149,7 +150,7 @@ def validate_op_between_ort_torch(
                     f"Op {node.target} has mismatch outputs. "
                     f"Please check the implementation of {function_name}.\n"
                 )
-                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic = diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Validation failed\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(e)}"
@@ -188,36 +189,44 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 
 @_beartype.beartype
-def _recursive_wrap_args(
+def _fx_args_to_torch_args(
     complete_args: List[_type_utils.Argument],
 ) -> List[_type_utils.Argument]:
-    """Wrap args in torch.fx.Node to FakeTensor"""
+    """Recursively convert fx args to torch args"""
     wrapped_args: List[_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
-            fake_tensor = arg.meta["val"]
+            # NOTE(titaiwang): The arg type here should align to the type handled in
+            # shape.inference.FakeTensorPropGetStaticShapes. Currently, we are aware
+            # of FakeTensor/Tensor/SymInt/SymFloat/Symbool/int/float/bool could be in
+            # arg.meta["static_shape"].
+            fake_tensor = arg.meta.get("static_shape", None)
             if isinstance(fake_tensor, torch.Tensor):
                 real_tensor = generate_random_tensors(
                     fake_tensor.shape, fake_tensor.dtype
                 )
                 wrapped_args.append(real_tensor)
-            elif isinstance(fake_tensor, (int, float)):
-                # TODO(titaiwang): Could dtype be inside a fx.Node?
+            elif isinstance(fake_tensor, (int, float, bool)):
                 wrapped_args.append(fake_tensor)
+            elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+                raise ValueError(
+                    f"Unexpected input argument Sym type found inside fx.Node. arg: {arg}; "
+                    f"arg.meta['static_shape']: {fake_tensor}; type(arg.meta['static_shape']): "
+                    f"{type(fake_tensor)}. Sym type is not supported in op_level_debug."
+                )
             else:
-                warnings.warn(
-                    f"Unexpected argument type found inside fx.Node. arg: {arg}; "
-                    f"arg.meta['val']: {fake_tensor}; type(arg.meta['val']): "
-                    f"{type(fake_tensor)}. This might lead to an error when running on Ops."
+                raise ValueError(
+                    f"Unexpected input argument type found inside fx.Node. arg: {arg}; "
+                    f"arg.meta['static_shape']: {fake_tensor}; type(arg.meta['static_shape']): "
+                    f"{type(fake_tensor)}."
                 )
         elif isinstance(arg, Sequence):
-            wrapped_args.append(_recursive_wrap_args(arg))
+            wrapped_args.append(_fx_args_to_torch_args(arg))
         elif isinstance(arg, (int, float, torch.dtype)):
             wrapped_args.append(arg)
         else:
-            warnings.warn(
-                f"Unexpected argument type found. arg: {arg}; type(arg): {type(arg)}. "
-                "This might lead to an error when running on Ops"
+            raise ValueError(
+                f"Unexpected input argument type is found in node arguments. arg: {arg}; "
             )
 
     return wrapped_args
@@ -231,6 +240,6 @@ def wrap_fx_args_as_torch_args(
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = _recursive_wrap_args(complete_args)
+    torch_args: List[_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
     torch_kwargs = complete_kwargs
-    return (tuple(torch_args), torch_kwargs)
+    return tuple(torch_args), torch_kwargs

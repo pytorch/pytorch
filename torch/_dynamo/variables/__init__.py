@@ -28,6 +28,7 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ClosureVariable,
+    DeletedVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -45,7 +46,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchVariable
+from .torch import TorchHigherOrderOperatorVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -59,6 +60,7 @@ __all__ = [
     "ContextWrappingVariable",
     "DataClassVariable",
     "DefaultDictVariable",
+    "DeletedVariable",
     "DeterministicAlgorithmsVariable",
     "EnumVariable",
     "FakeItemVariable",

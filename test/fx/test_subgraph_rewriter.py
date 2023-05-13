@@ -93,6 +93,7 @@ class TestSubgraphRewriter(JitTestCase):
         class M(torch.nn.Module):
             def forward(self, x):
                 val = torch.neg(x)
+                val = torch.add(val, val)
                 return torch.add(val, val)
 
         def pattern(x):
@@ -115,9 +116,9 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_output = comparison_fn(x)
         test_output = traced.forward(x)
-        one_replacement = len(matches) == 1 and len(matches[0].replacements) == 0
+        no_replacements = len(matches) == 2 and len(matches[1].replacements) == 0
         self.assertEqual(ref_output, test_output)
-        self.assertTrue(one_replacement)
+        self.assertTrue(no_replacements)
 
     def test_subgraph_rewriter_single_pattern_match(self):
         class M(torch.nn.Module):
@@ -922,4 +923,18 @@ def forward(self, x):
 
         traced = symbolic_trace(M())
         matches = subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+        self.assertEqual(len(matches), 1)
+
+    def test_matching_variable_arguments(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.max_pool2d_with_indices.default(x, [2, 2], stride=[2, 2])
+
+        def pattern(x, kernel_size, stride):
+            # default padding is [0, 0]
+            return torch.ops.aten.max_pool2d_with_indices.default(x, kernel_size, stride, padding=[0, 0])
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)
+
         self.assertEqual(len(matches), 1)
