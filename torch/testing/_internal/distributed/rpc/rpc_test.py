@@ -59,11 +59,11 @@ def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
 def udf_with_torch_ops(device=-1, use_record_function=False):
-    device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
+    device_ctx = contextlib.nullcontext() if device == -1 else torch.cuda.device(device)
     record_function_ctx = (
         torch.autograd.profiler.record_function("##forward##")
         if use_record_function
-        else contextlib.suppress()
+        else contextlib.nullcontext()
     )
     with device_ctx, record_function_ctx:
         t1, t2 = torch.ones(1), torch.ones(1)
@@ -1839,7 +1839,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
                 for expected_event_name in EXPECTED_REMOTE_EVENTS + [RPCExecMode.ASYNC.value]:
-                    event_exists = any([expected_event_name in event_name for event_name in event_names])
+                    event_exists = any(expected_event_name in event_name for event_name in event_names)
                     self.assertTrue(event_exists)
 
     @dist_init
@@ -2164,7 +2164,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         if self.rank == 1:
             with p() as prof:
                 record_function_ctx_mgr = (
-                    contextlib.suppress()
+                    contextlib.nullcontext()
                     if not use_record_function
                     else torch.autograd.profiler.record_function(
                         "foo"
@@ -2903,7 +2903,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         def launched_rpc(events):
             expected_name = f"rpc_{RPCExecMode.ASYNC.value}#_rref_typeof_on_owner"
-            return any([e.name.startswith(expected_name) for e in events])
+            return any(e.name.startswith(expected_name) for e in events)
 
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))

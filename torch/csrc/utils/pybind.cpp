@@ -30,22 +30,22 @@ py::handle type_caster<c10::SymInt>::cast(
     c10::SymInt si,
     return_value_policy /* policy */,
     handle /* parent */) {
-  if (si.is_symbolic()) {
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+  if (auto m = si.maybe_as_int()) {
+    return py::cast(*m).release();
+  } else {
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
+        si.toSymNodeImplUnowned());
     if (py_node) {
       // Return the Python directly (unwrap)
       return torch::get_symint_class()(py_node->getPyObj()).release();
     } else {
       // Wrap the C++ into Python
-      auto inner = py::cast(si.toSymNodeImpl());
+      auto inner = py::cast(si.toSymNode());
       if (!inner) {
         throw python_error();
       }
       return torch::get_symint_class()(inner).release();
     }
-  } else {
-    return py::cast(si.as_int_unchecked()).release();
   }
 }
 

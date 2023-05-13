@@ -125,6 +125,7 @@ if COLLECT_EXPECT:
 
 inductor_skips = defaultdict(dict)
 
+
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
@@ -168,6 +169,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -186,11 +189,11 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.gaussian_nll_loss": {f32, f64},
+    "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
+    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -208,6 +211,13 @@ inductor_expected_failures_single_sample["cpu"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("sparse.mm", "reduce"): {bf16, f32, f64},
     "stft": {f32, f64},
+    "svd": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    "linalg.cond": {f32, f64},
+    "linalg.svd": {f32, f64},
+    "linalg.svdvals": {f32, f64},
+    "linalg.matrix_rank": {f32, f64},
+    "pca_lowrank": {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
@@ -238,8 +248,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
+    "fft.rfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.rfftn": {b8, f16, f32, f64, i32, i64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},
@@ -267,10 +277,13 @@ inductor_expected_failures_single_sample["cuda"] = {
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
     "linalg.eigvalsh": {f32, f64},
+    "linalg.householder_product": {f32, f64},
     "linalg.lstsq": {f32, f64},
     ("linalg.lstsq", "grad_oriented"): {f32, f64},
     "masked_scatter": {f16, f32, f64},
@@ -320,7 +333,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     # (including _linalg_svd), possibly we should have something similar here
     "linalg.cond": {f32, f64},
     "linalg.svdvals": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
+    "linalg.matrix_rank": {f32, f64},
+    "linalg.svd": {f32, f64},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    "svd": {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
@@ -339,8 +356,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.irfft2": {b8, f16, f32, f64, i32, i64},
     "fft.irfftn": {b8, f16, f32, f64, i32, i64},
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
-    "fft.rfft2": {f16, f32, f64},
-    "fft.rfftn": {f16, f32, f64},
+    "fft.rfft2": {b8, f16, f32, f64, i32, i64},
+    "fft.rfftn": {b8, f16, f32, f64, i32, i64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},

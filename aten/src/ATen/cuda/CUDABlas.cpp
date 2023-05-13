@@ -104,6 +104,39 @@ static void _cublasAdjustLdLevel3(
       *ldb = std::max<int64_t>(k, 1);
   }
 }
+
+uint32_t _getAlignment(uintptr_t address) {
+  // alignment are in bytes
+  uint32_t alignment = 256;
+  for (; ; alignment /= 2) {
+    if (!(address % alignment)) {
+      return alignment;
+    }
+  }
+}
+
+static size_t _parseChosenWorkspaceSize() {
+  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  if (val) {
+    try {
+      workspace_size = std::stoi(val);
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid CUBLAS_LT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("CUBLAS_LT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
+static size_t _getWorkspaceSize() {
+  static size_t workspace_size = _parseChosenWorkspaceSize();
+  return workspace_size;
+}
+
 } // anonymous namespace
 
 namespace at {
@@ -443,7 +476,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_16F,
         ldc,
         CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
@@ -541,7 +574,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       ldc,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // !defined(USE_ROCM)
@@ -696,12 +729,33 @@ void gemm_and_bias(
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
+  size_t workspaceSize = _getWorkspaceSize();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
       &workspaceSize,
       sizeof(workspaceSize)));
+
+  uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
+  uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES,
+      &a_alignment, sizeof(a_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES,
+      &b_alignment, sizeof(b_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+      &c_alignment, sizeof(c_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      &d_alignment, sizeof(d_alignment)));
 
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},

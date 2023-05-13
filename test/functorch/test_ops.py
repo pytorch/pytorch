@@ -101,9 +101,9 @@ def diff_arg(arg, requires_grad=True):
         else:
             return arg.is_floating_point() or arg.is_complex()
     if is_iterable_of_tensors(arg):
-        if all([is_differentiable_arg(a) for a in arg]):
+        if all(is_differentiable_arg(a) for a in arg):
             return True
-        if all([not is_differentiable_arg(a) for a in arg]):
+        if all(not is_differentiable_arg(a) for a in arg):
             return False
         raise RuntimeError("NYI: The test runner can't handle this")
     return isinstance(arg, Tensor) and is_differentiable_arg(arg)
@@ -983,7 +983,6 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
@@ -1066,7 +1065,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('nn.functional.huber_loss'),
         xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
@@ -1075,7 +1073,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('put'),
         xfail('take'),
-        xfail('nn.functional.max_pool3d'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -1087,7 +1084,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
@@ -1166,7 +1162,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.ctc_loss'),
@@ -1174,7 +1169,6 @@ class TestOperators(TestCase):
         xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
-        xfail('nn.functional.max_pool3d'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -1188,7 +1182,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.multi_margin_loss', ''),
         xfail('nn.functional.multilabel_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
-        xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'prod'),
         xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.max_unpool3d', ''),
@@ -1362,19 +1355,16 @@ class TestOperators(TestCase):
         xfail('normal', ''),
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
-        xfail('logcumsumexp', ''),  # NYI: forward-AD for logcumsumexp
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
-        xfail('nn.functional.logsigmoid', ''),  # not differentiable w.r.t. buffer
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
         xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
-        xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
-        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
         xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
@@ -1488,7 +1478,6 @@ class TestOperators(TestCase):
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
         xfail('index_reduce'),  # Forward AD not implemented and no decomposition
-        xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_5'),  # vmap: inplace into a regular tensor
@@ -1518,14 +1507,12 @@ class TestOperators(TestCase):
         # running_mean or running_var, which will be updated in place,
         # were not batched.
         xfail('nn.functional.instance_norm'),
-        xfail('nn.functional.logsigmoid'),  # Forward AD not implemented and no decomposition
         # NYI: Tensor.clone(memory_format) inside vmap is only supported with
         # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.multi_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.multilabel_margin_loss'),  # Forward AD not implemented and no decomposition
-        xfail('nn.functional.multilabel_soft_margin_loss'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.pdist'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.rrelu'),  # vmap: we do not yet support aten::rrelu_with_noise.
         xfail('nn.functional.soft_margin_loss'),  # Forward AD not implemented and no decomposition

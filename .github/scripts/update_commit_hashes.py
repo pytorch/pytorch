@@ -50,8 +50,8 @@ def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
-        "base": "master",
-        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
+        "base": "main",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/main/"
         + f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, type="post")
