@@ -324,7 +324,7 @@ test_perf_for_dashboard() {
 
   for mode in "${modes[@]}"; do
     for target in "${targets[@]}"; do
-      local target_flag=("--$target")
+      local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
         target_flag+=( --cold-start-latency)
       fi
