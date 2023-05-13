@@ -17,7 +17,7 @@ o, a = attn(q, k, v)
 ```
 
 $$
-\newcommand{\PD}[2]{ \frac{ \partial #1 }{ \partial #2 }} 
+\newcommand{\PD}[2]{ \frac{ \partial #1 }{ \partial #2 }}
 \newcommand{\D}[2] {\frac{ \partial #1 }{ \partial #2 }}
 $$
 

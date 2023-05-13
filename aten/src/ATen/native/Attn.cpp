@@ -10,7 +10,7 @@ std::tuple<Tensor, Tensor, Tensor> attn(const Tensor& query, const Tensor& key, 
     TORCH_CHECK(key.dim() == 2, "expected 2D `key`, got ", key.dim(), "-D tensor")
     TORCH_CHECK(value.dim() == 2, "expected 2D `value`, got ", value.dim(), "-D tensor")
     TORCH_CHECK(query.sizes()[1] == key.sizes()[1], "expected size of key to be ", query.sizes()[1], " in last dimension but got: ", key.sizes()[1])
-    
+
     auto x = at::matmul(query, key.transpose(-2, -1));
     auto a = at::tanh(x);
     auto o = at::matmul(a, value);

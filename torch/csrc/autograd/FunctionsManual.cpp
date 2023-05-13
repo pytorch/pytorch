@@ -6923,7 +6923,6 @@ std::tuple<Tensor, Tensor, Tensor> attn_backward(
     const Tensor& value,
     const Tensor& a,
     const Tensor& x) {
-
   // grads[0] - grad_o, grads[1] - grad_a, grads[2] - grad_x
   auto grad_a = grads[1] + at::matmul(grads[0], value.transpose(1, 0));
   auto grad_v = at::matmul(a.transpose(1, 0), grads[0]);
