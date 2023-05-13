@@ -258,6 +258,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(out, result.shape)
+                    out.as_strided_(result.shape, result.stride())
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
@@ -269,6 +270,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     for r, o in zip(result, out):
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape)
+                        o.as_strided_(r.shape, r.stride())
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result
