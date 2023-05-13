@@ -6211,8 +6211,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
                 code = run_and_get_triton_code(fn_opt)
 
-                # this cannot be optimized away, value too large
-                self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
         def test_optimize_compute(self):

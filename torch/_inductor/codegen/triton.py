@@ -32,7 +32,7 @@ from ..utils import (
     sympy_symbol,
     unique,
 )
-from ..virtualized import ops, V
+from ..virtualized import V
 
 from .common import (
     CSEVariable,
@@ -202,8 +202,7 @@ class TritonOverrides(OpOverrides):
     def libdevice_sqrt(x):
         return f"tl.math.sqrt({x})"
 
-    @staticmethod
-    def relu(x):
+    def relu(self, x):
         bug = config.triton.inject_relu_bug_TESTING_ONLY
         if bug == "compile_error":
             return "compile error!"
@@ -214,7 +213,7 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
-            return ops.maximum("0", x)
+            return self.maximum("0", x)
         else:
             raise AssertionError(
                 f"unrecognized config triton.inject_relu_bug_TESTING_ONLY = {bug!r}"
@@ -255,11 +254,10 @@ class TritonOverrides(OpOverrides):
         var.mask_vars = mask_vars
         return var
 
-    @staticmethod
-    def masked(mask, body, other):
+    def masked(self, mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, triton_constant(other))
+        return self.where(new_mask, result, triton_constant(other))
 
     @staticmethod
     def lgamma(x):

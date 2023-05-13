@@ -4,7 +4,7 @@ import logging
 import os
 import warnings
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import sympy
 
@@ -155,56 +155,6 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
     inps = [construct_input(arg) for arg in args]
     _, dtype = elementwise_dtypes(*inps, type_promotion_kind=type_promotion_kind)
     return dtype
-
-
-class OpsWrapperMeta(type):
-    def __getattr__(cls, name):
-        def unwrap(x):
-            if isinstance(x, OpsWrapper):
-                return x.value
-            return x
-
-        def inner(*args, **kwargs):
-            new_args = [unwrap(a) for a in args]
-            new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
-            return OpsWrapper(getattr(ops, name)(*new_args, **new_kwargs))
-
-        return inner
-
-
-class OpsWrapper(metaclass=OpsWrapperMeta):
-    value: Any
-
-    def __init__(self, value):
-        self.value = value
-
-    def __add__(self, other):
-        return OpsWrapper.add(self, other)
-
-    def __mul__(self, other):
-        return OpsWrapper.mul(self, other)
-
-    def __sub__(self, other):
-        return OpsWrapper.sub(self, other)
-
-    def __neg__(self):
-        return OpsWrapper.neg(self)
-
-    def __truediv__(self, other):
-        return OpsWrapper.truediv(self, other)
-
-    def __floordiv__(self, other):
-        return OpsWrapper.floordiv(self, other)
-
-    def __mod__(self, other):
-        return OpsWrapper.mod(self, other)
-
-    def __pow__(self, other):
-        return OpsWrapper.pow(self, other)
-
-    @staticmethod
-    def constants(*args, dtype):
-        return tuple(OpsWrapper.constant(a, dtype) for a in args)
 
 
 def _register_lowering(
@@ -2531,6 +2481,10 @@ def upsample_nearest3d(
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
+def _create_constants(*args, dtype):
+    return tuple(ops.constant(a, dtype) for a in args)
+
+
 @register_lowering(aten.upsample_bicubic2d.default)
 def upsample_bicubic2d_default(
     x,
@@ -2561,44 +2515,41 @@ def upsample_bicubic2d_default(
 
     def compute_source_index(scale, dst_index, align_corners):
         dst_index_ie = ops.index_expr(dst_index, torch.float32)
+        scale = ops.constant(scale, torch.float32)
         if align_corners:
-            scale = ops.constant(scale, torch.float32)
             return ops.mul(scale, dst_index_ie)
         else:
-            dst_index_ie = OpsWrapper(dst_index_ie)
-            scale, half = OpsWrapper.constants(scale, 0.5, dtype=torch.float32)
-            return (scale * (dst_index_ie + half) - half).value
+            half = ops.constant(0.5, torch.float32)
+            return (scale * (dst_index_ie + half) - half)
 
-    def cubic_convolution1(x: OpsWrapper, A: float) -> OpsWrapper:
-        _Ap2, _Ap3, _1 = OpsWrapper.constants(A + 2, A + 3, 1, dtype=torch.float32)
+    def cubic_convolution1(x, A: float):
+        _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
         return (_Ap2 * x - _Ap3) * x * x + _1
 
-    def cubic_convolution2(x: OpsWrapper, A: float) -> OpsWrapper:
-        _A, _4, _5, _8 = OpsWrapper.constants(A, 4, 5, 8, dtype=torch.float32)
+    def cubic_convolution2(x, A: float):
+        _A, _4, _5, _8 = _create_constants(A, 4, 5, 8, dtype=torch.float32)
         return _A * (((x - _5) * x + _8) * x - _4)
 
     def get_cubic_upsample_coefficients(t):
-        t = OpsWrapper(t)
         A = -0.75
-        _1 = OpsWrapper.constant(1.0, torch.float32)
+        _1 = ops.constant(1.0, torch.float32)
         c0 = cubic_convolution2(t + _1, A)
         c1 = cubic_convolution1(t, A)
 
         x2 = _1 - t
         c2 = cubic_convolution1(x2, A)
         c3 = cubic_convolution2(x2 + _1, A)
-        return (c0.value, c1.value, c2.value, c3.value)
+        return (
+            c0,
+            c1,
+            c2,
+            c3,
+        )
 
     def cubic_interp1d(xs, t):
         cs = get_cubic_upsample_coefficients(t)
         # dot product between xs and cs
-        return ops.add(
-            ops.mul(xs[0], cs[0]),
-            ops.add(
-                ops.mul(xs[1], cs[1]),
-                ops.add(ops.mul(xs[2], cs[2]), ops.mul(xs[3], cs[3])),
-            ),
-        )
+        return xs[0] * cs[0] + xs[1] * cs[1] + xs[2] * cs[2] + xs[3] * cs[3]
 
     height_scale = compute_scale(iH, oH, align_corners, scales_h)
     width_scale = compute_scale(iW, oW, align_corners, scales_h)
