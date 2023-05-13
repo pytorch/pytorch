@@ -224,6 +224,12 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     if k not in kwargs:
                         kwargs[k] = out_attr
 
+            # out_names can sometimes appear in kwargs. But Python metas are
+            # defined without these params (hence this wrapper). This removes
+            # out_names from kwargs and sets their values as out.
+            if any(x in kwargs for x in out_names):
+                out = tuple(kwargs.pop(x) for x in out_names)
+
             result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
