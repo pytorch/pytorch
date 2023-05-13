@@ -21,7 +21,9 @@ class SymPyOps:
 
     @staticmethod
     def constant(value, dtype):
-        if is_boolean_dtype(dtype) or is_integer_dtype(dtype):
+        if is_boolean_dtype(dtype):
+            expr = sympy.Integer(bool(value))
+        elif is_integer_dtype(dtype):
             expr = sympy.Integer(int(value))
         else:
             expr = sympy.Float(float(value))
@@ -32,6 +34,15 @@ class SymPyOps:
         if isinstance(value, int):
             value = sympy.Integer(value)
         return TypedExpr(value, dtype)
+
+    @staticmethod
+    def to_dtype(value, dtype):
+        if isinstance(value, (sympy.Integer, sympy.Float)):
+            return SymPyOps.constant(value.expr, dtype)
+        elif is_integer_dtype(dtype):
+            return SymPyOps.index_expr(value.expr, dtype)
+        else:
+            return NotImplemented
 
     @staticmethod
     def square(x):
@@ -97,6 +108,8 @@ class IndexPropagation:
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
+        if new_expr is NotImplemented:
+            return self.fallback(name, args, kwargs)
         return self.new_symbol(new_expr)
 
     def __getattr__(self, name):
