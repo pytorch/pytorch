@@ -199,10 +199,6 @@ def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]
     return []
 
 
-def dummy_merge_base() -> str:
-    return "dummy"
-
-
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -216,7 +212,6 @@ class DummyGitRepo(GitRepo):
 
 @mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
-@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestTryMerge(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:

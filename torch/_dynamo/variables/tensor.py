@@ -184,11 +184,17 @@ class TensorVariable(VariableTracker):
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
-        # It's hard to get resize_() on graph input work properly across
+        # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name in ("resize_", "unsqueeze_", "resize_as_") and self.source is not None:
-            # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_
-            return variables.misc.DelayGraphBreakVariable()
+        if self.source is not None and hasattr(torch.ops.aten, name):
+            fn = getattr(torch.ops.aten, name)
+            if (
+                hasattr(fn, "overloads")
+                and hasattr(fn, fn.overloads()[0])
+                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+            ):
+                # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is

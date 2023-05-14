@@ -170,6 +170,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
                 self.module.register_generator()
 
+        def test_open_device_dispatchstub():
+            # test kernels could be reused by privateuse1 backend through dispatchstub
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu")
+            foo_input_data = input_data.to("foo")
+            self.assertFalse(self.module.custom_abs_called())
+            torch.abs(foo_input_data)
+            self.assertTrue(self.module.custom_abs_called())
+
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
                 pass
@@ -286,6 +295,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_common_registration()
         test_after_common_registration()
         test_generator_registration()
+        test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()
         test_open_device_storage()
