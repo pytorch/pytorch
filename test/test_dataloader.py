@@ -383,15 +383,15 @@ class TestStackDataset(TestCase):
         self.assertEqual(len(source), 15)
 
     def test_single(self):
-        t = torch.randn(15, 10)
-        source = StackDataset(TensorDataset(t))
+        t = TensorDataset(torch.randn(15, 10))
+        source = StackDataset(t)
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
 
     def test_getitem(self):
-        t = torch.randn(15, 10)
-        l = torch.randn(15, 5, 4)
-        source = StackDataset(TensorDataset(t), TensorDataset(l))
+        t = TensorDataset(torch.randn(15, 10))
+        l = TensorDataset(torch.randn(15, 5, 4))
+        source = StackDataset(t, l)
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
