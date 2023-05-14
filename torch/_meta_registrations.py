@@ -489,30 +489,6 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
-def householder_product_out_helper(
-    input: Tensor,
-    tau: Tensor,
-    result: Tensor,
-) -> Tensor:
-    assert input.ndim >= 2
-    assert input.size(-2) >= input.size(-1)
-    assert input.size(-1) >= tau.size(-1)
-
-    assert input.dtype == tau.dtype
-    assert input.device == tau.device
-
-    assert result.dtype == input.dtype
-    assert result.device == input.device
-
-    # result tensor must be in batched column major order (Fortran contiguous)
-    assert result.mT.is_contiguous()
-    assert result.shape == input.shape
-
-    result.copy_(input)
-
-    return result
-
-
 @register_meta(
     [aten.linalg_householder_product.default, aten.linalg_householder_product.out]
 )
