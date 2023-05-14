@@ -733,7 +733,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: List[Constraint] = None,
+    constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     functionalize: bool = False,
     **kwargs,
