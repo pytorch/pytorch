@@ -416,7 +416,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -1034,7 +1034,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,

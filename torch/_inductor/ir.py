@@ -3159,7 +3159,6 @@ class FallbackKernel(ExternKernelAlloc):
         )
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
-        self.cpp_op_num_args = len(kernel._schema.arguments)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
@@ -3182,7 +3181,7 @@ class FallbackKernel(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             args = [*self.codegen_args(), *self.codegen_kwargs()]
-            wrapper.generate_fusion_ops_code(
+            wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
                 self.kernel,
                 args,
@@ -3629,7 +3628,7 @@ class MKLPackedLinear(ExternKernelAlloc):
                 const int64_t prepack_batch_size)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_fusion_ops_code(
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
             self.kernel,
             self.codegen_args(),
@@ -3683,7 +3682,7 @@ class LinearUnary(ExternKernelAlloc):
                 c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        wrapper.generate_fusion_ops_code(
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
             self.kernel,
             self.codegen_args(),
@@ -3750,7 +3749,7 @@ class LinearBinary(ExternKernelAlloc):
         """
 
     def codegen(self, wrapper):
-        wrapper.generate_fusion_ops_code(
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
             self.kernel,
             self.codegen_args(),
