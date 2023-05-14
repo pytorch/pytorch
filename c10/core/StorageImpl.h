@@ -4,6 +4,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
+#include <c10/core/impl/cow/deleter.h>
+#include <c10/core/impl/cow/materialize.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -135,6 +137,9 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   void* mutable_data() {
+    if (data_ptr_.get_deleter() == impl::cow::delete_context) {
+      impl::cow::materialize(*this);
+    }
     return data_ptr_.mutable_get();
   }
 

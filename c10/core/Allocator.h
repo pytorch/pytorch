@@ -8,6 +8,8 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
 
+#include <cstddef>
+
 namespace c10 {
 
 // A DataPtr is a unique pointer (with an attached deleter and some
@@ -158,6 +160,18 @@ struct C10_API Allocator {
 
   virtual DataPtr allocate(size_t n) const = 0;
 
+  /// Clones an allocation that came from this allocator.
+  ///
+  /// The default instance of this uses `std::memcpy`: override
+  /// `copy_data` if that doesn't work for a subclass's allocations,
+  /// e.g. CUDA.
+  ///
+  /// Note that this explicitly ignores any context that may have been
+  /// attached to the input data.
+  ///
+  /// Requires: input data was allocated by the same allocator.
+  DataPtr clone(const void* data, std::size_t n) const;
+
   // If this returns a non nullptr, it means that allocate()
   // is guaranteed to return a unique_ptr with this deleter attached;
   // it means the rawAllocate and rawDeallocate APIs are safe to use.
@@ -175,6 +189,15 @@ struct C10_API Allocator {
     AT_ASSERT(d);
     d(ptr);
   }
+
+ private:
+  /// Copies data from one allocation to another.
+  ///
+  /// Note that this defaults to `std::memcpy`.
+  ///
+  /// Requires: src and dest were allocated by this allocator
+  /// Requires: src and dest both have length >= count
+  virtual void copy_data(void* dest, const void* src, std::size_t count) const;
 };
 
 // This context is used to generate DataPtr which have arbitrary
