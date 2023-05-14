@@ -2305,8 +2305,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 super().LOAD_DEREF(inst)
 
     def LOAD_CLOSURE(self, inst):
-        assert inst.argval in self.cell_and_freevars()
-        self.push(self.closure_cells[inst.argval])
+        if inst.argval in self.closure_cells:
+            self.push(self.closure_cells[inst.argval])
+        else:
+            sym_local = self.symbolic_locals[inst.argval]
+            side_effects = self.output.side_effects
+            if isinstance(sym_local, variables.NewCellVariable):
+                self.push(side_effects.load_cell(sym_local))
+            else:
+                cell_var = side_effects.track_cell_new()
+                side_effects.store_cell(cell_var, sym_local)
+                self.closure_cells[inst.argval] = cell_var
+                self.push(cell_var)
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         newvar = super().replace_all(oldvar, newvar)

@@ -3190,6 +3190,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
+    def test_out_of_scope_cell(self):
+        def closure_repro():
+            def outer(a):
+                return a + 1
+
+            def indirect(x):
+                return direct(x)
+
+            def direct(x):
+                def inner(b):
+                    return b + 2
+
+                def deep(c):
+                    d = outer(c)
+                    return inner(d)
+
+                return deep(x)
+
+            torch._dynamo.export(indirect, torch.randn(3))
+
+        closure_repro()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
