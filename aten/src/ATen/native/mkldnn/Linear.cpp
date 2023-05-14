@@ -276,7 +276,7 @@ Tensor mkldnn_linear_pointwise_binary(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight_t.size(0));
   auto output = at::empty(output_size, input.options());
-  if (output.sym_numel() ==0) {
+  if (output.sym_numel() == 0) {
     return output;
   }
   auto other_reshaped = other_t.contiguous();
@@ -366,7 +366,7 @@ Tensor mkl_linear(
     // avoid to call self.numel() / 0 when self.size(self.dim() - 1)==0.
     return output.fill_(0);
   }
-  if (output.sym_numel() ==0) {
+  if (output.sym_numel() == 0) {
     return output;
   }
   int64_t M = self.numel() / self.size(self.dim() - 1);
