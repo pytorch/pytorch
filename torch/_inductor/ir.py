@@ -1813,7 +1813,10 @@ class FixedLayout(Layout):
             assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
-                if sz != 1:
+                if sz != 1 or (
+                    isinstance(idx, sympy.Symbol)
+                    and ("tmp" in idx.name or "indirect" in idx.name)
+                ):
                     result = result + idx * stride
             return result
 
