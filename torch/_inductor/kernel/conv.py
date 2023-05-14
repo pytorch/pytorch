@@ -26,6 +26,10 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+import logging
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG) # TODO remove before merging
 
 
 aten = torch.ops.aten
@@ -336,12 +340,12 @@ def convolution(
     x.realize()
     weight.realize()
 
-    # ndim can be 1 for demucs
-    if config.layout_opt and groups == 1 and ndim == 2:
-        print("FORCE CHANNELS LAST INPUT FOR CONV")
+    # ndim can be 1 for convolution in models such as demucs
+    if config.layout_opt and ndim == 2:
+        log.debug("FORCE CHANNELS LAST INPUTS FOR CONV")
         x = ir.ExternKernel.require_channels_last(x)
-        # NOTE: it's fine that weight is not channels last.
-        # We can make it contiguous if that's necessary.
+        # TODO maybe we can convert weights to channels last just once before
+        # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
         layout = conv_layout(x, weight, None, **kwargs)
     else:
