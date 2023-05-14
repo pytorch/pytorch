@@ -217,6 +217,30 @@ class NLLLoss(_WeightedLoss):
 
 
 class NLLLoss2d(NLLLoss):
+        """
+    This class implements the 2D Negative Log Likelihood Loss (NLLLoss2d). It is a specific 
+    case of the NLLLoss designed for 2D inputs, useful for scenarios like 2D image data.
+
+    However, as of a recent update, PyTorch has deprecated NLLLoss2d, recommending users 
+    to use NLLLoss instead for both 1D and 2D inputs. NLLLoss can handle multi-dimensional 
+    inputs, rendering NLLLoss2d redundant.
+
+    The initialization parameters and methods are identical to those of the NLLLoss class.
+
+    Parameters:
+        weight (Tensor, optional): a manual rescaling weight given to each class. 
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch.
+        ignore_index (int, optional): Specifies a target value that is ignored and 
+            does not contribute to the input gradient.
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch.
+        reduction (str, optional): Specifies the reduction to apply to the output.
+
+    Methods:
+        forward(input, target): Defines the computation performed at every call.
+    """
+
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean') -> None:
         warnings.warn("NLLLoss2d has been deprecated. "
