@@ -82,6 +82,22 @@ MOCKED_DISABLED_JOBS = {
         "mock-platform-8",
         "build (dynamo)",
     ],
+    "linux-binary-libtorch-cxx11-abi / libtorch-cpu-shared-with-deps-cxx11-abi-test / test": [
+        "pytorchbot",
+        "9",
+        "https://github.com/pytorch/pytorch/issues/9",
+        "linux-binary-libtorch-cxx11-abi",
+        "libtorch-cpu-shared-with-deps-cxx11-abi-test",
+        "test",
+    ],
+    "linux-binary-manywheel / manywheel-py3_8-cuda11_8-build": [
+        "pytorchbot",
+        "10",
+        "https://github.com/pytorch/pytorch/issues/10",
+        "linux-binary-manywheel",
+        "manywheel-py3_8-cuda11_8-build",
+        "",
+    ],
 }
 MOCKED_LABELS = [{"name": "foo"}, {"name": "bar"}, {}, {"name": ""}]
 
@@ -254,6 +270,34 @@ class TestConfigFilter(TestCase):
                 "test_matrix": '{include: [{config: "default"}, {config: "backward_compat"}]}',
                 "expected": '{"include": [{"config": "default"}, {"config": "backward_compat"}]}',
                 "description": "not disabled on this platform",
+            },
+            {
+                "workflow": "linux-binary-libtorch-cxx11-abi",
+                "job_name": "libtorch-cpu-shared-with-deps-cxx11-abi-build / build",
+                "test_matrix": '{include: [{config: "default"}]}',
+                "expected": '{"include": []}',
+                "description": "Build job is not needed when test job has been disabled",
+            },
+            {
+                "workflow": "linux-binary-libtorch-cxx11-abi",
+                "job_name": "libtorch-cpu-shared-with-deps-cxx11-abi-test / test",
+                "test_matrix": '{include: [{config: "default"}]}',
+                "expected": '{"include": []}',
+                "description": "The binary test job is disabled on this platform",
+            },
+            {
+                "workflow": "linux-binary-manywheel",
+                "job_name": "manywheel-py3_8-cuda11_8-build / build",
+                "test_matrix": '{include: [{config: "default"}]}',
+                "expected": '{"include": []}',
+                "description": "Both binary build and test jobs are disabled",
+            },
+            {
+                "workflow": "linux-binary-manywheel",
+                "job_name": "manywheel-py3_8-cuda11_8-test / test",
+                "test_matrix": '{include: [{config: "default"}]}',
+                "expected": '{"include": []}',
+                "description": "Both binary build and test jobs are disabled",
             },
         ]
 
