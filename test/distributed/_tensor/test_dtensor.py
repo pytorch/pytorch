@@ -550,7 +550,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         shard_placement = Shard(0)
 
-        for size in range(2):
+        for size in range(8):
             tensor = self._create_tensor(size)
             if size == 0:
                 with self.assertRaisesRegex(
