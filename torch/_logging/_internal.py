@@ -351,7 +351,7 @@ def getArtifactLogger(module_qname, artifact_name):
             f"please call register_artifact({repr(artifact_name)}) in torch._logging.registrations."
         )
     qname = module_qname + f".__{artifact_name}"
-    log = logging.getLogger(module_qname + f".__{artifact_name}")
+    log = logging.getLogger(qname)
     log.artifact_name = artifact_name  # type: ignore[attr-defined]
     log_registry.register_artifact_log(qname)
     configure_artifact_log(log)
