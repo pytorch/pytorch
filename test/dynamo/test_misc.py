@@ -1201,26 +1201,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    def test_inplace_resize_on_graph_input(self):
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        # graph break when calling resize_() on graph input
-        def f1(x):
-            x.resize_(6)
-            x.mul_(2)
-            return x
-
-        @torch.compile(backend=cnts)
-        def f2(x):
-            x.resize_(6)
-            x.mul_(2)
-            return x
-
-        x = torch.ones(4)
-        y = torch.ones(4)
-        self.assertTrue(same(f1(x).shape, f2(y).shape))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)  # mul_
+    def test_inplace_view_on_graph_input(self):
+        # graph break when calling methods with inplace_view tag on graph input
+        func_args_map = {
+            lambda x: x.resize_(6).mul_(2): torch.ones(4),
+            lambda x: x.t_().mul_(2): torch.rand(2, 3),
+            lambda x: x.transpose_(0, 1).mul_(2): torch.rand(2, 3),
+            lambda x: x.squeeze_().mul_(2): torch.rand(1, 2, 3),
+            lambda x: x.unsqueeze_(0).mul_(2): torch.rand(2, 3),
+            lambda x: x.resize_as_(torch.rand(200, 300)): torch.rand(2, 3),
+            lambda x: x.swapaxes_(0, 1).mul_(2): torch.rand(2, 3),
+            lambda x: x.swapdims_(0, 1).mul_(2): torch.rand(2, 3),
+            lambda x: x.rename_("N", "C").mul_(2): torch.zeros(2, 3),
+            lambda x: x.as_strided_((3, 2), (2, 1)).mul_(2): torch.zeros(2, 3),
+            lambda x: x.detach_().mul_(2): torch.zeros(2, 3),
+        }
+        for func, args in func_args_map.items():
+            args_clone = args.clone()
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_f = torch._dynamo.optimize(cnts)(func)
+            self.assertTrue(same(func(args).shape, opt_f(args_clone).shape))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 1)  # mul_
 
     def test_dict_mutation_side_effect(self):
         def fn(d):

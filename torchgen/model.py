@@ -976,7 +976,9 @@ class NativeFunction:
         )
         # See Note [resize_ in Functionalization] for more dtails
         is_inplace_view = (
-            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+            "inplace_view" in self.tags
+            and str(self.func.name) != "resize_"
+            and str(self.func.name) != "resize_as_"
         )
         is_wildcard_view = any(
             inp.annotation is not None and "*" in inp.annotation.alias_set_after
@@ -1649,9 +1651,7 @@ class FunctionSchema:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
     def has_symint(self) -> bool:
-        return self.arguments.has_symint_arg() or any(
-            r.type.is_symint_like() for r in self.returns
-        )
+        return self.arguments.has_symint_arg()
 
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)

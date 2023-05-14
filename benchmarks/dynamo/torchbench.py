@@ -79,6 +79,11 @@ SKIP = {
     "vision_maskrcnn",
 }
 
+SKIP_FOR_CPU = {
+    "hf_T5_generate",  # OOMs
+    "cm3leon_generate",  # model is CUDA only
+}
+
 SKIP_FOR_CUDA = {
     "gat",  # only works on CPU
     "gcn",  # only works on CPU
@@ -221,6 +226,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return SKIP
 
     @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
+
+    @property
     def skip_models_for_cuda(self):
         return SKIP_FOR_CUDA
 
@@ -275,14 +284,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             f"torchbenchmark.canary_models.{model_name}",
             f"torchbenchmark.models.fb.{model_name}",
         ]
-        module = None
         for c in candidates:
             try:
                 module = importlib.import_module(c)
                 break
             except ModuleNotFoundError:
                 pass
-        if module is None:
+        else:
             raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):

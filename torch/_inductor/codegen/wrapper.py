@@ -5,7 +5,7 @@ import functools
 import hashlib
 import os
 from itertools import count
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -589,7 +589,9 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=False
+    ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
@@ -845,7 +847,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.write_wrapper_decl()
         return super().generate()
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=True):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=True
+    ):
         self.header.splice(f"\n{kernel}\n")
 
     def generate_return(self, output_refs):
@@ -1076,7 +1080,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=False
+    ):
         if cpp:
             return super().define_kernel(name, kernel, metadata)
         pass
