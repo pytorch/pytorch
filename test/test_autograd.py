@@ -5553,7 +5553,7 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
     def test_checkpointing_without_reentrant_custom_function_works(self):
-        msg = "If you are calling ctx.saved_tensor in backward, make sure to do so only once"
+        msg = "torch.utils.checkpoint: unpack is being triggered for a tensor that was either"
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
