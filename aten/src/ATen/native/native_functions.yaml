@@ -6402,6 +6402,7 @@
   dispatch:
     CompositeExplicitAutograd: resize_as_
   autogen: resize_as, resize_as.out
+  tags: inplace_view
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
