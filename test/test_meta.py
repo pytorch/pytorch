@@ -616,7 +616,7 @@ meta_function_expected_failures = {
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
-    torch.nn.functional.gaussian_nll_loss : {f64, bf16, f32},
+    torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
     torch.nn.functional.max_pool3d_with_indices : {f64, f32},
     torch.nn.functional.max_unpool1d : {f64, f32},
@@ -720,7 +720,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
-    torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
