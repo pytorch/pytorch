@@ -33,7 +33,11 @@ auto copy_data_ptr(at::DataPtr const& data_ptr) -> at::DataPtr {
 
 auto C10_API cow::try_ensure(StorageImpl& storage)
     -> c10::intrusive_ptr<StorageImpl> {
-  at::DataPtr& data_ptr = storage.mutable_data_ptr();
+  // In case 1), we'll need a mutable DataPtr, but that will trigger a
+  // copy-on-write if we already have one. Defer getting the mutable
+  // reference until we are in case 1) and know it's not
+  // copy-on-write.
+  at::DataPtr const& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
   //
@@ -64,7 +68,8 @@ auto C10_API cow::try_ensure(StorageImpl& storage)
 
   if (data_ptr.get() == data_ptr.get_context()) {
     // Case 1) We have a simple data pointer: wrap it.
-    std::unique_ptr<void, DeleterFnPtr> original_ctx = data_ptr.move_context();
+    std::unique_ptr<void, DeleterFnPtr> original_ctx =
+        storage.mutable_data_ptr().move_context();
     TORCH_INTERNAL_ASSERT(original_ctx.get() == data_ptr.get());
 
     // Save this for the result.

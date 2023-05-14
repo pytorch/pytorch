@@ -121,7 +121,10 @@ def define_targets(rules):
             ":impl/cow/context",
             "//c10/util:base",
         ],
-        visibility = ["//c10/test:__pkg__"],
+        visibility = [
+            "//:__pkg__",
+            "//c10/test:__pkg__",
+        ],
     )
 
     rules.filegroup(

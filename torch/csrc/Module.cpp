@@ -1713,6 +1713,21 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
+  py_module.def(
+      "_storage_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(
+            tensor.storage().unsafeGetStorageImpl());
+      },
+      "Gets the memory address of the Tensor's StorageImpl.");
+
+  py_module.def(
+      "_data_address",
+      [](const at::Tensor& tensor) {
+        return reinterpret_cast<std::intptr_t>(tensor.storage().data());
+      },
+      "Gets the memory address of the Tensor's data pointer.");
+
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
       (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);

@@ -15,7 +15,7 @@
 namespace c10::impl {
 
 auto C10_API cow::materialize(StorageImpl& storage) -> void {
-  at::DataPtr& data_ptr = storage.mutable_data_ptr();
+  at::DataPtr& data_ptr = storage.unsafe_mutable_data_ptr_do_not_materialize();
 
   auto* ctx = data_ptr.cast_context<cow::Context>(cow::delete_context);
   TORCH_INTERNAL_ASSERT(ctx != nullptr);

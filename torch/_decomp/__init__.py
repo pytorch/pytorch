@@ -239,6 +239,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
+            aten._lazy_clone,
             aten.leaky_relu,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
