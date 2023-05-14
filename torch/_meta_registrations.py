@@ -416,18 +416,6 @@ def checkSameDevice(
     )
 
 
-def checkLinalgCompatibleDtype(
-    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
-):
-    check(
-        torch.can_cast(input.dtype, result.dtype),
-        lambda: (
-            f"{fn_name}: Expected {result_name} to be safely castable from {input.dtype} dtype, but got "
-            f"{result_name} with dtype {result.dtype}"
-        ),
-    )
-
-
 def checkUplo(UPLO: str):
     UPLO_uppercase = UPLO.upper()
     check(
@@ -534,15 +522,10 @@ def linalg_householder_product(input: Tensor, tau: Tensor) -> Tensor:
     )
     checkSameDevice("torch.linalg.householder_product", tau, input, "tau")
 
-    result = input.new_empty([0])
-
-    checkSameDevice("torch.linalg.householder_product", result, input)
-    checkLinalgCompatibleDtype("torch.linalg.householder_product", result, input)
-
-    # if result has no elements we can modify it
-    if result.numel() == 0:
-        result = _maybe_resize_out(result, input.mT.shape)
-        result.transpose_(-2, -1)
+    result = torch.empty_like(input)
+    result.as_strided_(
+        input.shape, make_contiguous_strides_for(input.shape, row_major=False)
+    )
 
     return result
 
