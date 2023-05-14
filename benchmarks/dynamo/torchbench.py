@@ -80,6 +80,7 @@ SKIP = {
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
+    "vision_maskrcnn",  # The size of tensor a (36) must match the size of tensor b (34)
 }
 
 SKIP_FOR_CUDA = {
