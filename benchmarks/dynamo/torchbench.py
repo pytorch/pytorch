@@ -290,6 +290,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 break
             except ModuleNotFoundError:
                 pass
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
