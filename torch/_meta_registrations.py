@@ -522,12 +522,12 @@ def linalg_householder_product(input: Tensor, tau: Tensor) -> Tensor:
     )
     checkSameDevice("torch.linalg.householder_product", tau, input, "tau")
 
-    result = torch.empty_like(input)
-    result.as_strided_(
-        input.shape, make_contiguous_strides_for(input.shape, row_major=False)
+    return torch.empty_strided(
+        size=input.shape,
+        stride=make_contiguous_strides_for(input.shape, row_major=False),
+        dtype=input.dtype,
+        device=input.device,
     )
-
-    return result
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
