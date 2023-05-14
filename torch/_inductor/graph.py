@@ -450,6 +450,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+        value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(value, (TensorBox, sympy.Expr))
             if not isinstance(value, TensorBox):
@@ -493,6 +494,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif n.target == torch.ops.aten.sym_stride:
+                # inductor graphs can occasionally return sizes/strides,
+                # e.g. if we need to save symints for the backward graph.
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -711,6 +719,9 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
+        # TODO. Revisit this once the logging API is more mature
+        output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:

@@ -174,7 +174,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.timeout.count());
   }
@@ -194,7 +193,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.rootRank,
         opts.rootTensor,
@@ -262,6 +260,27 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
     return op.call(
         outputTensorLists,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
+  }
+
+  // This function is a coalesced version of `allgather_into_tensor` (currently
+  // still named as `_allgather_base`). Each tensor in the vector corresponds to
+  // an input/output of one `allgather_into_tensor` operation.
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::allgather_into_tensor_coalesced_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                const at::TensorList,
+                const at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+    return op.call(
+        outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
   }
