@@ -23,6 +23,7 @@ __all__ = [
     "Dataset",
     "IterableDataset",
     "TensorDataset",
+    "StackDataset",
     "ConcatDataset",
     "ChainDataset",
     "Subset",
@@ -213,13 +214,13 @@ class StackDataset(Dataset[Tuple[T_co, ...]]):
 
     Example:
         >>> # xdoctest: +SKIP
-        >>> images = ImagesDataset()
+        >>> images = ImageDataset()
         >>> texts = TextDataset()
         >>> multimodal = StackDataset(images, texts)
         >>> multimodal[0] == (images[0], texts[0])
 
     Args:
-        *datasets (Dataset[T_co]): Datasets for stacking that have the same size.
+        *datasets (Dataset): Datasets for stacking that have the same size.
     """
     datasets: Tuple[Dataset[T_co], ...]
 
