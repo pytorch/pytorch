@@ -605,7 +605,7 @@ class TORCH_API RecordQueue {
 };
 
 TORCH_API bool get_record_concrete_inputs_enabled();
-TORCH_API void set_record_concrete_inputs_enabled(bool);
+TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
 
 } // namespace impl
 } // namespace profiler
