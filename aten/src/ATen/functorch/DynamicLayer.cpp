@@ -42,7 +42,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
-      interpreter_ = Interpreter::Vmap(layerId, batchSize.value(), randomness.value());
+      interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
       interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value());
