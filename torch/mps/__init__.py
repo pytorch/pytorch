@@ -16,7 +16,7 @@ def _get_default_mps_generator() -> torch._C.Generator:
 
 def synchronize() -> None:
     r"""Waits for all kernels in all streams on a MPS device to complete."""
-    return torch._C._mps_deviceSynchronize()
+    return torch._C._mps_synchronize()
 
 def get_rng_state() -> Tensor:
     r"""Returns the random number generator state as a ByteTensor."""

@@ -404,11 +404,10 @@ class ListOf(PatternExpr):
     Matches a repeated pattern
     """
 
-    def __init__(self, pattern, partial=False):
+    def __init__(self, pattern):
         super().__init__()
         assert isinstance(pattern, PatternExpr)
         self.pattern = pattern
-        self.partial = partial
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.pattern})"
@@ -420,21 +419,15 @@ class ListOf(PatternExpr):
         # Propogating patterns with multiple users will ensure we don't revisit
         # the same nodes
         pattern_to_node = ctx.filter_multi_user_patterns()
-        matched = False
         for i, child_node in enumerate(node):
             child_ctx = MatchContext(
                 ctx.outputs, pattern_to_node, graph=child_node.graph
             )
             child_match = child_ctx.match(self.pattern, child_node)
-            pattern_to_node = child_ctx.filter_multi_user_patterns()
             if not child_match:
-                if not self.partial:
-                    return FailedMatch(f"list[{i}]: {child_match}")
-                continue
-            matched = True
+                return FailedMatch(f"list[{i}]: {child_match}")
+            pattern_to_node = child_ctx.filter_multi_user_patterns()
             m.extend(child_match.bundle())
-        if not matched:
-            return FailedMatch("list: no_match")
         return m.bundle()
 
 
