@@ -61,7 +61,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
             example_pos_args = [from_fun(arg) if isinstance(arg, torch.Tensor) else arg for arg in pos_args]
             example_flat_out = pytree.tree_map(from_fun, f(*example_xs, *example_pos_args))
-            example_grad = [from_fun(torch.ones_like(out)) for out in example_flat_out if out is not None and out.requires_grad]
+            if any(not isinstance(out, torch.Tensor) for out in example_flat_out if out is not None):
+                raise RuntimeError("Expect outputs of map only contains tensors or None. "
+                                   f"Got types {[type(out) for out in example_flat_out]}.")
+            example_grad = [from_fun(out) for out in example_flat_out]
 
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
@@ -78,7 +81,8 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                 return fw_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in fw_out]
 
             joint = create_joint(fw_with_masks)
-            _, grads = joint(list(mapped_input) + list(args), list(mapped_grads))
+            _, grads = joint(list(mapped_input) + list(args),
+                             [grad for grad in mapped_grads if grad is not None and grad.requires_grad])
 
             # In order to keep map functional for backward graph,
             # we clone outputs that are aliasing inputs
@@ -140,9 +144,8 @@ class MapAutogradOp(torch.autograd.Function):
         fw_args = ctx.saved_tensors
         fw_mapped_args = fw_args[:ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args:]
-        mapped_grads = [grad for grad in flat_grads if grad is not None]
 
-        grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(mapped_grads), *fw_mapped_args, *mapped_grads, *pos_args)
+        grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(flat_grads), *fw_mapped_args, *flat_grads, *pos_args)
         return None, None, None, *grads
 
 def trace_map(proxy_mode, func_overload, f, num_mapped, *args):
@@ -206,7 +209,9 @@ def _stack_pytree(pytrees):
         if all(isinstance(leaf, torch.Tensor) for leaf in leaves):
             stacked_out.append(torch.stack(leaves))
         elif all(leaf is None for leaf in leaves):
-            # Leaves can be None e.g. when one of the input doesn't require grad
+            # Backward graph can return None output when forward inputs doesn't require grad.
+            # When we eagerly execute backward graph, we need to call _stack_pytree on its output,
+            # therefore we need to deal with None output.
             stacked_out.append(None)
         else:
             raise RuntimeError(f"Cannot stack {leaves}.")

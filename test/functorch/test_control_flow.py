@@ -74,6 +74,27 @@ class TestControlFlow(TestCase):
                                     r"Got shapes \[torch\.Size\(\[3, 4, 5\]\), torch\.Size\(\[4, 4, 5\]\)\]\."):
             _ = control_flow.map(f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5))
 
+    def test_map_illegal_outputs(self):
+        def f(x, y):
+            return x.item()
+
+        def f1(x, y):
+            return y.size()
+
+        def f2(x, y):
+            return None
+
+        x = torch.ones([3])
+        y = torch.ones([1, 2, 3])
+        with self.assertRaisesRegex(RuntimeError, r"Expect outputs of map only contains tensors or None\."):
+            _ = control_flow.map(f, x, y)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expect outputs of map only contains tensors or None\."):
+            out = control_flow.map(f1, x, y)
+
+        # return None is OK
+        _ = control_flow.map(f2, x, y)
+
 
     def test_map_list_in_out(self):
         def f(x, y):
@@ -127,6 +148,22 @@ class TestControlFlow(TestCase):
         expected_grads = torch.autograd.grad(expected_res, (xs,), grad_out)
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
+
+    def test_map_autograd_no_grad_output(self):
+        def f(x, y):
+            return x.sin().cos() + y, y.cos().sin()
+
+        xs = torch.ones(3, 2, 2, requires_grad=True)
+        # Disable the gradient computation for y
+        y = torch.ones(2, requires_grad=False)
+        res = control_flow.map(f, xs, y)
+        expected_res = _fake_map(f, xs, y)
+        grad_out = torch.ones_like(res[0])
+        grads = torch.autograd.grad(res[0], (xs,), grad_out)
+        expected_grads = torch.autograd.grad(expected_res[0], (xs,), grad_out)
+        self.assertEqual(expected_res, res)
+        self.assertEqual(expected_grads, grads)
+
 
     def test_map_autograd_nested_list(self):
         import torch.utils._pytree as pytree
@@ -909,7 +946,6 @@ class TestControlFlowTraced(TestCase):
         x = [torch.randn(4, 5, 6), torch.ones(4, 5, 6, requires_grad=True)]
         y = torch.randn(6, requires_grad=True)
         res = gm(x, y)
-        gm.print_readable()
         self.assertEqual(res, g(x, y))
         self.check_map_count(gm, 2)
 
