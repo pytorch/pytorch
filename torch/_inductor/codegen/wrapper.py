@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import hashlib
 import os
+import re
 from itertools import count
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,6 +58,58 @@ def is_float(s: str):
     except ValueError:
         return False
     return True
+
+
+def convert_arg_type(python_type):
+    from .cpp import PYTHON_TO_CPP
+
+    if python_type == "Tensor":
+        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
+        return f"at::{python_type} const&"
+
+    # Convert arg of type Optional[*]
+    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
+    if len(optional_match) == 1:
+        optional_type = optional_match[0]
+        assert (
+            optional_type in PYTHON_TO_CPP
+        ), f"unsupported optional type in convert_arg_type: {optional_type}"
+        cpp_optional_type = PYTHON_TO_CPP[optional_type]
+        return f"c10::optional<{cpp_optional_type}>"
+
+    raise AssertionError(f"unsupport python_type: {python_type}")
+
+
+def convert_return_type(python_type):
+    # TODO: only support Tensor as func return type for now
+    # TODO: support alias
+    assert (
+        python_type == "Tensor"
+    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
+    return f"at::{python_type}"
+
+
+def get_cpp_op_schema(kernel):
+    arg_types = [repr(x.type) for x in kernel._schema.arguments]
+    arg_names = [x.name for x in kernel._schema.arguments]
+    # TODO: only support len(returns) == 1 for now.
+    returns = [repr(x.type) for x in kernel._schema.returns]
+    assert (
+        len(returns) == 1
+    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
+    return_value = returns[0]
+    cpp_return_value = convert_return_type(return_value)
+
+    cpp_arg_type = [
+        f"{convert_arg_type(arg_type)} {arg_name}"
+        for arg_type, arg_name in zip(arg_types, arg_names)
+    ]
+    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+
+
+SUPPORTED_FALLBACK_CPP_WRAPPER = [
+    "repeat_interleave.Tensor",
+]
 
 
 class MemoryPlanningState:
@@ -363,7 +416,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -985,7 +1038,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
