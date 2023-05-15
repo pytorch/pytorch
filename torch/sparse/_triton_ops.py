@@ -328,7 +328,7 @@ if _has_triton():
                     mask=mask_k[:, None], other=0.0
                 )
 
-                acc_block += tl.dot(mat1_block, mat2_block)
+                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32)
 
             if IS_BETA_ZERO:
                 acc_block *= alpha

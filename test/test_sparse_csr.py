@@ -3375,7 +3375,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
 
         # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [(), (2,)]
+        batches = [(), (2,), (2, 2)]
         size = [128, 256, 0]
 
         # Whether to make inputs orthogonal so that the product is zero
@@ -3508,12 +3508,12 @@ class TestSparseCompressedTritonKernels(TestCase):
                     row, col = coo_indices.unbind()
                     filtered.append(mm[b, row, col, :, :].unsqueeze(0))
 
+                batch_dims = input_broadcasted.shape[:-2]
                 out_vals = torch.cat(filtered, dim=0).squeeze(0)
-                out_batch_dims = out_vals.shape[:-3]
                 return torch.sparse_compressed_tensor(
-                    input_broadcasted.crow_indices(),
-                    input_broadcasted.col_indices(),
-                    out_vals,
+                    input_broadcasted.crow_indices().reshape(*batch_dims, n_blockrows + 1),
+                    input_broadcasted.col_indices().reshape(*batch_dims, nnz),
+                    out_vals.reshape(*batch_dims, m, n),
                     size=input_broadcasted.shape,
                     layout=input_broadcasted.layout
                 )
