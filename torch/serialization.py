@@ -390,7 +390,9 @@ def save(
     f: FILE_LIKE,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
-    _use_new_zipfile_serialization: bool = True
+    _use_new_zipfile_serialization: bool = True,
+    _disable_byteorder_record: bool = False,
+    _mmap: bool = False,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -436,9 +438,13 @@ def save(
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
 
-    if _use_new_zipfile_serialization:
+    if _mmap:
+        with _open_file_like(f, 'wb') as opened_file:
+            with closing(tarfile.open(fileobj=opened_file, mode='w:', format=tarfile.PAX_FORMAT)) as tar:
+                _save(obj, tar, pickle_module, pickle_protocol, _disable_byteorder_record, _mmap)
+    elif _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
-            _save(obj, opened_zipfile, pickle_module, pickle_protocol)
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
             return
     else:
         with _open_file_like(f, 'wb') as opened_file:
@@ -589,7 +595,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
         storage._write_file(f, _should_read_directly(f), True, torch._utils._element_size(dtype))
 
 
-def _save(obj, zip_file, pickle_module, pickle_protocol):
+def _save(obj, file, pickle_module, pickle_protocol, _disable_byteorder_record, _mmap=False):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
 
@@ -646,26 +652,68 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
         return None
 
-    # Write the pickle data for `obj`
-    data_buf = io.BytesIO()
-    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
-    pickler.persistent_id = persistent_id
-    pickler.dump(obj)
-    data_value = data_buf.getvalue()
-    zip_file.write_record('data.pkl', data_value, len(data_value))
+    if _mmap:
+        tar_file = file
+        # Write the pickle data for `obj`
+        # TODO: maybe mkstmp() is safer than NamedTemporaryFile?
+        data_file = tempfile.NamedTemporaryFile(delete=False)
+        with _open_file_like(data_file, 'wb+') as data_file:
+            pickler = pickle_module.Pickler(data_file, protocol=pickle_protocol)
+            pickler.persistent_id = persistent_id
+            pickler.dump(obj)
 
-    # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()):
-        name = f'data/{key}'
-        storage = serialized_storages[key]
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != 'cpu':
-            storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
-        num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        tar_file.add(data_file.name, arcname='data.pkl')
+        if os.path.isfile(data_file.name):
+            os.remove(data_file.name)
+
+        # Write each tensor to a file named storage_data/the_tensor_key in the tarfile
+        with mkdtemp() as storage_directory:
+            for key in sorted(serialized_storages.keys()):
+                name = f'{storage_directory}/storage_{key}'
+                print(f"storage filename={name}")
+                with _open_file_like(name, 'wb+') as f:
+                    storage = serialized_storages[key]
+                    # given that we copy things around anyway, we might use storage.cpu()
+                    # this means to that to get tensors serialized, you need to implement
+                    # .cpu() on the underlying Storage
+                    if storage.device.type != 'cpu':
+                        storage = storage.cpu()
+                    # Now that it is on the CPU we can directly copy it into the zip file
+                    num_bytes = storage.nbytes()
+                    # for UntypedStorage this is the dtype
+                    dtype = torch.uint8
+                    # storage._write_file(f, is_real_file=True, save_size=False, element_size=torch._utils._element_size(dtype))
+                    storage._write_file(f, True, False, torch._utils._element_size(dtype))
+            tar_file.add(storage_directory, arcname='storage_data')
+    else:
+        zip_file = file
+        # Write the pickle data for `obj`
+        data_buf = io.BytesIO()
+        pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
+        pickler.persistent_id = persistent_id
+        pickler.dump(obj)
+        data_value = data_buf.getvalue()
+        zip_file.write_record('data.pkl', data_value, len(data_value))
+
+        # Write byte order marker
+        if not _disable_byteorder_record:
+            if sys.byteorder not in ['little', 'big']:
+                raise ValueError('Unknown endianness type: ' + sys.byteorder)
+
+            zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
+
+        # Write each tensor to a file named tensor/the_tensor_key in the zip archive
+        for key in sorted(serialized_storages.keys()):
+            name = f'data/{key}'
+            storage = serialized_storages[key]
+            # given that we copy things around anyway, we might use storage.cpu()
+            # this means to that to get tensors serialized, you need to implement
+            # .cpu() on the underlying Storage
+            if storage.device.type != 'cpu':
+                storage = storage.cpu()
+            # Now that it is on the CPU we can directly copy it into the zip file
+            num_bytes = storage.nbytes()
+            zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
 def load(
@@ -674,6 +722,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
+    _mmap: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -789,6 +838,14 @@ def load(
         pickle_load_args['encoding'] = 'utf-8'
 
     with _open_file_like(f, 'rb') as opened_file:
+        # TODO: proper handling for BinaryIO/IO[bytes] types for f
+        if tarfile.is_tarfile(f):  # type: ignore[arg-type]
+            if weights_only:
+                try:
+                    return _load(opened_file, map_location, _weights_only_unpickler, 'data.pkl', _mmap, **pickle_load_args)
+                except RuntimeError as e:
+                    raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+            return _load(opened_file, map_location, pickle_module, 'data.pkl', _mmap, **pickle_load_args)
         if _is_zipfile(opened_file):
             # The zipfile reader is going to advance the current file position.
             # If we want to actually tail call to torch.jit.load, we need to
@@ -1101,21 +1158,51 @@ class StorageType():
         return f'StorageType(dtype={self.dtype})'
 
 
-def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
+# TODO: maybe merge _load_mmap into _load
+def _load(file, map_location, pickle_module, pickle_file='data.pkl', _mmap=False, **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
 
-    def load_tensor(dtype, numel, key, location):
-        name = f'data/{key}'
+    if not _mmap:
+        zip_file = file
+        # check if byteswapping is needed
+        byteordername = 'byteorder'
+        byteorderdata = None
+        if zip_file.has_record(byteordername):
+            byteorderdata = zip_file.get_record(byteordername)
+            if byteorderdata not in [b'little', b'big']:
+                raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+    else:
+        tar_file = file
+        # create tmpdir for untar-ing into
+        tmpdir = tempfile.TemporaryDirectory()
 
-        storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
-        # TODO: Once we decide to break serialization FC, we can
-        # stop wrapping with TypedStorage
-        typed_storage = torch.storage.TypedStorage(
-            wrap_storage=restore_location(storage, location),
-            dtype=dtype,
-            _internal=True)
+    def load_tensor(dtype, numel, key, location):
+        if _mmap:
+            extracted_filename = f'{tmpdir.name}/storage_data/storage_{key}'
+            untyped_storage: torch.UntypedStorage = torch.UntypedStorage.from_file(extracted_filename, False, numel)
+            # TODO: Once we decide to break serialization FC, we can
+            # stop wrapping with TypedStorage
+            typed_storage = torch.storage.TypedStorage(
+                wrap_storage=restore_location(untyped_storage, location),
+                dtype=dtype,
+                _internal=True)
+        else:
+            name = f'data/{key}'
+
+            storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
+            # swap here if byteswapping is needed
+            if byteorderdata is not None:
+                if byteorderdata.decode() != sys.byteorder:
+                    storage.byteswap(dtype)
+
+            # TODO: Once we decide to break serialization FC, we can
+            # stop wrapping with TypedStorage
+            typed_storage = torch.storage.TypedStorage(
+                wrap_storage=restore_location(storage, location),
+                dtype=dtype,
+                _internal=True)
 
         if typed_storage._data_ptr() != 0:
             loaded_storages[key] = typed_storage
@@ -1165,11 +1252,23 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
             return super().find_class(mod_name, name)
 
     # Load the data (which may in turn use `persistent_load` to load tensors)
-    data_file = io.BytesIO(zip_file.get_record(pickle_file))
+    if _mmap:
+        with closing(tarfile.open(fileobj=tar_file, mode='r:', format=tarfile.PAX_FORMAT)) as tar:
+            data_file = tar.extractfile(pickle_file)
+            subdir_and_files = [
+                tarinfo for tarinfo in tar.getmembers()
+                if tarinfo.name.startswith("storage_data/")
+            ]
+            tar.extractall(members=subdir_and_files, path=tmpdir.name)
+    else:
+        data_file = io.BytesIO(zip_file.get_record(pickle_file))
 
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
     result = unpickler.load()
+
+    if _mmap:
+        tmpdir.cleanup()
 
     torch._utils._validate_loaded_sparse_tensors()
 
