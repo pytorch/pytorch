@@ -1,8 +1,6 @@
-import functools
-from typing import Optional, Tuple
-
 import torch
 from torch._inductor.cuda_properties import get_device_capability
+
 
 def _has_triton():
     if not torch.cuda.is_available():
@@ -91,143 +89,137 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
         kernel(grid, *sliced_tensors)
 
 if _has_triton():
+    import triton
+    import triton.language as tl
+    from typing import Optional, Tuple
 
-    @functools.lru_cache(None)
-    def _get_bsr_strided_dense_rowspace_kernel():
-        import triton
-        import triton.language as tl
+    @triton.jit
+    def _bsr_strided_dense_rowspace_kernel(
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
+        # values prologue
+        values_ptr,
+        values_batch_stride,
+        values_nnz_stride,
+        values_row_block_stride,
+        values_col_block_stride,
+        # values epilogue
+        # crow_indices prologue
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        # crow_indices epilogue
+        # col_indices prologue
+        col_indices_ptr,
+        col_indices_batch_stride,
+        col_indices_stride,
+        # col_indices epilogue
+        # dense prologue
+        dense_ptr,
+        dense_batch_stride,
+        dense_tiled_row_stride,
+        dense_tiled_col_stride,
+        dense_row_block_stride,
+        dense_col_block_stride,
+        # dense epilogue
+        # output prologue
+        output_ptr,
+        output_batch_stride,
+        output_tiled_row_stride,
+        output_tiled_col_stride,
+        output_row_block_stride,
+        output_col_block_stride,
+        # output epilogue
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
+        GROUP_SIZE_ROW: tl.constexpr,
+    ):
+        batch_pid = tl.program_id(axis=2)
+        row_block_pid = tl.program_id(axis=0)
+        col_block_pid = tl.program_id(axis=1)
+        n_block_rows = tl.num_programs(axis=0)
+        n_block_cols = tl.num_programs(axis=1)
 
-        @triton.jit
-        def _bsr_strided_dense_rowspace_kernel(
-            BLOCKSIZE_ROW: tl.constexpr,
-            BLOCKSIZE_COL: tl.constexpr,
-            # values prologue
-            values_ptr,
-            values_batch_stride,
-            values_nnz_stride,
-            values_row_block_stride,
-            values_col_block_stride,
-            # values epilogue
-            # crow_indices prologue
-            crow_indices_ptr,
-            crow_indices_batch_stride,
-            crow_indices_stride,
-            # crow_indices epilogue
-            # col_indices prologue
-            col_indices_ptr,
-            col_indices_batch_stride,
-            col_indices_stride,
-            # col_indices epilogue
-            # dense prologue
-            dense_ptr,
-            dense_batch_stride,
-            dense_tiled_row_stride,
-            dense_tiled_col_stride,
-            dense_row_block_stride,
-            dense_col_block_stride,
-            # dense epilogue
-            # output prologue
-            output_ptr,
-            output_batch_stride,
-            output_tiled_row_stride,
-            output_tiled_col_stride,
-            output_row_block_stride,
-            output_col_block_stride,
-            # output epilogue
-            acc_dtype: tl.constexpr,
-            allow_tf32: tl.constexpr,
-            GROUP_SIZE_ROW: tl.constexpr,
-        ):
-            batch_pid = tl.program_id(axis=2)
-            row_block_pid = tl.program_id(axis=0)
-            col_block_pid = tl.program_id(axis=1)
-            n_block_rows = tl.num_programs(axis=0)
-            n_block_cols = tl.num_programs(axis=1)
+        row_block_pid, col_block_pid = tl.swizzle2d(
+            row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
+        )
 
-            row_block_pid, col_block_pid = tl.swizzle2d(
-                row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
-            )
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
 
-            crow_indices_offset_ptr = (
-                crow_indices_ptr
-                + crow_indices_batch_stride * batch_pid
-                + crow_indices_stride * row_block_pid
-            )
-            nnz_offset = tl.load(crow_indices_offset_ptr)
-            nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+        # Compute nnz for the row with number row_block_pid.
+        # If it is zero, skip the row.
+        row_nnz = nnz_offset_next - nnz_offset
+        if row_nnz == 0:
+            return
 
-            # Compute nnz for the row with number row_block_pid.
-            # If it is zero, skip the row.
-            row_nnz = nnz_offset_next - nnz_offset
-            if row_nnz == 0:
-                return
+        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
 
-            row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
-            col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+        # Pointers are set to the first block of the current row.
+        values_block_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_nnz_stride * nnz_offset
+            + values_row_block_stride * row_block_arange[:, None]
+            + values_col_block_stride * col_block_arange[None, :]
+        )
 
-            # Pointers are set to the first block of the current row.
-            values_block_ptrs = (
-                values_ptr
-                + values_batch_stride * batch_pid
-                + values_nnz_stride * nnz_offset
-                + values_row_block_stride * row_block_arange[:, None]
-                + values_col_block_stride * col_block_arange[None, :]
-            )
+        # NOTE: dense is advanced into all dimensions but the tiled row one.
+        # That will be advanced in the loop according to values in col_indices.
+        dense_block_ptrs = (
+            dense_ptr
+            + dense_batch_stride * batch_pid
+            + dense_tiled_col_stride * col_block_pid
+            + dense_row_block_stride * col_block_arange[:, None]
+            + dense_col_block_stride * row_block_arange[None, :]
+        )
 
-            # NOTE: dense is advanced into all dimensions but the tiled row one.
-            # That will be advanced in the loop according to values in col_indices.
-            dense_block_ptrs = (
-                dense_ptr
-                + dense_batch_stride * batch_pid
-                + dense_tiled_col_stride * col_block_pid
-                + dense_row_block_stride * col_block_arange[:, None]
-                + dense_col_block_stride * row_block_arange[None, :]
-            )
+        # Pointers are set to exact write-to locations
+        output_ptrs = (
+            output_ptr
+            + output_batch_stride * batch_pid
+            + output_tiled_row_stride * row_block_pid
+            + output_tiled_col_stride * col_block_pid
+            + output_row_block_stride * row_block_arange[:, None]
+            + output_col_block_stride * row_block_arange[None, :]
+        )
 
-            # Pointers are set to exact write-to locations
-            output_ptrs = (
-                output_ptr
-                + output_batch_stride * batch_pid
-                + output_tiled_row_stride * row_block_pid
-                + output_tiled_col_stride * col_block_pid
-                + output_row_block_stride * row_block_arange[:, None]
-                + output_col_block_stride * row_block_arange[None, :]
-            )
+        # Set pointer to the first nonzero element in the current row
+        col_index_nnz_ptr = (
+            col_indices_ptr
+            + col_indices_batch_stride * batch_pid
+            + col_indices_stride * nnz_offset
+        )
 
-            # Set pointer to the first nonzero element in the current row
-            col_index_nnz_ptr = (
-                col_indices_ptr
-                + col_indices_batch_stride * batch_pid
-                + col_indices_stride * nnz_offset
-            )
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
+        for _ in range(row_nnz):
+            values_block = tl.load(values_block_ptrs)
 
-            output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
-            for _ in range(row_nnz):
-                values_block = tl.load(values_block_ptrs)
+            # find which row of dense needs to get loaded
+            # for multiplication with values_block.
+            dense_row_idx = tl.load(col_index_nnz_ptr)
+            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
-                # find which row of dense needs to get loaded
-                # for multiplication with values_block.
-                dense_row_idx = tl.load(col_index_nnz_ptr)
-                dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+            # do block mm
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32)
 
-                # do block mm
-                output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32)
+            # move val/col_index ptrs to the next block in the row
+            values_block_ptrs += values_nnz_stride
+            col_index_nnz_ptr += col_indices_stride
 
-                # move val/col_index ptrs to the next block in the row
-                values_block_ptrs += values_nnz_stride
-                col_index_nnz_ptr += col_indices_stride
-
-            # write back the result
-            tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
-
-        return _bsr_strided_dense_rowspace_kernel
+        # write back the result
+        tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
 
 
     def _run_dense_rowspace_kernel(
         blocksize, values, crow_indices, col_indices, dense, output, max_grid
     ):
-        import triton.language as tl
-
         n_batches = dense.size(0)
         n_block_rows = crow_indices.size(-1) - 1
         n_block_cols = dense.size(-3)
@@ -252,7 +244,7 @@ if _has_triton():
             allow_tf32 = False
 
         def kernel(grid, *sliced_tensors):
-            _get_bsr_strided_dense_rowspace_kernel()[grid](
+            _bsr_strided_dense_rowspace_kernel[grid](
                 *blocksize,
                 *ptr_stride_extractor(*sliced_tensors),
                 acc_dtype=acc_dtype,
