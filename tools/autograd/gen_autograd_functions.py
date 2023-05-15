@@ -745,9 +745,9 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
+    for var in info.all_saved_inputs:
         save_var(var, is_output=False)
-    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
+    for var in info.all_saved_outputs:
         save_var(var, is_output=True)
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
@@ -770,7 +770,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         # Generate aliases for gradients named for returned values.
         body.extend(
             f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
-            for name in sorted(info.used_named_gradients)
+            for name in info.used_named_gradients
         )
 
     def emit_derivative(
