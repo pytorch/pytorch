@@ -893,6 +893,11 @@ class TritonKernel(Kernel):
         return free_symbol_startswith(index, "tmp")
 
     def is_broadcasted(self, index: sympy.Expr):
+        # not indirect_indexing is necessary as doing: y = torch.arange(n); x[y]
+        # will set tmp0 = x0; original_index == tmp0, so is_broadcasted == True.
+        # This is a bug will be solved by https://github.com/pytorch/pytorch/pull/100895
+        if self.is_indirect_indexing(index):
+            return False
         return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
@@ -1109,19 +1114,14 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index)
 
-        # Keep the variable in cache if we are going to reuse it
-        # TODO(lezcano) We could potentially do better
-        # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        # Keep the variable in cache last if any of the following hold
+        # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
         #  1) We are doing broadcasting
-        #  2) It will be used later and it won't be CSE'd. Equivalently, all the following hold
+        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
         #   2.1) We are in a reduction loop
         #   2.2) Its not its last use
         #   2.3) This load will not be lifted to the body
-
-        # not indirect_indexing is necessary as doing: y = torch.arange(n); x[y]
-        # will set tmp0 = x0; original_index == tmp0, so is_broadcasted == True.
-        # This is a bug will be solved by https://github.com/pytorch/pytorch/pull/100895
+        # TODO(lezcano) We could potentially do better
+        # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
         if not indirect_indexing and self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
