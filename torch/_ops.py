@@ -788,17 +788,5 @@ class _Ops(types.ModuleType):
         self.loaded_libraries.add(path)
 
 
-class Wrap(HigherOrderOperator):
-    def __init__(self):
-        super().__init__("wrap")
-
-    def __call__(self, func, *args):
-        result = func(*args)
-        return result
-
-
-wrap = Wrap()
-
-
 # The ops "namespace"
 ops = _Ops()

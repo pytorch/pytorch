@@ -818,7 +818,7 @@ def gen_variable_type(
     # dispatch key that appears in derivatives.yaml
     def wrapper_registrations(used_keys: Set[str]) -> str:
         library_impl_macro_list: List[str] = []
-        for key in used_keys:
+        for key in sorted(used_keys):
             dispatch_key = key
             if key == "Default":
                 dispatch_key = "Autograd"
@@ -843,7 +843,7 @@ def gen_variable_type(
             "type_derived_method_definitions": "\n\n".join(
                 [
                     "${" + f"type_derived_method_definitions_{key}" + "}"
-                    for key in used_keys
+                    for key in sorted(used_keys)
                 ]
             ),
             "wrapper_registrations": wrapper_registrations(used_keys),
@@ -854,8 +854,8 @@ def gen_variable_type(
     fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
 
     sharded_keys = set(
-        [f"type_derived_method_definitions_{key}" for key in used_keys]
-        + [f"wrapper_registrations_{key}" for key in used_keys]
+        [f"type_derived_method_definitions_{key}" for key in sorted(used_keys)]
+        + [f"wrapper_registrations_{key}" for key in sorted(used_keys)]
     )
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
@@ -1337,7 +1337,7 @@ def emit_body(
     ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []
-        for arg in saved_variables:
+        for arg in sorted(saved_variables, key=lambda sa: str(sa.nctype.name)):
             name = (
                 arg.nctype.name.name
                 if isinstance(arg.nctype.name, SpecialArgName)
@@ -1345,7 +1345,9 @@ def emit_body(
             )
             foreacharg: Optional[Argument] = None
             is_foreacharg_list_type: bool = False
-            remove_underscore_before_replace: bool = False
+            type = arg.nctype.type
+            expr = arg.expr
+            stmts_prepend = None
             if is_inplace_foreach and info is not None:
                 # todo(crcrpar): See if we can add some check e.g. `assert foreacharg is not None`.
                 # for now the example assert would fail.
@@ -1353,15 +1355,23 @@ def emit_body(
                 if name_to_query in refargname2inplace_foreacharg:
                     foreacharg = refargname2inplace_foreacharg[name_to_query]
                     is_foreacharg_list_type = isinstance(foreacharg.type, ListType)
-            type = arg.nctype.type
-            expr = arg.expr
-            stmts_prepend = None
+                if foreacharg is not None:
+                    name_in_expr = (
+                        f"{foreacharg.name}{'[i]' if is_foreacharg_list_type else ''}"
+                    )
+                    src_name = name
+                    if "_scalar_type" in src_name:
+                        split_src_name = src_name.split("_scalar_type")
+                        assert len(split_src_name) == 2
+                        src_name = split_src_name[0]
+                    expr = expr.replace(src_name, name_in_expr)
             if (
                 type == BaseCType(tensorT)
                 or type == OptionalCType(BaseCType(tensorT))
                 or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
                 or (is_output and type == BaseCType(scalarT))
             ):
+                # note(crcrpar): Here `expr` is generated from scratch, `arg.expr` is ignored.
                 var = name
                 name += "_"
                 if var == "self" and inplace:
@@ -1384,9 +1394,9 @@ def emit_body(
                     is_inplace_view = f"{var}.is_view()"
                     expr = f"SavedVariable({var}, {str(is_output).lower()}, {is_inplace_view})"
                 else:
-                    var_ = var + ("[i]" if is_foreacharg_list_type else "")
                     expr = f"SavedVariable({var}, {str(is_output).lower()})"
-                remove_underscore_before_replace = True and "self" not in var
+                    if foreacharg is not None and "original_selfs" not in expr:
+                        expr = expr.replace(src_name, name_in_expr)
             elif (
                 type == BaseCType(tensorListT)
                 or type == ListCType(OptionalCType(BaseCType(tensorT)))
@@ -1394,7 +1404,6 @@ def emit_body(
             ):
                 expr = f"make_saved_variable_list({name})"
                 name += "_"
-                remove_underscore_before_replace = True
             elif type == BaseCType(intArrayRefT):
                 expr = expr + ".vec()"
             elif type == BaseCType(symIntArrayRefT):
@@ -1408,21 +1417,6 @@ def emit_body(
             ):
                 expr = expr + ".vec()"
 
-            # todo(crcrpar): ideally do this replacement before refining `expr` in if-else above.
-            # Naively moving this processing to before if-else seems to cause some weirdos where
-            # some variable expressions are just wrong, e.g. trying to construct SavedVariable with a TensorList
-            if foreacharg is not None:
-                name_in_expr = (
-                    f"{foreacharg.name}{'[i]' if is_foreacharg_list_type else ''}"
-                )
-                src_name = name
-                if remove_underscore_before_replace:
-                    src_name = src_name[:-1]
-                if "_scalar_type" in src_name:
-                    split_src_name = src_name.split("_scalar_type")
-                    assert len(split_src_name) == 2
-                    src_name = split_src_name[0]
-                expr = expr.replace(src_name, name_in_expr)
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:
@@ -1722,8 +1716,7 @@ def emit_body(
                 assert len(info.output_differentiability_conditions) == 1
                 requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
             content.append(
-                f"auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};\n"
-                f"(void){get_any_has_forward_grad_name(derivative.var_names)};"
+                f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
             )
         return content
 

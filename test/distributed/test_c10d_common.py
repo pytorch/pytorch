@@ -1417,6 +1417,43 @@ class AbstractLargeCommTest(object):
         ]
         self.assertEqual(output_tensor_list, expected)
 
+    def _test_new_group_local_sync_duplicate_pg(self, backend):
+        """
+        We should support users create multiple PGs with the same set of
+        members, and no conflict in group name
+        """
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # split the world in 2 PGs
+        rank = dist.get_rank()
+        pg_idx = rank // 2
+        ranks_in = [pg_idx * 2, pg_idx * 2 + 1]
+        new_pgs = []
+        for _ in range(2):
+            new_pgs.append(
+                dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+            )
+
+        input_tensor = torch.tensor([pg_idx, rank], device=self.device)
+        for new_pg in new_pgs:
+            output_tensor_list = [
+                torch.tensor([-1, -1], device=self.device,) for _ in range(new_pg.size())
+            ]
+            dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+            expected = [
+                torch.tensor([pg_idx, ranks_in[0]], device=self.device),
+                torch.tensor([pg_idx, ranks_in[1]], device=self.device)
+            ]
+            self.assertEqual(output_tensor_list, expected)
+
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -1573,8 +1610,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
-            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.NCCL, "cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
             ("DUMMY", "cpu:dummy,cuda:dummy"),
@@ -1583,7 +1620,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
-            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
         ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
