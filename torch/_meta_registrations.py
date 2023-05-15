@@ -404,23 +404,58 @@ def checkInputsSolver(
     )
 
 
-def checkUplo(uplo: str):
-    uplo_uppercase = uplo.upper()
-    assert (
-        len(uplo) == 1 and uplo_uppercase == "U" or uplo_uppercase == "L"
-    ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
+def checkSameDevice(
+    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
+):
+    check(
+        result.device == input.device,
+        lambda: (
+            f"{fn_name}: Expected {result_name} and input tensors to be on the same device, but got "
+            f"{result_name} on {result.device} and input on {input.device}"
+        ),
+    )
 
 
-# @register_meta(aten.linalg_eigh.default)
-def meta_linalg_eigh(self, uplo="L"):
-    squareCheckInputs(self, "linalg_eigh")
-    checkUplo(uplo)
-    real_dtype = toRealValueType(self.dtype)
-    assert self.dim() >= 2
-    values = self.new_empty(self.shape, dtype=real_dtype)
-    values.transpose_(-2, -1)
-    vectors = self.new_empty(self.shape[:-1])
-    return (values, vectors)
+def checkUplo(UPLO: str):
+    UPLO_uppercase = UPLO.upper()
+    check(
+        len(UPLO) == 1 and (UPLO_uppercase == "U" or UPLO_uppercase == "L"),
+        lambda: f"Expected UPLO argument to be 'L' or 'U', but got {UPLO}",
+    )
+
+
+@register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
+def meta__linalg_eigh(
+    A: Tensor,
+    UPLO: str = "L",
+    compute_v: bool = True,
+    *,
+    eigenvalues: Tensor = None,
+    eigenvectors: Tensor = None,
+):
+    squareCheckInputs(A, "linalg.eigh")
+    checkUplo(UPLO)
+
+    shape = list(A.shape)
+    if compute_v:
+        vecs = A.new_empty(shape)
+        vecs.as_strided_(shape, make_contiguous_strides_for(shape, row_major=False))
+    else:
+        vecs = A.new_empty([0])
+
+    shape.pop()
+    vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
+
+    if eigenvalues is not None and eigenvectors is not None:
+        assert isinstance(eigenvalues, TensorLike)
+        assert isinstance(eigenvectors, TensorLike)
+        eigenvalues = _maybe_resize_out(eigenvalues, vals.shape)
+        eigenvectors = _maybe_resize_out(eigenvectors, vecs.shape)
+        _safe_copy_out(copy_from=vals, copy_to=eigenvalues)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=vecs, copy_to=eigenvectors)  # type: ignore[arg-type]
+        return eigenvalues, eigenvectors
+
+    return vals, vecs
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -442,6 +477,59 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
+@register_meta(
+    [aten.linalg_householder_product.default, aten.linalg_householder_product.out]
+)
+@out_wrapper()
+def linalg_householder_product(input: Tensor, tau: Tensor) -> Tensor:
+    check(
+        input.ndim >= 2,
+        lambda: "torch.linalg.householder_product: input must have at least 2 dimensions.",
+    )
+    check(
+        input.size(-2) >= input.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-2] must be greater than or equal to input.shape[-1]",
+    )
+    check(
+        input.size(-1) >= tau.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-1] must be greater than or equal to tau.shape[-1]",
+    )
+
+    check(
+        input.ndim - tau.ndim == 1,
+        lambda: (
+            f"torch.linalg.householder_product: Expected tau to have one dimension less than input, "
+            f"but got tau.ndim equal to {tau.ndim} and input.ndim is equal to {input.ndim}"
+        ),
+    )
+    if input.ndim > 2:
+        expected_batch_tau_shape = input.shape[:-2]
+        actual_batch_tau_shape = tau.shape[:-1]
+        check(
+            actual_batch_tau_shape == expected_batch_tau_shape,
+            lambda: (
+                f"torch.linalg.householder_product: Expected batch dimensions of tau to be "
+                f"equal to input.shape[:-2], but got {actual_batch_tau_shape}"
+            ),
+        )
+
+    check(
+        tau.dtype == input.dtype,
+        lambda: (
+            f"torch.linalg.householder_product: tau dtype {tau.dtype}"
+            f" does not match input dtype {input.dtype}"
+        ),
+    )
+    checkSameDevice("torch.linalg.householder_product", tau, input, "tau")
+
+    return torch.empty_strided(
+        size=input.shape,
+        stride=make_contiguous_strides_for(input.shape, row_major=False),
+        dtype=input.dtype,
+        device=input.device,
+    )
+
+
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_inv_ex.default)
 def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
@@ -453,6 +541,27 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 
     infos = A.new_empty(A.shape[:-2], dtype=torch.int32)
     return L, infos
+
+
+@register_meta([aten.linalg_ldl_factor_ex.default, aten.linalg_ldl_factor_ex.out])
+@out_wrapper("LD", "pivots", "info")
+def linalg_ldl_factor_ex_meta(
+    self: Tensor,
+    *,
+    hermitian: bool = False,
+    check_errors: bool = False,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    squareCheckInputs(self, "torch.linalg.ldl_factor_ex")
+    checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex")
+    LD = torch.empty_strided(
+        size=self.shape,
+        stride=make_contiguous_strides_for(self.shape, row_major=False),
+        dtype=self.dtype,
+        device=self.device,
+    )
+    pivots = self.new_empty(self.shape[:-1], dtype=torch.int)
+    info = self.new_empty(self.shape[:-2], dtype=torch.int)
+    return LD, pivots, info
 
 
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
@@ -2676,24 +2785,24 @@ def meta__scaled_dot_product_flash_backward(
     num_heads = query.size(1)
     head_dim = query.size(3)
 
-    Nnz_q = batch_size * max_q
-    Nnz_kv = batch_size * max_k
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
-    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
-    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
-    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
-
-    grad_q = torch.empty_like(query_reshaped)
-    grad_k = torch.empty_like(key_reshaped)
-    grad_v = torch.empty_like(value_reshaped)
-
-    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
-    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
-    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, max_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
     return grad_q, grad_k, grad_v
 
