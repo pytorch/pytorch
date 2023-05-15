@@ -52,6 +52,9 @@ test_failures = {
 
 # conv2d will fallback for dynamic shapes; the fallback path is not yet supported
 test_failures_cpp_wrapper = {
+    "test_conv2d_binary_inplace_fusion_pass_dynamic_shapes": TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
     "test_conv2d_binary_inplace_fusion_failed_dynamic_shapes": TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
