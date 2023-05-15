@@ -887,7 +887,7 @@ class TestDimConstraints(TestCase):
 
         dim_constraints = DimConstraints({}, var_to_val)
         dim_constraints.add(Eq(x / y, 0.256277056277056))
-        with self.assertRaisesRegex(AssertionError, "Ne\(x/y, 296/1155\) is inconsistent!"):
+        with self.assertRaisesRegex(AssertionError, "Ne\\(x/y, 296/1155\\) is inconsistent!"):
             dim_constraints.add(Ne(x / y, 0.256277056277056))
         dim_constraints.solve()
         self.assertEqual(dim_constraints._dynamic_results, set())
