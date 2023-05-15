@@ -1796,6 +1796,7 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
