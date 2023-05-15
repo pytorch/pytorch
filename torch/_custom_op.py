@@ -744,11 +744,11 @@ def derived_types(
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
     if list_base:
-        result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
+        result.append((typing.Tuple[base_type, ...], f"{cpp_type}[]"))
     if optional_base_list:
-        result.append((typing.Sequence[typing.Optional[base_type]], f"{cpp_type}?[]"))  # type: ignore[valid-type]
+        result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
     if optional_list_base:
-        result.append((typing.Optional[typing.Sequence[base_type]], f"{cpp_type}[]?"))  # type: ignore[valid-type]
+        result.append((typing.Optional[typing.Tuple[base_type, ...]], f"{cpp_type}[]?"))
     return result
 
 
