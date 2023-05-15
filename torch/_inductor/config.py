@@ -71,10 +71,7 @@ coordinate_descent_tuning = (
 )
 
 layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
-force_contiguous_inputs = os.environ.get("TORCHINDUCTOR_FORCE_CONTIGUOUS_INPUTS", "0") == "1"
-
-force_mix_layout = os.environ.get("TORCHINDUCTOR_FORCE_MIX_LAYOUT", "0") == "1"
-verify_uniform_layouts = os.environ.get("TORCHINDUCTOR_VERIFY_UNIFORM_LAYOUTS", "0") == "1"
+warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
@@ -236,6 +233,7 @@ class triton:
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     # cudagraph_trees = not is_fbcode()
+    # TODO: I'll revert the change here
     cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "0") == "1"
 
     # assertions not on the fast path, steady state

@@ -53,6 +53,7 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
+
 def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
@@ -89,6 +90,7 @@ def may_get_constant_buffer_dtype(constant_buffer):
 def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
+
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -134,7 +136,6 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    ITER = 0
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -146,61 +147,7 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
-        with open(f"/tmp/graphlowering_{self.ITER}.fx", "w") as f:
-            f.write(gm.print_readable(False))
-        GraphLowering.ITER += 1
-
-        if GraphLowering.ITER == -1:
-            from fxana import analyze, print_upstream, print_downstream, extract_conv
-            # analyze(gm)
-            # print_upstream(gm.graph, "gt_142")
-            extract_conv(gm)
-            # breakpoint()
-
-        nconv = len([ n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default])
-
-        # Follow models are skipped due to this:
-        # jx_nest_base
-        # volo_d1_224
-        if nconv > 0 and len(list(gm.graph.nodes)) >= 300 * nconv:
-            print("ONLY A FEW CONV, SKIP LAYOUT OPT")
-            config.layout_opt = False
-
-        # Channels last layout can dramatically hurt conv perf. E.g.
-        # Conv with arguments like {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 2}
-        # slows down 31x using channels last..
-
-        # But a lot of timm models use grouped convolution with
-        # in-channel size == 1, for those grouped convolution, channels last
-        # still helps a lot.
-        # E.g.
-        # Conv with arguments {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 58}
-        # get 1.86x speedup with channels last layout.
-        #
-        # The following heuristics skip using channels-last if the model contains
-        # grouped convolution with in-channels > 1.
-        if any(n.target == torch.ops.aten.convolution.default and n.args[-1] > 1 and n.args[1].meta['val'].size(1) > 1 for n in gm.graph.nodes):
-            print("FOUND GROUPED CONVOLUTION with >1 in_channels!")
-            config.layout_opt = False
-
-        # For some models that contain convolution with larger in-channel than out-channel, applying
-        # channels last hurts performance.
-        # Following models are skipped due to this:
-        # - pytorch_unet
-        # - phlippe_densenet (roughly neutral)
-        # - Background_Matting (1.22x -> 0.821x)
-        # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(n.target == torch.ops.aten.convolution.default and n.args[1].meta['val'].size(0) * 2 <= n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in gm.graph.nodes):
-            print("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
-            config.layout_opt = False
-
-        nconv = len([n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default])
-        # Following models are skipped due to this:
-        # - functorch_maml_omniglot
-        if nconv > 0 and all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default):
-            print("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
-            config.layout_opt = False
-
+        self.decide_layout_opt()
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
@@ -235,6 +182,62 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = None
         self.nodes_prefer_channels_last = self.find_nodes_prefer_channels_last() if config.layout_opt else set()
         self._warned_fallback = {"aten.convolution_backward"}
+
+    def decide_layout_opt(self):
+        if not config.layout_opt:
+            return
+
+        gm = self.module
+        conv_nodes = [n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default]
+        nconv = len(conv_nodes)
+
+        if nconv == 0:
+            return
+
+        # Followering models are skipped due to this:
+        # jx_nest_base
+        # volo_d1_224
+        if len(list(gm.graph.nodes)) >= 300 * nconv:
+            log.debug("ONLY A FEW CONV, SKIP LAYOUT OPT")
+            config.layout_opt = False
+            return
+
+        # Channels last layout can dramatically hurt grouped conv perf. E.g.
+        # Conv with arguments like {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 2}
+        # slows down 31x using channels last..
+
+        # But a lot of timm models use depthwise separable convolution which will
+        # result in grouped convolution with in-channel size == 1.
+        # For those grouped convolution, channels last still helps a lot.
+        # E.g.
+        # Conv with arguments {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 58}
+        # get 1.86x speedup with channels last layout.
+        #
+        # The following heuristics skip using channels-last if the model contains
+        # grouped convolution with in-channels > 1.
+        if any(n.args[-1] > 1 and n.args[1].meta['val'].size(1) > 1 for n in conv_nodes):
+            log.debug("FOUND GROUPED CONVOLUTION with >1 in_channels!")
+            config.layout_opt = False
+            return
+
+        # For some models that contain convolution with larger in-channel than out-channel, applying
+        # channels last hurts performance.
+        # Following models are skipped due to this:
+        # - pytorch_unet
+        # - phlippe_densenet (slightly worse)
+        # - Background_Matting (1.22x -> 0.821x)
+        # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
+        if any(n.args[1].meta['val'].size(0) * 2 <= n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in conv_nodes):
+            log.debug("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
+            config.layout_opt = False
+            return
+
+        # Following models are skipped due to this:
+        # - functorch_maml_omniglot
+        if all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in conv_nodes):
+            log.debug("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
+            config.layout_opt = False
+            return
 
     def find_nodes_prefer_channels_last(self):
         """
@@ -616,9 +619,8 @@ class GraphLowering(torch.fx.Interpreter):
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
 
-                    if len(result.get_size()) == 4 and (n in self.nodes_prefer_channels_last):
-                        if not (config.force_mix_layout and n.target == torch.ops.aten.convolution.default):
-                            stride_order = ir.NHWC_STRIDE_ORDER
+                    if len(result.get_size()) == 4 and n in self.nodes_prefer_channels_last:
+                        stride_order = ir.NHWC_STRIDE_ORDER
 
                     result = ir.ExternKernel.require_stride_order(
                         result, stride_order
@@ -813,6 +815,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        # TODO: will revert this line before merge
         if config.benchmark_kernel or True:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
