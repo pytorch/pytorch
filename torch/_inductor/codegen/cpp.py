@@ -985,8 +985,10 @@ class CppOverrides(OpOverrides):
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
         result = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
-        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        scalar_zero = f"decltype({x})(0)"
+        scalar_one = f"decltype({x})(1)"
+        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
+        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
