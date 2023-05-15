@@ -34,6 +34,11 @@ bool input_requires_grad(sdp_params params) {
   return any_inputs_require_grad && gradmode_enabled;
 }
 
+bool has_for_nested_inputs(sdp_params params) {
+  return (params.query.is_nested() || params.key.is_nested() ||
+          params.value.is_nested());
+}
+
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
@@ -49,9 +54,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
   // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
 
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    // See check_for_nested_inputs for details
+  if (has_for_nested_inputs(params)) {
     return efficient_first;
   }
   if (params.query.dim() != 4) {
@@ -119,11 +122,6 @@ bool check_for_non_zero_dropout(sdp_params params, bool debug) {
     return false;
   }
   return true;
-}
-
-bool check_for_nested_inputs(sdp_params params) {
-  return (params.query.is_nested() || params.key.is_nested() ||
-          params.value.is_nested());
 }
 
 bool try_broadcast_param_size(
@@ -195,7 +193,7 @@ bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
 
 bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (!check_for_nested_inputs(params)) {
+  if (!has_for_nested_inputs(params)) {
     return true;
   }
 
@@ -242,7 +240,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
 
 bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (check_for_nested_inputs(params) && input_requires_grad(params)) {
+  if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
       TORCH_WARN(
           "Memory efficient attention currently doesn't support training with NT inputs.");
@@ -303,7 +301,7 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto k_batch_size = params.key.sym_size(0);
   auto v_batch_size = params.value.sym_size(0);
 
-  bool has_nested_input = check_for_nested_inputs(params);
+  bool has_nested_input = has_for_nested_inputs(params);
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
