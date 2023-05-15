@@ -100,7 +100,8 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   // interpreter than the current one, create a new StorageImpl that points to
   // the same data and then create the Python storage from that.
   // NOTE: This is only supposed to happen in MultiPy
-  if (pyobj_slot->has_pyobj() && !pyobj_slot->check_interpreter(getPyInterpreter())) {
+  if (pyobj_slot->has_pyobj() &&
+      !pyobj_slot->check_interpreter(getPyInterpreter())) {
     return THPStorage_NewWithStorage(
         THPStorageClass,
         c10::newStorageImplFromRefcountedDataPtr(storage),
