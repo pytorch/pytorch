@@ -465,6 +465,8 @@ elseif(NOT TARGET cpuinfo)
   # We build static version of cpuinfo but link
   # them into a shared library for Caffe2, so they need PIC.
   set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+  # Need to set this to avoid conflict with XNNPACK's clog external project
+  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
 endif()
 list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
