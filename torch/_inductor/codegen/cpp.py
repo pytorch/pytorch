@@ -663,20 +663,26 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::Vectorized<int>(static_cast<int>({cexpr(V.kernel.rename_indexing(expr))}))"
 
 
+def cast_to_res_dtype(exp):
+    opt_ctx: OptimizationContext = get_current_node_opt_ctx()
+    assert opt_ctx
+    return f"static_cast<{DTYPE_TO_CPP[opt_ctx.dtype]}>({exp})"
+
+
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
     def add(a, b):
-        return f"decltype({a})({a} + {b})"
+        return cast_to_res_dtype(f"{a} + {b}")
 
     @staticmethod
     def sub(a, b):
-        return f"decltype({a})({a} - {b})"
+        return cast_to_res_dtype(f"{a} - {b}")
 
     @staticmethod
     def mul(a, b):
-        return f"decltype({a})({a} * {b})"
+        return cast_to_res_dtype(f"{a} * {b}")
 
     @staticmethod
     def to_dtype(x, dtype):
