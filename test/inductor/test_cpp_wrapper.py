@@ -32,19 +32,7 @@ RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
 
 
 class CppWrapperTemplate:
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def test_conv2d_binary_inplace_fusion_pass(self):
-        test_mkldnn_pattern_matcher.TestPaternMatcher().test_conv2d_binary_inplace_fusion_pass(
-            ["op_convolution_pointwise_binary_.call"],
-            ["op_convolution_pointwise_binary.call"],
-        )
-
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
-    def test_conv2d_binary_inplace_fusion_failed(self):
-        test_mkldnn_pattern_matcher.TestPaternMatcher().test_conv2d_binary_inplace_fusion_failed(
-            ["op_convolution_pointwise_binary.call"],
-            ["op_convolution_pointwise_binary_.call"],
-        )
+    pass
 
 
 class CudaWrapperTemplate:
@@ -59,7 +47,7 @@ class TestCudaWrapper(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition=True, slow=False):
+def make_test_case(name, device, tests, condition=True, slow=False, test_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -70,7 +58,9 @@ def make_test_case(name, device, tests, condition=True, slow=False):
             func = getattr(tests, test_name)
             assert callable(func), "not a callable"
             func = slowTest(func) if slow else func
-            code = test_torchinductor.run_and_get_cpp_code(func)
+            code = test_torchinductor.run_and_get_cpp_code(
+                func, *test_inputs if test_inputs is not None else []
+            )
             self.assertEqual("load_inline" in code, True)
         finally:
             tests.tearDown()
@@ -93,13 +83,32 @@ if RUN_CPU:
         tests: TorchTestCase = test_torchinductor.CpuTests()
         condition: bool = True
         slow: bool = False
+        test_inputs: list = None
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_inputs=[
+                ["op_convolution_pointwise_binary_.call"],
+                ["op_convolution_pointwise_binary.call"],
+            ],
+        ),
         BaseTest("test_cat"),  # alias
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_failed",
+            "",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_inputs=[
+                ["op_convolution_pointwise_binary.call"],
+                ["op_convolution_pointwise_binary_.call"],
+            ],
+        ),
         BaseTest(
             "test_conv2d_unary",
             "",
@@ -131,7 +140,14 @@ if RUN_CPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
     ]:
-        make_test_case(item.name, item.device, item.tests, item.condition, item.slow)
+        make_test_case(
+            item.name,
+            item.device,
+            item.tests,
+            item.condition,
+            item.slow,
+            item.test_inputs,
+        )
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
 
