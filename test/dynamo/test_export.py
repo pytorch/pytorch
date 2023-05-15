@@ -1,4 +1,8 @@
 # Owner(s): ["module: dynamo"]
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_export_persist_assert)
+"""
 import functools
 import inspect
 import math
@@ -15,6 +19,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
+from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
@@ -178,6 +183,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(inp)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_with_shallow_list_copy_wo_side_effects(self):
+        def f(x):
+            y = x.copy()
+            return y[0] + y[1]
+
+        inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
+        gm, _ = torch._dynamo.export(f, inp, aten_graph=True, tracing_mode="symbolic")
+        self.assertTrue(torch._dynamo.utils.same(gm(inp), f(inp)))
+
+    def test_export_with_shallow_list_copy_with_side_effects(self):
+        def f(x):
+            y = x.copy()
+            x[0] = x[1]
+            y.append(torch.tensor([[100]]))
+            return x[0] + x[1], y[0] + y[1], y[2]
+
+        inp = [torch.tensor([1.3, 3.77, 0.1]), torch.tensor([8.7, 6.23, 9.9])]
+        gm, _ = torch._dynamo.export(f, inp, aten_graph=True, tracing_mode="symbolic")
+        res = gm(inp)
+        ref = f(inp)
+        self.assertTrue(torch._dynamo.utils.same(res, ref))
+        self.assertEqual(res[0], res[1])
 
     def test_export_mismatched_out_2(self):
         def func(x):
@@ -1672,6 +1700,29 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             dynamo_result = out_graph(pred, x)
             self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
+    def test_export_with_cond_with_closed_function(self):
+        def hello(x):
+            return x + 1
+
+        def hi(x):
+            return x + 2
+
+        def foo(pred, x):
+            def true_fn(x):
+                return hello(x)
+
+            def false_fn(x):
+                return hi(x)
+
+            return cond(pred, true_fn, false_fn, [x])
+
+        x = torch.randn(5)
+        pred = x[0] > 0
+        real_result = foo(pred, x)
+        out_graph, _ = torch._dynamo.export(foo, pred, x)
+        dynamo_result = out_graph(pred, x)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
     def test_export_with_cond_dynamic_shape_pred(self):
         from functorch.experimental.control_flow import cond
 
@@ -1839,6 +1890,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
+
+    def test_pre_autograd_simple(self):
+        def f(x):
+            y = torch.ones_like(x)
+            return torch.matmul(x, y)
+
+        gm, _ = torch._dynamo.export(
+            f,
+            torch.randn(5, 5),
+            aten_graph=True,
+            pre_autograd=True,
+            tracing_mode="fake",
+        )
+
+        inp = torch.randn(6, 6)
+        self.assertEqual(gm(inp), f(inp))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    ones_like_default = torch.ops.aten.ones_like.default(arg0, pin_memory = False)
+    matmul_default = torch.ops.aten.matmul.default(arg0, ones_like_default);  arg0 = ones_like_default = None
+    return pytree.tree_unflatten([matmul_default], self._out_spec)""",
+        )
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
@@ -2183,7 +2259,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_no_raise_on_relationship(self):
+    def test_export_raise_on_relationship(self):
         y = torch.randn([3, 3, 3])
 
         def my_dyn_fn(a, b, c):
@@ -2194,6 +2270,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
         constraints = [dynamic_dim(y, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
+        constraints += [
+            dynamic_dim(y, 1) == dynamic_dim(y, 0),
+            dynamic_dim(y, 2) == dynamic_dim(y, 0),
+        ]
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=constraints)
 
     def test_export_no_raise(self):
@@ -2207,7 +2289,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_multi_dynamic_dim_safe_relationship(self):
+    def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
         z = torch.randn([3, 3, 3])
@@ -2219,7 +2301,105 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_scalar(self):
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        self.assertEqual(
+            gm.meta["input_shape_constraints"],
+            [c.serializable_spec for c in constraints],
+        )
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
+    @torch._dynamo.config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_tensor(self):
+        def f(x):
+            b = x.nonzero()
+            constrain_as_value(b.shape[0], min=2, max=5)
+            return b
+
+        y = torch.tensor([8, 8, 6])
+        constraints = []
+        gm, _ = torch._dynamo.export(
+            f,
+            y,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        preserved = False
+        for _, vr in gm.meta["inline_constraints"].items():
+            # Should have the constraint with min=2, max=5
+            if vr.lower == 2 and vr.upper == 5:
+                preserved = True
+        self.assertTrue(preserved)
+
+    @config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_exported_graph_serialization(self):
+        import io
+
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            return torch.empty((b, y.shape[0]))
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = [x, y]
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        gm, _ = torch._dynamo.export(
+            f,
+            *example_inputs,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
+
+        # Ensure the exported graph module with metadata is serializable,
+        # metadata won't be saved in the serialized module
+        buffer = io.BytesIO()
+        torch.save(gm, buffer)
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2253,6 +2433,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.export(my_dyn_fn, x, y, z)
         constraints = [dynamic_dim(x, 0), dynamic_dim(x, 1), dynamic_dim(x, 2)]
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
+        constraints.append(dynamic_dim(z, 0) == dynamic_dim(x, 0))
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     def test_export_dynamic_dim_raise_on_compound_range_constraint(self):
@@ -2461,6 +2644,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ):
             gm, _ = torch._dynamo.export(f, torch.randn(5, 6), aten_graph=True)
 
+    @config.patch(assume_static_by_default=False)
+    def test_export_persist_assert(self):
+        def f(x):
+            assert x.shape[0] > 4, "Shape must be more than 4"
+            return x.cos() + x.sin()
+
+        gm, guard = torch._dynamo.export(
+            f, torch.randn(5, 4, 6), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        def has_aten_op(gm, op):
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    return True
+            return False
+
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
+
+        with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
+            gm(torch.randn(3, 4, 5))
+
     def test_access_class_method_from_user_class(self):
         class A:
             @classmethod
@@ -2482,6 +2690,113 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @config.patch(dynamic_shapes=True)
+    def test_functionalize(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 2))
+
+            def forward(self, x):
+                x.add_(2)
+                return x.sum() + self.buffer1.sum()
+
+        example_inputs = (torch.ones(1, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            Foo(),
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            functionalize=True,
+        )
+
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.add_.Tensor:
+                count += 1
+        self.assertEqual(count, 0)
+        test_inp = (torch.ones(1, 2, 3),)
+        test_inp_v2 = (torch.ones(1, 2, 3),)
+        self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
+
+    @config.patch(dynamic_shapes=True)
+    def test_not_functionalize(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 2))
+
+            def forward(self, x):
+                x.add_(2)
+                return x.sum() + self.buffer1.sum()
+
+        example_inputs = (torch.ones(1, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            Foo(),
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            functionalize=False,
+        )
+        count = 0
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.add_.Tensor:
+                count += 1
+        self.assertEqual(count, 1)
+        test_inp = (torch.ones(1, 2, 3),)
+        test_inp_v2 = (torch.ones(1, 2, 3),)
+        self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
+
+    @config.patch(dynamic_shapes=True, assume_static_by_default=False)
+    def test_functionalize_cond(self):
+        def foo(x):
+            def true_true_fn(x):
+                return x.sum() + 6
+
+            def true_false_fn(x):
+                return x.sum() + 9
+
+            def true_fn(x):
+                return cond(x.shape[0] > 6, true_true_fn, true_false_fn, [x])
+
+            def false_fn(x):
+                return x.sum() - 1
+
+            return cond(x.shape[0] > 5, true_fn, false_fn, [x])
+
+        example_inputs = (torch.ones(5, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            foo,
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            functionalize=True,
+        )
+        self.assertEqual(gm(torch.ones(7, 2, 3)), foo(torch.ones(7, 2, 3)))
+
+    @config.patch(dynamic_shapes=True)
+    def test_functionalize_simple(self):
+        def foo(x):
+            def true_fn(x):
+                return x.sum() + 1
+
+            def false_fn(x):
+                return x.sum() - 1
+
+            return cond(x.shape[0] > 5, true_fn, false_fn, [x])
+
+        example_inputs = (torch.ones(5, 2, 3),)
+        gm, _ = torch._dynamo.export(
+            foo,
+            *example_inputs,
+            aten_graph=True,
+            tracing_mode="symbolic",
+            functionalize=True,
+        )
+        self.assertEqual(gm.true_graph_0(torch.ones(6, 4)), torch.ones(6, 4).sum() + 1)
+        self.assertEqual(gm.false_graph_0(torch.ones(6, 4)), torch.ones(6, 4).sum() - 1)
+
+    @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):
         def f(x):
             return x[: round(x.shape[0] / 2)]
@@ -2738,6 +3053,18 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 *example_inputs,
                 aten_graph=True,
             )
+
+    def test_byte_tensor_does_not_crash(self):
+        # See https://github.com/pytorch/pytorch/issues/100455
+        def func(text):
+            tensor = torch.ByteTensor(list(bytes(text, "utf8")))
+            return tensor + tensor
+
+        text = "".join(chr(a % 90 + 40) for a in range(111))
+        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
+        for i in [99, 100]:
+            input = text[:i]
+            opt_func(input)
 
     def test_export_defaults_ok(self):
         class DynamicSliceExportMod(torch.nn.Module):

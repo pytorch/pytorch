@@ -27,6 +27,7 @@ from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
+from torch._C import ExcludeDispatchKeyGuard, DispatchKeySet, DispatchKey
 
 import functorch
 from functorch import (
@@ -3362,6 +3363,58 @@ class TestComposability(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
             jvp(g, (x,), (t,))
+
+    def test_can_use_functionalize_when_key_is_excluded(self, device):
+        def f(x):
+            y = x.clone()
+            y.sin_()
+            return y
+
+        x = torch.randn([], device=device)
+        expected = f(x)
+
+        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
+        try:
+            gm = make_fx(functorch.functionalize(f))(x)
+            self.assertTrue('sin_' not in gm.code)
+            self.assertEqual(gm(x), expected)
+
+            local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
+            self.assertTrue(local_exclude_set.has(DispatchKey.Functionalize))
+        finally:
+            del guard
+
+    def test_can_use_vmap_when_key_is_excluded(self, device):
+        def f(x):
+            return x.sum(0)
+
+        x = torch.randn(3, device=device)
+        expected = vmap(f)(x)
+
+        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchBatched))
+        try:
+            result = vmap(f)(x)
+            self.assertEqual(result, expected)
+            local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
+            self.assertTrue(local_exclude_set.has(DispatchKey.FuncTorchBatched))
+        finally:
+            del guard
+
+    def test_can_use_grad_when_key_is_excluded(self, device):
+        def f(x):
+            return x.sin()
+
+        x = torch.randn([], device=device)
+        expected = grad(f)(x)
+
+        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Autograd))
+        try:
+            result = grad(f)(x)
+            self.assertEqual(result, expected)
+            local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
+            self.assertTrue(local_exclude_set.has(DispatchKey.Autograd))
+        finally:
+            del guard
 
 
 class TestMakeFunctional(TestCase):

@@ -2425,10 +2425,34 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _ = m.state_dict()
         self.assertTrue(called)
 
-    def test_register_state_dict_pre_hook(self):
+    def _test_register_state_dict_pre_hook(self, model, submodule):
         _state_dict_prefix = "foo."
         state_dict_pre_hook_count = 0
+        keep_var_setting = False
 
+        def my_state_dict_pre_hook(module, prefix, keep_vars):
+            self.assertEqual(keep_vars, keep_var_setting)
+            nonlocal state_dict_pre_hook_count
+            state_dict_pre_hook_count += 1
+            self.assertTrue(prefix.startswith(_state_dict_prefix))
+
+        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        # Test to ensure submodules run the hook as well.
+        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
+
+        def check_results(model):
+            nonlocal state_dict_pre_hook_count, keep_var_setting
+            for keep_var_setting in [True, False]:
+                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+                self.assertEqual(2, state_dict_pre_hook_count)
+                state_dict_pre_hook_count = 0
+        # Test state dict works as expected after model construction
+        check_results(model)
+        # Test state dict works as expected after forward
+        model(torch.ones(10, 3))
+        check_results(model)
+
+    def test_register_state_dict_pre_hook(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2437,21 +2461,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             def forward(self, x):
                 return self.a(x)
 
-        def my_state_dict_pre_hook(module, prefix, keep_vars):
-            nonlocal keep_var_setting
-            self.assertEqual(keep_vars, keep_var_setting)
-            nonlocal state_dict_pre_hook_count
-            state_dict_pre_hook_count += 1
-            self.assertTrue(prefix.startswith(_state_dict_prefix))
-
         mod = MyModule()
-        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        # Test to ensure submodules run the hook as well.
-        mod.a.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        for keep_var_setting in [True, False]:
-            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-            self.assertEqual(2, state_dict_pre_hook_count)
-            state_dict_pre_hook_count = 0
+        self._test_register_state_dict_pre_hook(mod, mod.a)
+
+    def test_register_state_dict_pre_hook_lazy_module(self):
+        class MyLazyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LazyLinear(8)
+                self.layer2 = nn.LazyLinear(5)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x))
+
+        mod = MyLazyModule()
+        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -6414,8 +6438,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(y, y_ref)
 
 
-    def test_channel_shuffle_return_self(self):
-        # gh-76616: nn.ChannelShuffle will return self with an  empty input tensor
+    def test_channel_shuffle_return_alias_of_self(self):
+        # gh-76616: nn.ChannelShuffle will return alias of self with an empty input tensor
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
@@ -9649,14 +9673,39 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
-    def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
+    @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
+    @parametrize_test("non_contig", [False, "sliced", "restrided"])
+    @parametrize_test("batch_size", [1, 5])
+    def test_upsamplingBiLinear2d_consistency(
+        self,
+        device,
+        memory_format,
+        antialias,
+        align_corners,
+        num_channels,
+        output_size,
+        check_as_unsqueezed_3d_tensor,
+        non_contig,
+        batch_size,
+    ):
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
         mode = "bilinear"
-        # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
-        input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        # Check if Max Abs Error between resized input_uint8 and resized input_float is
+        # smaller than a tolerated value, e.g. 1.0
+        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+
+        if non_contig == "sliced":
+            input_ui8 = input_ui8[:, :, 10:-10, 10:-10]
+        elif non_contig == "restrided":
+            input_ui8 = input_ui8[:, :, ::2, ::2]
+
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor:
+            input_ui8 = input_ui8[0, ...]
+            input_ui8 = input_ui8[None, ...]
+
         input_f32 = input_ui8.float()
 
         output_f32 = F.interpolate(
@@ -9665,6 +9714,19 @@ class TestNNDeviceType(NNTestCase):
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
+
+        if non_contig is False:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
+
+        # FIXME if-clause shows the current behaviour which is definitely unexpected.
+        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
+        # See for more details: https://github.com/pytorch/pytorch/pull/100373
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
+            self.assertTrue(output_ui8.is_contiguous())
+            self.assertTrue(output_f32.is_contiguous())
+        else:
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
         mae_tol = 0.5
         max_abs_err_tol = 1.0
@@ -10389,6 +10451,40 @@ class TestNNDeviceType(NNTestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
+
+    @skipMeta
+    @dtypes(torch.float32, torch.bfloat16)
+    @onlyCPU
+    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+        batch = 10
+        seq_len = 12
+        input = 3
+        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        import copy
+        Net_clone = copy.deepcopy(Net)
+        x = torch.rand(batch, seq_len, input)
+        x1 = x.clone().requires_grad_(True)
+        x2 = x.clone().requires_grad_(True)
+
+        torch._C._set_mkldnn_enabled(False)
+        out1, _ = Net(x1)
+        der_out1 = torch.autograd.grad(out1, x1,
+                                       grad_outputs=torch.ones_like(out1),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss1 = der_out1.sum()
+        loss1.backward(retain_graph=True)
+
+        torch._C._set_mkldnn_enabled(True)
+        out2, _ = Net(x2)
+        der_out2 = torch.autograd.grad(out2, x2,
+                                       grad_outputs=torch.ones_like(out2),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss2 = der_out2.sum()
+        loss2.backward(retain_graph=True)
+        assert torch.allclose(der_out1, der_out2)
+        assert torch.allclose(x1.grad, x2.grad)
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):
@@ -12279,6 +12375,7 @@ class TestNNDeviceType(NNTestCase):
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12306,6 +12403,7 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):

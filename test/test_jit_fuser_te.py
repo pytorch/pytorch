@@ -1595,7 +1595,7 @@ class TestTEFuser(JitTestCase):
                 t = torch.jit.trace(fn, (x, y))
                 t(x, y)
                 self.assertEqual(ref, t(x, y))
-                if not str(size) in skip_is_fused_check_sizes:
+                if str(size) not in skip_is_fused_check_sizes:
                     self.assertAllFused(t.graph_for(x, y))
             except Exception as e:
                 raise RuntimeError(

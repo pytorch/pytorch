@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from weakref import ReferenceType
 
 import torch
+import torch._custom_op
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -414,10 +415,6 @@ def unsupported_complex_op(op):
     op_name = op.name()
     if "fft" in op_name:
         return True
-    if "_linalg_svd" in op_name:
-        return True
-    if op is torch.ops.prims.svd.default:
-        return True
     return False
 
 
@@ -445,10 +442,18 @@ def _sparse_coo_tensor_with_dims_and_tensors(fake_mode, func, *args, **kwargs):
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
-    and func not in [aten.index.Tensor, aten.nonzero.default]
+    and func
+    not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
 )
 def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+
+@register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
+def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
+    if output_size is None:
+        raise DynamicOutputShapeException(func)
+    return repeats.new_empty(output_size)
 
 
 @register_op_impl(lambda func: func is torch.ops.aten._local_scalar_dense.default)
@@ -1068,7 +1073,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
-        log.info("create_mode 0x%x", id(self))
+        log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1132,7 +1137,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
-            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
+            any(i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors)
             or len(flat_symints) > 0
         )
 
@@ -1283,6 +1288,16 @@ class FakeTensorMode(TorchDispatchMode):
             with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
+        # Users can register FakeTensor rules for custom operators
+        # Call them if they exist.
+        if func.name() in torch._custom_op.global_registry:
+            custom_op = torch._custom_op.global_registry[func.name()]
+            if custom_op is not None and custom_op._has_impl("abstract"):
+                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
+                    return result
+
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
@@ -1323,7 +1338,7 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any([check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs))])
+        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
