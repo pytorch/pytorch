@@ -1023,7 +1023,7 @@ def export(
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
