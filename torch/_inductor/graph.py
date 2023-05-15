@@ -179,6 +179,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
+        self.optional_variable = {
+            "optional_scalar": False,
+            "optional_string": False,
+            "optional_list": False,
+        }
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:

@@ -112,6 +112,13 @@ SUPPORTED_FALLBACK_CPP_WRAPPER = [
 ]
 
 
+OPTIONAL_DEFINITION = {
+    "optional_scalar": "c10::optional<at::Scalar> optional_scalar;",
+    "optional_string": "c10::optional<c10::string_view> optional_string;",
+    "optional_list": "torch::List<c10::optional<at::Scalar>> optional_list;",
+}
+
+
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
@@ -895,6 +902,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
             self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
+
+            for optional_name, optional_needed in V.graph.optional_variable.items():
+                if optional_needed:
+                    self.wrapper_call.splice(
+                        f"""
+                        {OPTIONAL_DEFINITION[optional_name]}
+                        """
+                    )
 
     def generate(self):
         self.write_wrapper_decl()
