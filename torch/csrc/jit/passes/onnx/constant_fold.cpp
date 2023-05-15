@@ -491,7 +491,6 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // move it to the device of the input device
     auto indices_val = node->inputs()[1];
     if(indices_val->node()->kind() == onnx::Constant) {
-      std::cout << "I am here \n";
       if (inputTensorValues[0].device() != indices.device()) {
         indices = indices.to(inputTensorValues[0].device());
       }
