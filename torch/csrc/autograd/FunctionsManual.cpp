@@ -6244,8 +6244,8 @@ Tensor linalg_lu_backward(
 
   // L.shape == (..., m, k)
   // U.shape == (..., k, n)
-  auto m = L.size(-2);
-  auto n = U.size(-1);
+  auto m = L.sym_size(-2);
+  auto n = U.sym_size(-1);
   auto k = std::min(m, n);
 
   if (m == n) {
@@ -6273,10 +6273,10 @@ Tensor linalg_lu_backward(
     // A1_grad = P L^{-H} [U1_grad + (L^H L_grad o 1_L - U_grad U^H o 1_U)
     // U1^{-H}) U^{-H}] A2_grad = P L^{-H}  U2_grad
     const auto get_U1 = [n, k](const Tensor& U) {
-      return n == k ? U : U.narrow(-1, 0, k);
+      return n == k ? U : U.narrow_symint(-1, 0, k);
     };
     const auto get_U2 = [n, k](const Tensor& U) {
-      return U.narrow(-1, k, n - k);
+      return U.narrow_symint(-1, k, n - k);
     };
 
     auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad) : Tensor{};
@@ -6315,10 +6315,10 @@ Tensor linalg_lu_backward(
     // 1_L)]U^{-H} A2_grad = P  L2_grad U^{-H}
 
     const auto get_L1 = [m, k](const Tensor& L) {
-      return m == k ? L : L.narrow(-2, 0, k);
+      return m == k ? L : L.narrow_symint(-2, 0, k);
     };
     const auto get_L2 = [m, k](const Tensor& L) {
-      return L.narrow(-2, k, m - k);
+      return L.narrow_symint(-2, k, m - k);
     };
 
     auto A_grad = U_grad.defined() ? U_grad.matmul(U.mH()) : Tensor{};
