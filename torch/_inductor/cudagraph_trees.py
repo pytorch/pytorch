@@ -151,6 +151,16 @@ def clear_cublas_manager():
 
 
 @contextlib.contextmanager
+def disable_conv_cache_emptying():
+    prev = torch._C._cuda_get_conv_benchmark_empty_cache()
+    torch._C._cudnn_set_conv_benchmark_empty_cache(False)
+    try:
+        yield
+    finally:
+        torch._C._cudnn_set_conv_benchmark_empty_cache(prev)
+
+
+@contextlib.contextmanager
 def enable_history_recording():
     "Turns on history recording in the CUDA Caching Allocator"
     enabled = torch._C._cuda_isHistoryEnabled()
@@ -454,10 +464,6 @@ class StorageWeakRefWrapper:
             return f"StorageWeakRefWrapper to {self.data_ptr()}; alive"
 
 
-def is_cuda_tensor(x):
-    return isinstance(x, torch.Tensor) and x.device.type == "cuda"
-
-
 @contextlib.contextmanager
 def _use_cuda_memory_pool_manager(device, mem_pool, stream):
     """
@@ -559,7 +565,7 @@ class CUDAWarmupNode:
 
         with torch.cuda.device(
             self.device_index
-        ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
+        ), disable_conv_cache_emptying(), clear_cublas_manager(), _use_cuda_memory_pool_manager(
             self.device_index, self.cuda_graphs_pool, self.stream
         ), get_history_recording():
             out = self.wrapped_function.model(new_inputs)
@@ -569,9 +575,11 @@ class CUDAWarmupNode:
 
         assert len(new_inputs) == 0
 
+        # sdpa returns cpu tensors when not recording cuda graph
         def add_ref(o):
             return (
                 o is not None
+                and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
             )
 
@@ -1046,6 +1054,11 @@ class CUDAGraphNode:
             if o is None:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
+
+            check(
+                o.is_cuda,
+                lambda: f"Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}",
+            ),
 
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None

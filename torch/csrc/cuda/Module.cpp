@@ -2,6 +2,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -916,6 +917,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_get_conv_benchmark_empty_cache", []() {
+    return at::native::_cudnn_get_conv_benchmark_empty_cache();
+  });
+
+  m.def("_cudnn_set_conv_benchmark_empty_cache", [](bool enable) {
+    return at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
   });
 }
 
