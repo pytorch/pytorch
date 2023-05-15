@@ -597,7 +597,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
                                                                  deterministic, allow_tf32);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
+      c10::cuda::CUDACachingAllocator::emptyCache();
+    }
     try_plans(plans, key, handle, x, y, w);
   }
 }

@@ -48,18 +48,8 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import (
-    _ext_chunk_tensor,
-    _ext_pre_load_state_dict_transform,
-    _extensions as _user_extensions,
-)
-from ._unshard_param_utils import (
-    _deregister_orig_params,
-    _register_orig_params,
-    _unshard_fsdp_state_params,
-    FLAT_PARAM,
-)
-from .flat_param import FlatParamHandle
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -156,6 +146,12 @@ def _common_unshard_pre_state_dict_hook(
     Performs the pre-state_dict tasks shared by all state_dict types that require
     ``_unshard_fsdp_state_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
+    # For composable `fully_shard`, it does not need to unshard parameters for `NO_SHARD` cases.
+    if (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        return
     _enter_unshard_params_ctx(
         module,
         fsdp_state,
@@ -182,7 +178,11 @@ def _common_unshard_post_state_dict_hook(
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
     # Return early for trivial cases
     if not state_dict or not _has_fsdp_params(fsdp_state, module):
-        _exit_unshard_params_ctx(module, fsdp_state)
+        if not (
+            _is_composable(fsdp_state)
+            and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+        ):
+            _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
     # If a rank does not have unsharded parameters(when `rank0_only=True`
@@ -225,7 +225,12 @@ def _common_unshard_post_state_dict_hook(
         )
 
         param_hook(state_dict, prefix, fqn)
-    _exit_unshard_params_ctx(module, fsdp_state)
+
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
     cpu_device = torch.device("cpu")
     buffer_clean_fqns = []
@@ -345,7 +350,11 @@ def _full_pre_load_state_dict_hook(
     prefix: str,
 ) -> None:
     _lazy_init(fsdp_state, module)
-    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
     # Add FSDP_PREFIX only for wrapper-based FSDP.
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
@@ -354,7 +363,11 @@ def _full_pre_load_state_dict_hook(
 def _full_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    _exit_unshard_params_ctx(module, fsdp_state)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
 
 def _local_pre_state_dict_hook(
@@ -544,8 +557,8 @@ def _sharded_post_state_dict_hook(
 def _sharded_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    if fsdp_state._use_orig_params:
-        _register_orig_params(module, fsdp_state)
+    if _has_fsdp_params(fsdp_state, module):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
 
 @no_type_check
@@ -560,7 +573,8 @@ def _sharded_pre_load_state_dict_hook(
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
     _lazy_init(fsdp_state, module)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
     if not _has_fsdp_params(fsdp_state, module):
         return
 
@@ -578,14 +592,14 @@ def _sharded_pre_load_state_dict_hook(
     loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
-        fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        if not _is_composable(fsdp_state):
+            fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
+        else:
+            fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
-        if fqn in shared_param_fqns:
-            # This shared parameter does not own the storage, so there is no
-            # need to flatten it into the `FlatParameter`
-            continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
+
         loaded_shapes.append(param.size())
         assert len(shards) < 2, (
             "Expects 0 or 1 shard per rank "
@@ -612,38 +626,9 @@ def _sharded_pre_load_state_dict_hook(
             tensor, local_tensor, group=fsdp_state.process_group
         )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        tensors_to_flatten.append(tensor)
+        state_dict[fqn_from_global_root] = tensor
 
-    # Create a new flat_param from the loaded, non-sharded tensors.
-    loaded_flat_param = handle.flatten_tensors_into_flat_param(
-        tensors_to_flatten, handle._aligned_numel, requires_grad=False
-    )
-
-    # Get the chunk from the loaded flat_param for the local rank.
-    loaded_flat_tensor, num_to_pad = FlatParamHandle._get_shard(
-        loaded_flat_param,
-        fsdp_state.rank,
-        fsdp_state.world_size,
-    )
-    flat_param = handle.flat_param
-    loaded_flat_tensor.to(flat_param.device)
-    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
-        f"The original shapes in FSDP are {expected_shapes}. "
-        f"The loaded shapes are {loaded_shapes}. "
-        f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
-    )
-    assert flat_param.numel() == loaded_flat_tensor.numel(), (
-        f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
-        f"from the local chunk {flat_param.numel()}."
-    )
-    assert flat_param._shard_numel_padded == num_to_pad, (
-        f"The loaded local chunk has different padding({num_to_pad}) "
-        f"from the local chunk {flat_param._shard_numel_padded}."
-    )
-    state_dict[f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"] = loaded_flat_tensor
-    if fsdp_state._use_orig_params:
-        _deregister_orig_params(module, fsdp_state)
+    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
 
 
 @contextlib.contextmanager
