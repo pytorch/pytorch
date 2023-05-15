@@ -48,12 +48,16 @@ except ModuleNotFoundError:
 import importlib
 
 import torch
+import torch._functorch.config
+import torch._higher_order_ops.wrap
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -1262,6 +1266,7 @@ def get_fake_value(node, tx):
         cause = e
         if e.__cause__ is not None:
             cause = e.__cause__
+
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -1284,8 +1289,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        # why don't we print the exception here?
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
@@ -1318,9 +1322,9 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             assert "example_value" in node.meta
             return node.meta["example_value"]
     except Exception as e:
-        raise RuntimeError(
-            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ) from e
+        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+
     raise AssertionError(op)
 
 
@@ -1329,6 +1333,8 @@ def get_real_value(node, tracer):
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
+    from .exc import TorchRuntimeError
+
     cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
@@ -1354,7 +1360,7 @@ def get_real_value(node, tracer):
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
     return real_value
 
 
@@ -1620,3 +1626,46 @@ def defake(x):
     )
     y.zero_()
     return y
+
+
+# NB: The dictionary has to be created lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+@functools.lru_cache(None)
+def higher_order_op_converter():
+    return {
+        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
+    }
+
+
+def requires_higher_order_op(obj):
+    return obj in higher_order_op_converter()
+
+
+def get_higher_order_op(obj):
+    if (
+        obj is torch.utils.checkpoint.checkpoint
+        and not torch._functorch.config.functionalize_rng_ops
+    ):
+        from .exc import unimplemented
+
+        # TODO - functionalize_rng_ops flags cannot be turned ON by default
+        # because 1) Performance concerns - seed and offset are read and passed
+        # to each AOT graph 2) Inductor has rand-specific optimizations and
+        # there is work remaining to compose them together with
+        # functionalization.
+        #
+        # Until we make it ON by default, we will have to ask users to turn on
+        # this flag manually.  TODO - Revisit if there is a simpler way to
+        # resolve this problem.
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
+        unimplemented(
+            "torch.compile requires functioanlization of rng ops to be turned on"
+        )
+    return higher_order_op_converter().get(obj)
