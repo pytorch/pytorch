@@ -10,6 +10,15 @@ def define_targets(rules):
     )
 
     rules.cc_test(
+        name = "core/impl/cow/context_test",
+        srcs = ["core/impl/cow/context_test.cpp"],
+        deps = [
+            "//c10/core:impl/cow/context",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
         name = "core_tests",
         size = "small",
         srcs = rules.glob([
