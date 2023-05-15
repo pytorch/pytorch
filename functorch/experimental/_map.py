@@ -36,8 +36,21 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     mapped_xs = args[:num_mapped_args]
     pos_args = args[num_mapped_args:]
 
-    # We create "clean" environments by disabling
-    # all dispatch keys between Autograd and Backend
+    # Note: We create "clean" environments for make_fx by suspending all dispatch keys
+    # between Autograd and Python key. Currently, we only suspend functionalization but more can be
+    # added when required. Will encounter two problems if we don't suspend functionalization:
+    #
+    # 1. make_fx fails to capture operations on input: the inputs are wrapped as _to_functional_tensor_wrapper,
+    # but they will be unwrapped before entering ProxyTorchDispatchMode as part of the dispatching.
+    # However, it's the outside wrapper that tracer creates proxies for. This casuses tracer fail to
+    # fetch the proxy for the inputs and fail to capture any operations on them.
+    #
+    # 2. make_fx fails to capture output: the outputs after ProxyTorchDispatchMode are further
+    # wrapped as FunctionalTensorWrapper in Functionalize key after return. However, the tracer
+    # only associates the inner tensor with proxy in ProxyTorchDispatchMode. Therefore,
+    # when creating the output node, it fails to associate the wrapped tensor with its proxy.
+    # Instead, it will create _tensor_constant as output.
+
     with suspend_functionalization():
         with disable_proxy_modes_tracing():
             def from_fun(t):
@@ -68,7 +81,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
             _, grads = joint(list(mapped_input) + list(args), list(mapped_grads))
 
             # In order to keep map functional for backward graph,
-            # we do clone outputs that are aliasing inputs
+            # we clone outputs that are aliasing inputs
             input_storage = {StorageWeakRef(arg._typed_storage()) for arg in example_args if isinstance(arg, torch.Tensor)}
 
             def maybe_clone(t):
@@ -128,8 +141,6 @@ class MapAutogradOp(torch.autograd.Function):
         fw_mapped_args = fw_args[:ctx._num_mapped_args]
         pos_args = fw_args[ctx._num_mapped_args:]
         mapped_grads = [grad for grad in flat_grads if grad is not None]
-        # pytree.tree_map(lambda t: t.requires_grad_(), mapped_grads)
-        # print("force requiring grad:", [grad.requires_grad for grad in mapped_grads])
 
         grads = map_impl(ctx._joint_graph, ctx._num_mapped_args + len(mapped_grads), *fw_mapped_args, *mapped_grads, *pos_args)
         return None, None, None, *grads
