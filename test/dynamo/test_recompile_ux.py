@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 
@@ -134,6 +135,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_verbose_tensor_check(self):
         def func(a):
             # Warning: choose a function here whose meta implementation lives
@@ -182,6 +184,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "tensor 'L['a']' requires_grad mismatch. expected requires_grad=0",
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_mismatched_type(self):
         a = torch.rand(3, 4, 5)
         b = torch.rand(3, 4, 5)
