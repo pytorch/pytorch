@@ -94,6 +94,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_pass",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
             test_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
                 ["op_convolution_pointwise_binary.call"],
@@ -104,6 +105,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_failed",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
             test_inputs=[
                 ["op_convolution_pointwise_binary.call"],
                 ["op_convolution_pointwise_binary_.call"],
