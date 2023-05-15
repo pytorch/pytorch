@@ -5976,7 +5976,7 @@ class CommonTemplate:
                 bitwise_not,
             ),
         )
-        _data_type_propagation(_graph)
+        _data_type_propagation(_graph, {})
 
         def get_data_type(node: torch.fx.Node):
             if OptimizationContext.key in node.meta:
