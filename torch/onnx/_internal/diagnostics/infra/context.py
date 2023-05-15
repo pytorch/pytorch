@@ -9,15 +9,11 @@ import gzip
 
 import logging
 
-from typing import Callable, Generator, List, Literal, Mapping, Optional, Type, TypeVar
+from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
 from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
-
-
-class DiagnosticError(RuntimeError):
-    pass
 
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
@@ -37,6 +33,8 @@ class Diagnostic:
     )
     additional_message: Optional[str] = None
     tags: List[infra.Tag] = dataclasses.field(default_factory=list)
+    source_exception: Optional[Exception] = None
+    """The exception that caused this diagnostic to be created."""
 
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
@@ -103,6 +101,11 @@ class Diagnostic:
             self.additional_message = message
         else:
             self.additional_message = f"{self.additional_message}\n{message}"
+        return self
+
+    def with_source_exception(self: _Diagnostic, exception: Exception) -> _Diagnostic:
+        """Adds the source exception to the diagnostic."""
+        self.source_exception = exception
         return self
 
     def record_python_call_stack(self, frames_to_skip: int) -> infra.Stack:
@@ -173,6 +176,14 @@ class Diagnostic:
         # TODO: print help url to rule at the end.
 
 
+class RuntimeErrorWithDiagnostic(RuntimeError):
+    """Runtime error with enclosed diagnostic information."""
+
+    def __init__(self, diagnostic: Diagnostic):
+        super().__init__(diagnostic.message)
+        self.diagnostic = diagnostic
+
+
 @dataclasses.dataclass
 class DiagnosticContext:
     name: str
@@ -180,7 +191,6 @@ class DiagnosticContext:
     options: infra.DiagnosticOptions = dataclasses.field(
         default_factory=infra.DiagnosticOptions
     )
-    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
     diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     logger: logging.Logger = dataclasses.field(
         init=True, default_factory=lambda: logging.getLogger().getChild("diagnostics")
@@ -231,7 +241,7 @@ class DiagnosticContext:
             with open(file_path, "w") as f:
                 f.write(self.to_json())
 
-    def add_diagnostic(self, diagnostic: Diagnostic) -> None:
+    def log(self, diagnostic: Diagnostic) -> None:
         """Adds a diagnostic to the context.
 
         Use this method to add diagnostics that are not created by the context.
@@ -243,6 +253,15 @@ class DiagnosticContext:
                 f"Expected diagnostic of type {Diagnostic}, got {type(diagnostic)}"
             )
         self.diagnostics.append(diagnostic)
+        self.logger.log(diagnostic.level, diagnostic.message)
+        self.logger.log(diagnostic.level, diagnostic.additional_message)
+
+    def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
+        self.log(diagnostic)
+        if diagnostic.level == infra.Level.ERROR:
+            raise RuntimeErrorWithDiagnostic(
+                diagnostic
+            ) from diagnostic.source_exception
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(
@@ -259,31 +278,6 @@ class DiagnosticContext:
             yield diagnostic
         finally:
             self._inflight_diagnostics.pop()
-
-    def diagnose(
-        self,
-        rule: infra.Rule,
-        level: infra.Level,
-        message: Optional[str] = None,
-        **kwargs,
-    ) -> Diagnostic:
-        """Creates a diagnostic for the given arguments.
-
-        Args:
-            rule: The rule that triggered the diagnostic.
-            level: The level of the diagnostic.
-            message: The message of the diagnostic.
-            **kwargs: Additional arguments to pass to the Diagnostic constructor.
-
-        Returns:
-            The created diagnostic.
-
-        Raises:
-            ValueError: If the rule is not supported by the tool.
-        """
-        diagnostic = self.diagnostic_type(rule, level, message, **kwargs)
-        self.add_diagnostic(diagnostic)
-        return diagnostic
 
     def push_inflight_diagnostic(self, diagnostic: Diagnostic) -> None:
         """Pushes a diagnostic to the inflight diagnostics stack.
@@ -308,7 +302,7 @@ class DiagnosticContext:
         if rule is None:
             # TODO(bowbao): Create builtin-rules and create diagnostic using that.
             if len(self._inflight_diagnostics) <= 0:
-                raise DiagnosticError("No inflight diagnostics")
+                raise AssertionError("No inflight diagnostics")
 
             return self._inflight_diagnostics[-1]
         else:
@@ -316,7 +310,7 @@ class DiagnosticContext:
             for diagnostic in reversed(self._inflight_diagnostics):
                 if diagnostic.rule == rule:
                     return diagnostic
-            raise DiagnosticError(f"No inflight diagnostic for rule {rule.name}")
+            raise AssertionError(f"No inflight diagnostic for rule {rule.name}")
 
     def pretty_print(
         self, verbose: Optional[bool] = None, log_level: Optional[infra.Level] = None
