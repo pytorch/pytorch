@@ -146,6 +146,12 @@ def _common_unshard_pre_state_dict_hook(
     Performs the pre-state_dict tasks shared by all state_dict types that require
     ``_unshard_fsdp_state_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
+    # For composable `fully_shard`, it does not need to unshard parameters for `NO_SHARD` cases.
+    if (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        return
     _enter_unshard_params_ctx(
         module,
         fsdp_state,
@@ -172,7 +178,11 @@ def _common_unshard_post_state_dict_hook(
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
     # Return early for trivial cases
     if not state_dict or not _has_fsdp_params(fsdp_state, module):
-        _exit_unshard_params_ctx(module, fsdp_state)
+        if not (
+            _is_composable(fsdp_state)
+            and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+        ):
+            _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
     # If a rank does not have unsharded parameters(when `rank0_only=True`
@@ -215,7 +225,12 @@ def _common_unshard_post_state_dict_hook(
         )
 
         param_hook(state_dict, prefix, fqn)
-    _exit_unshard_params_ctx(module, fsdp_state)
+
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
     cpu_device = torch.device("cpu")
     buffer_clean_fqns = []
@@ -335,7 +350,11 @@ def _full_pre_load_state_dict_hook(
     prefix: str,
 ) -> None:
     _lazy_init(fsdp_state, module)
-    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
     # Add FSDP_PREFIX only for wrapper-based FSDP.
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
@@ -344,7 +363,11 @@ def _full_pre_load_state_dict_hook(
 def _full_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    _exit_unshard_params_ctx(module, fsdp_state)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
 
 def _local_pre_state_dict_hook(
