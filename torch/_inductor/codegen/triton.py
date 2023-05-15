@@ -732,7 +732,11 @@ class TritonKernel(Kernel):
     def set_last_usage(self, nodes):
         if not self.inside_reduction or self.persistent_reduction:
             return
-        self.last_usage = set(itertools.chain.from_iterable(n.last_usage for n in nodes if n is not EnableReduction))
+        self.last_usage = set(
+            itertools.chain.from_iterable(
+                n.last_usage for n in nodes if n is not EnableReduction
+            )
+        )
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -889,9 +893,7 @@ class TritonKernel(Kernel):
         return free_symbol_startswith(index, "tmp")
 
     def is_broadcasted(self, index: sympy.Expr):
-        return not set.issubset(
-            set(self.range_tree_nodes.keys()), index.free_symbols
-        )
+        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
@@ -1107,7 +1109,6 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index)
 
-
         # Keep the variable in cache if we are going to reuse it
         # TODO(lezcano) We could potentially do better
         # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
@@ -1117,7 +1118,7 @@ class TritonKernel(Kernel):
         #   2.1) We are in a reduction loop
         #   2.2) Its not its last use
         #   2.3) This load will not be lifted to the body
-        # The second lot of conditions are equiv to: 
+        # The second lot of conditions are equiv to:
         if self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
@@ -1911,7 +1912,6 @@ class TritonScheduling:
             return "tl.int32"
         return "tl.int64"
 
-
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
@@ -1939,7 +1939,6 @@ class TritonScheduling:
 
         def current_reduction_nodes(nodes):
             return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
-
 
         with TritonKernel(
             *tiled_groups,
