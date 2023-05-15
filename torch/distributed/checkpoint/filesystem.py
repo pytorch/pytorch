@@ -84,6 +84,7 @@ class _TensorLoader(ABC):
     def add(self, size, obj):
         pass
 
+    @abstractmethod
     def start_loading(self):
         pass
 

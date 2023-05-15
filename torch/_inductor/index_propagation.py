@@ -1,3 +1,9 @@
+"""
+This file implements the IndexPropagation ops handler, which wraps an
+underlying handler to add a limited for of constant propagation, as well as
+propagation of sympy expressions downstream of `ops.index_expr` calls.
+
+"""
 import itertools
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -48,9 +54,10 @@ class SymPyOps:
     def to_dtype(value, dtype):
         if isinstance(value, (sympy.Integer, sympy.Float)):
             return SymPyOps.constant(value.expr, dtype)
-        elif is_integer_dtype(dtype):
+        elif is_integer_dtype(dtype) and is_integer_dtype(value.dtype):
             return SymPyOps.index_expr(value.expr, dtype)
         else:
+            # TODO: Inductor doesn't handle floating point in sympy expressions well at the moment
             return NotImplemented
 
     @staticmethod
@@ -97,20 +104,23 @@ class IndexPropagation:
     def new_symbol(self, expr: TypedExpr):
         return IndexPropVar(f"index_tmp{next(self.id_iter)}", expr)
 
-    def unwrap(self, a):
-        if not isinstance(a, IndexPropVar):
-            return a
-        # Unwrap the inner IR value
-        if a.expr is None:
-            return a.rep
-
+    def materialize_expr(self, expr, dtype):
         # Construct a new constant/index_expr from the SymPy expression
-        expr, dtype = a.expr.expr, a.expr.dtype
         if isinstance(expr, sympy.Integer):
             return self._inner.constant(int(expr), dtype)
         elif not expr.free_symbols:
             return self._inner.constant(float(expr), dtype)
         return self._inner.index_expr(expr, dtype)
+
+    def unwrap(self, a):
+        if not isinstance(a, IndexPropVar):
+            return a
+
+        # Prefer the sympy representation if possible
+        if a.expr is not None:
+            return self.materialize_expr(a.expr.expr, a.expr.dtype)
+
+        return a.rep
 
     def fallback(self, name, args, kwargs):
         # Fallback to the wrapped handler
