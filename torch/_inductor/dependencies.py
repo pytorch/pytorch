@@ -2,56 +2,65 @@ import collections
 import dataclasses
 import itertools
 import logging
+import re
 import typing
 from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
 from .codegen.common import index_prevent_reordering
-from .utils import (
-    get_dtype_size,
-    sympy_product,
-    sympy_str,
-    sympy_subs,
-    sympy_symbol,
-    VarRanges,
-)
+from .utils import get_dtype_size, sympy_str, sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-
+is_indirect = re.compile(r"indirect|tmp").search
 Dep = Union["MemoryDep", "StarDep", "WeakDep"]
 
 
 class MemoryDep(typing.NamedTuple):
     name: str
     index: sympy.Expr  # type: ignore[assignment]
+    var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
-    def broadcast_extend_sizes(self, extra_sizes: List[sympy.Expr]) -> "MemoryDep":
-        size = (*self.size, *[x for x in extra_sizes if x != 1])
-        return MemoryDep(self.name, self.index, size)
+    def __repr__(self):
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
+
+    @property
+    def ranges(self) -> Dict[sympy.Symbol, sympy.Expr]:
+        """{c0: 128, c1: 512, ...}"""
+        return dict(zip(self.var_names, self.size))
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
-            return MemoryDep(renames[self.name], self.index, self.size)
+            return MemoryDep(
+                renames[self.name], self.index, var_names=self.var_names, size=self.size
+            )
         return self
 
     def numbytes_hint(self):
-        vars = set(self.index.free_symbols)
-        size_vars_used = []
-        for var in vars:
-            if var.name.startswith(canonicalization_prefix()):
-                # Sometimes with indirect indexing we have very weird symbol names
-                assert " " not in var.name
-                size_vars_used.append(int(var.name[len(canonicalization_prefix()) :]))
-
-        return V.graph.sizevars.size_hint(
-            sympy_product([self.size[i] for i in size_vars_used])
-        ) * get_dtype_size(V.graph.get_dtype(self.name))
+        if self.is_indirect():
+            numel = V.graph.get_numel(self.name)
+        else:
+            vars = set(self.index.free_symbols)
+            numel = sympy.Integer(1)
+            for var, size in zip(self.var_names, self.size):
+                if var in vars:
+                    numel = numel * size
+        return V.graph.sizevars.size_hint(numel) * get_dtype_size(
+            V.graph.get_dtype(self.name)
+        )
 
     def is_contiguous(self) -> bool:
-        return isinstance(self.index, (sympy.Symbol, sympy.Integer))
+        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def is_scalar(self) -> bool:
+        if isinstance(self.index, sympy.Symbol):
+            return self.index not in self.var_names and not self.is_indirect()
+        return isinstance(self.index, (int, sympy.Integer))
+
+    def is_indirect(self) -> bool:
+        return any(is_indirect(v.name) for v in self.index.free_symbols)
 
 
 class StarDep(typing.NamedTuple):
@@ -64,22 +73,17 @@ class StarDep(typing.NamedTuple):
         return self
 
     def numbytes_hint(self):
-        from .ir import MultiOutputLayout
-
-        if self.name in V.graph.name_to_buffer:
-            buf = V.graph.name_to_buffer[self.name]
-        elif self.name in V.graph.graph_inputs:
-            buf = V.graph.graph_inputs[self.name]
-        else:
-            return 1
-        if hasattr(buf, "layout") and isinstance(buf.layout, MultiOutputLayout):
-            # NB: Too annoying to acquire, should only be used for instrumentation
-            return 1
         return V.graph.sizevars.size_hint(
-            sympy_product(buf.get_size())
-        ) * get_dtype_size(buf.get_dtype())
+            V.graph.get_numel(self.name)
+        ) * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
+        return False
+
+    def is_scalar(self) -> bool:
+        return False
+
+    def is_indirect(self) -> bool:
         return False
 
 
@@ -103,6 +107,7 @@ class WeakDep(typing.NamedTuple):
 
 class IndexExprDep(typing.NamedTuple):
     index: sympy.Expr  # type: ignore[assignment]
+    var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
 
@@ -179,7 +184,7 @@ class _RecordLoadStoreInner(V.MockHandler):
                 k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
             )
             sizes = tuple(v for v in sizes if v != 1)
-            return index, sizes
+            return index, var_names, sizes
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -213,11 +218,10 @@ class _RecordLoadStoreInner(V.MockHandler):
             # downstream users won't.  Normalize this away.
             new_vars.pop()
             new_sizes.pop()
-        return index, tuple(new_sizes)
+        return index, tuple(new_vars), tuple(new_sizes)
 
     def load(self, name: str, index: sympy.Expr) -> str:
-        canonicalized_index, canonicalized_size = self.canonicalize(index)
-        self._reads.add(MemoryDep(name, canonicalized_index, canonicalized_size))
+        self._reads.add(MemoryDep(name, *self.canonicalize(index)))
         return f"load({name}, {sympy_str(index)})"
 
     def load_seed(self, name: str, index: int):
@@ -225,8 +229,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        canonicalized_index, canonicalized_size = self.canonicalize(index)
-        self._writes.add(MemoryDep(name, canonicalized_index, canonicalized_size))
+        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def reduction(
@@ -235,8 +238,7 @@ class _RecordLoadStoreInner(V.MockHandler):
         return self.store(name, index, f"reduce_{reduction_type})({value})")
 
     def index_expr(self, index: sympy.Expr, dtype) -> str:
-        canonicalized_index, canonicalized_size = self.canonicalize(index)
-        self._index_exprs.add(IndexExprDep(canonicalized_index, canonicalized_size))
+        self._index_exprs.add(IndexExprDep(*self.canonicalize(index)))
         return f"index_expr({sympy_str(index)}, {dtype})"
 
 
@@ -264,7 +266,7 @@ class RecordLoadStore(V.KernelFormatterHandler):
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
-    var_ranges: VarRanges = collections.OrderedDict()
+    var_ranges: VarRanges = dict()
 
     def add_var(length: sympy.Expr) -> sympy.Symbol:
         v = sympy_symbol(f"{prefix}{next(cnt)}")
@@ -292,7 +294,7 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
         new_size, reindex = SqueezeView.squeezer(size)
         new_sizes.append(new_size)
         args.append(reindex(list(map(add_var, new_size))))
-    return new_sizes, args, var_ranges
+    return args, var_ranges
 
 
 def extract_read_writes(
@@ -301,7 +303,7 @@ def extract_read_writes(
     normalize: bool = False,
     prefix: str = "d",
 ):
-    _, args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
+    args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
     rw = RecordLoadStore(var_ranges, normalize=normalize)
     with V.set_ops_handler(rw):  # type: ignore[call-arg]
         fn(*args)
