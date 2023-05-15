@@ -349,6 +349,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.erf()"
 
     @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
@@ -713,6 +717,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"std::erf({x})"
+
+    @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
 
     @staticmethod
     def sqrt(x):
