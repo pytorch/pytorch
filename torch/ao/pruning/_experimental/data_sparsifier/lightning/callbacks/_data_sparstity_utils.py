@@ -29,7 +29,7 @@ def _get_valid_name(name):
 def _log_sparsified_level(model, data_sparsifier) -> None:
     # Show the level of sparsity AFTER step:
     for name, parameter in model.named_parameters():
-        if not (type(parameter) in SUPPORTED_TYPES):
+        if type(parameter) not in SUPPORTED_TYPES:
             continue
         valid_name = _get_valid_name(name)
         mask = data_sparsifier.get_mask(name=valid_name)

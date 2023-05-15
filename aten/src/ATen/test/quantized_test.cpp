@@ -156,7 +156,7 @@ TEST(TestQTensor, QuantizePerChannel4d) {
   int ch_axis = 1;
   // create 4d tensor where each H x W image is a range(0, H*W)
   Tensor tensor = at::empty({1, C, H, W}, at::device(at::kCPU).dtype(kFloat));
-  auto* tensor_data = tensor.data_ptr<float>();
+  auto* tensor_data = tensor.mutable_data_ptr<float>();
   for (int c = 0, i = 0; c < C; ++c) {
     for (int e = 0; e < H * W; ++e, ++i) {
       tensor_data[i] = e;

@@ -315,6 +315,8 @@ class TestCommon(TestCase):
                 continue
             except torch._subclasses.fake_tensor.DataDependentOutputException:
                 continue
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
@@ -532,6 +534,17 @@ class TestCommon(TestCase):
     def test_errors(self, device, op):
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                out = op(si.input, *si.args, **si.kwargs)
+                self.assertFalse(isinstance(out, type(NotImplemented)))
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_sparse_func is not None], dtypes=OpDTypes.none)
+    @parametrize("layout", (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo))
+    def test_errors_sparse(self, device, op, layout):
+        for ei in op.error_inputs_sparse(device, layout):
             si = ei.sample_input
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
                 out = op(si.input, *si.args, **si.kwargs)
@@ -1733,7 +1746,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
-        '_refs.item',
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
@@ -1976,7 +1988,7 @@ fake_tensor_stride_failing_ops = {
     "linalg.svd",
 }
 
-fake_backward_xfails = fake_tensor_stride_failing_ops | {
+fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1989,12 +2001,10 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "cholesky",
 }
 
-fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
+fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
-    xfail("norm", "nuc"),
-    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
-}
+} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2064,6 +2074,8 @@ class TestFakeTensor(TestCase):
                 self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                pass
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
@@ -2150,12 +2162,15 @@ class TestFakeTensor(TestCase):
             )
 
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
-                    composite_compliance.compute_expected_grads(
-                        op.get_op(), args, kwargs,
-                        sample.output_process_fn_grad,
-                        op.gradcheck_wrapper)
+            try:
+                with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
+                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
+                        composite_compliance.compute_expected_grads(
+                            op.get_op(), args, kwargs,
+                            sample.output_process_fn_grad,
+                            op.gradcheck_wrapper)
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                pass
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))

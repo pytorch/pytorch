@@ -394,7 +394,7 @@ Tensor segment_reduce_kernel(
     bool unsafe,
     const c10::optional<Scalar>& initial) {
   axis = maybe_wrap_dim(axis, data.ndimension());
-  TORCH_CHECK(data.numel() > 0);
+  TORCH_CHECK(data.numel() >= 0);
 
   // check that one of lengths or offsets is defined
   auto lengths_has_value = lengths.has_value();
