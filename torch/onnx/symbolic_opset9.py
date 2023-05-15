@@ -843,28 +843,42 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         return reduce_nodim, reduce_dim
 
@@ -2518,6 +2532,72 @@ def _convolution(
         return n
 
 
+@_onnx_symbolic("aten::_convolution_mode")
+@symbolic_helper.parse_args(
+    "v",
+    "v",
+    "v",
+    "is",
+    "s",
+    "is",
+    "i",
+)
+@_beartype.beartype
+def _convolution_mode(
+    g: jit_utils.GraphContext,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+):
+    weight_size = symbolic_helper._get_tensor_sizes(weight)
+    try:
+        kernel_shape = weight_size[2:]
+    except Exception:
+        # FIXME(justinchuby): Avoid catching Exception.
+        # Catch a more specific exception instead.
+        kernel_shape = None
+
+    if kernel_shape is None or any(i is None for i in kernel_shape):
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of convolution for kernel of unknown shape.",
+            input,
+        )
+
+    args = [input, weight]
+    # ONNX only supports 1D bias
+    if (
+        not symbolic_helper._is_none(bias)
+        and symbolic_helper._get_tensor_rank(bias) == 1
+    ):
+        args.append(bias)
+
+    if padding == "valid":
+        padding = "VALID"
+    elif padding == "same":
+        padding = "SAME_UPPER"
+    kwargs = {
+        "kernel_shape_i": weight_size[2:],
+        "strides_i": stride,
+        "auto_pad_s": padding,
+        "dilations_i": dilation,
+        "group_i": groups,
+    }
+
+    n = g.op("Conv", *args, **kwargs)
+
+    if (
+        not symbolic_helper._is_none(bias)
+        and symbolic_helper._get_tensor_rank(bias) != 1
+    ):
+        return g.op("Add", n, bias)
+    else:
+        return n
+
+
 @_onnx_symbolic("aten::convolution")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
 @_beartype.beartype
@@ -2552,75 +2632,117 @@ def convolution(
 
 
 @_onnx_symbolic("aten::conv1d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv1d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv2d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv2d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv3d")
-@symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
+@symbolic_helper.parse_args("v", "v", "v", "is", "v", "is", "i")
 @_beartype.beartype
 def conv3d(
     g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
 ):
-    return _convolution(
-        g,
-        input,
-        weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        False,
-        (),
-        groups,
-        None,
-        None,
-        None,
-        None,
-    )
+    str_padding = symbolic_helper._parse_arg(padding, "s")
+    if str_padding in ["valid", "same"]:
+        return _convolution_mode(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            str_padding,
+            dilation,
+            groups,
+        )
+    else:
+        padding = symbolic_helper._parse_arg(padding, "is")
+        return _convolution(
+            g,
+            input,
+            weight,
+            bias,
+            stride,
+            padding,
+            dilation,
+            False,
+            (),
+            groups,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 @_onnx_symbolic("aten::conv_transpose1d")
@@ -4252,7 +4374,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -4275,6 +4397,10 @@ def repeat_interleave(
             input,
         )
 
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)
+
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
@@ -4282,8 +4408,6 @@ def repeat_interleave(
 
     # Cases where repeats is an int or single value tensor
     if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-        if not symbolic_helper._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "repeat_interleave",
@@ -4292,11 +4416,9 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        else:
-            reps = input_sizes[dim]
-            repeats = expand(
-                g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None
-            )
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:

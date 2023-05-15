@@ -475,7 +475,7 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   // Implementation detail for getInputShapeGenerator and
-  // getConcereteInputGenerator
+  // getConcreteInputGenerator
   auto getIValueGenerator(const IOType& io_type);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
@@ -626,6 +626,10 @@ class TORCH_API RecordQueue {
   std::mutex sub_queue_mutex_;
   std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
+
+TORCH_API bool get_record_concrete_inputs_enabled();
+TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool);
 
 } // namespace impl
 } // namespace profiler

@@ -64,6 +64,7 @@ inline int64_t getTimeUs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
@@ -84,14 +85,13 @@ struct OpArgData {
 auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concrete_inputs) {
-  TORCH_INTERNAL_ASSERT(input_shapes.size() == concrete_inputs.size());
   if (input_shapes.empty()) {
     return OpArgData{false, {}, {}, {}};
   }
 
   std::vector<std::vector<int64_t>> shapes(input_shapes.size());
   std::vector<std::string> dtypes(input_shapes.size());
-  std::vector<c10::IValue> concrete_inputs_list(input_shapes.size());
+  std::vector<c10::IValue> concrete_inputs_list;
 
   for (const auto& i : c10::irange(input_shapes.size())) {
     c10::visit(
@@ -103,21 +103,31 @@ auto parseArgData(
             [&](const std::vector<TensorMetadata>&) {
               dtypes[i] = "TensorList";
             },
-            [&](const c10::IValue& val) {
-              concrete_inputs_list[i] = val;
-              dtypes[i] = "Scalar";
-            },
+            [&](const c10::IValue& val) { dtypes[i] = "Scalar"; },
             [&](const auto&) {}),
         input_shapes[i]);
+  }
 
-    c10::visit(
-        c10::overloaded(
-            [&](const c10::IValue& val) {
-              concrete_inputs_list[i] = val;
-              dtypes[i] = "ScalarList";
-            },
-            [&](const auto&) {}),
-        concrete_inputs[i]);
+  // If we recorded concrete inputs, then parse them
+  if (input_shapes.size() == concrete_inputs.size() &&
+      !concrete_inputs.empty()) {
+    concrete_inputs_list.resize(input_shapes.size());
+
+    for (const auto& i : c10::irange(input_shapes.size())) {
+      c10::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
+              [&](const auto&) {}),
+          input_shapes[i]);
+      c10::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) {
+                concrete_inputs_list[i] = val;
+                dtypes[i] = "ScalarList";
+              },
+              [&](const auto&) {}),
+          concrete_inputs[i]);
+    }
   }
 
   return OpArgData{true, shapes, dtypes, concrete_inputs_list};
@@ -210,7 +220,10 @@ struct AddGenericMetadata : public MetadataBase {
     if (arg_data.has_data) {
       addMetadata("Input Dims", shapesToStr(arg_data.shapes));
       addMetadata("Input type", strListToStr(arg_data.dtypes));
-      addMetadata("Concrete Inputs", ivalueListToStr(arg_data.concrete_inputs));
+      if (!arg_data.concrete_inputs.empty()) {
+        addMetadata(
+            "Concrete Inputs", ivalueListToStr(arg_data.concrete_inputs));
+      }
     }
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
@@ -743,6 +756,7 @@ KinetoEvent::KinetoEvent(
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
     shapes_ = std::move(arg_data.shapes);
     dtypes_ = std::move(arg_data.dtypes);
+    concrete_inputs_ = std::move(arg_data.concrete_inputs);
   });
 }
 
@@ -766,6 +780,14 @@ bool KinetoEvent::hasTypes() const {
 
 const c10::ArrayRef<std::string> KinetoEvent::dtypes() const {
   return dtypes_;
+}
+
+bool KinetoEvent::hasConcreteInputs() const {
+  return !concrete_inputs_.empty();
+}
+
+const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
+  return concrete_inputs_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {

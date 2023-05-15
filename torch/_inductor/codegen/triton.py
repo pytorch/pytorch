@@ -144,6 +144,11 @@ class TritonCSEVariable(CSEVariable):
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
 class TritonOverrides(OpOverrides):
@@ -1167,6 +1172,19 @@ class TritonKernel(Kernel):
         ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
+        # Guard against write-after-read corruption in triton.
+        # See # https://github.com/openai/triton/issues/1615
+        # This triton bug means that a load which is broadcasted over multiple
+        # warps may see the result of a store that happens later in the triton
+        # program. The workaround is to add a barrier before storing, which
+        # enforces that all warps have already read the data.
+        is_inplace = name in self.args.inplace_buffers
+        is_broadcasted = not set.issubset(
+            set(self.range_tree_nodes.keys()), original_index.free_symbols
+        )
+        if is_inplace and is_broadcasted:
+            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1195,8 +1213,10 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
+            use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
+            if reduction_type in {"max", "min"}:
+                return f"{module}.{reduction_type}2({value}, {dim})[{', '.join(sizes)}]"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         def final_argreduce(buffer, result_var, value, index):

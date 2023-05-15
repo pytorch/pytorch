@@ -146,6 +146,11 @@ bool InputOutputEncoder::isSupportedScalarList(
   // Scalar list can be very long. If a list is too long, we shouldn't
   // collect it. This function checks whether the list is a scalar list
   // and whether its length is sufficiently short.
+
+  if (!get_record_concrete_inputs_enabled()) {
+    return false;
+  }
+
   if (!list_candidate.isList()) {
     return false;
   }
@@ -1292,6 +1297,25 @@ RecordQueue::getRecords(
 
   build_tree(out);
   return {out, std::move(trace)};
+}
+
+namespace {
+std::function<bool()>& record_concrete_inputs_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_record_concrete_inputs_enabled() {
+  return record_concrete_inputs_enabled_fn()();
+}
+
+void set_record_concrete_inputs_enabled_fn(std::function<bool()> fn) {
+  record_concrete_inputs_enabled_fn() = std::move(fn);
+}
+
+void set_record_concrete_inputs_enabled_val(bool val) {
+  record_concrete_inputs_enabled_fn() = [val]() { return val; };
 }
 
 } // namespace impl
