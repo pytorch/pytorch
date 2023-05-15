@@ -54,6 +54,13 @@ http_archive(
     urls = [
         "https://github.com/google/glog/archive/v0.4.0.tar.gz",
     ],
+    build_file_content = """
+licenses(['notice'])
+
+load(':bazel/glog.bzl', 'glog_library')
+# TODO: figure out why enabling gflags leads to SIGSEV on the logging init
+glog_library(with_gflags=0)
+    """
 )
 
 http_archive(
