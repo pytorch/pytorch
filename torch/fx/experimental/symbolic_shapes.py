@@ -1627,7 +1627,10 @@ try:
             model: Optional[z3.ModelRef] = None
 
             # List of the expressions that failed due to the assignment.
-            failed_inputs: Optional[List[str]] = None
+            failed_inputs: Optional[List] = None
+
+            # List of output expressions
+            outputs: Optional[Set] = None
 
         def validate(self) -> "TranslationValidator.Result":
             from torch._dynamo.utils import dynamo_timed
@@ -1652,9 +1655,11 @@ try:
                     success=False,
                     model=model,
                     failed_inputs=[inp for inp in self._inputs if not model.evaluate(inp)],
+                    outputs=self._outputs,
                 )
             else:
                 # Output expressions are sound.
+                log.debug("translation validation: success")
                 return self.Result(success=True)
 except:
     _HAS_Z3 = False
@@ -2107,10 +2112,14 @@ class ShapeEnv:
         if _translation_validator_enabled():
             result = self.validator.validate()
             if not result.success:
-                assert result.model is not None and result.failed_inputs is not None
+                assert result.model is not None and result.failed_inputs is not None and result.outputs is not None
                 oneline_model = {sym: result.model[sym] for sym in result.model}
-                failed_inputs = "\n".join(f">> {inp}" for inp in result.failed_inputs)
+                failed_inputs = "\n".join(f"==>> {inp}" for inp in result.failed_inputs)
+                outputs = "\n".join(f"==>> {out}" for out in result.outputs)
                 raise RuntimeError(f"""translation validation failed with model: {oneline_model}
+Outputs:
+{outputs}
+
 Failed inputs:
 {failed_inputs}""")
 
