@@ -27,6 +27,7 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     run_fwd_maybe_bwd,
     same_two_models,
+    TestInputWriter,
 )
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
@@ -184,7 +185,72 @@ if __name__ == '__main__':
     )
 
 
-def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
+def generate_dynamo_fx_test_from_repro_string(
+    gm,
+    args,
+    compiler_name,
+    check_accuracy=False,
+    *,
+    stable_output=False,
+    save_dir=None,
+    command="run",
+):
+    """
+    Generate a test string for backend-agnostic minified version.
+    """
+
+    model_str = NNModuleToString.convert(gm, imports=False)
+
+    # TODO: Figure out why torch.compile'd hash isn't work on this codepath
+    writer = TestInputWriter(save_dir, stable_hash=True)
+    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
+        if isinstance(arg, (int, torch.SymInt)):
+            writer.symint(placeholder, arg)
+        elif isinstance(arg, torch.Tensor):
+            # TODO: improve these names with FQN
+            writer.tensor(placeholder, arg)
+        else:
+            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+    load_args = "\n".join(writer.lines())
+    storage_names = ",".join(writer._storage_names)
+
+    return textwrap.dedent(
+        f"""
+from math import inf
+import torch
+from torch import tensor, device
+import torch.fx as fxindent
+import torch._dynamo
+from torch._dynamo.testing import rand_strided
+from torch._dynamo.debug_utils import run_fwd_maybe_bwd
+from torch.nn import *
+import torch._dynamo.test_case
+import torch._dynamo.testing
+
+{generate_config_string(stable_output=stable_output)}
+
+{extra_imports}
+
+class GeneratedReproTestCase(torch._dynamo.test_case.TestCase):
+    def test_generated_repro_case(self):
+        {textwrap.indent(model_str, ' ' * 8)}
+        mod = Repro()
+
+        {load_args}
+        # TODO(voz): Add dynamic, nopython, and all sorts of other configs
+        torch._dynamo.optimize({compiler_name!r})(mod)({storage_names})
+
+if __name__ == '__main__':
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
+"""
+    )
+
+
+def dump_backend_repro_as_file(
+    gm, args, compiler_name, check_accuracy=False, produce_test=False
+):
     """
     Saves the repro to a repro.py file
     """
@@ -197,6 +263,17 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
 
+    if produce_test:
+        test_file_name = os.path.join(
+            subdir, f"test_from_minified_{len(gm.graph.nodes)}_nodes.py"
+        )
+        with open(test_file_name, "w") as fd:
+            fd.write(
+                generate_dynamo_fx_test_from_repro_string(
+                    gm, args, compiler_name, check_accuracy, save_dir=subdir
+                )
+            )
+
     with open(file_name, "w") as fd:
         fd.write(
             generate_dynamo_fx_repro_string(
@@ -205,6 +282,12 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
         )
     latest_repro = os.path.join(curdir, "repro.py")
     log.warning("Copying %s to %s for convenience", file_name, latest_repro)
+    if produce_test:
+        latest_test = os.path.join(curdir, "repro_test.py")
+        log.warning(
+            "Copying test %s to %s for convenience", test_file_name, latest_test
+        )
+        shutil.copyfile(test_file_name, latest_test)
 
     if use_buck:
         BuckTargetWriter(latest_repro).write()
@@ -212,7 +295,9 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
     shutil.copyfile(file_name, latest_repro)
 
 
-def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
+def dump_backend_state(
+    gm, args, compiler_name, check_accuracy=False, produce_test=False
+):
     """
     Dumps the dynamo graph to repro the issue.
     1) It tries to convert Fx GraphModule to a string. If we can, it writes to a
@@ -221,7 +306,9 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
     the module and save a tar file.
     """
     assert NNModuleToString.can_convert_to_string(gm)
-    return dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy)
+    return dump_backend_repro_as_file(
+        gm, args, compiler_name, check_accuracy, produce_test
+    )
     # return dump_backend_repro_as_tarfile(gm, args, compiler_name)
 
 
@@ -253,7 +340,7 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 
 
 @register_debug_backend
-def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+def dynamo_minifier_backend(gm, example_inputs, compiler_name, produce_test):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
@@ -275,7 +362,7 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
             "Compiled Fx GraphModule failed. Creating script to minify the error."
         )
         dump_state_fn = functools.partial(
-            dump_backend_state, compiler_name=compiler_name
+            dump_backend_state, compiler_name=compiler_name, produce_test=produce_test
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         fails_fn = functools.partial(
@@ -402,8 +489,7 @@ def repro_minify(options, mod, load_args):
         )
 
     dynamo_minifier_backend = functools.partial(
-        compiler_fn,
-        compiler_name=options.backend,
+        compiler_fn, compiler_name=options.backend, produce_test=options.produce_test
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
@@ -496,6 +582,12 @@ default settings on this script:
             action="store_const",
             const=None,
             help="don't use any directory for saved inputs",
+        )
+        parser.add_argument(
+            "--produce_test",
+            action="store_true",
+            help="Generate a unit test.",
+            default=False,
         )
         parser.add_argument(
             "--no-isolate",
