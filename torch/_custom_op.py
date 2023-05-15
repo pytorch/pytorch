@@ -197,9 +197,34 @@ class CustomOp:
         # this is _opname but with namespace. e.g. "custom::foo"
         self._qualname: str = name
         self.__name__ = None  # mypy requires this
-        self._abstract_impl: typing.Optional[FuncAndLocation] = None
+        # NB: Some of these impls are registered as kernels to DispatchKeys.
+        # Modifying the _impls dict directly won't do anything in that case.
+        self._impls: typing.Dict[str, typing.Optional[FuncAndLocation]] = {}
 
         global_registry[self._qualname] = self
+
+    # Records the impl and the source location in self._impls
+    # Note that this doesn't cause torch.library to use the impl, that
+    # needs to be done in a separate self._lib.impl call.
+    def _register_impl(self, kind, func, stacklevel=2):
+        if self._has_impl(kind):
+            func_and_location = self._impls[kind]
+            assert func_and_location is not None  # Pacify mypy
+            location = func_and_location.location
+            raise RuntimeError(
+                f"Attempting to register a {kind} impl for operator {self._qualname} "
+                f"that already has a {kind} impl registered from Python at "
+                f"{location}. This is not supported."
+            )
+        frame = inspect.stack()[stacklevel]
+        location = f"{frame.filename}:{frame.lineno}"
+        self._impls[kind] = FuncAndLocation(func, location)
+
+    def _get_impl(self, kind):
+        return self._impls[kind]
+
+    def _has_impl(self, kind):
+        return kind in self._impls
 
     def _destroy(self):
         # NOTE: [CustomOp lifetime]
@@ -273,8 +298,19 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
+                self._register_impl(device_type, f)
                 dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
+            return f
+
+        return inner
+
+    def impl_factory(self) -> typing.Callable:
+        r"""Register an implementation for a factory function."""
+
+        def inner(f):
+            self._register_impl("factory", f)
+            library.impl(self._lib, self._opname, "BackendSelect")(f)
             return f
 
         return inner
@@ -349,16 +385,8 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
-            if self._abstract_impl is not None:
-                raise RuntimeError(
-                    f"Attempting to register an abstract impl for operator {self._qualname} "
-                    f"that already has an abstract impl registered from Python at "
-                    f"{self._abstract_impl.location}. This is not supported."
-                )
-            new_location = f"{frame.filename}:{frame.lineno}"
-
-            # FakeTensor will look at _abstract_impl
-            self._abstract_impl = FuncAndLocation(f, new_location)
+            self._register_impl("abstract", f)
+            location = self._get_impl("abstract").location
 
             qualname = self._qualname
 
@@ -374,7 +402,7 @@ class CustomOp:
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
                         f"in the implementation registered with impl_abstract "
-                        f"at {new_location}"
+                        f"at {location}"
                     )
 
                 with set_ctx_getter(error_on_ctx):
@@ -429,11 +457,6 @@ def validate_schema(schema: FunctionSchema) -> None:
     if is_non_mutating_view:
         raise ValueError(f"custom_op does not support view functions. Got: {schema}")
 
-    # Requires us to have handling for factory functions
-    if not schema.arguments.has_tensor_arg():
-        raise ValueError(
-            f"custom_op does not support function schema with no Tensor inputs. Got: {schema}"
-        )
     # Just seems weird so banning for now
     if not schema.returns:
         raise ValueError(
@@ -709,12 +732,15 @@ def parse_param(name, param, error_fn):
     return f"{SUPPORTED_PARAM_TYPES[param.annotation]} {name}"
 
 
-def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
+def derived_types(
+    base_type, cpp_type, list_base, optional_base_list, optional_list_base
+):
     result = [
         (base_type, cpp_type),
         (typing.Optional[base_type], f"{cpp_type}?"),
-        (typing.Tuple[base_type, ...], f"{cpp_type}[]"),
     ]
+    if list_base:
+        result.append((typing.Tuple[base_type, ...], f"{cpp_type}[]"))
     if optional_base_list:
         result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
     if optional_list_base:
@@ -724,12 +750,15 @@ def derived_types(base_type, cpp_type, optional_base_list, optional_list_base):
 
 def get_supported_param_types():
     data = [
-        # (python type, schema type, type?[] variant, type[]? variant
-        (torch.Tensor, "Tensor", True, False),
-        (int, "SymInt", False, True),
-        (float, "float", False, True),
-        (bool, "bool", False, True),
-        (torch.types.Number, "Scalar", False, False),
+        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
+        (torch.Tensor, "Tensor", True, True, False),
+        (int, "SymInt", True, False, True),
+        (float, "float", True, False, True),
+        (bool, "bool", True, False, True),
+        (str, "str", False, False, False),
+        (torch.types.Number, "Scalar", True, False, False),
+        (torch.dtype, "ScalarType", False, False, False),
+        (torch.device, "Device", False, False, False),
     ]
     result = []
     for line in data:

@@ -877,6 +877,21 @@ class TestDimConstraints(TestCase):
         solution = reduce_inequalities(exprs, s).as_set()
         self.assertEqual(solution, {8})
 
+    def test_precision(self):
+        from sympy import Eq, Ne, Symbol
+        from torch.fx.experimental.symbolic_shapes import DimConstraints
+
+        x = Symbol("x", positive=True, integer=True)
+        y = Symbol("y", positive=True, integer=True)
+        var_to_val = {x: 296, y: 1155}
+
+        dim_constraints = DimConstraints({}, var_to_val)
+        dim_constraints.add(Eq(x / y, 0.256277056277056))
+        with self.assertRaisesRegex(AssertionError, "Ne\\(x/y, 296/1155\\) is inconsistent!"):
+            dim_constraints.add(Ne(x / y, 0.256277056277056))
+        dim_constraints.solve()
+        self.assertEqual(dim_constraints._dynamic_results, set())
+
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Mod, Ne, Symbol
         from torch._dynamo.source import LocalSource, TensorProperty, TensorPropertySource
@@ -1780,16 +1795,16 @@ class TestDimConstraints(TestCase):
         print(static_code)
         expected_static = '''
 def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
-    return (x0.size()[0] == 8 and
-    x1.size()[2] == 96 and
-    x11.size()[1] == 1 and
-    x12.size()[2] == 3 and
-    x2.size()[0] == 8 and
-    x3.size()[0] == 8 and
-    x4.size()[0] == 8 and
-    x5.size()[1] == 22 and
-    x7.size()[3] == 96 and
-    x8.size()[1] == 22)
+    assert x0.size()[0] == 8
+    assert x1.size()[2] == 96
+    assert x11.size()[1] == 1
+    assert x12.size()[2] == 3
+    assert x2.size()[0] == 8
+    assert x3.size()[0] == 8
+    assert x4.size()[0] == 8
+    assert x5.size()[1] == 22
+    assert x7.size()[3] == 96
+    assert x8.size()[1] == 22
 '''
         expected_dynamic = '''
 def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):

@@ -55,6 +55,7 @@ Features described in this documentation are classified by release status:
    compile/guards-overview
    compile/custom-backends
    compile/deep-dive
+   compile/performance-dashboard
    ir
 
 .. toctree::
