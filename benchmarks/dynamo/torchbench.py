@@ -82,7 +82,6 @@ SKIP = {
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
-    "nanogpt_generate",  # timeout
 }
 
 SKIP_FOR_CUDA = {

@@ -1,5 +1,9 @@
-#include <ATen/Context.h>
 #include <torch/mps.h>
+
+#include <ATen/Context.h>
+#include <c10/util/irange.h>
+
+#include <cstddef>
 
 namespace torch {
 namespace mps {
@@ -21,19 +25,8 @@ void manual_seed(uint64_t seed) {
 }
 
 void synchronize() {
+  TORCH_CHECK(is_available(), "No MPS devices are available");
   at::detail::getMPSHooks().deviceSynchronize();
-}
-
-void commit() {
-  at::detail::getMPSHooks().commitStream();
-}
-
-MTLCommandBuffer_t get_command_buffer() {
-  return at::detail::getMPSHooks().getCommandBuffer();
-}
-
-DispatchQueue_t get_dispatch_queue() {
-  return at::detail::getMPSHooks().getDispatchQueue();
 }
 
 } // namespace mps
