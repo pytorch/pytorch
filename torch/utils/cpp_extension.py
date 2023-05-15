@@ -17,7 +17,6 @@ import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
-from .hipify.hipify_python import GeneratedFileCleaner
 from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
@@ -1484,7 +1483,7 @@ def _jit_compile(name,
         baton = FileBaton(os.path.join(build_directory, 'lock'))
         if baton.try_acquire():
             try:
-                with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
+                with hipify_python.GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
