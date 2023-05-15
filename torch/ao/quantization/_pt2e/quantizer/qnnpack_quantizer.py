@@ -18,8 +18,6 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
 from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
-from torch.fx.passes.utils.matcher_utils import InternalMatch, SubgraphMatcher
-
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 from .quantizer import (
@@ -418,14 +416,15 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([relu_node, conv_node]):
             return
 
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "_annotated": True,
         }
         relu_node.meta["target_dtype_info"] = {
@@ -445,15 +444,17 @@ class QNNPackQuantizer(Quantizer):
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             return
+
+        input_node = conv_node.args[0]
+        weight_node = conv_node.args[1]
+        bias_node = conv_node.args[2]
         conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
+            "input_act_obs_or_fq_ctr_map": {
+                input_node: get_act_obs_or_fq_ctr(quantization_config),
+                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
+                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
+            },
             "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
             "_annotated": True,
         }
 

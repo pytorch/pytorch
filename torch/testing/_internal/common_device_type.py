@@ -168,6 +168,20 @@ except ImportError:
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
 #
+# In addition to parametrizing over device, dtype, and ops via OpInfos, the
+#   @parametrize decorator is supported for arbitrary parametrizations:
+# --------------------------------------------------------
+# # A template test that can be specialized with a device, dtype, and value for x
+# @parametrize("x", range(5))
+# def test_car(self, device, dtype, x)
+#   pass
+# --------------------------------------------------------
+#
+# See the documentation for @parametrize in common_utils.py for additional details
+#   on this. Note that the instantiate_device_type_tests() function will handle
+#   such parametrizations; there is no need to additionally call
+#   instantiate_parametrized_tests().
+#
 # Clever test filtering can be very useful when working with parametrized
 #   tests. "-k test_car" would run every instantiated variant of the test_car()
 #   test template, and "-k test_car_add" runs every variant instantiated with
@@ -624,7 +638,10 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
-# generic_test_class.
+# generic_test_class. This function should be used instead of
+# instantiate_parametrized_tests() if the test class contains
+# device-specific tests (NB: this supports additional @parametrize usage).
+#
 # See note "Writing Test Templates"
 def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
