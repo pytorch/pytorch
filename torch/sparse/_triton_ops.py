@@ -611,7 +611,6 @@ if _has_triton():
         )
 
         return out_backup
-        #return None
 
 
     def bsr_dense_mm(

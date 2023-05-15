@@ -3469,18 +3469,17 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs, rhs, out=out)
 
     @parametrize("block_size", [16, 32, 64])
-    @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    def test_triton_sampled_addmm(self, device, dtype, index_dtype, block_size):
+    def test_triton_sampled_addmm(self, device, dtype, block_size):
         from functools import partial
         from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr, tile_to_blocksize
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
-        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
 
         # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
         batches = [(), (2,), (2, 2)]
@@ -3513,7 +3512,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                 return torch.sparse_compressed_tensor(
                     input_broadcasted.crow_indices().reshape(*batch_dims, n_blockrows + 1),
                     input_broadcasted.col_indices().reshape(*batch_dims, nnz),
-                    out_vals.reshape(*batch_dims, m, n),
+                    out_vals.reshape(*batch_dims, *out_vals.shape[-3:]),
                     size=input_broadcasted.shape,
                     layout=input_broadcasted.layout
                 )
@@ -3522,11 +3521,20 @@ class TestSparseCompressedTritonKernels(TestCase):
             if alpha == 0.0:
                 out.values().copy_(beta * input.values())
                 return out
-            mm_res = filter_mm(alpha * (mat1 @ mat2))
+
+            if input.dtype in (torch.half, torch.bfloat16):
+                mm_args_dtype = torch.float32
+            else:
+                mm_args_dtype = input.dtype
+
+            mm_res = filter_mm(alpha * (mat1.to(mm_args_dtype) @ mat2.to(mm_args_dtype)))
             out.values().copy_(mm_res.values()).add_(beta * input.values())
             return out
 
-        for bi, bm1, bm2, m, n, k in itertools.product(batches, batches, batches, size, size, size):
+        delta_k = [-3, 0, +3]
+        for bi, bm1, bm2, m, n, k, dk in itertools.product(batches, batches, batches, size, size, size, delta_k):
+            # Test not powers of 2 ks as well.
+            k = max(0, k + dk)
             input = tensor(bi + (m, n)).tril_()
             bsr = input.to_sparse_bsr(block_size)
             mat1 = tensor(bm1 + (m, k)).tril_()
@@ -3541,11 +3549,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             scalars = (0.0, 2.0)
             for alpha, beta in itertools.product(scalars, scalars):
                 res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
-                #res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
+                res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
 
                 batch_broadcasted_shape = torch.broadcast_shapes(*(t.shape[:-2] for t in (input, mat1, mat2)))
                 self.assertTrue(res_tri.shape == batch_broadcasted_shape + (m, n))
-                #self.assertEqual(res_tri, res_ref)
+                self.assertEqual(res_tri, res_ref)
 
                 if dtype is torch.float:
                     res_csr = torch.sparse.sampled_addmm(csr, mat1csr, mat2csr, alpha=alpha, beta=beta)
