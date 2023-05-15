@@ -100,7 +100,16 @@ class DTensorConstructorTest(DTensorTestBase):
             lambda x, y: (x.shape == y.shape)
             and (x.dtype == y.dtype)
             and (x.layout == y.layout),
-            pin_memory=False,
+            requires_grad=True,
+        )
+
+    @with_comms
+    def test_full(self):
+        self._run_init_op(
+            torch.full,
+            torch.distributed._tensor.full,
+            self.assertEqual,
+            123.4,
             requires_grad=True,
         )
 
