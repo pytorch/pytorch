@@ -1,1 +1,1 @@
-/Users/sahanp/pytorch/.github/ci_commit_pins/triton-rocm.txt
+cd9e4c5db76b2bb0b47d0680d3d4c24523047e7c
