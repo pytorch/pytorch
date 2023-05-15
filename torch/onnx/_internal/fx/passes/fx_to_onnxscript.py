@@ -286,7 +286,6 @@ def _wrap_fx_args_as_onnxscript_args(
 @_beartype.beartype
 @diagnostics.diagnose_call(
     diagnostics.rules.fx_node_to_onnx,
-    exception_report_level=diagnostics.levels.ERROR,
     diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
 )
 def _export_fx_node_to_onnxscript(
