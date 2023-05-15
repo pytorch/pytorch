@@ -4481,6 +4481,17 @@ else:
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
 
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
+
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
