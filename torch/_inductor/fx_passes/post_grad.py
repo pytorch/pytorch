@@ -50,7 +50,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-
     if locality_reorder:
         reorder_for_locality(gm.graph)
 
