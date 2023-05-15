@@ -204,3 +204,22 @@ class Transform(abc.ABC):
         )
 
         return module
+
+
+class AnalysisResult(abc.ABC):
+    ...
+
+
+class Analysis(abc.ABC):
+    @_beartype.beartype
+    def __init__(
+        self,
+        diagnostic_context: diagnostics.DiagnosticContext,
+        module: torch.fx.GraphModule,
+    ):
+        self.diagnostic_context = diagnostic_context
+        self.module = module
+
+    @abc.abstractmethod
+    def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:
+        ...
