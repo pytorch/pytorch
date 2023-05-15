@@ -2148,7 +2148,6 @@ class CppKernelProxy(CppKernel):
         def _legalize_bf16(loop_body: ir.LoopBody):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
-                sub_block.graph.print_tabular()
                 add_to_dtype(sub_block.graph)
 
         for _node in nodes:
