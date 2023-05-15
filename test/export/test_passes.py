@@ -4,7 +4,7 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export, dynamic_dim
+from torch._export import export, dynamic_dim, _export
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ConstPropPass,
