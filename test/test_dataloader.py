@@ -369,7 +369,7 @@ class TestTensorDataset(TestCase):
 class TestStackDataset(TestCase):
 
     def test_empty(self):
-        with self.assertRaisesRegex(AssertionError, "At least one dataset should be passed"):
+        with self.assertRaisesRegex(ValueError, "At least one dataset should be passed"):
             StackDataset()
 
     def test_mixed(self):
@@ -377,9 +377,9 @@ class TestStackDataset(TestCase):
             StackDataset(TensorDataset(torch.randn(15, 10)), a=TensorDataset(torch.randn(10, 15)))
 
     def test_size_mismatch(self):
-        with self.assertRaisesRegex(AssertionError, "Size mismatch between datasets"):
+        with self.assertRaisesRegex(ValueError, "Size mismatch between datasets"):
             StackDataset(TensorDataset(torch.randn(15, 10)), TensorDataset(torch.randn(10, 15)))
-        with self.assertRaisesRegex(AssertionError, "Size mismatch between datasets"):
+        with self.assertRaisesRegex(ValueError, "Size mismatch between datasets"):
             StackDataset(a=TensorDataset(torch.randn(15, 10)), b=TensorDataset(torch.randn(10, 15)))
 
     def test_len(self):
