@@ -32,7 +32,12 @@ RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
 
 
 class CppWrapperTemplate:
-    pass
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    def test_conv2d_binary_inplace_fusion_failed(self):
+        test_mkldnn_pattern_matcher.TestPaternMatcher().test_conv2d_binary_inplace_fusion_failed(
+            ["op_convolution_pointwise_binary.call"],
+            ["op_convolution_pointwise_binary_.call"],
+        )
 
 
 class CudaWrapperTemplate:
