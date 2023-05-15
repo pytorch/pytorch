@@ -464,9 +464,6 @@ def repro_common(options, mod, load_args):
         load_args(input_reader)
         args = input_reader.args
 
-    if options.produce_test:
-        print(args)
-
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
@@ -808,12 +805,6 @@ divergences--you just might not end up with a useful repro in the end.""",
             metavar="{real,fake,symbolic}",
             default=tracing_mode,
             help="how to trace the repro module into a GraphModule with metadata",
-        )
-
-        parser.add_argument(
-            "--produce_test",
-            action="produce_test",
-            help="Generate a unit test.",
         )
 
     subparsers = parser.add_subparsers(
