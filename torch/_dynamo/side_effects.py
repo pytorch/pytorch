@@ -238,11 +238,10 @@ class SideEffects:
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
+        elif issubclass(user_cls, torch.nn.Module):
+            obj = nn_module_new(user_cls)
         else:
-            if issubclass(user_cls, torch.nn.Module):
-                obj = nn_module_new(user_cls)
-            else:
-                obj = object_new(user_cls)
+            obj = object_new(user_cls)
         variable = variable_cls(
             obj,
             mutable_local=AttributeMutationNew(None, cls_source),
