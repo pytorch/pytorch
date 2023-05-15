@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - master
       - main
       - release/*
       - landchecks/*
@@ -108,7 +107,7 @@ jobs:
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: -1
@@ -146,7 +145,7 @@ jobs:
           echo '    .github/scripts/generate_ci_workflows.py'
           echo
           echo 'If running that command does nothing, you may need to rebase'
-          echo 'onto a more recent commit from the PyTorch master branch.'
+          echo 'onto a more recent commit from the PyTorch main branch.'
           RC=1
         fi
 
@@ -221,7 +220,7 @@ jobs:
       # [see note: pytorch repo ref]
       # deep clone (fetch-depth 0) required, to allow us to use git log
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           submodules: false
           fetch-depth: 1

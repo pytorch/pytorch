@@ -73,6 +73,7 @@ class BaseSchedulerNode:
             f"{name}.writes = {pformat(self.read_writes.writes)}",
             f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
             f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
         ]
         try:
             lines += [
@@ -125,11 +126,26 @@ class BaseSchedulerNode:
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
+    def op_counts(self):
+        return self.read_writes.op_counts
+
     def used_buffer_names(self) -> Set[str]:
         return {
             dep.name
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
         }
+
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        used_names = set()
+        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
+            used_names.add(dep.name)
+            if V.graph.name_to_buffer.get(dep.name):
+                layout = V.graph.name_to_buffer[dep.name].get_layout()
+                # needed to avoid deallocating aliased buffer
+                # if there are still uses of aliases ahead
+                if isinstance(layout, ir.AliasedLayout):
+                    used_names.add(layout.view.data.get_name())
+        return used_names
 
     def prune_deps(self):
         self.unmet_dependencies = {
@@ -213,7 +229,7 @@ class BaseSchedulerNode:
                 # o what have i done.  lets make this an api
                 or (
                     isinstance(self, ExternKernelSchedulerNode)
-                    and isinstance(self.node, ir.AllReduce)
+                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
                 )
             )
             and config.inplace_buffers
@@ -333,7 +349,9 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             # (would this have been fixed if I tracked mutations properly above?)
             return False
 
-        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+        if not isinstance(
+            self.node, (torch._inductor.ir.AllReduce, torch._inductor.ir.InPlaceHint)
+        ):
             # TODO make this a property of the IR
             return False
 
@@ -366,23 +384,6 @@ class SchedulerNode(BaseSchedulerNode):
                     self._body, *self._sizes, normalize=True
                 )
             )
-
-        if self.is_reduction():
-            # reduction has last (reduced) dim in its sizes, and some
-            # downstream dependencies get confused by it
-            self.read_writes.writes = self.read_writes.writes | {
-                w.strip_last_size() for w in self.read_writes.writes
-            }
-            # reduction not on the last dim swaps the sizes, and downstream
-            # dependencies expect unswapped
-            # TODO swapping sizes doesn't work, leads to
-            # File "/scratch/ngimel/work/repos/torchdynamo/torchinductor/sizevars.py", line 130, in guard_equals
-            # if len(right.free_symbols) < len(left.free_symbols):
-            # AttributeError: 'int' object has no attribute 'free_symbols'
-            # even though memory dep looks correct
-            # self.read_writes.writes = self.read_writes.writes | {
-            #     w.maybe_swap_sizes() for w in self.read_writes.writes
-            # }
 
     def debug_str_extra(self):
         name = self.get_name()
@@ -517,6 +518,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_buffer_names(self) -> Set[str]:
         return functools.reduce(set.union, [x.used_buffer_names() for x in self.snodes])
 
+    @cache_on_self
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        return functools.reduce(
+            set.union, (x.used_or_aliased_buffer_names() for x in self.snodes)
+        )
+
     def get_nodes(self) -> List[BaseSchedulerNode]:
         return self.snodes
 
@@ -537,6 +544,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self):
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
+
+    @cache_on_self
+    def op_counts(self):
+        op_counts = collections.Counter()
+        for node in self.snodes:
+            op_counts.update(node.op_counts())
+        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -792,15 +806,19 @@ class Scheduler:
         """
         Remove any nodes without users
         """
-        updated_nodes = []
-        for node in self.nodes:
-            if node.users:
-                updated_nodes.append(node)
-            else:
-                # dead code
-                log.debug("removed dead node: %s", node.get_name())
-                V.graph.removed_buffers.add(node.get_name())
-        self.nodes = updated_nodes
+        again = True  # repeat until a fixed point
+        while again:
+            updated_nodes = []
+            for node in self.nodes:
+                if any(n.get_name() not in V.graph.removed_buffers for n in node.users):
+                    updated_nodes.append(node)
+                else:
+                    # dead code
+                    log.debug("removed dead node: %s", node.get_name())
+                    V.graph.removed_buffers.add(node.get_name())
+
+            again = len(self.nodes) > len(updated_nodes)
+            self.nodes = updated_nodes
 
     def topological_sort_schedule(self):
         """
@@ -1077,7 +1095,7 @@ class Scheduler:
             future_used_buffers.add(node_name)
 
         for node in reversed(self.nodes):
-            used_buffers = node.used_buffer_names()
+            used_buffers = node.used_or_aliased_buffer_names()
             used_buffers = {self.mutation_real_name.get(k, k) for k in used_buffers}
             node.last_usage = used_buffers - future_used_buffers
             future_used_buffers.update(used_buffers)
@@ -1150,7 +1168,7 @@ class Scheduler:
             from .codegen.cpp import CppScheduling
 
             return CppScheduling(self)
-        else:
+        elif device.type == "cuda":
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
                 if device_props.major < 7:
@@ -1164,6 +1182,8 @@ class Scheduler:
             from .codegen.triton import TritonScheduling
 
             return TritonScheduling(self)
+        else:
+            raise RuntimeError(f"Unsupported device type: {device.type}")
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:

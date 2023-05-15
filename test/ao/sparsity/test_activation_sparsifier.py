@@ -7,8 +7,8 @@ import logging
 import torch
 from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier import ActivationSparsifier
 import torch.nn as nn
-from torch.ao.pruning.pruner.utils import module_to_fqn
 import torch.nn.functional as F
+from torch.ao.pruning.sparsifier.utils import module_to_fqn
 from typing import List
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)

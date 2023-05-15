@@ -31,23 +31,7 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
-
-
-try:
-    import torch._prims
-
-    # isort: split
-    # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
-    import torch._prims.utils
-    import torch._prims.wrappers
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
-
-    HAS_PRIMS_REFS = True
-except ImportError:
-    HAS_PRIMS_REFS = False
+import torch.utils._content_store
 
 from . import comptime, config, external_utils
 
@@ -124,6 +108,7 @@ FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
+    torch.utils._content_store.__file__,
     # These are dynamo files!
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
@@ -137,15 +122,15 @@ FILENAME_ALLOWLIST |= {
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
-if HAS_PRIMS_REFS:
-    FILENAME_ALLOWLIST |= {
-        torch._prims.__file__,
-        torch._prims.utils.__file__,
-        torch._prims.wrappers.__file__,
-        torch._refs.__file__,
-        torch._refs.special.__file__,
-        torch._refs.nn.functional.__file__,
-    }
+# Do trace through match and replace patterns used in PT2E QAT
+# Note: These patterns are comprised of torch ops and for internal use only.
+# They are exported to aten graphs before being passed to the FX subgraph rewriter.
+# TODO: find a better way to express this path without having to import
+# `torch.ao.quantization._pt2e`, which interferes with memory profiling
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
+}
 
 
 SKIP_DIRS_RE = None
@@ -170,10 +155,7 @@ def add(import_name: str):
     if isinstance(import_name, types.ModuleType):
         return add(import_name.__name__)
     assert isinstance(import_name, str)
-    try:
-        module_spec = importlib.util.find_spec(import_name)
-    except Exception:
-        return
+    module_spec = importlib.util.find_spec(import_name)
     if not module_spec:
         return
     origin = module_spec.origin
@@ -199,8 +181,6 @@ def check(filename, allow_torch=False):
 
 # skip common third party libs
 for _name in (
-    "einops",
-    "einops_exts",
     "functorch",
     "fx2trt_oss",
     "intel_extension_for_pytorch",
@@ -216,7 +196,6 @@ for _name in (
     "tensorflow",
     "tensorrt",
     "torch2trt",
-    "torchrec.distributed",
     "tqdm",
     "tree",
     "tvm",

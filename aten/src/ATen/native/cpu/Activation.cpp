@@ -12,6 +12,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/core/TensorBase.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/TensorIterator.h>
@@ -27,40 +28,40 @@ namespace {
 static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   if (at::isReducedFloatingType(input.scalar_type())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&]() {
-      using Vec = Vectorized<scalar_t>;
-      scalar_t* output_data = output.data_ptr<scalar_t>();
-      scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-      scalar_t* input_data = input.data_ptr<scalar_t>();
-      parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
-        int64_t size = end - begin;
-        int64_t d = 0;
-        for (; d < size - (size % Vec::size()); d += Vec::size()) {
-          Vec data_vec = Vec::loadu(input_data + begin+ d);
-          Vectorized<float> data_vec0, data_vec1;
-          std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
-          Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
-          Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
-          Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
-          min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
-          Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
-          Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
-          convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d);
-          convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d);
-        }
-        if (size - d > 0) {
-          Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-          Vectorized<float> data_vec0, data_vec1;
-          std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
-          Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
-          Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
-          Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
-          min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
-          Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
-          Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
-          convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d, size - d);
-          convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d, size - d);
-        }
-      });
+    using Vec = Vectorized<scalar_t>;
+    scalar_t* output_data = output.data_ptr<scalar_t>();
+    scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
+    scalar_t* input_data = input.data_ptr<scalar_t>();
+    parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
+      int64_t size = end - begin;
+      int64_t d = 0;
+      for (; d < size - (size % Vec::size()); d += Vec::size()) {
+        Vec data_vec = Vec::loadu(input_data + begin+ d);
+        Vectorized<float> data_vec0, data_vec1;
+        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
+        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
+        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
+        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
+        convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d);
+        convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d);
+      }
+      if (size - d > 0) {
+        Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
+        Vectorized<float> data_vec0, data_vec1;
+        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
+        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
+        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
+        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
+        convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d, size - d);
+        convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d, size - d);
+      }
+    });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
@@ -150,44 +151,22 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
 static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
-    const Scalar& value_scalar) {
-  if (at::isReducedFloatingType(iter.dtype())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "threshold_cpu", [&]() {
-      using Vec = Vectorized<float>;
-      float threshold = threshold_scalar.to<float>();
-      Vec threshold_v = Vec(threshold);
-      scalar_t value = value_scalar.to<scalar_t>();
-      Vec value_v = Vec(float(value));
-      cpu_kernel_vec(
-          iter,
-          [&](scalar_t x, scalar_t other) -> scalar_t {
-            return float(x) <= threshold ? value : other;
-          },
-          [&](Vectorized<scalar_t> x, Vectorized<scalar_t> other) -> Vectorized<scalar_t> {
-            Vec x0, x1, other0, other1;
-            std::tie(x0, x1) = convert_to_float<scalar_t>(x);
-            std::tie(other0, other1) = convert_to_float<scalar_t>(other);
-            return convert_from_float<scalar_t>(Vec::blendv(other0, value_v, x0 <= threshold_v),
-                                                Vec::blendv(other1, value_v, x1 <= threshold_v));
-          });
-    });
-  } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "threshold_cpu", [&] {
-      using Vec = Vectorized<scalar_t>;
-      scalar_t threshold = threshold_scalar.to<scalar_t>();
-      Vec threshold_v = Vec(threshold);
-      scalar_t value = value_scalar.to<scalar_t>();
-      Vec value_v = Vec(value);
-      cpu_kernel_vec(
-          iter,
-          [&](scalar_t x, scalar_t other) -> scalar_t {
-            return x <= threshold ? value : other;
-          },
-          [&](Vec x, Vec other) -> Vec {
-            return Vec::blendv(other, value_v, x <= threshold_v);
-          });
-    });
-  }
+    const Scalar& value_scalar) 
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
+    using Vec = Vectorized<scalar_t>;
+    scalar_t threshold = threshold_scalar.to<scalar_t>();
+    Vec threshold_v = Vec(threshold);
+    scalar_t value = value_scalar.to<scalar_t>();
+    Vec value_v = Vec(value);
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t x, scalar_t other) -> scalar_t {
+          return x <= threshold ? value : other;
+        },
+        [&](Vec x, Vec other) -> Vec {
+          return Vec::blendv(other, value_v, x <= threshold_v);
+        });
+  });
 }
 
 void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
@@ -197,7 +176,6 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
       auto poscoef = scale.to<float>();
       auto negiptcoef = input_scale.to<float>();
       const Vectorized<float> negcoef_vec(negcoef);
-      const Vectorized<float> negiptcoef_vec(negiptcoef);
       const Vectorized<float> poscoef_vec(poscoef);
       const Vectorized<float> one_vec(static_cast<float>(1));
       const Vectorized<float> zero_vec(static_cast<float>(0));
@@ -213,45 +191,6 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
           auto cmp1 = (a1 > zero_vec);
           auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a) {
             return !cmp.zero_mask() ? a * poscoef_vec :
-              Vectorized<float>::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
-          };
-          res0 = get_res_masked(cmp0, a0);
-          res1 = get_res_masked(cmp1, a1);
-          return convert_from_float<scalar_t>(res0, res1);
-        });
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(it.common_dtype(), "elu_cpu", [&]() {
-      using Vec = Vectorized<scalar_t>;
-      auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
-      auto poscoef = scale.to<scalar_t>();
-      auto negiptcoef = input_scale.to<scalar_t>();
-      const Vec negcoef_vec(negcoef);
-      const Vec negiptcoef_vec(negiptcoef);
-      const Vec poscoef_vec(poscoef);
-      const Vec one_vec(static_cast<scalar_t>(1));
-      const Vec zero_vec(static_cast<scalar_t>(0));
-      cpu_kernel_vec(
-          it,
-          [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
-            return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
-          },
-          [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
-            auto cmp = (a > zero_vec);
-            if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-              return a * poscoef_vec;
-            } else {
-              return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
-            }
-          });
-    });
-  }
-}
-
-void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
-  if (at::isReducedFloatingType(it.common_dtype())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "elu_backward_cpu", [&]() {
-    auto negcoef = alpha.to<float>() * scale.to<float>();
     auto poscoef = scale.to<float>();
     auto negiptcoef = input_scale.to<float>();
     const Vectorized<float> negcoef_vec(negcoef);
@@ -810,22 +749,22 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&]() {
-    auto min_val = min.to<float>();
-    auto max_val = max.to<float>();
-    cpu_kernel_vec(
-        iter,
-        [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
-          return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
-        },
-        [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
-          Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
-          std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
-          std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
-          return convert_from_float<scalar_t>(
-            ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
-            ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
-          );
-        });
+      auto min_val = min.to<float>();
+      auto max_val = max.to<float>();
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
+            return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
+          },
+          [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
+            Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
+            std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+            std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+            return convert_from_float<scalar_t>(
+              ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
+              ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
+            );
+          });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {

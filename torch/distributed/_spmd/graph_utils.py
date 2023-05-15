@@ -2,14 +2,14 @@ import logging
 import os
 import tempfile
 from enum import Enum
-from typing import Dict, List, Set, Tuple, Union
+from typing import Callable, cast, Dict, Iterable, List, Set
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-logger: logging.Logger = logging.getLogger("IterGraphModule")
+logger: logging.Logger = logging.getLogger("graph_utils")
 
 
 class OP(str, Enum):
@@ -27,60 +27,6 @@ class CommType(str, Enum):
     BROADCAST = "broadcast_"
     REDUCESCATTER = "reduce_scatter_"
     SCATTER = "scatter_"
-
-
-comm_block_op_sequence: Tuple[Union[str, Set[CommType]], ...] = (
-    "clone",
-    "_tensor_constant",
-    "_tensor_constant",
-    # The supported communication type.
-    {CommType.ALLREDUCE},
-    "comm_result",
-    "getitem",
-    "getitem",
-    "wait_comm",
-)
-
-
-def get_comm_block_nodes(
-    wait_node: fx.Node, comm_type: CommType
-) -> Tuple[int, List[fx.Node]]:
-    """
-    Given a wait_comm node, find out all the nodes belong to this communication.
-
-    Args:
-        wait_node(fx.Node): The target wait_comm node.
-        comm_type(CommType): The communication type of this communication block.
-            Currently, only allreduce is supported. An exception will be raised
-            if other values are passed.
-    Returns:
-        comm_idx(int): The index to the communication node in the return list.
-        node_list(List[fx.Node]): The list that contain the nodes in the order
-           of inserting to the graph.
-    """
-    if not wait_node.name.startswith("wait_comm"):
-        raise ValueError(
-            "Passing a wait_node that name does not start with ``wait_comm``. "
-            f"Name is {wait_node.name}, OP is {wait_node.op}."
-        )
-    node = wait_node
-    node_list = []
-    for i, prefix in enumerate(reversed(comm_block_op_sequence)):
-        node_list.append(node)
-        if isinstance(prefix, set):
-            if comm_type not in prefix:
-                raise ValueError(f"Not supported CommType {comm_type}")
-            prefix = comm_type
-            comm_idx = i
-        assert node.name.startswith(
-            prefix
-        ), f"Comm block op sequence mismatches, {node.op} {node.name} {i} {prefix}."
-        node = node.prev
-
-    comm_idx = len(node_list) - comm_idx - 1
-    node_list.reverse()
-
-    return comm_idx, node_list
 
 
 def get_node_tensor_metadata(node: fx.Node, is_required: bool = True) -> TensorMetadata:
@@ -102,6 +48,19 @@ def get_output(graph: fx.Graph) -> fx.Node:
         if node.op == OP.OUTPUT:
             return node
     raise RuntimeError(f"Cannot find the output node in {graph}")
+
+
+def find_node(
+    graph: fx.Graph, predicate: Callable, reverse_order: bool = False
+) -> List[fx.Node]:
+    """
+    Take a predicate and return all the nodes in the `graph` where the predicate
+    holds.
+    """
+    nodes = cast(Iterable[fx.Node], graph.nodes)
+    if reverse_order:
+        nodes = cast(Iterable[fx.Node], iter(reversed(nodes)))  # type: ignore[call-overload]
+    return [node for node in nodes if predicate(node)]
 
 
 def is_leaf_subgraph(graph: fx.Graph, subgraph: List[fx.Node]) -> bool:
@@ -147,7 +106,10 @@ def clone_subgraph(
             for original_input_node, cloned_input_node in zip(
                 original_input, cloned_input
             ):
-                if original_input_node in all_nodes:
+                if (
+                    isinstance(original_input_node, fx.Node)
+                    and original_input_node in all_nodes
+                ):
                     assert original_input_node in mapping
                     mapped_cloned_input.append(mapping[original_input_node])
                 else:

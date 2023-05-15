@@ -1,7 +1,15 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at::native::mps {
 
@@ -152,8 +160,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
   }
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
-  int64_t ndim = t.dim();
+NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
   for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
@@ -161,7 +168,15 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
   return axes;
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) {
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
+  return getTensorAxes(t.dim());
+}
+
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
+  return getTensorAxes(sizes.size());
+}
+
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
   if (dim.has_value() && dim.value().size() != 0) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
@@ -173,7 +188,7 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) 
     return axes;
   }
 
-  return getTensorAxes(t);
+  return getTensorAxes(sizes);
 }
 
 std::string getMPSShapeString(MPSShape* shape) {
@@ -459,6 +474,17 @@ string get_mem_format_string(c10::MemoryFormat memory_format) {
 }
 
 MPSGraphCache* MPSGraphCache::_instance_cache = nullptr;
+
+void MPSGraphCache::profileCachedGraph(const CacheEntry& cacheEntry) const {
+  auto& profiler = getMPSProfiler();
+  if (profiler.isOperationProfilingEnabled()) {
+    std::string graphKey = cacheEntry.key_;
+    // for interval-based signpost tracing, we begin the interval here to be able
+    // to measure the time it takes to compile the graphs (if graph newly created),
+    // and also the time potentially spent on gather/scatter of graph's input tensors
+    profiler.beginProfileKernel(cacheEntry.cachedGraph_->graph(), graphKey, true);
+  }
+}
 
 class MPSGraphCacheCallback : public IMpsAllocatorCallback {
  public:

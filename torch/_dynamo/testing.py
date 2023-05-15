@@ -3,6 +3,7 @@ import dis
 import functools
 import logging
 import os.path
+import re
 import sys
 import types
 import unittest
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config, eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -54,10 +55,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return name
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -104,7 +102,7 @@ def requires_bwd_pass(out):
     if isinstance(out, torch.Tensor):
         return out.requires_grad
     elif isinstance(out, (list, tuple)):
-        return any([requires_bwd_pass(x) for x in out])
+        return any(requires_bwd_pass(x) for x in out)
     elif out is None:
         return False
     elif isinstance(out, int):
@@ -255,6 +253,37 @@ def requires_static_shapes(fn):
     return _fn
 
 
+@contextlib.contextmanager
+def trace_numpy() -> None:
+    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
+    try:
+        yield
+    finally:
+        config.numpy_ndarray_as_tensor = prev
+
+
+def requires_numpy_pytorch_interop(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+
+    return _fn
+
+
+def requires_numpy(fn):
+    @functools.wraps(fn)
+    def _fn(*args, **kwargs):
+        if utils.HAS_NUMPY:
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires numpy")
+
+    return _fn
+
+
 def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(size, stride))
@@ -300,9 +329,8 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
     return DummyTestClass
 
 
-# temporary decorator to skip failing 3.11 dynamo tests
-def skipIfPy311(fn):
-    if sys.version_info < (3, 11):
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
         return fn
-    else:
-        return unittest.skip(fn)
+    return unittest.skip(fn)

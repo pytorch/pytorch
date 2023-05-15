@@ -28,10 +28,9 @@
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
-#include <c10/util/Half.h>
-#include <c10/util/Half-math.h>
 #include <c10/util/copysign.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>

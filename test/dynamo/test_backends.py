@@ -11,6 +11,7 @@ from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
+from torch.testing._internal.common_utils import IS_FBCODE
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -160,10 +161,12 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("aot_ts_nvfuser")
 
     @requires_cuda()
+    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
     def test_nvprims_nvfuser(self):
         self._check_backend_works("nvprims_nvfuser")
 
     @requires_cuda()
+    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
     def test_nvprims_aten(self):
         self._check_backend_works("nvprims_aten")
 
@@ -202,15 +205,13 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
 
 class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
-    def test_default_mps_to_aot_eager(self):
+    def test_mps_not_supported(self):
         model = Seq().to("mps")
         example_input = torch.randn(1, 10).to("mps")
-
-        # Not sure yet if there's a better way to test this
-        a = torch.compile(model, backend="inductor")(example_input)
-        torch._dynamo.reset()
-        b = torch.compile(model, backend="aot_eager")(example_input)
-        self.assertTrue(torch.equal(a, b))
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.compile(model, backend="inductor")(example_input),
+        )
 
 
 if __name__ == "__main__":
