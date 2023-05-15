@@ -84,6 +84,12 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+PYTHON_TO_CPP = {
+    "int": "long",
+    "float": "double",
+    "bool": "bool",
+}
+
 
 def reduction_init(reduction_type, dtype):
     if dtype in (torch.float16, torch.bfloat16):
@@ -118,7 +124,9 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} ^= {next_value}"
     if reduction_type == "any":
         return f"{var} = {var} || {next_value}"
-    return f"{var} = std::{reduction_type}({var}, {next_value})"
+    if reduction_type in ("min", "max"):
+        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+    raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
@@ -282,12 +290,13 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
-    if OptimizationContext.key in V.interpreter.current_node.meta:
-        return V.interpreter.current_node.meta[OptimizationContext.key]
-    else:
-        return None
+    return get_opt_ctx(V.interpreter.current_node)
 
 
 class CppVecOverrides(OpOverrides):
@@ -563,14 +572,6 @@ class CppVecOverrides(OpOverrides):
         return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
-    def int_minimum(a, b):
-        return f"at::vec::minimum({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"at::vec::maximum({a}, {b})"
-
-    @staticmethod
     def square(a):
         return f"{a} * {a}"
 
@@ -605,6 +606,16 @@ class CppVecOverrides(OpOverrides):
             torch.bfloat16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        node: torch.fx.Node = V.interpreter.current_node
+        assert node
+        opt_ctx_x = get_opt_ctx(node.args[1])
+        assert opt_ctx_x
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+            return f"vec_convert_to_mask({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+            return f"mask_convert_to_float({x})"
+        # TODO(jgong5): support conversion for other types
+        # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
 
     @staticmethod
@@ -638,9 +649,12 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
+        elif math.isnan(other):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
+            )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
-
         type = f"decltype({var}())"
         float_mask = f"to_float_mask({mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
@@ -858,19 +872,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def minimum(a, b):
-        return f"({b} != {b}) ? {b} : std::min({a}, {b})"
+        return f"min_propagate_nan({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        return f"({b} != {b}) ? {b} : std::max({a}, {b})"
-
-    @staticmethod
-    def int_minimum(a, b):
-        return f"std::min({a}, {b})"
-
-    @staticmethod
-    def int_maximum(a, b):
-        return f"std::max({a}, {b})"
+        return f"max_propagate_nan({a}, {b})"
 
     @staticmethod
     def where(a, b, c):
@@ -923,6 +929,8 @@ class CppOverrides(OpOverrides):
             other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
+        elif math.isnan(other):
+            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
         else:
             other_code = f"static_cast<{type}>({repr(other)})"
 
