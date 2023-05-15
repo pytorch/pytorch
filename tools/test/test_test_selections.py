@@ -337,14 +337,6 @@ class TestCalculateShards(unittest.TestCase):
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
 
 
-def mocked_get_previously_failing_tests() -> Set[str]:
-    return {"test4"}
-
-
-def mocked_get_modified_tests() -> Set[str]:
-    return {"test2", "test4"}
-
-
 def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     file_object = io.StringIO()
     json.dump(contents, file_object)
@@ -391,11 +383,11 @@ class TestParsePrevTests(unittest.TestCase):
 
     @mock.patch(
         "tools.testing.test_selections._get_previously_failing_tests",
-        side_effect=mocked_get_previously_failing_tests,
+        return_value={"test4"},
     )
     @mock.patch(
         "tools.testing.test_selections._get_modified_tests",
-        side_effect=mocked_get_modified_tests,
+        return_value={"test2", "test4"}
     )
     def test_get_reordered_tests(
         self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
