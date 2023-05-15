@@ -365,9 +365,7 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join(
-                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
-                )
+                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
             )
         }
 
