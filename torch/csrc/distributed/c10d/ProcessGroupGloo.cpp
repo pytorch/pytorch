@@ -106,8 +106,6 @@ namespace c10d {
 
 namespace {
 
-constexpr int kBytes = 8;
-
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
