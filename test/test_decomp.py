@@ -455,6 +455,17 @@ class TestDecomp(TestCase):
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
 
+    def test_batch_norm_unflatten_weight_bias(self, device):
+        # https://github.com/pytorch/pytorch/issues/100970
+        shape = (1, 3, 2, 2)
+        input = torch.randn(shape, device=device)
+        weight = torch.randn((3, 1, 1, 1), device=device)
+        bias = torch.randn(3, device=device)
+        mean = torch.randn(3, device=device)
+        var = torch.randn(3, device=device)
+        res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
+        self.assertEqual(shape, res[0].shape)
+
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
             self.test_case = test_case
