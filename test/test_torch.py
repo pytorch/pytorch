@@ -1439,6 +1439,24 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_interpolate_bilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=12,
+                    mode='bilinear',
+                    align_corners=False)
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
     @skipIfMps
     @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
@@ -4481,6 +4499,17 @@ else:
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
 
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
+
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
@@ -6166,10 +6195,11 @@ class TestTorch(TestCase):
         self.assertEqual(neg_0.stride(), neg_1.stride())
         self.assertEqual(neg_0.size(), neg_1.size())
         self.assertFalse(torch.equal(neg_0, neg_1))
-        # Disable the following check due to the inductor failure
+        # FIXME: Disable the following check due to the inductor failure
         # See https://github.com/pytorch/pytorch/issues/100340 and
         # https://github.com/pytorch/pytorch/issues/98175
-        # self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
 
         conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
         conj_1 = conj_0.conj()
@@ -6179,10 +6209,11 @@ class TestTorch(TestCase):
         self.assertEqual(conj_0.stride(), conj_1.stride())
         self.assertEqual(conj_0.size(), conj_1.size())
         self.assertFalse(torch.equal(conj_0, conj_1))
-        # Disable the following check due to the inductor failure
+        # FIXME: Disable the following check due to the inductor failure
         # See https://github.com/pytorch/pytorch/issues/100340 and
         # https://github.com/pytorch/pytorch/issues/98175
-        # self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
         # Fast path test: two tensors share the same storage, but different dtype
         s_0 = torch.rand((2, 3), dtype=torch.float)
@@ -7441,6 +7472,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_parallel_info(self):
         torch.__config__.parallel_info()
+
+    def test_get_cpu_capability(self):
+        # This method is primarily exposed for torchvision's resize
+        torch.backends.cpu.get_cpu_capability()
+
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):

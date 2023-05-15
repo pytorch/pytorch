@@ -51,6 +51,14 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
       (*pyobj_interpreter_.load())->name());
 }
 
+bool PyObjectSlot::check_interpreter(PyInterpreter* interpreter) {
+  return interpreter == pyobj_interpreter();
+}
+
+bool PyObjectSlot::has_pyobj() const {
+  return pyobj_ != nullptr;
+}
+
 bool PyObjectSlot::owns_pyobj() {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   return reinterpret_cast<uintptr_t>(pyobj_) & 1;

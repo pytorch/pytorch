@@ -6,6 +6,7 @@
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/RefcountedDeleter.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
@@ -84,132 +85,35 @@ PyObject* THPStorage_NewWithStorage(
   return obj;
 }
 
-// This object is used as the `ctx` argument for DataPtr to implement a shared
-// DataPtr. Normally, a DataPtr is unique, but we use this custom context and
-// the deleter function below to make the DataPtr act like a non-unique
-// DataPtr. This context object holds onto an inner context and deleter
-// function which handle the actual deletion of the data when the refcount
-// reaches 0.
-//
-// This shared DataPtr feature is only used when storages are shared between
-// multiple Python interpreters in torch::deploy (MultiPy). Before storages had
-// PyObject preservation, interpreters could just share the same StorageImpl
-// instance. But now a StorageImpl can only be associated with one interpreter
-// in order to properly manage a zombie PyObject. So we share storages across
-// Python interpreters by creating a different StorageImpl instance for each
-// one, but they all point to the same data.
-struct RefcountedDeleterContext {
-  RefcountedDeleterContext(void* other_ctx, c10::DeleterFnPtr other_deleter)
-      : other_ctx(other_ctx, other_deleter), refcount(1) {}
-
-  void incref() {
-    refcount++;
-  }
-
-  std::unique_ptr<void, c10::DeleterFnPtr> other_ctx;
-  size_t refcount;
-};
-
-// This function is used as the `ctx_deleter` for DataPtr to implement a
-// shared DataPtr.
-// Warning: This should only be called on a RefcountedDeleterContext that was
-// allocated on the heap with `new`
-void refcounted_deleter(void* ctx_) {
-  RefcountedDeleterContext& ctx =
-      *reinterpret_cast<RefcountedDeleterContext*>(ctx_);
-  ctx.refcount--;
-  if (ctx.refcount == 0) {
-    ctx.other_ctx = nullptr;
-    delete &ctx;
-  }
-}
-
-// If the storage has a normal unique DataPtr, replace it with a DataPtr
-// that can be shared between multiple StorageImpls
-void maybeReplaceDataPtrWithShared(c10::Storage storage) {
-  c10::DataPtr& data_ptr = storage.mutable_data_ptr();
-
-  if (data_ptr.get_deleter() == &refcounted_deleter) {
-    // Data pointer is already shared
-    return;
-  }
-
-  void* data = data_ptr.get();
-  void* other_ctx = data_ptr.get_context();
-  c10::DeleterFnPtr other_deleter = data_ptr.get_deleter();
-  c10::Device device = data_ptr.device();
-
-  // Release the context of the original DataPtr so that the data doesn't
-  // get deleted when the original DataPtr is replaced
-  data_ptr.release_context();
-
-  RefcountedDeleterContext* refcount_ctx =
-      new RefcountedDeleterContext(other_ctx, other_deleter);
-
-  c10::DataPtr new_data_ptr(
-      data, reinterpret_cast<void*>(refcount_ctx), &refcounted_deleter, device);
-  storage.set_data_ptr(std::move(new_data_ptr));
-}
-
-// Create a new StorageImpl that points to the same data. If the original
-// StorageImpl's DataPtr is not shared, replace it with a shared DataPtr
-c10::Storage newStorageImplWithSharedDataPtr(c10::Storage storage) {
-  maybeReplaceDataPtrWithShared(storage);
-
-  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
-
-  c10::DataPtr& data_ptr = storage.mutable_data_ptr();
-  c10::DataPtr new_data_ptr(
-      data_ptr.get(),
-      data_ptr.get_context(),
-      data_ptr.get_deleter(),
-      data_ptr.device());
-
-  reinterpret_cast<RefcountedDeleterContext*>(data_ptr.get_context())->incref();
-
-  c10::Storage new_storage = c10::make_intrusive<c10::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      storage_impl->nbytes(),
-      storage_impl->allocator(),
-      /*resizable=*/storage_impl->resizable());
-
-  new_storage.set_data_ptr(std::move(new_data_ptr));
-  return new_storage;
-}
-
 // Wraps the c10::Storage with a storage PyObject
 PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
-
-    bool has_pyobj =
-        pyobj_slot->check_pyobj(pyobj_slot->pyobj_interpreter()).has_value();
-    bool is_same_interpreter =
-        pyobj_slot->pyobj_interpreter() == getPyInterpreter();
-
-    c10::Storage storage_ = storage;
-
-    if (has_pyobj && !is_same_interpreter) {
-      // If the StorageImpl has a PyObject that is managed by a different
-      // interpreter than the current one, create a new StorageImpl that points
-      // to the same data and then create the Python storage from that
-      storage_ = newStorageImplWithSharedDataPtr(storage);
-    }
-
     return THPStorage_NewWithStorage(
         THPStorageClass,
-        std::move(storage_),
+        std::move(storage),
+        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  }
+  c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
+
+  // If the StorageImpl has a PyObject that is managed by a different
+  // interpreter than the current one, create a new StorageImpl that points to
+  // the same data and then create the Python storage from that.
+  // NOTE: This is only supposed to happen in MultiPy
+  if (pyobj_slot->has_pyobj() && !pyobj_slot->check_interpreter(getPyInterpreter())) {
+    return THPStorage_NewWithStorage(
+        THPStorageClass,
+        c10::newStorageImplFromRefcountedDataPtr(storage),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
   c10::optional<PyObject*> maybe_pyobj =
-      storage_impl->pyobj_slot()->check_pyobj(getPyInterpreter());
+      pyobj_slot->check_pyobj(getPyInterpreter());
   c10::impl::PyInterpreterStatus status;
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
-      if (storage_impl->pyobj_slot()->owns_pyobj()) {
-        storage_impl->pyobj_slot()->set_owns_pyobj(false);
+      if (pyobj_slot->owns_pyobj()) {
+        pyobj_slot->set_owns_pyobj(false);
         reinterpret_cast<THPStorage*>(obj)->cdata =
             c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
         return obj;

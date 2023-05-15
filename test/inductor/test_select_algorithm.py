@@ -14,8 +14,6 @@ from torch._inductor.autotune_process import BenchmarkRequest
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-torch.backends.cuda.matmul.allow_tf32 = False
-
 aten = torch.ops.aten
 
 

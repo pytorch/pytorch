@@ -154,14 +154,14 @@ __global__ void indexing_backward_kernel_stride_1(
       } else {
         opmath_t gradient = (opmath_t)0.0;
 
-        int laneIdx = threadIdx.x & 0x1f;
+        int laneIdx = threadIdx.x % C10_WARP_SIZE;
         int64_t num_warp_passes = num_duplicates / C10_WARP_SIZE;
         for (int64_t i = 0; i < num_warp_passes; ++i) {
             grad_row = ((int64_t) indices[idx + i * C10_WARP_SIZE + laneIdx]) * stride + z * numel * stride;
             gradient += static_cast<opmath_t>(grad_output[grad_row]) * scale;
         }
         WARP_SYNC();
-        for (int offset = 16; offset > 0; offset /= 2) {
+        for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
           gradient += WARP_SHFL_DOWN(gradient, offset);
         }
 
@@ -504,6 +504,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
+
       if (sliceSize == 1) {
         // This implementation is faster with high amounts of duplicates but could overflow
         // if FP16 / BF16 is used
@@ -538,18 +539,18 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
             C10_CUDA_KERNEL_LAUNCH_CHECK();
             });
         } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-          expandedValue.scalar_type(), "indexing_backward", [&] {
-            indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-              sorted_indices.const_data_ptr<int64_t>(),
-              orig_indices.const_data_ptr<int64_t>(),
-              expandedValue.const_data_ptr<scalar_t>(),
-              src_.mutable_data_ptr<scalar_t>(),
-              num_indices,
-              sliceSize,
-              strideBefore,
-              nElemBefore,
-              accumulate);
+            AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
+            expandedValue.scalar_type(), "indexing_backward", [&] {
+              indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+                sorted_indices.const_data_ptr<int64_t>(),
+                orig_indices.const_data_ptr<int64_t>(),
+                expandedValue.const_data_ptr<scalar_t>(),
+                src_.mutable_data_ptr<scalar_t>(),
+                num_indices,
+                sliceSize,
+                strideBefore,
+                nElemBefore,
+                accumulate);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             });
           }

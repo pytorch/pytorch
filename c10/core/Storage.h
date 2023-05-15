@@ -4,6 +4,12 @@
 
 namespace c10 {
 
+struct Storage;
+
+C10_API bool isSharedStorageAlias(
+    const Storage& storage0,
+    const Storage& storage1);
+
 struct C10_API Storage {
  public:
   struct use_byte_size_t {};
@@ -155,7 +161,9 @@ struct C10_API Storage {
   }
 
   bool is_alias_of(const Storage& other) const {
-    return storage_impl_ == other.storage_impl_;
+    return (
+        storage_impl_ == other.storage_impl_ ||
+        isSharedStorageAlias(*this, other));
   }
 
   void UniqueStorageShareExternalPointer(
