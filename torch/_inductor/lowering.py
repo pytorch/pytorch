@@ -2481,6 +2481,7 @@ def upsample_nearest3d(
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
+
 def _create_constants(*args, dtype):
     return tuple(ops.constant(a, dtype) for a in args)
 
@@ -2520,36 +2521,43 @@ def upsample_bicubic2d_default(
             return ops.mul(scale, dst_index_ie)
         else:
             half = ops.constant(0.5, torch.float32)
-            return (scale * (dst_index_ie + half) - half)
+            return ops.sub(
+                ops.mul(scale, ops.add(dst_index_ie, half)), half
+            )  # scale * (dst_index + 0.5) - 0.5
 
-    def cubic_convolution1(x, A: float):
+    def cubic_convolution1(x, A):
         _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
-        return (_Ap2 * x - _Ap3) * x * x + _1
+        # ((A + 2) * x - (A+3)) * x * x + 1
+        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
 
-    def cubic_convolution2(x, A: float):
-        _A, _4, _5, _8 = _create_constants(A, 4, 5, 8, dtype=torch.float32)
-        return _A * (((x - _5) * x + _8) * x - _4)
+    def cubic_convolution2(x, A):
+        _A, _4A, _5A, _8A = _create_constants(A, 4 * A, 5 * A, 8 * A, dtype=torch.float32)
+        # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
+        return ops.sub(
+            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(_A, x), _5A), x), _8A), x), _4A
+        )
 
     def get_cubic_upsample_coefficients(t):
         A = -0.75
         _1 = ops.constant(1.0, torch.float32)
-        c0 = cubic_convolution2(t + _1, A)
+        c0 = cubic_convolution2(ops.add(t, _1), A)
         c1 = cubic_convolution1(t, A)
 
-        x2 = _1 - t
+        x2 = ops.sub(_1, t)
         c2 = cubic_convolution1(x2, A)
-        c3 = cubic_convolution2(x2 + _1, A)
-        return (
-            c0,
-            c1,
-            c2,
-            c3,
-        )
+        c3 = cubic_convolution2(ops.add(x2, _1), A)
+        return (c0, c1, c2, c3)
 
     def cubic_interp1d(xs, t):
         cs = get_cubic_upsample_coefficients(t)
         # dot product between xs and cs
-        return xs[0] * cs[0] + xs[1] * cs[1] + xs[2] * cs[2] + xs[3] * cs[3]
+        return ops.add(
+            ops.mul(xs[0], cs[0]),
+            ops.add(
+                ops.mul(xs[1], cs[1]),
+                ops.add(ops.mul(xs[2], cs[2]), ops.mul(xs[3], cs[3])),
+            ),
+        )
 
     height_scale = compute_scale(iH, oH, align_corners, scales_h)
     width_scale = compute_scale(iW, oW, align_corners, scales_h)
