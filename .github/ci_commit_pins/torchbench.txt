@@ -1,1 +1,1 @@
-/Users/sahanp/pytorch/.ci/docker/ci_commit_pins/torchbench.txt
+../../.ci/docker/ci_commit_pins/torchbench.txt

@@ -1,1 +1,1 @@
-/Users/sahanp/pytorch/.ci/docker/ci_commit_pins/vision.txt
+../../.ci/docker/ci_commit_pins/vision.txt
