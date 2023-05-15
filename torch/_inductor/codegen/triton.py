@@ -888,6 +888,11 @@ class TritonKernel(Kernel):
         # tmpX  means indirect indexing
         return free_symbol_startswith(index, "tmp")
 
+    def is_broadcasted(self, index: sympy.Expr):
+        return not set.issubset(
+            set(self.range_tree_nodes.keys()), index.free_symbols
+        )
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
@@ -1106,18 +1111,22 @@ class TritonKernel(Kernel):
         # Keep the variable in cache if we are going to reuse it
         # TODO(lezcano) We could potentially do better
         # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        # Keep the variable in cache last if all the folowing hold
-        #  1) We are in a reduction loop
-        #  2) Its not its last use
-        #  3) This load will not be lifted to body the body
-        #  4) We are not broadcasting
-        if self.inside_reduction and not self.persistent_reduction:
-            names = self.mutations or {name}
+        # Keep the variable in cache last if any of the following hold
+        #  1) We are doing broadcasting
+        #  2) It will be used later and it won't be CSE'd. Equivalently, all the following hold
+        #   2.1) We are in a reduction loop
+        #   2.2) Its not its last use
+        #   2.3) This load will not be lifted to the body
+        # The second lot of conditions are equiv to: 
+        if self.is_broadcasted(original_index):
+            ep = ", eviction_policy='evict_last'"
+        elif self.inside_reduction and not self.persistent_reduction:
+            if name in self.args.inplace_buffers:
+                names = set(self.args.inplace_buffers[name].other_names)
+            else:
+                names = {name}
             last_use = len(names & self.last_usage) > 0
-            is_broadcasted = not set.issubset(
-                set(self.range_tree_nodes.keys()), original_index.free_symbols
-            )
-            evict_last = not last_use and ("rmask" in mask or indirect_indexing) and not is_broadcasted
+            evict_last = not last_use and ("rmask" in mask or indirect_indexing)
             ep = ", eviction_policy='evict_last'" if evict_last else ""
         else:
             ep = ""
@@ -1189,6 +1198,16 @@ class TritonKernel(Kernel):
         ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
+        # Guard against write-after-read corruption in triton.
+        # See # https://github.com/openai/triton/issues/1615
+        # This triton bug means that a load which is broadcasted over multiple
+        # warps may see the result of a store that happens later in the triton
+        # program. The workaround is to add a barrier before storing, which
+        # enforces that all warps have already read the data.
+        is_inplace = name in self.args.inplace_buffers
+        is_broadcasted = self.is_broadcasted(original_index)
+        if is_inplace and is_broadcasted:
+            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
         # Lezcano: Setting the eviction_policy would be useful in in_out_ptrs,
         # but it's not supported by triton master ATM
