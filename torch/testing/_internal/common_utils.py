@@ -714,6 +714,8 @@ def sanitize_pytest_xml(xml_file: str):
         full_classname = testcase.attrib['classname']
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
+        if regex_result is None:
+            continue
         classname = regex_result.group("classname")
         file = regex_result.group("file").replace(".", "/")
         testcase.set("classname", classname)
@@ -2226,10 +2228,9 @@ class TestCase(expecttest.TestCase):
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        # TODO remove version check once dynamo supports 3.11
-        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+        if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
+        elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
 
