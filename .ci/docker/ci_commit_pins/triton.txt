@@ -1,1 +1,1 @@
-7d1a95b04654ff9c216afe08a454ad0822f05370
+/Users/sahanp/pytorch/.github/ci_commit_pins/triton.txt

@@ -1,1 +1,1 @@
-4.27.4
+/Users/sahanp/pytorch/.github/ci_commit_pins/huggingface.txt
