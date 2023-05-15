@@ -112,7 +112,7 @@ SUPPORTED_FALLBACK_CPP_WRAPPER = [
 ]
 
 
-OPTIONAL_DEFINITION = {
+OPTIONAL_DECLARATION = {
     "optional_scalar": "c10::optional<at::Scalar> optional_scalar;",
     "optional_string": "c10::optional<c10::string_view> optional_string;",
     "optional_list": "torch::List<c10::optional<at::Scalar>> optional_list;",
@@ -905,9 +905,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             for optional_name, optional_needed in V.graph.optional_variable.items():
                 if optional_needed:
+                    assert (
+                        optional_name in OPTIONAL_DECLARATION
+                    ), f"key {optional_name} not found in OPTIONAL_DECLARATION"
                     self.wrapper_call.splice(
                         f"""
-                        {OPTIONAL_DEFINITION[optional_name]}
+                        {OPTIONAL_DECLARATION[optional_name]}
                         """
                     )
 
