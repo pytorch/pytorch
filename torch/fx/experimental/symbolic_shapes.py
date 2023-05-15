@@ -1661,14 +1661,18 @@ try:
                 # Output expressions are sound.
                 log.debug("translation validation: success")
                 return self.Result(success=True)
-except:
+except ImportError:
     _HAS_Z3 = False
 else:
     _HAS_Z3 = True
 
 
 def _translation_validator_enabled() -> bool:
-    return _HAS_Z3 and torch._dynamo.config.translation_validation
+    assert _HAS_Z3 or not torch._dynamo.config.translation_validation, (
+        "translation validation requires Z3 package. Please, either install "
+        "z3-solver or disable translation validation."
+    )
+    return torch._dynamo.config.translation_validation
 
 
 def _lru_cache(fn, maxsize=None):
@@ -2917,7 +2921,6 @@ Failed inputs:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
-        self._add_output_guard(sympy.Eq(a, expr))
 
         # When specializing 'a == expr', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
