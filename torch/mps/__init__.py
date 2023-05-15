@@ -98,7 +98,9 @@ def driver_allocated_memory() -> int:
     """
     return torch._C._mps_driverAllocatedMemory()
 
+from . import profiler
+
 __all__ = [
     'get_rng_state', 'manual_seed', 'seed', 'set_rng_state', 'synchronize',
     'empty_cache', 'set_per_process_memory_fraction', 'current_allocated_memory',
-    'driver_allocated_memory']
+    'driver_allocated_memory', 'profiler']

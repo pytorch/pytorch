@@ -86,7 +86,6 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
@@ -1414,7 +1413,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
 make_fallback(aten.view_as_complex.default, require_contiguous)
 
@@ -1565,6 +1563,27 @@ make_fallback(aten.zeros.names)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
+
+# ROCm specific fallback, perf issues are observed when registered
+make_fallback(aten.miopen_batch_norm, warn=False)
+
+if torch.version.hip is not None and torch.cuda.is_available():
+    # tl.reduce not available yet in ROCm's version of triton
+    make_fallback(aten.prod, warn=False)
+
+
+@register_lowering(aten.copy)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() == src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(src, self.get_size())
+        return clone(out)
+    return clone(src)
 
 
 @register_lowering(aten.clone)
@@ -2678,11 +2697,17 @@ def reflection_pad2d_backward(grad_output, x, padding):
         bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
 
         # Accumulate gradients from different areas
-        grad = load_from_output(center_x, center_y)
-        accumulate(center_x, left_reflect_y, (y, 1, left))
-        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top))
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        # If some of the padding is negative, center load is not always valid
+        range_cx = (center_x, 0, h + top + bot)
+        range_cy = (center_y, 0, w + left + right)
+        cond = ops.and_(
+            index_range_condition(range_cx), index_range_condition(range_cy)
+        )
+        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
+        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
         accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
         accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
         accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
@@ -3020,10 +3045,10 @@ def max_pool2d_with_indices_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3033,15 +3058,11 @@ def max_pool2d_with_indices_backward(
                 grad_index = [
                     *prefix,
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            ph, ops.sub(phend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
                     ),
                     ops.indirect_indexing(
-                        ops.int_minimum(
-                            pw, ops.sub(pwend, ops.constant(1, torch.int32))
-                        ),
+                        ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
                     ),
                 ]
@@ -3428,18 +3449,18 @@ def avg_pool2d_backward(
         kernel_w = ops.constant(kernel_size[1], torch.int32)
         hstart = ops.sub(ops.mul(ph, stride_h), pad_h)
         wstart = ops.sub(ops.mul(pw, stride_w), pad_w)
-        hend = ops.int_minimum(
+        hend = ops.minimum(
             ops.add(hstart, kernel_h),
             ops.add(ops.index_expr(height, torch.int32), pad_h),
         )
-        wend = ops.int_minimum(
+        wend = ops.minimum(
             ops.add(wstart, kernel_w),
             ops.add(ops.index_expr(width, torch.int32), pad_w),
         )
-        hstart = ops.int_maximum(hstart, ops.constant(0, torch.int32))
-        wstart = ops.int_maximum(wstart, ops.constant(0, torch.int32))
-        hend = ops.int_minimum(hend, ops.index_expr(height, torch.int32))
-        wend = ops.int_minimum(wend, ops.index_expr(width, torch.int32))
+        hstart = ops.maximum(hstart, ops.constant(0, torch.int32))
+        wstart = ops.maximum(wstart, ops.constant(0, torch.int32))
+        hend = ops.minimum(hend, ops.index_expr(height, torch.int32))
+        wend = ops.minimum(wend, ops.index_expr(width, torch.int32))
         divide_factor = ops.mul(ops.sub(hend, hstart), ops.sub(wend, wstart))
         return divide_factor
 
@@ -3456,10 +3477,10 @@ def avg_pool2d_backward(
         phend = ops.index_expr(ir.FloorDiv(h, stride[0]) + 1, torch.int32)
         pwend = ops.index_expr(ir.FloorDiv(w, stride[1]) + 1, torch.int32)
 
-        phstart = ops.int_maximum(phstart, ops.constant(0, torch.int32))
-        pwstart = ops.int_maximum(pwstart, ops.constant(0, torch.int32))
-        phend = ops.int_minimum(phend, ops.index_expr(pooled_height, torch.int32))
-        pwend = ops.int_minimum(pwend, ops.index_expr(pooled_width, torch.int32))
+        phstart = ops.maximum(phstart, ops.constant(0, torch.int32))
+        pwstart = ops.maximum(pwstart, ops.constant(0, torch.int32))
+        phend = ops.minimum(phend, ops.index_expr(pooled_height, torch.int32))
+        pwend = ops.minimum(pwend, ops.index_expr(pooled_width, torch.int32))
 
         gradient = None
         for ph_ in range(h_window_size):
@@ -3477,13 +3498,13 @@ def avg_pool2d_backward(
                         [
                             *prefix,
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
                             ),
                             ops.indirect_indexing(
-                                ops.int_minimum(
+                                ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,

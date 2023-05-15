@@ -53,6 +53,8 @@ class C10_API DataPtr {
   operator bool() const {
     return static_cast<bool>(ptr_);
   }
+
+  /// @see c10::UniqueVoidPtr::cast_context
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     return ptr_.cast_context<T>(expected_deleter);
