@@ -356,6 +356,14 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_add_int16(self):
+        # https://github.com/pytorch/pytorch/issues/96487
+        def fn(a):
+            return a + 1, a - 1
+
+        a = torch.randint(4, (2,), dtype=torch.int16)
+        self.common(fn, (a,))
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

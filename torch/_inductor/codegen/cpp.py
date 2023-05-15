@@ -667,6 +667,14 @@ class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
 
     @staticmethod
+    def add(a, b):
+        return f"decltype({a})({a} + {b})"
+
+    @staticmethod
+    def sub(a, b):
+        return f"decltype({a})({a} - {b})"
+
+    @staticmethod
     def mul(a, b):
         return f"decltype({a})({a} * {b})"
 
