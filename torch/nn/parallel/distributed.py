@@ -814,6 +814,7 @@ class DistributedDataParallel(Module, Joinable):
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=0,
             params_and_buffers_to_ignore=self.parameters_to_ignore,
+            broadcast_buffers=self.broadcast_buffers,
         )
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
@@ -1369,34 +1370,8 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        if self.device_ids:
-            inputs, kwargs = _to_kwargs(
-                inputs,
-                kwargs,
-                torch.device(self.device_type, self.device_ids[0]),
-                self.use_side_stream_for_tensor_copies,
-            )
-            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
-            # Cast inputs to reduced precision if needed.
-            if self.mixed_precision is not None:
-                args, kwargs = _cast_forward_inputs(
-                    self.mixed_precision.param_dtype,
-                    *args,
-                    **kwargs,
-                )
-            with self._inside_ddp_forward():
-                return self.module(*args, **kwargs)  # type: ignore[index]
-        else:
-            # Cast inputs to reduced precision if needed.
-            # TODO (rohan-varma) test this codepath.
-            if self.mixed_precision is not None:
-                inputs, kwargs = _cast_forward_inputs(
-                    self.mixed_precision.param_dtype,
-                    *inputs,
-                    **kwargs,
-                )
-            with self._inside_ddp_forward():
-                return self.module(*inputs, **kwargs)
+        with self._inside_ddp_forward():
+            return self.module(*inputs, **kwargs)  # type: ignore[index]
 
     def _clear_grad_buffer(self):
         # Making param.grad points to the grad buffers before backward is based on the
@@ -1407,7 +1382,7 @@ class DistributedDataParallel(Module, Joinable):
             # We batch zero_grad for all params by resetting the whole grad
             # buffer when the grad of all params is set to None.
             all_param_grad_none = all(
-                [param.grad is None for param in self._delay_all_reduce_params]
+                param.grad is None for param in self._delay_all_reduce_params
             )
 
             for index, param in enumerate(self._delay_all_reduce_params):
@@ -1419,9 +1394,9 @@ class DistributedDataParallel(Module, Joinable):
             if all_param_grad_none:
                 self._delay_grad_buffer.zero_()
 
-    def _pre_forward(self):
+    def _pre_forward(self, *inputs, **kwargs):
         if self._delay_all_reduce_all_params:
-            return
+            return inputs, kwargs
 
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             assert self.logger is not None
@@ -1455,6 +1430,33 @@ class DistributedDataParallel(Module, Joinable):
         if self._join_config.enable:
             # Notify joined ranks whether they should sync in backwards pass or not.
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
+
+        if self.device_ids:
+            inputs, kwargs = _to_kwargs(
+                inputs,
+                kwargs,
+                torch.device(self.device_type, self.device_ids[0]),
+                self.use_side_stream_for_tensor_copies,
+            )
+            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
+            # Cast inputs to reduced precision if needed.
+            if self.mixed_precision is not None:
+                args, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *args,
+                    **kwargs,
+                )
+            return args, kwargs
+        else:
+            # Cast inputs to reduced precision if needed.
+            # TODO (rohan-varma) test this codepath.
+            if self.mixed_precision is not None:
+                inputs, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *inputs,
+                    **kwargs,
+                )
+            return inputs, kwargs
 
     def _post_forward(self, output):
         if self._delay_all_reduce_all_params:
@@ -1528,7 +1530,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
-            self._pre_forward()
+            inputs, kwargs = self._pre_forward(*inputs, **kwargs)
             output = (
                 self.module.forward(*inputs, **kwargs)
                 if self._delay_all_reduce_all_params
@@ -1590,6 +1592,7 @@ class DistributedDataParallel(Module, Joinable):
             broadcast_bucket_size=self.broadcast_bucket_size,
             src=self._authoritative_rank,
             params_and_buffers_to_ignore=self.parameters_to_ignore,
+            broadcast_buffers=self.broadcast_buffers,
         )
 
     # Schedule comm ops to match those scheduled in the reducer's backward

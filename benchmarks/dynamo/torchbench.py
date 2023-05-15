@@ -79,6 +79,11 @@ SKIP = {
     "vision_maskrcnn",
 }
 
+SKIP_FOR_CPU = {
+    "hf_T5_generate",  # OOMs
+    "cm3leon_generate",  # model is CUDA only
+}
+
 SKIP_FOR_CUDA = {
     "gat",  # only works on CPU
     "gcn",  # only works on CPU
@@ -92,8 +97,6 @@ SKIP_TRAIN = {
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
     "maml",
-    # segfault: Internal Triton PTX codegen error
-    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -200,6 +203,11 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
+}
+
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
@@ -216,6 +224,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
 
     @property
     def skip_models_for_cuda(self):
@@ -251,6 +263,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
     def load_model(
         self,
         device,
@@ -261,10 +279,19 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        try:
-            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
-        except ModuleNotFoundError:
-            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
+        candidates = [
+            f"torchbenchmark.models.{model_name}",
+            f"torchbenchmark.canary_models.{model_name}",
+            f"torchbenchmark.models.fb.{model_name}",
+        ]
+        for c in candidates:
+            try:
+                module = importlib.import_module(c)
+                break
+            except ModuleNotFoundError:
+                pass
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -281,10 +308,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
             batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
-
-        # See https://github.com/pytorch/benchmark/issues/1560
-        if model_name == "speech_transformer":
-            batch_size = 10
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True

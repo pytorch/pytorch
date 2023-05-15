@@ -1,5 +1,7 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/Device.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -9,12 +11,17 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
+static c10::DeviceIndex custom_device_index = 0;
 
+static uint64_t abs_counter = 0;
+static uint64_t last_abs_saved_value = 0;
 // register guard
 namespace at {
 namespace detail {
@@ -23,6 +30,21 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::
 
 }} // namespace at::detail
 
+namespace {
+
+void abs_kernel(::at::TensorIteratorBase& iter) {
+  // Since this custom device is just for testing, not bothering to implement kernels.
+  abs_counter += 1;
+}
+
+} // namespace
+
+namespace at::native {
+
+REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
+
+} // namespace at::native
+
 // basic dummy add function
 at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
   add_counter += 1;
@@ -30,12 +52,17 @@ at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, 
   return at::empty(self.sizes(), self.options());
 }
 
+// basic abs function
+at::Tensor& custom_abs_out(const at::Tensor& self, at::Tensor& out) {
+  return at::native::abs_out(self, out);
+}
+
 // A dummy allocator for our custom device, that secretly uses the CPU
 struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = c10::alloc_cpu(nbytes);
-    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, 0)};
+    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
 
   static void ReportAndDelete(void* ptr) {
@@ -128,6 +155,20 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
   return false;
 }
 
+const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
+                          c10::optional<at::MemoryFormat> optional_memory_format) {
+  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
+  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
+  const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
+  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
+  if (storage_size > storage.nbytes()) {
+    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
+  }
+
+  return self;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -138,6 +179,7 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
 // This macro registers your kernels to the PyTorch Dispatcher.
 // More details on the dispatcher can be found at http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/.
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("abs.out", &custom_abs_out);
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
@@ -146,6 +188,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
+  m.impl("resize_", &custom_resize_);
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -162,6 +205,15 @@ bool custom_add_called() {
   if (add_counter > last_saved_value) {
     called = true;
     last_saved_value = add_counter;
+  }
+  return called;
+}
+
+bool custom_abs_called() {
+  bool called = false;
+  if (abs_counter > last_abs_saved_value) {
+    called = true;
+    last_abs_saved_value = abs_counter;
   }
   return called;
 }
@@ -185,6 +237,10 @@ void register_generator() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
+void set_custom_device_index(c10::DeviceIndex device_index) {
+  custom_device_index = device_index;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -192,5 +248,7 @@ void register_generator() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
+    m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
     m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
 }

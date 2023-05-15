@@ -23,6 +23,7 @@ import platform
 import random
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -62,6 +63,7 @@ import __main__  # type: ignore[import]
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
@@ -151,9 +153,11 @@ class _TestParametrizer:
     The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
 
-    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
-    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parametrize over device type, as that is already handled separately.
+    In the details, the decorator adds a 'parametrize_fn' property to the test function. This function
+    is intended to be called later by one of:
+      * Device-specific test instantiation via instantiate_device_type_tests(). Note that for this
+        case there is no need to explicitly parametrize over device type, as that is handled separately.
+      * Device-agnostic parametrized test instantiation via instantiate_parametrized_tests().
 
     If the decorator is applied to a test function that already has a 'parametrize_fn' property, a new
     composite 'parametrize_fn' will be created that generates tests with the product of the parameters
@@ -238,7 +242,8 @@ def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
-    parametrized tests with specialized names.
+    parametrized tests with specialized names. This should be used instead of
+    instantiate_device_type_tests() if the test class contains device-agnostic tests.
 
     You can also use it as a class decorator. E.g.
 
@@ -344,6 +349,11 @@ class parametrize(_TestParametrizer):
                               subtest((1, 4), name='quadruple')])
         def test_baz(self, x, y):
             ...
+
+    To actually instantiate the parametrized tests, one of instantiate_parametrized_tests() or
+    instantiate_device_type_tests() should be called. The former is intended for test classes
+    that contain device-agnostic tests, while the latter should be used for test classes that
+    contain device-specific tests. Both support arbitrary parametrizations using the decorator.
 
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
@@ -588,6 +598,15 @@ def wait_for_process(p, timeout=None):
         else:
             p.kill()
             raise
+    except subprocess.TimeoutExpired:
+        # send SIGINT to give pytest a chance to make xml
+        p.send_signal(signal.SIGINT)
+        exit_status = p.wait(timeout=5)
+        if exit_status is not None:
+            return exit_status
+        else:
+            p.kill()
+            raise
     except:  # noqa: B001,E722, copied from python core library
         p.kill()
         raise
@@ -695,6 +714,8 @@ def sanitize_pytest_xml(xml_file: str):
         full_classname = testcase.attrib['classname']
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
+        if regex_result is None:
+            continue
         classname = regex_result.group("classname")
         file = regex_result.group("file").replace(".", "/")
         testcase.set("classname", classname)
@@ -945,6 +966,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
@@ -1133,7 +1155,7 @@ def skipIfRocm(fn):
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if torch.backends.mps.is_available():
+        if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
@@ -1789,7 +1811,7 @@ def check_if_enable(test: unittest.TestCase):
                         # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
                         platforms = list(filter(lambda p: p in platform_to_conditional, platforms))
 
-                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                    if platforms == [] or any(platform_to_conditional[platform] for platform in platforms):
                         should_skip = True
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
@@ -3084,7 +3106,7 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
             # empty string matches any string
             expected_regex = ''
 
@@ -3159,9 +3181,9 @@ class TestCase(expecttest.TestCase):
                 yield
             if len(ws) == 0:
                 self.fail('no warning caught')
-            self.assertTrue(any([type(w.message) is category for w in ws]))
+            self.assertTrue(any(type(w.message) is category for w in ws))
             self.assertTrue(
-                any([re.match(pattern, str(w.message)) for w in ws]),
+                any(re.match(pattern, str(w.message)) for w in ws),
                 f'{pattern}, {[w.message for w in ws if type(w.message) is category]}')
 
     def assertExpected(self, s, subname=None):
@@ -4368,8 +4390,6 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Op doesn't support autograd for this dtype.")
         if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
-        if op.name == "cat":
-            self.skipTest("TODO(whc) fix pre-existing bug with cat for newly added opinfo for empty+nonempty")
 
 def make_lazy_class(cls):
 

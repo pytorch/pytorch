@@ -124,6 +124,10 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     return Object()
 
 
+def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+    pass
+
+
 def mock_revert(
     repo: GitRepo,
     pr: GitHubPR,
@@ -136,7 +140,7 @@ def mock_revert(
 
 
 def mock_merge(
-    pr_num: int,
+    pr: GitHubPR,
     repo: GitRepo,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
@@ -195,10 +199,6 @@ def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]
     return []
 
 
-def dummy_merge_base() -> str:
-    return "dummy"
-
-
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -212,7 +212,6 @@ class DummyGitRepo(GitRepo):
 
 @mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
-@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestTryMerge(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
@@ -364,7 +363,7 @@ class TestTryMerge(TestCase):
         lint_checks = [name for name in conclusions.keys() if "Lint" in name]
         self.assertTrue(len(lint_checks) > 0)
         self.assertTrue(
-            all([conclusions[name].status == "SUCCESS" for name in lint_checks])
+            all(conclusions[name].status == "SUCCESS" for name in lint_checks)
         )
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
@@ -376,6 +375,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, True))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_force(
         self, mock_merge: Any, mock_parse_args: Any, *args: Any
@@ -392,6 +392,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, False))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_merge(self, mock_merge: Any, *args: Any) -> None:
         trymerge_main()

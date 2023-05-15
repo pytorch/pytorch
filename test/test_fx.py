@@ -46,7 +46,7 @@ from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
-from fx.test_verifier import VerifierTest  # noqa: F401
+from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
@@ -1273,7 +1273,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint()
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', '#users']:
+        for s in ['args', 'kwargs', 'num_users']:
             assert s in stringed
 
     def test_custom_proxy_type(self):
@@ -2756,7 +2756,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
+        assert(any(i.target == torch._assert for i in mod_true.graph.nodes))
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
