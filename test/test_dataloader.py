@@ -372,14 +372,24 @@ class TestStackDataset(TestCase):
         with self.assertRaisesRegex(AssertionError, "At least one dataset should be passed"):
             StackDataset()
 
+    def test_mixed(self):
+        with self.assertRaisesRegex(AssertionError, "Supported only tuple or dict like output setup, but both given"):
+            StackDataset(TensorDataset(torch.randn(15, 10)), a=TensorDataset(torch.randn(10, 15)))
+
     def test_size_mismatch(self):
         with self.assertRaisesRegex(AssertionError, "Size mismatch between datasets"):
             StackDataset(TensorDataset(torch.randn(15, 10)), TensorDataset(torch.randn(10, 15)))
+        with self.assertRaisesRegex(AssertionError, "Size mismatch between datasets"):
+            StackDataset(a=TensorDataset(torch.randn(15, 10)), b=TensorDataset(torch.randn(10, 15)))
 
     def test_len(self):
         source = StackDataset(TensorDataset(torch.randn(15, 10)), TensorDataset(torch.randn(15)))
         self.assertEqual(len(source), 15)
         source = StackDataset(TensorDataset(torch.randn(15, 10)))
+        self.assertEqual(len(source), 15)
+        source = StackDataset(a=TensorDataset(torch.randn(15, 10)), b=TensorDataset(torch.randn(15)))
+        self.assertEqual(len(source), 15)
+        source = StackDataset(a=TensorDataset(torch.randn(15, 10)))
         self.assertEqual(len(source), 15)
 
     def test_single(self):
@@ -387,6 +397,9 @@ class TestStackDataset(TestCase):
         source = StackDataset(t)
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
+        source = StackDataset(a=t)
+        for i in range(15):
+            self.assertEqual(t[i], source[i]['a'])
 
     def test_getitem(self):
         t = TensorDataset(torch.randn(15, 10))
@@ -395,6 +408,10 @@ class TestStackDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
+        source = StackDataset(a=t, b=l)
+        for i in range(15):
+            self.assertEqual(t[i], source[i]['a'])
+            self.assertEqual(l[i], source[i]['b'])
 
 
 @unittest.skipIf(

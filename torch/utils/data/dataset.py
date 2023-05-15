@@ -10,7 +10,9 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
-    Union
+    Union,
+    Dict,
+    Hashable
 )
 
 # No 'default_generator' in torch/__init__.pyi
@@ -207,7 +209,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 
-class StackDataset(Dataset[Tuple[T_co, ...]]):
+class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[Hashable, T_co]]]):
     r"""Dataset as a stacking of multiple datasets.
 
     This class is useful to assemble different parts of complex input data, given as datasets.
@@ -216,23 +218,36 @@ class StackDataset(Dataset[Tuple[T_co, ...]]):
         >>> # xdoctest: +SKIP
         >>> images = ImageDataset()
         >>> texts = TextDataset()
-        >>> multimodal = StackDataset(images, texts)
-        >>> multimodal[0] == (images[0], texts[0])
+        >>> tuple_stack = StackDataset(images, texts)
+        >>> tuple_stack[0] == (images[0], texts[0])
+        >>> dict_stack = StackDataset(first=images, second=texts)
+        >>> dict_stack[0] == {'first': images[0], 'second': texts[0]}
 
     Args:
-        *datasets (Dataset): Datasets for stacking that have the same size.
+        *args (Dataset): Datasets for stacking returned as tuple.
+        **kwargs (Dataset): Datasets for stacking returned as dict.
     """
-    datasets: Tuple[Dataset[T_co], ...]
+    def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
+        if args:
+            assert not kwargs, "Supported only tuple or dict like output setup, but both given"
+            assert all(len(args[0]) == len(dataset) for dataset in args), "Size mismatch between datasets"  # type: ignore[arg-type]
 
-    def __init__(self, *datasets: Dataset[T_co]) -> None:
-        assert len(datasets) > 0, "At least one dataset should be passed"
-        assert all(len(datasets[0]) == len(dataset) for dataset in datasets), "Size mismatch between datasets"  # type: ignore[arg-type]
-        self.datasets = datasets
+            self.datasets = args
+        else:
+            assert kwargs, "At least one dataset should be passed"
+            tmp = list(kwargs.values())
+            assert all(len(tmp[0]) == len(dataset) for dataset in tmp), "Size mismatch between datasets"  # type: ignore[arg-type]
+
+            self.datasets = kwargs
 
     def __getitem__(self, index):
+        if isinstance(self.datasets, dict):
+            return {k: dataset[index] for k, dataset in self.datasets.items()}
         return tuple(dataset[index] for dataset in self.datasets)
 
     def __len__(self):
+        if isinstance(self.datasets, dict):
+            return len(next(iter(self.datasets.values())))  # type: ignore[arg-type]
         return len(self.datasets[0])  # type: ignore[arg-type]
 
 
