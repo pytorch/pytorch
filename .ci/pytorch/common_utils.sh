@@ -139,9 +139,12 @@ function install_torchaudio() {
 }
 
 function install_torchtext() {
-  local commit
-  commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
+  local data_commit
+  local text_commit
+  data_commit=$(get_pinned_commit data)
+  text_commit=$(get_pinned_commit text)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/data.git@${data_commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${text_commit}"
 }
 
 function install_torchvision() {
@@ -185,11 +188,11 @@ function test_torch_deploy(){
 }
 
 function install_huggingface() {
-  local commit
-  commit=$(get_pinned_commit huggingface)
+  local version
+  version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install "git+https://github.com/huggingface/transformers.git@${commit}#egg=transformers"
+  pip_install "transformers==${version}"
 }
 
 function install_timm() {
