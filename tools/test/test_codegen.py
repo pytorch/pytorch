@@ -8,7 +8,7 @@ import torchgen.model
 
 import yaml
 
-from tools.autograd import gen_autograd_functions, load_derivatives
+from torchgen.autograd import gen_autograd_functions, load_derivatives
 from torchgen import dest
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager

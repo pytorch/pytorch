@@ -6,8 +6,6 @@ as a Python module hierarchy (thus the `__init__.py`).
 
 Modern infrastructure:
 
-* [autograd](autograd) - Code generation for autograd.  This
-  includes definitions of all our derivatives.
 * [jit](jit) - Code generation for JIT
 * [shared](shared) - Generic infrastructure that scripts in
   tools may find useful.
