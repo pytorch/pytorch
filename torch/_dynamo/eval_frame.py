@@ -23,7 +23,6 @@ from unittest.mock import patch
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-import torch.utils.checkpoint
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -479,11 +478,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -1024,7 +1018,7 @@ def export(
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
@@ -1281,18 +1275,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        # TorchDynamo does not step inside utils.checkpoint function.  The flow
-        # looks likes this
-        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
-        #     speculatively checking if the forward function is safe to trace.
-        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
-        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
-        #  3) If not, then TorchDynamo falls back to eager by performing a graph
-        #     break. And here, the following disable wrapper ensures that
-        #     TorchDynamo does not trigger again on the frames created by
-        #     utils.checkpoint innards.
-        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

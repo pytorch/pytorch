@@ -1,9 +1,11 @@
+#include <unordered_map>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/Device.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <torch/extension.h>
@@ -44,6 +46,68 @@ namespace at::native {
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 
 } // namespace at::native
+struct CustomBackendMetadata : public c10::BackendMeta {
+  // for testing this field will mutate when clone() is called by shallow_copy_from.
+  int backend_version_format_{-1};
+  int format_number_{-1};
+  mutable bool cloned_{false};
+  // define the constructor
+  CustomBackendMetadata(int backend_version_format, int format_number): backend_version_format_(backend_version_format), format_number_(format_number) {}
+  c10::intrusive_ptr<c10::BackendMeta> clone(const c10::intrusive_ptr<c10::BackendMeta>& ptr) const override {
+    cloned_ = true;
+    return c10::BackendMeta::clone(ptr);
+  }
+};
+
+// we need to register two functions for serialization
+void for_serialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
+  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr() == nullptr) {
+    return;
+  }
+  CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+  if (tmeta->backend_version_format_ == 1) {
+    m["backend_version_format"] = true;
+  }
+  if (tmeta->format_number_ == 29) {
+    m["format_number"] = true;
+  }
+}
+
+void for_deserialization(const at::Tensor& t, std::unordered_map<std::string, bool>& m) {
+  int backend_version_format{-1};
+  int format_number{-1};
+  if (m.find("backend_version_format") != m.end()) {
+    backend_version_format = 1;
+  }
+  if (m.find("format_number") != m.end()) {
+    format_number = 29;
+  }
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
+}
+
+void custom_serialization_registry(){
+torch::jit::TensorBackendMetaRegistry(c10::DeviceType::PrivateUse1, &for_serialization, &for_deserialization);
+}
+
+//check if BackendMeta serialization correctly
+bool check_backend_meta(const at::Tensor& t) {
+  if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr()) {
+    CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+    if (tmeta->backend_version_format_==1 && tmeta->format_number_==29) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// a fake set function is exposed to the Python side
+void custom_set_backend_meta(const at::Tensor& t) {
+  int backend_version_format{1};
+  int format_number{29};
+  c10::intrusive_ptr<c10::BackendMeta> new_tmeta{std::unique_ptr<c10::BackendMeta>(new CustomBackendMetadata(backend_version_format, format_number))};
+  t.unsafeGetTensorImpl()->set_backend_meta(new_tmeta);
+}
 
 // basic dummy add function
 at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha) {
@@ -127,6 +191,14 @@ at::Tensor& custom_set_source_Storage(at::Tensor& result, c10::Storage src) {
   return result;
 }
 
+// Some set operations for the basic use case
+at::Tensor& custom_set_source_Storage_storage_offset(at::Tensor& result, c10::Storage storage, int64_t storage_offset, c10::IntArrayRef size, c10::IntArrayRef stride) {
+  result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
+  at::OptionalIntArrayRef stride_opt = stride.data() != nullptr ? at::OptionalIntArrayRef(stride) : c10::nullopt;
+  at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
+  return result;
+}
+
 // basic dummy functions related to pin_memory.
 std::vector<void*> custom_pinned_data_ptr;
 
@@ -186,6 +258,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_copy_from", &custom__copy_from);
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
+  m.impl("set_.source_Storage_storage_offset",&custom_set_source_Storage_storage_offset);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
@@ -251,4 +324,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
     m.def("register_generator", &register_generator, "register generator for custom device");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
+    m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
+    m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
+    m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
 }

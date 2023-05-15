@@ -1,5 +1,5 @@
 import contextlib
-from typing import Sequence
+from typing import Tuple
 
 import torch
 from torch._custom_op import custom_op
@@ -29,8 +29,8 @@ def register_debug_prims():
     @custom_op("debugprims::load_tensor")
     def load_tensor(
         name: str,
-        size: Sequence[int],
-        stride: Sequence[int],
+        size: Tuple[int, ...],
+        stride: Tuple[int, ...],
         *,
         dtype: torch.dtype,
         device: torch.device,
