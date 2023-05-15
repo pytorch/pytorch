@@ -908,6 +908,26 @@ class TestCustomOp(TestCase):
         self.assertTrue(f'{TestCustomOp.test_ns}.foo' in gm.code)
         foo._destroy()
 
+    def test_not_implemented_error(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(NotImplementedError, "cpu impl registered"):
+            foo(x)
+
+        x = torch.randn(3, device='meta')
+        with self.assertRaisesRegex(NotImplementedError, "abstract impl registered"):
+            foo(x)
+
+        @custom_op(f'{TestCustomOp.test_ns}::bar')
+        def bar(sizes: Sequence[int]) -> torch.Tensor:
+            ...
+
+        with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
+            bar((1, 2, 3))
+
     def test_abstract_registration_location(self):
         loc = torch.testing._internal.custom_op_db.numpy_nonzero._get_impl('abstract').location
         matches = re.match(r'.*custom_op_db.py:\d+', loc)
