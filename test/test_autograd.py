@@ -9846,6 +9846,33 @@ class TestAutogradDeviceType(TestCase):
         x.resize_as_(y)
         self.assertEqual(x._version, 2)
 
+    @onlyCUDA
+    def test_inplace_hardtanh(self, device):
+        class TestModel(nn.Module):
+            def __init__(self, inplace):
+                super(TestModel, self).__init__()
+                self.conv1 = nn.Conv2d(3, 32, kernel_size=3, bias=False)
+                self.relu1 = nn.Hardtanh(inplace=inplace)
+                self.model = nn.Sequential(self.conv1, self.relu1)
+
+            def forward(self, x):
+                return self.model(x)
+
+        x = torch.randn(5, 3, 28, 28, device=device)
+
+        torch.cuda.reset_peak_memory_stats()
+        model = TestModel(False).to(device)
+        y = model(x)
+        out_of_place_peak_memory = torch.cuda.max_memory_allocated()
+        del model, y
+
+        torch.cuda.reset_peak_memory_stats()
+        model = TestModel(True).to(device)
+        y = model(x)
+        inplace_peak_memory = torch.cuda.max_memory_allocated()
+        del model, y
+
+        self.assertTrue(out_of_place_peak_memory > inplace_peak_memory)
 
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
