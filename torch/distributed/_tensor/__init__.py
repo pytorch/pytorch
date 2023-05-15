@@ -167,6 +167,21 @@ def empty(
     )
 
 
+def full(
+    size,
+    fill_value,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    requires_grad: bool = False,
+    device_mesh: Optional[DeviceMesh] = None,
+    placements: Optional[Sequence[Placement]] = None,
+) -> DTensor:
+    return _dtensor_init_helper(
+        torch.full,
+        
+    )
+
 def zeros(
     *size,
     requires_grad: bool = False,
