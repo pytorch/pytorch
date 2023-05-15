@@ -178,8 +178,11 @@ compute_internal(
     Vec max_bvec = convert_from_float<scalar_t>(max_fvec0, max_fvec1);
     max_bvec.store(out_data + d3);
   }
-  for (; d3 < size; d3++) {
-    out_data[d3] = down_scale<scalar_t>(max_ptr[d3]);
+  if (d3 < size) {
+    fVec max_fvec0 = fVec::loadu(max_ptr + d3, (size - d3) > fVec::size() ? fVec::size() : (size - d3));
+    fVec max_fvec1 = fVec::loadu(max_ptr + d3 + fVec::size(), (size - d3) > fVec::size() ? (size - d3 - fVec::size()) : 0);
+    Vec max_bvec = convert_from_float<scalar_t>(max_fvec0, max_fvec1);
+    max_bvec.store(out_data + d3, size - d3);
   }
 }
 
