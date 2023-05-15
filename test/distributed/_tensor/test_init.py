@@ -35,12 +35,12 @@ class DTensorConstructorTest(DTensorTestBase):
     def world_size(self):
         return 4
 
-    @with_comms
-    def test_ones(self):
+    def _run_init_op(self, init_op, dist_init_op, eq_op, *args, **kwargs):
+        # 1d mesh test
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         placements_list = [[Shard(0)], [Shard(1)], [Shard(2)], [Replicate()]]
 
-        # 1d mesh evenly sharding
+        # even sharding
         tensor_size = [4, 8, 12]
         for placements in placements_list:
             local_tensor_size = tensor_size.copy()
@@ -48,34 +48,69 @@ class DTensorConstructorTest(DTensorTestBase):
                 shard_dim = placements[0].dim
                 local_tensor_size[shard_dim] //= self.world_size
 
-            dist_tensor = torch.distributed._tensor.ones(
+            dist_tensor = dist_init_op(
                 tensor_size,
+                *args,
+                **kwargs,
                 device_mesh=device_mesh,
                 placements=placements,
             )
-            ones_expected = torch.ones(local_tensor_size)
-            self.assertEqual(ones_expected, dist_tensor.to_local())
+            ones_expected = init_op(local_tensor_size, *args, **kwargs)
+            eq_op(ones_expected, dist_tensor.to_local())
 
-        # 1d mesh unevenly sharding
+        # uneven sharding
         tensor_size = [5, 10, 15]
         for placements in placements_list:
-            dist_tensor = torch.distributed._tensor.ones(
+            dist_tensor = dist_init_op(
                 tensor_size,
+                *args,
+                **kwargs,
                 device_mesh=device_mesh,
                 placements=placements,
             )
             if isinstance(placements[0], Shard):
                 shard_dim = placements[0].dim
-                ones_expected_list = list(
-                    torch.chunk(torch.ones(tensor_size), self.world_size, dim=shard_dim)
-                )
-                if self.rank < len(ones_expected_list):
-                    self.assertEqual(
-                        ones_expected_list[self.rank], dist_tensor.to_local()
+                exp_tensor_list = list(
+                    torch.chunk(
+                        init_op(tensor_size, *args, **kwargs),
+                        self.world_size,
+                        dim=shard_dim,
                     )
+                )
+                if self.rank < len(exp_tensor_list):
+                    eq_op(exp_tensor_list[self.rank], dist_tensor.to_local())
             else:
-                ones_expected = torch.ones(tensor_size)
-                self.assertEqual(ones_expected, dist_tensor.to_local())
+                exp_tensor = init_op(tensor_size, *args, **kwargs)
+                eq_op(exp_tensor, dist_tensor.to_local())
+
+    @with_comms
+    def test_ones(self):
+        self._run_init_op(
+            torch.ones,
+            torch.distributed._tensor.ones,
+            self.assertEqual,
+            requires_grad=True,
+        )
+
+    @with_comms
+    def test_empty(self):
+        self._run_init_op(
+            torch.empty,
+            torch.distributed._tensor.empty,
+            lambda x, y: (x.shape == y.shape)
+            and (x.dtype == y.dtype)
+            and (x.layout == y.layout),
+            requires_grad=True,
+        )
+
+    @with_comms
+    def test_zeros(self):
+        self._run_init_op(
+            torch.zeros,
+            torch.distributed._tensor.zeros,
+            self.assertEqual,
+            requires_grad=True,
+        )
 
     @with_comms
     def test_zeros_full_mesh(self):
