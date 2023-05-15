@@ -818,7 +818,7 @@ def gen_variable_type(
     # dispatch key that appears in derivatives.yaml
     def wrapper_registrations(used_keys: Set[str]) -> str:
         library_impl_macro_list: List[str] = []
-        for key in used_keys:
+        for key in sorted(used_keys):
             dispatch_key = key
             if key == "Default":
                 dispatch_key = "Autograd"
@@ -843,7 +843,7 @@ def gen_variable_type(
             "type_derived_method_definitions": "\n\n".join(
                 [
                     "${" + f"type_derived_method_definitions_{key}" + "}"
-                    for key in used_keys
+                    for key in sorted(used_keys)
                 ]
             ),
             "wrapper_registrations": wrapper_registrations(used_keys),
@@ -854,8 +854,8 @@ def gen_variable_type(
     fm2 = FileManager(install_dir=out, template_dir=out + "/templates", dry_run=False)
 
     sharded_keys = set(
-        [f"type_derived_method_definitions_{key}" for key in used_keys]
-        + [f"wrapper_registrations_{key}" for key in used_keys]
+        [f"type_derived_method_definitions_{key}" for key in sorted(used_keys)]
+        + [f"wrapper_registrations_{key}" for key in sorted(used_keys)]
     )
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
@@ -1337,7 +1337,7 @@ def emit_body(
     ) -> Sequence[str]:
         # assign the saved variables to the generated grad_fn
         stmts: List[str] = []
-        for arg in saved_variables:
+        for arg in sorted(saved_variables, key=lambda sa: str(sa.nctype.name)):
             name = (
                 arg.nctype.name.name
                 if isinstance(arg.nctype.name, SpecialArgName)
