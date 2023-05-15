@@ -328,7 +328,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
-    # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
@@ -1586,12 +1585,20 @@ class DimConstraints:
         return expr
 
     def add(self, expr):
+        free_symbols = expr.free_symbols
+        if isinstance(expr, sympy.Rel):
+            # It is possible that `expr` will fail the consistency check below
+            # because of precision errors, i.e., on substituting its free symbols
+            # with their concrete values, we might end up comparing floats. Thus
+            # we approximate floats with rationals using concrete values as hints.
+            constants = [self._var_to_val[s] for s in free_symbols]
+            expr = type(expr)(*(sympy.nsimplify(arg, constants) for arg in expr.args))
         if expr == sympy.true:
             return
+        # `expr` should be consistent with concrete values
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
-        free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
             # multivariate: record and move on
@@ -1692,7 +1699,11 @@ class DimConstraints:
             try:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
-                self._dynamic_results.add(self._dcp.doprint(solution))
+                if isinstance(solution, sympy.And):
+                    for arg in solution.args:
+                        self._dynamic_results.add(self._dcp.doprint(arg))
+                else:
+                    self._dynamic_results.add(self._dcp.doprint(solution))
             except NotImplementedError as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
@@ -1719,20 +1730,22 @@ class DimConstraints:
         def unwrap_local_source(source_name):
             return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
 
+        signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+
         buf = ""
         indent = 4 * " "
         if self._static_results:
             sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
-            buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
-            buf += f"\n```\ndef specializations{str(original_signature)}:"
-            buf += f"\n{indent}return (" + f" and\n{indent}".join(sorted_static_results) + ")"
+            buf += f"\n```\ndef specializations{str(signature)}:"
+            for result in sorted_static_results:
+                buf += f"\n{indent}assert {result}"
             buf += "\n```\n"
         if self._dynamic_results:
             sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
-            buf += f"\n```\ndef specify_constraints{str(original_signature)}:"
+            buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             for result in sorted_dynamic_results:
                 buf += f"\n{indent*2}{unwrap_local_source(result)},"
@@ -2030,7 +2043,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
@@ -2321,8 +2334,7 @@ class ShapeEnv:
                         if isinstance(c, StrictMinMaxConstraint):
                             msg = (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
-                                f"was allocated at:\n{tb}"
+                                f"we generated a guard on this size variable: {guard_expr}."
                             )
                             record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):

@@ -484,7 +484,6 @@ struct AttentionKernel {
       int32_t problem_size_0_n =
           std::min(int32_t(kKeysPerBlock), p.num_keys - iter_key_start);
       int32_t const& problem_size_0_k = p.head_dim;
-      int32_t const& problem_size_1_m = problem_size_0_m;
       int32_t const& problem_size_1_n = p.head_dim_value;
       int32_t const& problem_size_1_k = problem_size_0_n;
 
