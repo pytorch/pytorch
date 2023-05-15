@@ -269,7 +269,9 @@ int64_t _vmap_increment_nesting(
     c10::SymInt batch_size,
     const std::string& randomness) {
   return initAndPushDynamicLayer(
-      TransformType::Vmap, batch_size, get_randomness_enum(randomness));
+      TransformType::Vmap,
+      std::move(batch_size),
+      get_randomness_enum(randomness));
 }
 
 int64_t _vmap_decrement_nesting() {
