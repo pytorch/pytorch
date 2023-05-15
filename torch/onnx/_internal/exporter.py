@@ -518,6 +518,16 @@ class UnsatisfiedDependencyError(RuntimeError):
         self.package_name = package_name
 
 
+class OnnxExporterError(RuntimeError):
+    """Raised when an ONNX exporter error occurs. Diagnostic context is enclosed."""
+
+    diagnostic_context: Final[infra.DiagnosticContext]
+
+    def __init__(self, diagnostic_context: infra.DiagnosticContext, message: str):
+        super().__init__(message)
+        self.diagnostic_context = diagnostic_context
+
+
 @_beartype.beartype
 def _assert_dependencies(export_options: ResolvedExportOptions):
     logger = export_options.logger
@@ -619,7 +629,9 @@ def dynamo_export(
             f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
-        raise RuntimeError(message) from e
+        raise OnnxExporterError(
+            resolved_export_options.diagnostic_context, message
+        ) from e
 
 
 __all__ = [
