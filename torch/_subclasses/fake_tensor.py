@@ -14,6 +14,7 @@ import torch._custom_op
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check_same_device,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -552,6 +553,12 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 def index_put(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    check_same_device(
+        new_kwargs["input"], new_kwargs["values"], allow_cpu_scalar_tensors=True
+    )
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
@@ -563,6 +570,9 @@ def index_put_(fake_mode, func, *args, **kwargs):
 
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    check_same_device(
+        new_kwargs["input"], new_kwargs["values"], allow_cpu_scalar_tensors=True
     )
 
     return new_kwargs["input"]

@@ -213,6 +213,16 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(fake_x.grad, FakeTensor))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_index_put_error(self):
+        mode = FakeTensorMode()
+        for context in [contextlib.nullcontext, lambda: mode]:
+            with context():
+                y = torch.randn(4, 2, 2, 3)
+                x = torch.randn(2, 2, 3).to('cuda')
+                with self.assertRaises(RuntimeError):
+                    x[[1, 2]] = y
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_like_constructor(self):
         with FakeTensorMode():
             x = torch.rand([4, 4])
