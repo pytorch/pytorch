@@ -11,8 +11,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    Dict,
-    Hashable
+    Dict
 )
 
 # No 'default_generator' in torch/__init__.pyi
@@ -209,7 +208,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 
-class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[Hashable, T_co]]]):
+class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
     r"""Dataset as a stacking of multiple datasets.
 
     This class is useful to assemble different parts of complex input data, given as datasets.
@@ -227,6 +226,8 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[Hashable, T_co]]]):
         *args (Dataset): Datasets for stacking returned as tuple.
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
+    datasets: Union[Tuple[Dataset[T_co], ...], Dict[str, Dataset[T_co]]]
+
     def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
         if args:
             assert not kwargs, "Supported only tuple or dict like output setup, but both given"
