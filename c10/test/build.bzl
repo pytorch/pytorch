@@ -19,17 +19,6 @@ def define_targets(rules):
     )
 
     rules.cc_test(
-        name = "core/impl/cow/try_ensure_test",
-        srcs = ["core/impl/cow/try_ensure_test.cpp"],
-        deps = [
-            "//c10/core:CPUAllocator",
-            "//c10/core:impl/cow/context",
-            "//c10/core:impl/cow/try_ensure",
-            "@com_google_googletest//:gtest_main",
-        ],
-    )
-
-    rules.cc_test(
         name = "core_tests",
         size = "small",
         srcs = rules.glob([

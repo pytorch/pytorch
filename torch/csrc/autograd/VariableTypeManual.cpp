@@ -103,7 +103,7 @@ std::vector<at::Tensor> unpack(
   std::vector<at::Tensor> ret;
   ret.reserve(tl.size());
   for (const auto& t : tl) {
-    ret.push_back(t.defined() ? static_cast<const Variable&>(t) : Variable{});
+    ret.push_back(t);
   }
   return ret;
 }

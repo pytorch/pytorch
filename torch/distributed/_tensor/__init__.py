@@ -23,8 +23,8 @@ __all__ = [
 def _dtensor_init_helper(
     init_op,
     size: torch.Size,
-    device_mesh = None,
-    placements = None,
+    device_mesh=None,
+    placements=None,
     **kwargs,
 ) -> DTensor:
     # if device_mesh is None, use the one from mesh resources
