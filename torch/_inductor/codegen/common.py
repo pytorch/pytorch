@@ -44,9 +44,7 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def _data_type_propagation(
-    sub_graph: torch.fx.Graph, masked_subblock_dtypes: dict = {}
-):
+def _data_type_propagation(sub_graph: torch.fx.Graph, masked_subblock_dtypes: dict):
     def propagate_node(node: torch.fx.Node):
         _node: torch.fx.Node = node
         ops_to_bool = [
@@ -137,7 +135,7 @@ def _data_type_propagation(
         new_node_propogated = propagate_node(node) or new_node_propogated
 
     if new_node_propogated:
-        _data_type_propagation(sub_graph)
+        _data_type_propagation(sub_graph, masked_subblock_dtypes)
 
 
 def data_type_propagation(node):
@@ -164,15 +162,15 @@ def data_type_propagation(node):
         body: LoopBody = node._body
         root_block = body.root_block
         sub_blocks = body.subblocks
-        sub_block_dtypes = {}
+        masked_sub_block_dtypes = {}
         for sub_block_name, sub_block in sub_blocks.items():
+            assert "masked_subblock" in sub_block_name
             _sub_graph: torch.fx.Graph = sub_block.graph
-            _data_type_propagation(_sub_graph)
-            if "masked_subblock" in sub_block_name:
-                masked_subblock_dtype = get_masked_subblock_data_type(_sub_graph)
-                sub_block_dtypes[sub_block_name] = masked_subblock_dtype
+            _data_type_propagation(_sub_graph, masked_sub_block_dtypes)
+            masked_subblock_dtype = get_masked_subblock_data_type(_sub_graph)
+            sub_block_dtypes[sub_block_name] = masked_subblock_dtype
 
-        _data_type_propagation(root_block.graph, sub_block_dtypes)
+        _data_type_propagation(root_block.graph, masked_sub_block_dtypes)
 
 
 class ExprPrinter(Printer):
