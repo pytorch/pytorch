@@ -219,8 +219,8 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
         >>> texts = TextDataset()
         >>> tuple_stack = StackDataset(images, texts)
         >>> tuple_stack[0] == (images[0], texts[0])
-        >>> dict_stack = StackDataset(first=images, second=texts)
-        >>> dict_stack[0] == {'first': images[0], 'second': texts[0]}
+        >>> dict_stack = StackDataset(image=images, text=texts)
+        >>> dict_stack[0] == {'image': images[0], 'text': texts[0]}
 
     Args:
         *args (Dataset): Datasets for stacking returned as tuple.
