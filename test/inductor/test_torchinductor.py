@@ -2069,7 +2069,7 @@ class CommonTemplate:
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
         self.assertTrue(
-            "tensor 'x' Tensor device index mismatch. Expected device index to be"
+            "tensor 'L['x']' Tensor device index mismatch. Expected device index to be"
             in failed_guard.reason
         )
 
@@ -3556,6 +3556,10 @@ class CommonTemplate:
         template([1, 1, 8, 8], [0, 0, 0, 0])
         template([1, 1, 8, 8], [1, 1, 1, 1])
         template([1, 1, 8, 8], [1, 2, 3, 4])
+        template([1, 1, 8, 8], [0, -1, 2, 2])
+        template([1, 1, 8, 8], [-1, 0, 2, 2])
+        template([1, 1, 8, 8], [2, 2, 0, -1])
+        template([1, 1, 8, 8], [2, 2, -1, 0])
 
     def test_grid_sampler_2d(self):
         def fn(a, b):
@@ -5564,6 +5568,38 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
+    @requires_cuda()
+    @torch._inductor.config.patch("shape_padding", True)
+    def test_shape_padding(self):
+        if torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("dynamic shapes do not support padding")
+
+        dtypes = [
+            torch.float16,
+            torch.float32,
+        ]
+
+        b, m, n, k = 7, 11, 13, 15
+
+        def gen(*shape, dtype=torch.float32):
+            return torch.randn(*shape, device="cuda", dtype=dtype) / k + 1.0
+
+        for dtype in dtypes:
+            x = gen(m, k, dtype=dtype)
+            y = gen(k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.mm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.addmm(z, x, y), (x, y, z))
+
+        for dtype in dtypes:
+            x = gen(b, m, k, dtype=dtype)
+            y = gen(b, k, n, dtype=dtype)
+            z = gen(n, dtype=dtype)
+            self.common(lambda x, y: torch.bmm(x, y), (x, y))
+            self.common(lambda x, y: torch.matmul(x, y), (x, y))
+            self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
@@ -6021,6 +6057,7 @@ class CommonTemplate:
 class TestFailure:
     suffixes: Tuple[str]
     is_skip: bool = False
+    __test__: bool = False
 
 
 def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
@@ -6172,6 +6209,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        # See https://github.com/pytorch/pytorch/issues/100348
+        def test_inductor_detach_view(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                a = x * 2
+                return a, a.detach()
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+            inp = torch.ones(2, 2, requires_grad=True, device="cuda")
+            inp_ref = inp.clone().detach().requires_grad_(True)
+            out_ref = fn(inp_ref)
+            out = fn_opt(inp)
+            out_ref[0].sum().backward()
+            out[0].sum().backward()
+            self.assertEqual(inp.grad, inp_ref.grad)
+
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
@@ -6234,7 +6286,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
-                self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
 

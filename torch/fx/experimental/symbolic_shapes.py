@@ -328,7 +328,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
-    # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
@@ -1586,12 +1585,20 @@ class DimConstraints:
         return expr
 
     def add(self, expr):
+        free_symbols = expr.free_symbols
+        if isinstance(expr, sympy.Rel):
+            # It is possible that `expr` will fail the consistency check below
+            # because of precision errors, i.e., on substituting its free symbols
+            # with their concrete values, we might end up comparing floats. Thus
+            # we approximate floats with rationals using concrete values as hints.
+            constants = [self._var_to_val[s] for s in free_symbols]
+            expr = type(expr)(*(sympy.nsimplify(arg, constants) for arg in expr.args))
         if expr == sympy.true:
             return
+        # `expr` should be consistent with concrete values
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
-        free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
             # multivariate: record and move on
@@ -2036,7 +2043,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
