@@ -9744,6 +9744,8 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("input_size, output_size", [(399, 437), (403, 377)])
     def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
+        # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
+
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
@@ -9754,22 +9756,11 @@ class TestNNDeviceType(NNTestCase):
 
         output_f32 = F.interpolate(
             input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
-        )
+        ).round().byte()
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
         )
-
-        mae_tol = 0.5
-        max_abs_err_tol = 1.0
-        num_wrong_pixels_tol = 5
-
-        abs_diff = torch.abs(output_f32.round() - output_ui8.float())
-        mae = torch.mean(abs_diff)
-        max_abs_err = torch.max(abs_diff)
-        num_wrong_pixels = (abs_diff > max_abs_err_tol).sum()
-        self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
-        self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
-        self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
+        torch.testing.assert_close(output_f32, output_ui8, atol=1, rtol=0)
 
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
