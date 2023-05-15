@@ -222,6 +222,7 @@ def _replace_pattern(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+    ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
@@ -243,7 +244,7 @@ def _replace_pattern(
         replacement_graph = symbolic_trace(replacement).graph
 
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
-                              remove_overlapping_matches=True)
+                              remove_overlapping_matches=True, ignore_literals=ignore_literals)
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
@@ -270,6 +271,12 @@ def _replace_pattern(
         for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
             if isinstance(gn, Node):
                 val_map[rn] = match_changed_node.get(gn, gn)
+                if gn != val_map[rn]:
+                    # Update match.placeholder_nodes and match.nodes_map with the node that replaced gn
+                    gn_ind = match.placeholder_nodes.index(gn)
+                    match.placeholder_nodes[gn_ind] = match_changed_node[gn]
+                    map_key = list(match.nodes_map.keys())[list(match.nodes_map.values()).index(gn)]
+                    match.nodes_map[map_key] = match_changed_node[gn]
             else:
                 val_map[rn] = gn
 

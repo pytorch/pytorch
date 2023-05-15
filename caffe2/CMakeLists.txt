@@ -493,9 +493,6 @@ else()
     append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
   endif()
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
-    set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-
     # TODO: Delete this when https://github.com/pytorch/pytorch/issues/35026 is fixed
     set_source_files_properties(../torch/csrc/autograd/record_function_ops.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   endif()
@@ -761,6 +758,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
   )
@@ -828,6 +826,10 @@ endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
+if(USE_MPS OR USE_PYTORCH_METAL)
+  enable_language(OBJC OBJCXX)
+endif()
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
@@ -1176,6 +1178,11 @@ if(BUILD_TEST)
     endif()
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
                      ${CMAKE_BINARY_DIR}/test_lazy)
+  endif()
+  if(BUILD_AOT_INDUCTOR_TEST)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aot_inductor
+      ${CMAKE_BINARY_DIR}/test_aot_inductor)
   endif()
 endif()
 
@@ -1781,7 +1788,7 @@ if(BUILD_PYTHON)
   # location).  It varies from system to system.
   # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
+  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       import sysconfig

@@ -1,7 +1,19 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/avg_pool2d.h>
+#include <ATen/ops/avg_pool2d_backward.h>
+#include <ATen/ops/avg_pool2d_backward_native.h>
+#include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/max_pool2d_with_indices_backward_native.h>
+#include <ATen/ops/max_pool2d_with_indices_native.h>
+#endif
 
 namespace at::native {
 namespace mps {
@@ -32,9 +44,6 @@ static void pool2d_template(const Tensor& input,
                             const c10::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
                             const c10::string& op_name) {
-  if (input.numel() == 0) {
-    return;
-  }
   if (!is_macos_13_or_newer()) {
     TORCH_CHECK(input.scalar_type() != ScalarType::Long,
                 "MPS: ",
@@ -105,6 +114,10 @@ static void pool2d_template(const Tensor& input,
                      outputWidth,
                      memory_format);
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
   // by simply restriding them (instead of calling the costly Contiguous()).
@@ -130,8 +143,6 @@ static void pool2d_template(const Tensor& input,
   if (count_include_pad && ceil_mode) {
     padH = padW = 0;
   }
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" + getArrayRefString(kernel_size) +
         "]:S[" + getArrayRefString(stride) + "]:P[" + getArrayRefString(padding) + "]:D[" +
@@ -141,53 +152,41 @@ static void pool2d_template(const Tensor& input,
 
     MPSShape* inputShape = getMPSShape(input, memory_format);
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
-    PoolingCachedGraph* cachedGraph = cache_->LookUpAs<PoolingCachedGraph>(key);
 
-    if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<PoolingCachedGraph>(key, ^MPSCachedGraph*() {
-        PoolingCachedGraph* newCachedGraph = nil;
-
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new PoolingCachedGraph(mpsGraph);
-
-          MPSGraphPooling2DOpDescriptor* desc =
-              [MPSGraphPooling2DOpDescriptor descriptorWithKernelWidth:kW
-                                                          kernelHeight:kH
-                                                             strideInX:dW
-                                                             strideInY:dH
-                                                       dilationRateInX:dilationW
-                                                       dilationRateInY:dilationH
-                                                           paddingLeft:padW
-                                                          paddingRight:ceil_mode ? padW * dW : padW
-                                                            paddingTop:padH
-                                                         paddingBottom:ceil_mode ? padH * dH : padH
-                                                          paddingStyle:MPSGraphPaddingStyleExplicit
-                                                            dataLayout:memory_format == MemoryFormat::ChannelsLast
-                                                                ? MPSGraphTensorNamedDataLayoutNHWC
-                                                                : MPSGraphTensorNamedDataLayoutNCHW];
-          desc.ceilMode = (padW == 0 && padH == 0) ? ceil_mode : false;
-          if (has_indices) {
-            desc.returnIndicesMode = MPSGraphPoolingReturnIndicesGlobalFlatten2D;
-            desc.returnIndicesDataType = MPSDataTypeInt32;
-          }
-          newCachedGraph->inputTensor =
-              mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input.scalar_type()), inputShape);
-          if (is_backward_pass) {
-            newCachedGraph->gradOutputTensor =
-                mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output.scalar_type()), gradOutputShape);
-          }
-          if (has_divisor) {
-            newCachedGraph->divisorTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
-          }
-          MPSGraphTensor* outputTensor = poolingBlock(*newCachedGraph, desc);
-          // with desc.dataLayout = NHWC (i.e., ChannelsLast), the results need to be converted back to NCHW
-          newCachedGraph->outputTensor =
-              memory_format == MemoryFormat::ChannelsLast ? convertNHWCtoNCHW(mpsGraph, outputTensor) : outputTensor;
-        }
-        return newCachedGraph;
-      });
-    }
+    auto cachedGraph = LookUpOrCreateCachedGraph<PoolingCachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
+      MPSGraphPooling2DOpDescriptor* desc = [MPSGraphPooling2DOpDescriptor
+          descriptorWithKernelWidth:kW
+                       kernelHeight:kH
+                          strideInX:dW
+                          strideInY:dH
+                    dilationRateInX:dilationW
+                    dilationRateInY:dilationH
+                        paddingLeft:padW
+                       paddingRight:ceil_mode ? padW * dW : padW
+                         paddingTop:padH
+                      paddingBottom:ceil_mode ? padH * dH : padH
+                       paddingStyle:MPSGraphPaddingStyleExplicit
+                         dataLayout:memory_format == MemoryFormat::ChannelsLast ? MPSGraphTensorNamedDataLayoutNHWC
+                                                                                : MPSGraphTensorNamedDataLayoutNCHW];
+      desc.ceilMode = (padW == 0 && padH == 0) ? ceil_mode : false;
+      if (has_indices) {
+        desc.returnIndicesMode = MPSGraphPoolingReturnIndicesGlobalFlatten2D;
+        desc.returnIndicesDataType = MPSDataTypeInt32;
+      }
+      newCachedGraph->inputTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(input.scalar_type()), inputShape);
+      if (is_backward_pass) {
+        newCachedGraph->gradOutputTensor =
+            mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output.scalar_type()), gradOutputShape);
+      }
+      if (has_divisor) {
+        newCachedGraph->divisorTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
+      }
+      MPSGraphTensor* outputTensor = poolingBlock(*newCachedGraph, desc);
+      // with desc.dataLayout = NHWC (i.e., ChannelsLast), the results need to be converted back to NCHW
+      newCachedGraph->outputTensor =
+          memory_format == MemoryFormat::ChannelsLast ? convertNHWCtoNCHW(mpsGraph, outputTensor) : outputTensor;
+    });
 
     MPSStream* mpsStream = getCurrentMPSStream();
     // in case of ChannelsLast we don't perform gather() in placeholder to avoid implicit conversion to NCHW

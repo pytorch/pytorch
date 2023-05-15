@@ -5,31 +5,47 @@ import operator
 
 import torch
 import torch._inductor as inductor
-from .. import config, ir
+from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
+    _return_true,
     Arg,
     CallFunction,
     filter_nodes,
     get_arg_value,
     Ignored,
+    init_once_fakemode,
     KeywordArg,
     ListOf,
     Match,
     MULTIPLE,
-    pass_patterns,
-    register_lowering_pattern,
-    reorder_for_locality,
+    PatternMatcherPass,
+    register_graph_pattern,
+    stable_topological_sort,
 )
 from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
+
+# First pass_patterns[0] are applied, then [1], then [2]
+pass_patterns = [
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+    PatternMatcherPass(),
+]
 
 
 def post_grad_passes(gm: torch.fx.GraphModule):
+    """
+    Passes that run on after grad.  This is called once on the forwards
+    graph and once on the backwards graph.
+
+    The IR here has been normalized and functionalized.
+    """
     if config.dce:
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
@@ -39,10 +55,66 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
+        lazy_init()
+
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
+
+
+@init_once_fakemode
+def lazy_init():
+    if torch._C.has_mkldnn:
+        from .mkldnn_fusion import _mkldnn_fusion_init
+
+        _mkldnn_fusion_init()
+
+
+def reorder_for_locality(graph: torch.fx.Graph):
+    def visit(other_node):
+        if (
+            other_node.op == "call_function"
+            and other_node.target != operator.getitem
+            and all((n in seen_nodes) for n in other_node.users)
+        ):
+            # move node's producers right before it
+            node.prepend(other_node)
+
+    seen_nodes = set()
+
+    # only reorder nodes before the first copy_ in the graph.
+    # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
+    # and this reordering doesnt work well with mutation
+    first_copy = next(
+        (
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.copy_.default
+        ),
+        None,
+    )
+    past_mutating_epilogue = True if first_copy is None else False
+
+    for node in reversed(graph.nodes):
+        seen_nodes.add(node)
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
+            continue
+
+        torch.fx.map_arg((node.args, node.kwargs), visit)
+
+
+def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
+    """
+    Register an aten to inductor IR replacement pattern
+    """
+    return pattern_matcher.register_lowering_pattern(
+        pattern, extra_check, pass_dict=pass_patterns[pass_number]
+    )
 
 
 ################################################################################
@@ -62,6 +134,41 @@ def post_grad_passes(gm: torch.fx.GraphModule):
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.cumsum.default,
+        CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                torch.ops.aten.full.default,
+                [Arg(), Arg()],
+                1,
+                dtype=Ignored(),
+                layout=Ignored(),
+                device=KeywordArg("device"),
+                pin_memory=False,
+                _users=MULTIPLE,
+            ),
+            KeywordArg("dtype"),
+            _users=MULTIPLE,
+        ),
+        1,
+    ),
+    pass_dict=pass_patterns[1],
+)
+def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
+    """Based on a pattern in OPTForCausalLM"""
+
+    def repl():
+        return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
+            size0, size1
+        )
+
+    # only replace the output node, not all nodes
+    match.nodes = [match.output_node()]
+    match.replace_by_example(repl, [])
 
 
 def shape_of_mm(a, b):
@@ -182,7 +289,9 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.maybe_guard_leq(size, first.get_size()[dim]):
+    # size should be within first.get_size()[dim] such that the optimization is valid.
+    # For negative `end`, we currently fallback to not optimizing.
+    if size >= 0 and V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [
@@ -253,6 +362,15 @@ def is_valid_splitwithsizes_cat(match):
     # All parts of split should be included in the cat
     if get_item_args != set(range(len(split_sizes))):
         return False
+    # The order of get_item_args should same with cat_node used.
+    # For example, if the split_node like split_with_sizes(input, [2, 2, 3], 1),
+    # the cat node should be like cat([get_item(0), get_item(1), get_item(2)], 1).
+    cat_items_args_order = [
+        get_arg_value(item_node, 1) for item_node in get_arg_value(cat_node, 0)
+    ]
+    if cat_items_args_order != list(range(len(split_sizes))):
+        return False
+
     return True
 
 
@@ -279,26 +397,3 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
-
-
-# This slows things down:
-"""
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.bmm, Arg(), Arg()),
-        KeywordArg("added"),
-    ),
-    pass_number=3
-)
-@register_replacement_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("added"),
-        CallFunction(aten.bmm, Arg(), Arg()),
-    ),
-    pass_number=3
-)
-def baddbmm(mat1, mat2, added):
-    return aten.baddbmm(added, mat1, mat2)
-"""

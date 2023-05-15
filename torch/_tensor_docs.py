@@ -5937,7 +5937,7 @@ Example::
 add_docstr_all(
     "uniform_",
     r"""
-uniform_(from=0, to=1) -> Tensor
+uniform_(from=0, to=1, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
