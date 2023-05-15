@@ -2481,7 +2481,6 @@ def upsample_nearest3d(
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
-
 def _create_constants(*args, dtype):
     return tuple(ops.constant(a, dtype) for a in args)
 
@@ -2531,7 +2530,9 @@ def upsample_bicubic2d_default(
         return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
 
     def cubic_convolution2(x, A):
-        _A, _4A, _5A, _8A = _create_constants(A, 4 * A, 5 * A, 8 * A, dtype=torch.float32)
+        _A, _4A, _5A, _8A = _create_constants(
+            A, 4 * A, 5 * A, 8 * A, dtype=torch.float32
+        )
         # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
         return ops.sub(
             ops.mul(ops.add(ops.mul(ops.sub(ops.mul(_A, x), _5A), x), _8A), x), _4A
