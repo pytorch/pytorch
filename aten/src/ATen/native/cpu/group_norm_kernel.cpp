@@ -87,8 +87,8 @@ void GroupNormKernelImplInternal(
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, at::opmath_type<T>>::value,
-  std::tuple<T, T>>::type
+typename std::enable_if_t<std::is_same_v<T, at::opmath_type<T>>,
+  std::tuple<T, T>>
 ColumnwiseMoments(
     const T* X_data,
     int64_t HxW,
@@ -120,8 +120,8 @@ ColumnwiseMoments(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T>
-typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value,
-  std::tuple<at::opmath_type<T>, at::opmath_type<T>>>::type
+typename std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>,
+  std::tuple<at::opmath_type<T>, at::opmath_type<T>>>
 ColumnwiseMoments(
     const T* X_data,
     int64_t HxW,
@@ -164,7 +164,7 @@ ColumnwiseMoments(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 CalcMeanVar(
   const T* X_ptr,
   opmath_t* mean_ptr,
@@ -187,7 +187,7 @@ CalcMeanVar(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 CalcMeanVar(
   const T* X_ptr,
   opmath_t* mean_ptr,
@@ -233,7 +233,7 @@ CalcMeanVar(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyScaleBias(
   T* Y_ptr,
   const T* X_ptr,
@@ -252,7 +252,7 @@ ApplyScaleBias(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyScaleBias(
   T* Y_ptr,
   const T* X_ptr,
@@ -538,7 +538,7 @@ void GroupNormKernelImpl(
 
 
 template <typename T, typename opmath_t>
-typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ComputeInternalGradients(
     int64_t N,
     int64_t C,
@@ -565,7 +565,7 @@ ComputeInternalGradients(
 }
 
 template <typename T, typename opmath_t>
-typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ComputeInternalGradients(
     int64_t N,
     int64_t C,
@@ -579,16 +579,14 @@ ComputeInternalGradients(
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
     constexpr int64_t K = Vec::size();
     const int64_t inner_size = HxW / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, K / 2> ds_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, K / 2> db_arr;
+    fVec zero(0);
     for (const auto i : c10::irange(start, end)) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;
       fVec ds_vec(0);
       fVec db_vec(0);
-      for (int64_t j = 0; j < inner_size; j += K) {
+      int64_t j = 0;
+      for (; j < inner_size; j += K) {
         const Vec dy_bvec = Vec::loadu(dY_ptr + j);
         const Vec x_bvec = Vec::loadu(X_ptr + j);
         fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1;
@@ -598,70 +596,111 @@ ComputeInternalGradients(
         ds_vec = ds_vec + dy_fvec1 * x_fvec1;
         db_vec = db_vec + dy_fvec0 + dy_fvec1;
       }
-      ds_vec.store(ds_arr.data());
-      db_vec.store(db_arr.data());
-      opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), float(0));
-      opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), float(0));
-      for (const auto j : c10::irange(inner_size, HxW)) {
-        ds_val += opmath_t(dY_ptr[j]) * opmath_t(X_ptr[j]);
-        db_val += opmath_t(dY_ptr[j]);
+
+      if (j < HxW) {
+        const Vec dy_bvec = Vec::loadu(dY_ptr + j, HxW - j);
+        const Vec x_bvec = Vec::loadu(X_ptr + j, HxW - j);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
+        if (HxW - j > fVec::size()) {
+          x_fvec1 = fVec::set(zero, x_fvec1, HxW - j - fVec::size());
+          dy_fvec1 = fVec::set(zero, dy_fvec1, HxW - j - fVec::size());
+          ds_vec = ds_vec + dy_fvec0 * x_fvec0;
+          ds_vec = ds_vec + dy_fvec1 * x_fvec1;
+          db_vec = db_vec + dy_fvec0 + dy_fvec1;
+        } else {
+          x_fvec0 = fVec::set(zero, x_fvec0, HxW - j);
+          dy_fvec0 = fVec::set(zero, dy_fvec0, HxW - j);
+          ds_vec = ds_vec + dy_fvec0 * x_fvec0;
+          db_vec = db_vec + dy_fvec0;
+        }
       }
-      ds[i] = ds_val;
-      db[i] = db_val;
+      ds[i] = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, ds_vec);
+      db[i] = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, db_vec);
     }
   });
 }
 
 template <typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<PT, opmath_t>, std::tuple<PT, PT>>
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
     bool gamma_null,
     const PT* gamma_ptr,
-    const int64_t d,
-    const int64_t K,
-    void* ds_arr,
-    void* db_arr) {
-    vec::Vectorized<opmath_t> ds_vec(0);
-    vec::Vectorized<opmath_t> db_vec(0);
-    for (int64_t j = 0; j < d; j += K) {
-      const vec::Vectorized<PT> gamma_vec = gamma_null
-          ? vec::Vectorized<PT>(1)
-          : vec::Vectorized<PT>::loadu(gamma_ptr + j);
-      ds_vec = ds_vec + vec::Vectorized<PT>::loadu(ds_ptr + j) * gamma_vec;
-      db_vec = db_vec + vec::Vectorized<PT>::loadu(db_ptr + j) * gamma_vec;
+    const int64_t D) {
+    using Vec = vec::Vectorized<PT>;
+    constexpr int64_t K = Vec::size();
+    const int64_t d = D / K * K;
+    Vec ds_vec(0);
+    Vec db_vec(0);
+    int64_t j = 0;
+    for (; j < d; j += K) {
+      const Vec gamma_vec = gamma_null
+          ? Vec(1)
+          : Vec::loadu(gamma_ptr + j);
+      ds_vec = ds_vec + Vec::loadu(ds_ptr + j) * gamma_vec;
+      db_vec = db_vec + Vec::loadu(db_ptr + j) * gamma_vec;
     }
-    ds_vec.store(ds_arr);
-    db_vec.store(db_arr);
+
+    if (j < D) {
+      const Vec gamma_vec = gamma_null
+          ? Vec(1)
+          : Vec::loadu(gamma_ptr + j, D - j);
+      ds_vec = ds_vec + Vec::loadu(ds_ptr + j, D - j) * gamma_vec;
+      db_vec = db_vec + Vec::loadu(db_ptr + j, D - j) * gamma_vec;
+    }
+    PT ds_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, ds_vec);
+    PT db_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, db_vec);
+    return std::tuple<PT, PT>(ds_val, db_val);
 }
 
 template <typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<PT, opmath_t>, std::tuple<opmath_t, opmath_t>>
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
     bool gamma_null,
     const PT* gamma_ptr,
-    const int64_t d,
-    const int64_t K,
-    void* ds_arr,
-    void* db_arr) {
+    const int64_t D) {
   using fVec = at::vec::Vectorized<opmath_t>;
   using Vec = at::vec::Vectorized<PT>;
-  fVec ds_acc(0);
-  fVec db_acc(0);
-  for (int64_t j = 0; j < d; j += K) {
+  constexpr int64_t K = Vec::size();
+  const int64_t d = D / K * K;
+  fVec zero(0);
+  fVec ds_vec(0);
+  fVec db_vec(0);
+  int64_t j = 0;
+  for (; j < d; j += K) {
     const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j);
     fVec gamma_vec0, gamma_vec1;
     std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
-    ds_acc += fVec::loadu(ds_ptr + j) * gamma_vec0;
-    ds_acc += fVec::loadu(ds_ptr + j + fVec::size()) * gamma_vec1;
-    db_acc += fVec::loadu(db_ptr + j) * gamma_vec0;
-    db_acc += fVec::loadu(db_ptr + j + fVec::size()) * gamma_vec1;
+    ds_vec += fVec::loadu(ds_ptr + j) * gamma_vec0;
+    ds_vec += fVec::loadu(ds_ptr + j + fVec::size()) * gamma_vec1;
+    db_vec += fVec::loadu(db_ptr + j) * gamma_vec0;
+    db_vec += fVec::loadu(db_ptr + j + fVec::size()) * gamma_vec1;
   }
-  ds_acc.store(ds_arr);
-  db_acc.store(db_arr);
+  if (j < D) {
+    const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j);
+    fVec gamma_vec0, gamma_vec1;
+    std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
+    if (D - j > fVec::size()) {
+      gamma_vec1 = fVec::set(zero, gamma_vec1, D - j - fVec::size());
+      ds_vec += fVec::loadu(ds_ptr + j) * gamma_vec0;
+      ds_vec += fVec::loadu(ds_ptr + j + fVec::size(), D - j - fVec::size()) * gamma_vec1;
+      db_vec += fVec::loadu(db_ptr + j) * gamma_vec0;
+      db_vec += fVec::loadu(db_ptr + j + fVec::size(), D - j - fVec::size()) * gamma_vec1;
+    } else {
+      gamma_vec0 = fVec::set(zero, gamma_vec0, D - j);
+      ds_vec += fVec::loadu(ds_ptr + j, D - j) * gamma_vec0;
+      db_vec += fVec::loadu(db_ptr + j, D - j) * gamma_vec0;
+    }
+  }
+  opmath_t ds_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, ds_vec);
+  opmath_t db_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, db_vec);
+  return std::tuple<opmath_t, opmath_t>(ds_val, db_val);
+
 }
 
 template <typename T, typename PT, typename opmath_t>
@@ -683,25 +722,13 @@ void GroupNormInputBackward(
   const opmath_t s = opmath_t(1) / static_cast<opmath_t>(D * HxW);
   const bool gamma_null = (gamma == nullptr);
   at::parallel_for(0, N * G, 1, [=](int64_t start, int64_t end) {
-    constexpr int64_t K = vec::Vectorized<PT>::size();
-    const int64_t d = D / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> ds_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<opmath_t, at::vec::Vectorized<opmath_t>::size()> db_arr;
     for (const auto i : c10::irange(start, end)) {
       const int64_t g = i % G;
       const opmath_t* ds_ptr = ds + i * D;
       const opmath_t* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma + g * D;
-      CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
-      opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), opmath_t(0));
-      opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), opmath_t(0));
-      for (const auto j : c10::irange(d, D)) {
-        const opmath_t gamma_v = gamma_null ? opmath_t(1) : opmath_t(gamma[g * D + j]);
-        ds_val += ds_ptr[j] * gamma_v;
-        db_val += db_ptr[j] * gamma_v;
-      }
+      opmath_t ds_val, db_val;
+      std::tie(ds_val, db_val) = CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, D);
       const opmath_t c2 =
           (db_val * opmath_t(mean[i]) - ds_val) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * s;
       const opmath_t c3 = -c2 * opmath_t(mean[i]) - db_val * opmath_t(rstd[i]) * s;
@@ -721,7 +748,7 @@ void GroupNormInputBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+typename std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 GammaBackward(
     int64_t N,
     int64_t C,
@@ -768,7 +795,7 @@ GammaBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+typename std::enable_if_t<!std::is_same_v<PT, opmath_t>, void>
 GammaBackward(
     int64_t N,
     int64_t C,
@@ -830,7 +857,7 @@ GammaBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+typename std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
   using Vec = at::vec::Vectorized<PT>;
   constexpr int64_t K = Vec::size();
@@ -854,7 +881,7 @@ BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+typename std::enable_if_t<!std::is_same_v<PT, opmath_t>, void>
 BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
   using Vec = at::vec::Vectorized<PT>;
   using fVec = at::vec::Vectorized<opmath_t>;
@@ -950,7 +977,7 @@ void GroupNormBackwardKernelImplInternal(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 DsDbRowwiseMomentsChannelsLast(
   const T* dY_ptr,
   const T* X_ptr,
@@ -985,7 +1012,7 @@ DsDbRowwiseMomentsChannelsLast(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 DsDbRowwiseMomentsChannelsLast(
   const T* dY_ptr,
   const T* X_ptr,
@@ -1039,10 +1066,10 @@ DsDbRowwiseMomentsChannelsLast(
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_same<T, at::opmath_type<T>>::value,
+inline typename std::enable_if_t<std::is_same_v<T, at::opmath_type<T>>,
   std::tuple<
   vec::Vectorized<T>,
-  vec::Vectorized<T>>>::type
+  vec::Vectorized<T>>>
 load_util(const T* data_ptr, int64_t n) {
   using Vec = vec::Vectorized<T>;
   auto vec0 = Vec::loadu(data_ptr, n > Vec::size() ? Vec::size() : n);
@@ -1052,11 +1079,11 @@ load_util(const T* data_ptr, int64_t n) {
 }
 
 template <typename T>
-inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value,
+inline typename std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>,
   std::tuple<
     vec::Vectorized<at::opmath_type<T>>,
     vec::Vectorized<at::opmath_type<T>>>
-    >::type
+    >
 load_util(const T* data_ptr, int64_t n) {
   using Vec = vec::Vectorized<T>;
   auto vec = Vec::loadu(data_ptr, n);
@@ -1064,7 +1091,7 @@ load_util(const T* data_ptr, int64_t n) {
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastColMov(
   const T* dY_data,
   const T* X_data,
@@ -1112,7 +1139,7 @@ ApplyInputGradientsChannelsLastColMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastColMov(
     const T* dY_data,
     const T* X_data,
@@ -1173,7 +1200,7 @@ ApplyInputGradientsChannelsLastColMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastRowMov(
   const T* dY_data,
   const T* X_data,
@@ -1209,7 +1236,7 @@ ApplyInputGradientsChannelsLastRowMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline typename std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastRowMov(
     const T* dY_data,
     const T* X_data,
@@ -1260,7 +1287,7 @@ ApplyInputGradientsChannelsLastRowMov(
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if_t<std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>
     CalcInternalGradientsChannelsLast(
     const T* X_data,
     const T* dY_data,
@@ -1315,7 +1342,7 @@ inline typename std::
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<!std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if_t<!std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>
     CalcInternalGradientsChannelsLast(
         const T* X_data,
         const T* dY_data,
@@ -1331,6 +1358,7 @@ inline typename std::
   constexpr int64_t K = Vec::size();
   const int64_t inner_size = D / K * K;
   float ds_gamma{0}, db_gamma{0};
+  fVec zero{0};
   int64_t d = 0;
   for (; d < inner_size; d += K) {
     fVec acc0_vec0{0}, acc0_vec1{0}, acc1_vec0{0}, acc1_vec1{0};
@@ -1363,19 +1391,56 @@ inline typename std::
     db_gamma += vec::vec_reduce_all(
         [](fVec& x, fVec& y) { return x + y; }, acc1_vec1 * gamma_vec1);
   }
-  for (; d < D; d++) {
-    opmath_t acc0{0}, acc1{0};
+  if (d < D) {
+    fVec acc0_vec0{0}, acc0_vec1{0}, acc1_vec0{0}, acc1_vec1{0};
     for (const auto m : c10::irange(HxW)) {
       const T* X_ptr = X_data + m * C;
       const T* dY_ptr = dY_data + m * C;
-      acc0 += opmath_t(X_ptr[d]) * opmath_t(dY_ptr[d]);
-      acc1 += opmath_t(dY_ptr[d]);
+      Vec x_vec = Vec::loadu(X_ptr + d, D - d);
+      Vec dy_vec = Vec::loadu(dY_ptr + d, D - d);
+      fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
+      std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
+      std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+      if (D - d > fVec::size()) {
+        x_vec1 = fVec::set(zero, x_vec1, D - d - fVec::size());
+        dy_vec1 = fVec::set(zero, dy_vec1, D - d - fVec::size());
+        acc0_vec0 += x_vec0 * dy_vec0;
+        acc0_vec1 += x_vec1 * dy_vec1;
+        acc1_vec0 += dy_vec0;
+        acc1_vec1 += dy_vec1;
+      } else {
+        x_vec0 = fVec::set(zero, x_vec0, D - d);
+        dy_vec0 = fVec::set(zero, dy_vec0, D - d);
+        acc0_vec0 += x_vec0 * dy_vec0;
+        acc1_vec0 += dy_vec0;
+      }
     }
-    ds_ptr[d] = acc0;
-    db_ptr[d] = acc1;
-    opmath_t gamma_val = gamma_null ? opmath_t(1) : opmath_t(gamma_ptr[d]);
-    ds_gamma += acc0 * gamma_val;
-    db_gamma += acc1 * gamma_val;
+    acc0_vec0.store(ds_ptr + d, (D - d) > fVec::size() ? fVec::size() : (D - d));
+    acc0_vec1.store(ds_ptr + d + fVec::size(),
+      (D - d) > fVec::size() ? (D - d - fVec::size()) : 0);
+    acc1_vec0.store(db_ptr + d, (D - d) > fVec::size() ? fVec::size() : (D - d));
+    acc1_vec1.store(db_ptr + d + fVec::size(),
+      (D - d) > fVec::size() ? (D - d - fVec::size()) : 0);
+    fVec gamma_vec0, gamma_vec1;
+    std::tie(gamma_vec0, gamma_vec1) = gamma_null ?
+      std::tuple<fVec, fVec>(fVec(1), fVec(1)) : load_util(gamma_ptr + d, D - d);
+    if (D - d > fVec::size()) {
+      gamma_vec1 = fVec::set(zero, gamma_vec1, D - d - fVec::size());
+      ds_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc0_vec0 * gamma_vec0);
+      ds_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc0_vec1 * gamma_vec1);
+      db_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc1_vec0 * gamma_vec0);
+      db_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc1_vec1 * gamma_vec1);
+    } else {
+      gamma_vec0 = fVec::set(zero, gamma_vec0, D - d);
+      ds_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc0_vec0 * gamma_vec0);
+      db_gamma += vec::vec_reduce_all(
+          [](fVec& x, fVec& y) { return x + y; }, acc1_vec0 * gamma_vec0);
+    }
   }
 
   return std::tuple<opmath_t, opmath_t>(ds_gamma, db_gamma);
