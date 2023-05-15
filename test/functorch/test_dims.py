@@ -619,6 +619,14 @@ class TestMin(TestCase):
         x = torch.randn(total, 1)
         x.split(l, 0)
 
+    def test_symbolic_trace(self):
+        def f(x):
+            i, j = dims(2)
+            i.size = x.size(0)
+
+        # Doesn't error
+        make_fx(f, tracing_mode="symbolic")(torch.randn(3))
+
 skip_functorch_only = ['test_time_mm_fuse', 'test_attn_cuda']
 class TestMinFunctorchOnly(TestMin):
     def setUp(self):

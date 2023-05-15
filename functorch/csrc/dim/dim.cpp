@@ -21,6 +21,8 @@
 #include "arena.h"
 #include "python_variable_simple.h"
 
+#include <torch/csrc/utils/pybind.h>
+
 #if IS_PYTHON_3_11_PLUS
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
@@ -119,7 +121,7 @@ struct Dim : public mpy::base<Dim> {
     mpy::object name_;
     Dim()
     : level_(n_dims_created++) {}
-    void init(mpy::object name, int64_t s = -1) {
+    void init(mpy::object name, c10::SymInt s = -1) {
         name_ = std::move(name);
         size_ = s;
     }
@@ -128,17 +130,17 @@ struct Dim : public mpy::base<Dim> {
         return Py_TYPE(v.ptr()) == DimType;
     }
 
-    int64_t size() const {
+    c10::SymInt size() const {
         if (size_ == -1) {
             mpy::raise_error(PyExc_ValueError, "dimension %S is unbound", name_.ptr());
         }
         return size_;
     }
-    void set_size(int64_t v) {
+    void set_size(c10::SymInt v) {
         if (size_ == -1) {
             size_ = v;
         } else if(size_ != v) {
-            mpy::raise_error(DimensionBindError(), "Dim '%R' previously bound to a dimension of size %lld cannot bind to a dimension of size %lld", this, this->size_, v);
+            mpy::raise_error(DimensionBindError(), "Dim '%R' previously bound to a dimension of size %lld cannot bind to a dimension of size %lld", this, this->size_.guard_int(__FILE__, __LINE__), v.guard_int(__FILE__, __LINE__));
         }
     }
     bool is_bound() const {
@@ -166,7 +168,7 @@ struct Dim : public mpy::base<Dim> {
         return batchtensor_;
     }
 private:
-    int64_t size_{-1};
+    c10::SymInt size_{-1};
     at::Tensor range_;
     at::Tensor batchtensor_;
 };
@@ -244,13 +246,13 @@ static PyObject* Dim_repr(Dim* self) {
 
 static PyObject* Dim_getsize(Dim* self, void*) {
     PY_BEGIN
-    return mpy::from_int(self->size()).release();
+    return py::cast(self->size()).release().ptr();
     PY_END(nullptr)
 }
 
 int Dim_setsize(Dim* self, PyObject* size, void*) {
     PY_BEGIN
-    self->set_size(mpy::to_int(size));
+    self->set_size(py::cast<c10::SymInt>(size));
     return 0;
     PY_END(-1)
 }
@@ -1172,11 +1174,11 @@ TensorRef _match_levels(Arena& A, TensorRef v, Slice<DimEntry> from_levels, Slic
         return v;
     }
     // drop_levels -> if a dim appears in from_levels but not to_levels, it is assumed it has stride 0.
-    at::IntArrayRef sz = v->sizes();
-    at::IntArrayRef sd = v->strides();
+    auto sz = v->sym_sizes();
+    auto sd = v->sym_strides();
     AT_ASSERT(drop_levels || from_levels.size() <= to_levels.size());
-    Slice<int64_t> nsz;
-    Slice<int64_t> nsd;
+    Slice<c10::SymInt> nsz;
+    Slice<c10::SymInt> nsd;
     for (auto l : to_levels) {
         auto oidx = from_levels.index(l);
         if (!oidx) {
@@ -1188,7 +1190,7 @@ TensorRef _match_levels(Arena& A, TensorRef v, Slice<DimEntry> from_levels, Slic
             nsd.append(A, sd[idx]);
         }
     }
-    return A.autorelease(v->as_strided(at::IntArrayRef(nsz.begin(), nsz.end()), at::IntArrayRef(nsd.begin(), nsd.end()), v->storage_offset()));
+    return A.autorelease(v->as_strided_symint(at::SymIntArrayRef(nsz.begin(), nsz.end()), at::SymIntArrayRef(nsd.begin(), nsd.end()), v->sym_storage_offset()));
 }
 
 static mpy::object run_torch_function(Arena &A, mpy::handle orig, mpy::vector_args args, bool is_pointwise) {
@@ -1609,7 +1611,7 @@ int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
 
 struct DotPart {
     Slice<DimEntry> dims;
-    size_t total_size = 1;
+    c10::SymInt total_size = 1;
     void append(Arena& A, mpy::hdl<Dim> d) {
         total_size *= d->size();
         dims.append(A, d);
@@ -1634,11 +1636,11 @@ TensorRef dot_prepare(Arena& A, std::initializer_list<DotPart> parts, const Tens
     if (!needs_reshape) {
         return r;
     }
-    Slice<int64_t> view;
+    Slice<c10::SymInt> view;
     for (auto p : parts) {
         view.append(A, p.total_size);
     }
-    return A.autorelease(r->reshape(at::IntArrayRef(view.begin(), view.end())));
+    return A.autorelease(r->reshape_symint(at::SymIntArrayRef(view.begin(), view.end())));
 }
 
 mpy::object dot_finish(Arena& A, std::initializer_list<DotPart> parts, at::Tensor r) {
@@ -1651,11 +1653,11 @@ mpy::object dot_finish(Arena& A, std::initializer_list<DotPart> parts, at::Tenso
         result_levels.extend(A, p.dims);
     }
     if (needs_reshape) {
-        Slice<int64_t> new_size;
+        Slice<c10::SymInt> new_size;
         for (auto l : result_levels) {
             new_size.append(A, l.dim()->size());
         }
-        r = r.reshape(at::IntArrayRef(new_size.begin(), new_size.end()));
+        r = r.reshape_symint(at::SymIntArrayRef(new_size.begin(), new_size.end()));
     }
     return Tensor::from_positional(A, std::move(r), result_levels, true);
 }
@@ -1956,8 +1958,8 @@ static PyObject* expand(PyObject *_,
     const at::Tensor& data = *info.tensor;
     auto levels = info.levels;
     Slice<DimEntry> new_levels;
-    Slice<int64_t> sz;
-    Slice<int64_t> sd;
+    Slice<c10::SymInt> sz;
+    Slice<c10::SymInt> sd;
     for (auto i : irange(nargs)) {
         auto d = Dim::unchecked_wrap(args[i]);
         if (levels.contains(d) || new_levels.contains(d)) {
@@ -1968,19 +1970,19 @@ static PyObject* expand(PyObject *_,
         sd.append(A, 0);
     }
     new_levels.extend(A, levels);
-    at::IntArrayRef osz = data.sizes();
-    at::IntArrayRef osd = data.strides();
+    auto osz = data.sym_sizes();
+    auto osd = data.sym_strides();
     sz.extend(A, osz.begin(), osz.end());
     sd.extend(A, osd.begin(), osd.end());
-    at::Tensor ndata = data.as_strided(at::IntArrayRef(sz.begin(), sz.end()), at::IntArrayRef(sd.begin(), sd.end()), data.storage_offset());
+    at::Tensor ndata = data.as_strided_symint(at::SymIntArrayRef(sz.begin(), sz.end()), at::SymIntArrayRef(sd.begin(), sd.end()), data.sym_storage_offset());
     return Tensor::from_positional(A, std::move(ndata), new_levels, info.has_device).release();
     PY_END(nullptr)
 }
 
 
-void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
-                        Slice<mpy::hdl<Dim>> dims, Slice<int64_t>& nsz, Slice<int64_t>& nsd) {
-    int64_t rhs_prod = 1;
+void _bind_dims_to_size(Arena & A, c10::SymInt sz, c10::SymInt sd,
+                        Slice<mpy::hdl<Dim>> dims, Slice<c10::SymInt>& nsz, Slice<c10::SymInt>& nsd) {
+    c10::SymInt rhs_prod = 1;
     for (auto i : dims.enumerate()) {
         if (!dims[i]->is_bound()) {
             for (auto j : irange(i + 1, dims.size())) {
@@ -1992,11 +1994,11 @@ void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
             if (sz % rhs_prod != 0) {
                 mpy::tuple tup(dims.size());
                 for (auto j : dims.enumerate()) {
-                    tup.set(j, dims[j]->is_bound() ? mpy::from_int(dims[j]->size()) : mpy::unicode_from_string("?"));
+                    tup.set(j, dims[j]->is_bound() ? mpy::object::steal(mpy::handle(py::cast(dims[j]->size()).release().ptr())) : mpy::unicode_from_string("?"));
                 }
-                mpy::raise_error(DimensionBindError(), "inferred dimension does not evenly fit into larger dimension: %d vs %R", (int) sz, tup.ptr());
+                mpy::raise_error(DimensionBindError(), "inferred dimension does not evenly fit into larger dimension: %d vs %R", (int) sz.guard_int(__FILE__, __LINE__), tup.ptr());
             }
-            int64_t inferred_size = sz / rhs_prod;
+            c10::SymInt inferred_size = sz / rhs_prod;
             dims[i]->set_size(inferred_size);
             rhs_prod = sz;
             break;
@@ -2008,9 +2010,9 @@ void _bind_dims_to_size(Arena & A, int64_t sz, int64_t sd,
         for (auto j : dims.enumerate()) {
             tup.set(j, mpy::object::borrow(dims[j]));
         }
-        mpy::raise_error(DimensionBindError(), "Dimension sizes to do not match (%d != %d) when matching dimension pack %R", (int) sz, (int) rhs_prod, tup.ptr());
+        mpy::raise_error(DimensionBindError(), "Dimension sizes to do not match (%d != %d) when matching dimension pack %R", (int) sz.guard_int(__FILE__, __LINE__), (int) rhs_prod.guard_int(__FILE__, __LINE__), tup.ptr());
     }
-    auto new_strides = A.allocate<int64_t>(dims.size());
+    auto new_strides = A.allocate<c10::SymInt>(dims.size());
     auto prev_stride = sd;
     for (auto i : dims.reversed_enumerate()) {
         new_strides[i] = prev_stride;
@@ -2379,10 +2381,10 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> 
         }
     };
 
-    Slice<int64_t> nsz;
-    Slice<int64_t> nsd;
-    at::IntArrayRef sz = self_info.tensor->sizes();
-    at::IntArrayRef sd = self_info.tensor->strides();
+    Slice<c10::SymInt> nsz;
+    Slice<c10::SymInt> nsd;
+    at::SymIntArrayRef sz = self_info.tensor->sym_sizes();
+    at::SymIntArrayRef sd = self_info.tensor->sym_strides();
 
     auto append_size = [&](int i) {
         if (has_dimpacks_or_none) {
@@ -2473,7 +2475,7 @@ IndexingInfo getsetitem_flat(Arena& A, TensorInfo self_info, Slice<mpy::handle> 
 
     // we have to restride the tensor to collapse dimension packs and introduce our none dimensions.
     if (has_dimpacks_or_none) {
-        self_info.tensor = A.autorelease(self_info.tensor->as_strided(at::IntArrayRef(nsz.begin(), nsz.end()),at::IntArrayRef(nsd.begin(), nsd.end()), self_info.tensor->storage_offset()));
+        self_info.tensor = A.autorelease(self_info.tensor->as_strided_symint(at::SymIntArrayRef(nsz.begin(), nsz.end()),at::SymIntArrayRef(nsd.begin(), nsd.end()), self_info.tensor->sym_storage_offset()));
     }
 
 
@@ -2778,9 +2780,9 @@ static PyObject* py_split(PyObject *_,
         }
         mpy::raise_error(PyExc_TypeError, "tensor does not comtain dimension %R", dim.ptr());
     }
-    Slice<int64_t> indices;
+    Slice<c10::SymInt> indices;
 
-    int64_t total_size = 0;
+    c10::SymInt total_size = 0;
     Slice<int64_t> unbound;
     for (auto i : sizes.enumerate()) {
         auto d = Dim::unchecked_wrap(sizes[i]);
@@ -2792,11 +2794,11 @@ static PyObject* py_split(PyObject *_,
             unbound.append(A, i);
         }
     }
-    auto tensor_size = self_info.tensor->sizes()[*idx];
+    auto tensor_size = self_info.tensor->sym_sizes()[*idx];
 
     if (unbound.size()) {
         if (total_size > tensor_size) {
-           mpy::raise_error(PyExc_TypeError, "sizes of target dimensions add up to more (%d) than source dim (%d)", int(total_size), int(tensor_size));
+           mpy::raise_error(PyExc_TypeError, "sizes of target dimensions add up to more (%d) than source dim (%d)", int(total_size.guard_int(__FILE__, __LINE__)), int(tensor_size.guard_int(__FILE__, __LINE__)));
         }
         auto remaining_size = tensor_size - total_size;
         auto chunk_size = (remaining_size + unbound.size() - 1) / unbound.size();
@@ -2804,13 +2806,13 @@ static PyObject* py_split(PyObject *_,
             auto sz = std::min(chunk_size, remaining_size);
             Dim::unchecked_wrap(sizes[u])->set_size(sz);
             indices[u] = sz;
-            remaining_size -= sz;
+            remaining_size = remaining_size - sz;
         }
     } else if (tensor_size != total_size) {
-        mpy::raise_error(PyExc_TypeError, "sum of sizes of target dimensions (%d) do not match the than source dim (%d)", int(total_size), int(tensor_size));
+        mpy::raise_error(PyExc_TypeError, "sum of sizes of target dimensions (%d) do not match the than source dim (%d)", int(total_size.guard_int(__FILE__, __LINE__)), int(tensor_size.guard_int(__FILE__, __LINE__)));
     }
 
-    auto result_tensors = self_info.tensor->split_with_sizes(at::IntArrayRef(indices.begin(), indices.end()), *idx);
+    auto result_tensors = self_info.tensor->split_with_sizes_symint(at::SymIntArrayRef(indices.begin(), indices.end()), *idx);
     mpy::tuple result(result_tensors.size());
     Slice<DimEntry> new_levels;
     new_levels.extend(A, self_info.levels);
