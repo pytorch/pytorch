@@ -1990,6 +1990,7 @@ class TestSDPA(NNTestCase):
             tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
+            assert all(not isinstance(o, torch.Tensor) or o.is_cuda for o in output_tuple)
         g.replay()
         out_first = output_tuple[0].clone()
         dbug_mask_first = output_tuple[-1].clone()
