@@ -110,6 +110,8 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
+        "new_ones",
+        "new_zeros",
         "nn.functional.adaptive_avg_pool1d",
         "nn.functional.adaptive_avg_pool2d",
         "nn.functional.adaptive_avg_pool3d",

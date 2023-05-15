@@ -150,7 +150,11 @@ class ResolvedExportOptions(ExportOptions):
             import torch.onnx._internal.fx.dynamo_graph_extractor as dynamo_graph_extractor  # TODO: Prevent circular dep
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
-            self.onnx_registry = registration.OnnxRegistry()
+
+            # TODO(titaiwang): opset version for registry should be provided from torchlib (source)
+            # However, torchlib doesn't have opset version in anywhere yet. We need to revisit this
+            # once torchlib has multiple opset version.
+            self.onnx_registry = registration.OnnxRegistry(self.opset_version)
             self.decomposition_table = (
                 decomposition_table.create_onnx_friendly_decomposition_table(
                     self.onnx_registry

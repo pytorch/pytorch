@@ -14,8 +14,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace torch {

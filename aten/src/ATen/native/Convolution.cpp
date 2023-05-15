@@ -9,7 +9,6 @@
 #include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/macros/Macros.h>
@@ -87,6 +86,9 @@
 constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
+
+
+static bool conv_benchmark_empty_cache = true;
 
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
@@ -2257,5 +2259,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
 }
+
+void _cudnn_set_conv_benchmark_empty_cache(bool enable) {
+  conv_benchmark_empty_cache = enable;
+}
+
+bool _cudnn_get_conv_benchmark_empty_cache() {
+  return conv_benchmark_empty_cache;
+}
+
+
 
 }} // at::native

@@ -8,7 +8,6 @@ from typing import (
     Collection,
     Dict,
     Generic,
-    List,
     Optional,
     Set,
     TYPE_CHECKING,
@@ -43,14 +42,14 @@ class MergeDict(Generic[_K, _V], Collection[_K]):
     """
 
     def __init__(self):
-        self._torchlib: Dict[_K, List[_V]] = {}
-        self._merged: Dict[_K, List[_V]] = {}
-        self._customs: Dict[_K, List[_V]] = {}
+        self._torchlib: Dict[_K, Set[_V]] = {}
+        self._merged: Dict[_K, Set[_V]] = {}
+        self._customs: Dict[_K, Set[_V]] = {}
 
     def set_base(self, key: _K, value: _V) -> None:
-        self._torchlib.setdefault(key, []).append(value)
+        self._torchlib.setdefault(key, set()).add(value)
         if key not in self._customs:
-            self._merged.setdefault(key, []).append(value)
+            self._merged.setdefault(key, set()).add(value)
 
     def in_base(self, key: _K) -> bool:
         """Checks if a key is in the base dictionary."""
@@ -58,8 +57,8 @@ class MergeDict(Generic[_K, _V], Collection[_K]):
 
     def add_custom(self, key: _K, value: _V) -> None:
         """Add a base key-value with a new pair."""
-        self._customs.setdefault(key, []).append(value)
-        self._merged.setdefault(key, []).append(value)
+        self._customs.setdefault(key, set()).add(value)
+        self._merged.setdefault(key, set()).add(value)
 
     def remove_custom(self, key: _K) -> None:
         """Remove a key-value pair."""
@@ -73,10 +72,10 @@ class MergeDict(Generic[_K, _V], Collection[_K]):
         """Checks if a key-value pair is overridden."""
         return key in self._customs
 
-    def __getitem__(self, key: _K) -> List[_V]:
+    def __getitem__(self, key: _K) -> Set[_V]:
         return self._merged[key]
 
-    def get(self, key: _K, default: Optional[List[_V]] = None) -> Optional[List[_V]]:
+    def get(self, key: _K, default: Optional[Set[_V]] = None) -> Optional[Set[_V]]:
         return self._merged.get(key, default)
 
     def __contains__(self, key: object) -> bool:
@@ -116,13 +115,13 @@ class _SymbolicFunctionGroup:
     def __repr__(self) -> str:
         return f"_SymbolicFunctionGroup({self._name}, registered={self._functions})"
 
-    def __getitem__(self, key: OpsetVersion) -> List[Callable]:
+    def __getitem__(self, key: OpsetVersion) -> Set[Callable]:
         result = self.get(key)
         if result is None:
             raise KeyError(key)
         return result
 
-    def get(self, opset: OpsetVersion) -> Optional[List[Callable]]:
+    def get(self, opset: OpsetVersion) -> Optional[Set[Callable]]:
         """Find the most recent version of the overloaded functions."""
         return self._functions.get(opset)
 
@@ -174,7 +173,7 @@ class OnnxRegistry:
         _registry: A dictionary mapping qualified names to _SymbolicFunctionGroup objects.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, opset_version: int = 18) -> None:
         self._registry: Dict[str, _SymbolicFunctionGroup] = {}
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
@@ -182,6 +181,7 @@ class OnnxRegistry:
             registration,
         )
 
+        self._opset_version = opset_version
         self.initiate_registry_from_torchlib(registration.default_registry)
 
     # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
@@ -195,7 +195,7 @@ class OnnxRegistry:
             for func in aten_overloads_func.overloads:
                 self.register(
                     aten_name,
-                    18,
+                    self._opset_version,
                     func,
                     custom=False,
                 )
@@ -268,6 +268,7 @@ class OnnxRegistry:
             return False
         return functions.get(version) is not None
 
+    @_beartype.beartype
     def all_functions(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)
