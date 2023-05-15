@@ -1668,7 +1668,8 @@ def _coalescing_manager(
             # Collectives supporting "Fast Path" coalescing are captured.
             # See implementation in corresponding collective APIs.
             # Currently supported:
-            # - allreduce_coalesced
+            # - coalesced `all_reduce`
+            # - coalesced `all_gather_into_tensor`
             op0 = op_list[0].op
             if op0 == all_reduce:
                 tensors = []
@@ -1677,6 +1678,13 @@ def _coalescing_manager(
                 opts = AllreduceCoalescedOptions()
                 opts.reduceOp = op_list[0].redop
                 work = group.allreduce_coalesced(tensors, opts)
+            elif op0 == all_gather_into_tensor:
+                inputs = []
+                outputs = []
+                for op in op_list:
+                    inputs.append(op.tensor)
+                    outputs.append(op.dst_tensor)
+                work = group.allgather_into_tensor_coalesced(outputs, inputs)
             else:
                 raise AssertionError(
                     f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -2834,11 +2842,18 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else torch.view_as_real(input_tensor)
     )
 
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg._allgather_base(output_tensor, input_tensor)
-    else:
-        work = group._allgather_base(output_tensor, input_tensor)
+    group = group or _get_default_group()
+
+    if group in _world.pg_coalesce_state.keys():
+        # We are in coalescing context, do not issue single operation, just append a collective representation
+        coll = _CollOp(all_gather_into_tensor, input_tensor, output_tensor)
+        _world.pg_coalesce_state[group].append(coll)
+        if async_op:
+            return _IllegalWork()
+        else:
+            return None
+
+    work = group._allgather_base(output_tensor, input_tensor)
 
     if async_op:
         return work

@@ -888,9 +888,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.warning(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
-                ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
