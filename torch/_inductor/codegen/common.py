@@ -22,7 +22,7 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
 
@@ -251,16 +251,19 @@ class OpOverrides:
     def constant(value, dtype):
         return repr(value)
 
-    def reciprocal(self, x):
-        return self.div("1", x)
+    @staticmethod
+    def reciprocal(x):
+        return ops.div("1", x)
 
-    def square(self, x):
-        return self.mul(x, x)
+    @staticmethod
+    def square(x):
+        return ops.mul(x, x)
 
-    def sign(self, x):
-        left = self.where(self.lt("0", x), "1", "0")
-        right = self.where(self.lt(x, "0"), "1", "0")
-        return self.sub(left, right)
+    @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), "1", "0")
+        right = ops.where(ops.lt(x, "0"), "1", "0")
+        return ops.sub(left, right)
 
     @staticmethod
     def bitwise_not(x):
@@ -292,9 +295,10 @@ class OpOverrides:
     def bitwise_right_shift(x, y):
         return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
 
-    def remainder(self, a, b):
-        r = self.mod(a, b)
-        return self.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", self.add(r, b), r)
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
 class DeferredLine(DeferredLineBase):
