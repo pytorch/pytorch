@@ -1154,17 +1154,22 @@ class _WrappedTritonKernel(object):
 
 def _register_triton_kernels():
     import sys
+    import importlib
 
     if sys.executable == "torch_deploy":
         return
 
-    from torch.sparse._triton_ops import bsr_dense_mm
+    @_WrappedTritonKernel
+    def kernel_impl(*args, **kwargs):
+        from torch.sparse._triton_ops import bsr_dense_mm
+        return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
-    if bsr_dense_mm is not None:
+    has_triton = importlib.util.find_spec("triton") is not None
+    if has_triton:
         torch._TritonLibrary.probablyRegisterOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            _WrappedTritonKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
+            kernel_impl,
             "SparseCsrCUDA"
         )
 

@@ -3457,6 +3457,35 @@ class TestSparseCompressedTritonKernels(TestCase):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
 
+    @onlyCUDA
+    def test_no_triton_on_import(self):
+        import os
+        import sys
+        import subprocess
+
+        script = """
+import sys
+import torch
+
+a = torch.rand(2, device="cuda")
+
+if "triton" in sys.modules:
+    exit(2)
+else:
+    exit(0)
+
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)))
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 2:
+                self.assertTrue(False, "Triton was imported when importing torch!")
+
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
