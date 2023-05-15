@@ -667,9 +667,11 @@ public:
 
   // IntList
   bool isIntList() const;
+  bool isSymIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  std::vector<c10::SymInt> toSymIntVector() const;
   at::DimVector toDimVector() const;
 
   // ConstantString

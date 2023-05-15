@@ -169,6 +169,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -187,11 +189,11 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.gaussian_nll_loss": {f32, f64},
+    "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f32, f64, i32, i64},
+    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -216,7 +218,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "linalg.svdvals": {f32, f64},
     "linalg.matrix_rank": {f32, f64},
     "pca_lowrank": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
@@ -276,6 +277,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten._local_scalar_dense.default
+    "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
     "linalg.eigh": {f32, f64},
     "linalg.eigvals": {f32, f64},
@@ -335,7 +338,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
     "svd": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},

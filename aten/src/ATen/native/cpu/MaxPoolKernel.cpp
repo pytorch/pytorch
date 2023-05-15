@@ -159,7 +159,7 @@ compute_internal(
         }
         for (; d2 < size; d2++) {
           int64_t index = id * input_height * input_width + ih * input_width + iw;
-          opmath_t val = upscale<scalar_t, opmath_t>(in[d2]);
+          opmath_t val = opmath_t(in[d2]);
           int64_t maxindex = ind[d2];
           opmath_t maxval = max_ptr[d2];
 
@@ -179,7 +179,7 @@ compute_internal(
     max_bvec.store(out_data + d3);
   }
   for (; d3 < size; d3++) {
-    out_data[d3] = downscale<scalar_t, opmath_t>(max_ptr[d3]);
+    out_data[d3] = scalar_t(max_ptr[d3]);
   }
 }
 
@@ -270,7 +270,7 @@ void cpu_max_pool(
               for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
                 for (int64_t iw = iw0; iw < iw1; iw += dilationW) {
                   int64_t index = id * input_height * input_width + ih * input_width + iw;
-                  opmath_t val = upscale<scalar_t, opmath_t>(input_ptr[index]);
+                  opmath_t val = input_ptr[index];
                   if ((val > maxval) || std::isnan(val)) {
                     maxval = val;
                     maxindex = index;
@@ -281,7 +281,7 @@ void cpu_max_pool(
 
             // set output to local max and store location of max
             int64_t i = od * output_height * output_width + oh * output_width + ow;
-            output_ptr[i] = downscale<scalar_t, opmath_t>(maxval);
+            output_ptr[i] = scalar_t(maxval);
             indices_ptr[i] = maxindex;
           }
         }
@@ -421,7 +421,6 @@ void cpu_max_pool_backward(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
     const Tensor& indices_) {
-  using opmath_t = at::opmath_type<scalar_t>;
   auto grad_output = grad_output_.contiguous();
   auto indices = indices_.contiguous();
   auto grad_input = grad_input_.contiguous();
@@ -469,9 +468,7 @@ void cpu_max_pool_backward(
             int64_t maxindex = indices_ptr[index];
             if (maxindex != -1) {
               // update gradient
-              grad_input_ptr[maxindex] = downscale<scalar_t, opmath_t>(
-                  upscale<scalar_t, opmath_t>(grad_input_ptr[maxindex]) +
-                  upscale<scalar_t, opmath_t>(grad_output_ptr[index]));
+              grad_input_ptr[maxindex] += grad_output_ptr[index];
             }
           }
         }
@@ -489,7 +486,6 @@ void cpu_max_pool_backward_channels_last(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
     const Tensor& indices_) {
-  using opmath_t = at::opmath_type<scalar_t>;
   int64_t ndim = grad_output_.ndimension();
   if (is_3d) {
     TORCH_CHECK(ndim == 5, "MaxPool3d backward with channels last format supports tensors with 5 dims.");
@@ -533,9 +529,7 @@ void cpu_max_pool_backward_channels_last(
             for (int64_t c = 0; c < channels; c++) {
               int64_t maxindex = ind[c];
               if (maxindex != -1) {
-                grad_input_ptr[maxindex * channels + c] = downscale<scalar_t, opmath_t>(
-                    upscale<scalar_t, opmath_t>(gout[c]) +
-                    upscale<scalar_t, opmath_t>(grad_input_ptr[maxindex * channels + c]));
+                grad_input_ptr[maxindex * channels + c] += gout[c];
               }
             }
           }
@@ -591,6 +585,7 @@ void max_pool3d_kernel_impl(
     // really only contiguous in ChannelsLast3d
     if ((!input_cl_check.is_contiguous()) &&
                      input_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      TORCH_CHECK(output.ndimension() == 4 && indices.ndimension() == 4);
       DimVector out_sizes(output.sizes().begin(), output.sizes().end());
       out_sizes.insert(out_sizes.begin(), 1);
       output.resize_(out_sizes, at::MemoryFormat::ChannelsLast3d);
@@ -660,6 +655,7 @@ void max_pool3d_backward_kernel_impl(
     // really only contiguous in ChannelsLast3d
     if ((!grad_output_cl_check.is_contiguous()) &&
                      grad_output_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      TORCH_CHECK(grad_input.ndimension() == 4 && indices.ndimension() == 4);
       DimVector sizes(grad_input.sizes().begin(), grad_input.sizes().end());
       sizes.insert(sizes.begin(), 1);
       grad_input.resize_(sizes, at::MemoryFormat::ChannelsLast3d);
