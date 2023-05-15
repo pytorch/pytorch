@@ -357,6 +357,16 @@ class CPUReproTests(TestCase):
         b = torch.randn([2])
         self.common(fn, (a, b))
 
+    def test_scalar_sign_with_min(self):
+        # https://github.com/pytorch/pytorch/issues/101340
+        def fn(a):
+            t1 = torch.tanh(a)
+            t2 = torch.sign(t1)
+            return torch.min(t1, t2)
+
+        a = torch.randn(1, 3)
+        self.common(fn, (a,))
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
