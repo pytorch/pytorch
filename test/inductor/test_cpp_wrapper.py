@@ -105,6 +105,7 @@ if RUN_CPU:
             "test_conv2d_unary",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
             slow=True,
         ),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
