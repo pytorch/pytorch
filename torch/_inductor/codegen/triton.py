@@ -1118,8 +1118,11 @@ class TritonKernel(Kernel):
         #   2.1) We are in a reduction loop
         #   2.2) Its not its last use
         #   2.3) This load will not be lifted to the body
-        # The second lot of conditions are equiv to:
-        if self.is_broadcasted(original_index):
+
+        # not indirect_indexing is necessary as doing: y = torch.arange(n); x[y]
+        # will set tmp0 = x0; original_index == tmp0, so is_broadcasted == True.
+        # This is a bug will be solved by https://github.com/pytorch/pytorch/pull/100895
+        if not indirect_indexing and self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
             if name in self.args.inplace_buffers:
@@ -1210,9 +1213,6 @@ class TritonKernel(Kernel):
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
-        # Lezcano: Setting the eviction_policy would be useful in in_out_ptrs,
-        # but it's not supported by triton master ATM
-        # See how we set it in loads in the future if they support it again.
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":

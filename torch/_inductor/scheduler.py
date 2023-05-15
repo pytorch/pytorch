@@ -231,13 +231,20 @@ class BaseSchedulerNode:
             return
 
         if (
-            isinstance(self, (SchedulerNode,))
-            # o what have i done.  lets make this an api
-            or (
-                isinstance(self, ExternKernelSchedulerNode)
-                and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
+            (
+                isinstance(self, (SchedulerNode,))
+                # o what have i done.  lets make this an api
+                or (
+                    isinstance(self, ExternKernelSchedulerNode)
+                    and isinstance(self.node, (ir.AllReduce, ir.InPlaceHint))
+                )
             )
-        ) and config.inplace_buffers:
+            and config.inplace_buffers
+            and (
+                not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
+                or getattr(V.kernel, "mutations", None) is not None
+            )
+        ):
             from .codegen.wrapper import buffer_reuse_key
 
             ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
