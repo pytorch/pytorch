@@ -539,12 +539,12 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                         )
                         if device_of is not None:
                             device_guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
-                        custom_code = (
-                            self.custom_code_callback(f, g)
-                            if self.custom_code_callback is not None
-                            else ""
-                        )
 
+                custom_code = (
+                    self.custom_code_callback(f, g)
+                    if self.custom_code_callback is not None
+                    else ""
+                )
                 return f"""\
 namespace {{
 
