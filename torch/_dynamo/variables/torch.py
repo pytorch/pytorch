@@ -479,6 +479,20 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif self.value in (
+            torch.func.vmap,
+            torch.func.grad,
+            torch.func.vjp,
+            torch.func.jvp,
+        ):
+            # Raise hard-error as even graph-break can't handle functorch transform under torch.compile.
+            tfms_name = {
+                torch.func.vmap: "torch.func.vmap",
+                torch.func.grad: "torch.func.grad",
+                torch.func.vjp: "torch.func.vjp",
+                torch.func.jvp: "torch.func.jvp",
+            }[self.value]
+            raise RuntimeError(f"{tfms_name} transform is currently not supported.")
         elif (
             self.value == torch.addcdiv
             and len(args) == 3
