@@ -354,7 +354,7 @@ class CPUReproTests(TestCase):
             return torch.min(t1, t2)
 
         a = torch.randn(1, 3)
-        self.common(fn, (a, ))
+        self.common(fn, (a,))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
