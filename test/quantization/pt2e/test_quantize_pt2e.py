@@ -2,7 +2,7 @@
 import copy
 import operator
 import unittest
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -535,6 +535,30 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=False)
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=False)
 
+    def test_prepare_qat_conv_bn_fusion_constant_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3, stride=(2, 2), padding=(4, 4))
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        # stride, padding, dilation, transposed, output_padding, groups
+        conv_args = ((2, 2), (4, 4), (1, 1), False, (0, 0), 1)
+        self._verify_symmetric_qnnpack_qat_graph(
+            M(), example_inputs, is_per_channel=False, has_relu=False, expected_conv_constant_args=conv_args
+        )
+        self._verify_symmetric_qnnpack_qat_graph(
+            M(), example_inputs, is_per_channel=True, has_relu=False, expected_conv_constant_args=conv_args
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
+
     def test_prepare_qat_conv_bn_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -559,6 +583,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
+        expected_conv_constant_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
         Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
@@ -610,6 +635,12 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(conv_node.target, torch.ops.aten.convolution.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
+        # Verify: conv constant args
+        if expected_conv_constant_args is not None:
+            assert len(expected_conv_constant_args) == 6, "wrong num conv args, bad test setup"
+            for i in range(6):
+                self.assertEqual(conv_node.args[i + 3], expected_conv_constant_args[i])
+
         # Verify: conv input activation fake quantize
         conv_input_fq_node = conv_node.args[0]
         conv_input_node = conv_input_fq_node.args[0]
@@ -657,6 +688,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertTrue("tensor_constant" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
+    # TODO: merge these numerics tests with the graph tests above
     def test_prepare_qat_conv_bn_numerics(self):
         class M(torch.nn.Module):
             def __init__(self):

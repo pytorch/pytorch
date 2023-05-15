@@ -261,12 +261,6 @@ class OpOverrides:
         return ops.mul(x, x)
 
     @staticmethod
-    def sign(x):
-        left = ops.where(ops.lt("0", x), "1", "0")
-        right = ops.where(ops.lt(x, "0"), "1", "0")
-        return ops.sub(left, right)
-
-    @staticmethod
     def bitwise_not(x):
         return f"~{ExprPrinter.paren(x)}"
 
