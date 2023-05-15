@@ -9756,7 +9756,7 @@ class TestNNDeviceType(NNTestCase):
 
         output_f32 = F.interpolate(
             input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
-        ).round().byte()
+        ).round().to(torch.uint8)
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
         )
