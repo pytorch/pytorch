@@ -1,4 +1,5 @@
 import functools
+import logging
 from typing import List
 
 import torch
@@ -26,10 +27,9 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
-import logging
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG) # TODO remove before merging
+log.setLevel(logging.DEBUG)  # TODO remove before merging
 
 
 aten = torch.ops.aten
@@ -350,7 +350,9 @@ def convolution(
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
-        req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
@@ -429,6 +431,7 @@ def _convolution(
     return convolution(
         x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
     )
+
 
 if not config.layout_opt:
     add_layout_constraint(aten.convolution, constrain_to_fx_strides)

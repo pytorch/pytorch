@@ -145,7 +145,9 @@ def fuse_reindexing(reindex1, reindex2):
 
     return reindex
 
+
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
+
 
 def stride_order2fill_order(order):
     """

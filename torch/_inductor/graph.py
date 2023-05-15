@@ -180,7 +180,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
-        self.nodes_prefer_channels_last = self.find_nodes_prefer_channels_last() if config.layout_opt else set()
+        self.nodes_prefer_channels_last = (
+            self.find_nodes_prefer_channels_last() if config.layout_opt else set()
+        )
         self._warned_fallback = {"aten.convolution_backward"}
 
     def decide_layout_opt(self):
@@ -188,7 +190,9 @@ class GraphLowering(torch.fx.Interpreter):
             return
 
         gm = self.module
-        conv_nodes = [n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default]
+        conv_nodes = [
+            n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
+        ]
         nconv = len(conv_nodes)
 
         if nconv == 0:
@@ -203,19 +207,25 @@ class GraphLowering(torch.fx.Interpreter):
             return
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
-        # Conv with arguments like {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 2}
+        # Conv with arguments like
+        #   {"input_shape": [32, 224, 112, 112], "weight_shape": [224, 112, 3, 3],
+        #    "stride": [2, 2], "padding": [1, 1], "groups": 2}
         # slows down 31x using channels last..
 
         # But a lot of timm models use depthwise separable convolution which will
         # result in grouped convolution with in-channel size == 1.
         # For those grouped convolution, channels last still helps a lot.
         # E.g.
-        # Conv with arguments {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3], "stride": [2, 2], "padding": [1, 1], "groups": 58}
+        # Conv with arguments
+        #   {"input_shape": [128, 58, 56, 56], "weight_shape": [58, 1, 3, 3],
+        #    "stride": [2, 2], "padding": [1, 1], "groups": 58}
         # get 1.86x speedup with channels last layout.
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(n.args[-1] > 1 and n.args[1].meta['val'].size(1) > 1 for n in conv_nodes):
+        if any(
+            n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
+        ):
             log.debug("FOUND GROUPED CONVOLUTION with >1 in_channels!")
             config.layout_opt = False
             return
@@ -227,14 +237,23 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(n.args[1].meta['val'].size(0) * 2 <= n.args[1].meta['val'].size(1) and n.args[1].meta['val'].size(2) > 1 for n in conv_nodes):
-            log.debug("SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL")
+        if any(
+            n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
+            and n.args[1].meta["val"].size(2) > 1
+            for n in conv_nodes
+        ):
+            log.debug(
+                "SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL"
+            )
             config.layout_opt = False
             return
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(n.args[1].meta['val'].size(0) <= 64 and n.args[1].meta['val'].size(1) <= 64 for n in conv_nodes):
+        if all(
+            n.args[1].meta["val"].size(0) <= 64 and n.args[1].meta["val"].size(1) <= 64
+            for n in conv_nodes
+        ):
             log.debug("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
             config.layout_opt = False
             return
@@ -641,12 +660,13 @@ class GraphLowering(torch.fx.Interpreter):
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
 
-                    if len(result.get_size()) == 4 and n in self.nodes_prefer_channels_last:
+                    if (
+                        len(result.get_size()) == 4
+                        and n in self.nodes_prefer_channels_last
+                    ):
                         stride_order = ir.NHWC_STRIDE_ORDER
 
-                    result = ir.ExternKernel.require_stride_order(
-                        result, stride_order
-                    )
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.

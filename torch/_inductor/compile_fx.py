@@ -221,7 +221,8 @@ def compile_fx_inner(
     # in eager mode may becomes a channels last tensor. A view op previously
     # can be applied to the contiguous tensor may not be able to be applied
     # on the channels tensor any more. An error like
-    #   RuntimeError: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+    #   RuntimeError: view size is not compatible with input tensor's size and stride
+    #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
     # will be printed.
     #
     # Replace view op to reshape op in this case.

@@ -2819,7 +2819,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     # backward pass if any real tensor has a different stride.
                     # This can happen if the compiler compiles the fwd module
                     # with layout optimization.
-                    if any(ph_arg.stride() != real_arg.stride() for ph_arg, real_arg in zip(placeholder_list, all_args) if isinstance(ph_arg, torch.Tensor)):
+                    if any(ph_arg.stride() != real_arg.stride()
+                            for ph_arg, real_arg in zip(placeholder_list, all_args)
+                            if isinstance(ph_arg, torch.Tensor)):
                         tracing_context = nullcontext()
                         bw_args = all_args
                     else:
