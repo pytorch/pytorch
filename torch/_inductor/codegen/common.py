@@ -128,7 +128,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph, masked_subblock_dtypes: di
             )
         data_type_logger(msg + input_msg)
         _node.meta[OptimizationContext.key] = opt_ctx
-        return opt_ctx.dtype is not None
+        return True
 
     new_node_propogated = False
     for node in sub_graph.nodes:

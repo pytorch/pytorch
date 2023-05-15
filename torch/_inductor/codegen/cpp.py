@@ -610,11 +610,7 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx_x
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
             return f"vec_convert_to_mask({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype in (
-            torch.float,
-            torch.float32,
-            torch.bfloat16,
-        ):
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
             return f"mask_convert_to_float({x})"
         if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bfloat16:
             return f"cvt_fp32_to_bf16({x})"
