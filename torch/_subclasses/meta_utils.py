@@ -242,7 +242,10 @@ class MetaConverter:
                     # TODO: Delete this assert, and just attempt making the
                     # sparse tensor anyway; even if there is a shape_env, this
                     # tensor might be all static
-                    assert shape_env is None, "symbolic on sparse NYI"
+                    import sympy
+
+                    static = all(isinstance(s, (int, sympy.Integer)) for s in t.size())
+                    assert static, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
