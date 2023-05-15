@@ -170,6 +170,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                                         "Only can register a generator to the PrivateUse1 dispatch key once"):
                 self.module.register_generator()
 
+        def test_open_device_dispatchstub():
+            # test kernels could be reused by privateuse1 backend through dispatchstub
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu")
+            foo_input_data = input_data.to("foo")
+            self.assertFalse(self.module.custom_abs_called())
+            torch.abs(foo_input_data)
+            self.assertTrue(self.module.custom_abs_called())
+
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
                 pass
@@ -258,8 +267,14 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_storage.is_pinned())
 
         def test_open_device_serialization():
+            self.module.set_custom_device_index(-1)
             storage = torch.UntypedStorage(4, device=torch.device('foo'))
             self.assertEqual(torch.serialization.location_tag(storage), 'foo')
+
+            self.module.set_custom_device_index(0)
+            storage = torch.UntypedStorage(4, device=torch.device('foo'))
+            self.assertEqual(torch.serialization.location_tag(storage), 'foo:0')
+
             cpu_storage = torch.empty(4, 4).storage()
             foo_storage = torch.serialization.default_restore_location(cpu_storage, 'foo:0')
             self.assertTrue(foo_storage.is_foo)
@@ -280,6 +295,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_common_registration()
         test_after_common_registration()
         test_generator_registration()
+        test_open_device_dispatchstub()
         test_open_device_random()
         test_open_device_tensor()
         test_open_device_storage()
