@@ -4983,8 +4983,8 @@ bool any_variable_defined(const variable_list& variables) {
 // Additionally, when the computation is done in-place, we exploit that the
 // first `k` coordinates of `u_full/v_full` are zeros.
 static Tensor apply_simple_transformation(
-    int64_t m,
-    int64_t k,
+    c10::SymInt m,
+    c10::SymInt k,
     const Tensor& u_full,
     const Tensor& v_full,
     const Tensor& t,
@@ -5004,9 +5004,11 @@ static Tensor apply_simple_transformation(
   // returns (I - t u v^H) K or -t u v^H K
   if (left) {
     if (modify_K_in_place) {
-      auto v = u_full.narrow(-2, k, m - k);
-      auto u = v_full.narrow(-2, k, m - k).mH().matmul(K.narrow(-2, k, m - k));
-      K.narrow(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
+      auto v = u_full.narrow_symint(-2, k, m - k);
+      auto u = v_full.narrow_symint(-2, k, m - k)
+                   .mH()
+                   .matmul(K.narrow_symint(-2, k, m - k));
+      K.narrow_symint(-2, k, m - k).sub_((t.unsqueeze(-1) * v) * u);
       return K;
     } else {
       auto transformation = (t.unsqueeze(-1) * u_full) * v_full.mH().matmul(K);
@@ -5016,10 +5018,11 @@ static Tensor apply_simple_transformation(
   // returns K (I - t u v^H) or -K t u v^H
   else {
     if (modify_K_in_place) {
-      auto v = u_full.narrow(-2, k, m - k);
-      auto u = K.narrow(-1, k, m - k)
-                   .matmul(t.unsqueeze(-1) * v_full.narrow(-2, k, m - k));
-      K.narrow(-1, k, m - k).sub_(u * v.mH());
+      auto v = u_full.narrow_symint(-2, k, m - k);
+      auto u =
+          K.narrow_symint(-1, k, m - k)
+              .matmul(t.unsqueeze(-1) * v_full.narrow_symint(-2, k, m - k));
+      K.narrow_symint(-1, k, m - k).sub_(u * v.mH());
       return K;
     } else {
       auto transformation = K.matmul(t.unsqueeze(-1) * u_full) * v_full.mH();
@@ -5042,8 +5045,9 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   if (!grad.defined() || input_.sym_numel() == 0 || tau.sym_numel() == 0) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
   }
-  auto m = input_.size(-2);
-  auto k = tau.size(-1);
+  auto m = input_.sym_size(-2);
+  // guard_int is due to irange calls below
+  auto k = tau.sym_size(-1).guard_int(__FILE__, __LINE__);
 
   // forward operates only over the lower triangular part with the assumption
   // that the diagonal of input is filled with 1s.
@@ -5083,13 +5087,13 @@ std::tuple<Tensor, Tensor> householder_product_backward(
                          const Tensor& K) -> std::tuple<Tensor, Tensor> {
     // v_full is a vector of dimension (..., m, 1), t is a scalar of dimension
     // (..., 1)
-    auto v = v_full.narrow(-2, k, m - k);
-    auto vHK = v.mH().matmul(K.narrow(-2, k, m - k));
-    auto Kv = K.narrow(-1, k, m - k).matmul(v);
+    auto v = v_full.narrow_symint(-2, k, m - k);
+    auto vHK = v.mH().matmul(K.narrow_symint(-2, k, m - k));
+    auto Kv = K.narrow_symint(-1, k, m - k).matmul(v);
     auto t_unsqueezed = t.unsqueeze(-1);
     auto v_grad = (-t_unsqueezed * vHK).conj().squeeze(-2) -
         (t_unsqueezed * Kv).squeeze(-1);
-    auto tau_grad = -(vHK.narrow(-1, k, m - k).matmul(v)).conj();
+    auto tau_grad = -(vHK.narrow_symint(-1, k, m - k).matmul(v)).conj();
     return std::make_tuple(v_grad.unsqueeze(-1), tau_grad.squeeze(-1));
   };
 
@@ -5137,7 +5141,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // eg. if both are BatchedTensor at different level.
   if (areAnyTensorSubclassLike({input, tau, K})) {
     // k + 1 if input_grads hold a matrix of zeros for inactive parts of input.
-    auto input_grads = std::vector<Tensor>(k < input.size(-1) ? k + 1 : k);
+    auto input_grads = std::vector<Tensor>(k < input.sym_size(-1) ? k + 1 : k);
     auto tau_grads = std::vector<Tensor>(k);
 
     for (const auto i_idx : c10::irange(k)) {
@@ -5164,11 +5168,11 @@ std::tuple<Tensor, Tensor> householder_product_backward(
 
     // Only first k columns are active in forward.
     // zero gradients for the inactive input.
-    if (k < input.size(-1)) {
+    if (k < input.sym_size(-1)) {
       auto zero_grad_shape =
-          at::DimVector(input_.sizes().slice(0, input_.dim() - 1));
-      zero_grad_shape.push_back(input.size(-1) - k);
-      auto zero_grad = at::zeros(zero_grad_shape, input_.options());
+          at::SymDimVector(input_.sym_sizes().slice(0, input_.dim() - 1));
+      zero_grad_shape.push_back(input.sym_size(-1) - k);
+      auto zero_grad = at::zeros_symint(zero_grad_shape, input_.options());
       input_grads[k] = zero_grad;
     }
 
@@ -5215,7 +5219,7 @@ Tensor householder_product_jvp(
     const Tensor& prod,
     const Tensor& V_,
     const Tensor& tau) {
-  auto m = V_.size(-2);
+  auto m = V_.sym_size(-2);
   auto k = tau.size(-1);
 
   // forward operates only over the lower triangular part with the assumption
