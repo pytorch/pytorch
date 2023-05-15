@@ -920,7 +920,7 @@ def load(
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
         # TODO: proper handling for BinaryIO/IO[bytes] types for f
-        if tarfile.is_tarfile(f):  # type: ignore[arg-type]
+        elif tarfile.is_tarfile(f):  # type: ignore[arg-type]
             if weights_only:
                 try:
                     return _load(opened_file, map_location, _weights_only_unpickler, 'data.pkl', _mmap, **pickle_load_args)
