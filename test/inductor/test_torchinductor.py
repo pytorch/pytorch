@@ -5018,6 +5018,24 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_dtype_sympy_expr(self):
+        torch._inductor.metrics.disable_cpp_wrapper = 0
+
+        @torch._dynamo.optimize_assert("inductor")
+        def fn(a):
+            y = a[..., :-1, :].contiguous()
+            return y
+
+        result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
+        result.sum().backward()
+
+        expected_disable_cpp_wrapper = 0
+        self.assertEqual(
+            torch._inductor.metrics.disable_cpp_wrapper, expected_disable_cpp_wrapper
+        )
+
     @config.patch({"triton.cudagraphs": False})
     def test_lowmem_dropout1(self):
         n = 100000
