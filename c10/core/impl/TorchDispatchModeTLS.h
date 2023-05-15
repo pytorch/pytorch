@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/SafePyObject.h>
-#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 namespace impl {
