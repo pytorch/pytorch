@@ -151,7 +151,7 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
 static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
-    const Scalar& value_scalar) 
+    const Scalar& value_scalar) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
@@ -176,6 +176,7 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
       auto poscoef = scale.to<float>();
       auto negiptcoef = input_scale.to<float>();
       const Vectorized<float> negcoef_vec(negcoef);
+      const Vectorized<float> negiptcoef_vec(negiptcoef);
       const Vectorized<float> poscoef_vec(poscoef);
       const Vectorized<float> one_vec(static_cast<float>(1));
       const Vectorized<float> zero_vec(static_cast<float>(0));
@@ -191,6 +192,45 @@ void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale
           auto cmp1 = (a1 > zero_vec);
           auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a) {
             return !cmp.zero_mask() ? a * poscoef_vec :
+              Vectorized<float>::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+          };
+          res0 = get_res_masked(cmp0, a0);
+          res1 = get_res_masked(cmp1, a1);
+          return convert_from_float<scalar_t>(res0, res1);
+        });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(it.common_dtype(), "elu_cpu", [&]() {
+      using Vec = Vectorized<scalar_t>;
+      auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
+      auto poscoef = scale.to<scalar_t>();
+      auto negiptcoef = input_scale.to<scalar_t>();
+      const Vec negcoef_vec(negcoef);
+      const Vec negiptcoef_vec(negiptcoef);
+      const Vec poscoef_vec(poscoef);
+      const Vec one_vec(static_cast<scalar_t>(1));
+      const Vec zero_vec(static_cast<scalar_t>(0));
+      cpu_kernel_vec(
+          it,
+          [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
+            return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+          },
+          [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+            auto cmp = (a > zero_vec);
+            if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              return a * poscoef_vec;
+            } else {
+              return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+            }
+          });
+    });
+  }
+}
+
+void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result) {
+  if (at::isReducedFloatingType(it.common_dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "elu_backward_cpu", [&]() {
+    auto negcoef = alpha.to<float>() * scale.to<float>();
     auto poscoef = scale.to<float>();
     auto negiptcoef = input_scale.to<float>();
     const Vectorized<float> negcoef_vec(negcoef);
