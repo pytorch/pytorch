@@ -125,8 +125,8 @@ SparseAdam.__doc__ = r"""SparseAdam implements a lazy version of the Adam algori
 
     If you insist on converting your grads, you can do so by manually overriding your
     parameter's `.grad` fields with their sparse equivalents before calling `.step()`.
-    
-    
+
+
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
