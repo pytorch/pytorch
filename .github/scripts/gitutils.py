@@ -5,8 +5,21 @@ import re
 import tempfile
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, cast, Dict, Iterator, List, Optional, Tuple, Union
+from functools import wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
+T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
 
@@ -380,3 +393,24 @@ def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> bool:
         repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}")
     )
     return orig_diff_sha == head_diff_sha
+
+
+def retries_decorator(
+    rc: Any = None, num_retries: int = 3
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    def decorator(f: Callable[..., T]) -> Callable[..., T]:
+        @wraps(f)
+        def wrapper(*args: List[Any], **kwargs: Dict[str, Any]) -> T:
+            for idx in range(num_retries):
+                try:
+                    return f(*args, **kwargs)
+                except Exception as e:
+                    print(
+                        f'Attempt {idx} of {num_retries} to call {f.__name__} failed with "{e}"'
+                    )
+                    pass
+            return cast(T, rc)
+
+        return wrapper
+
+    return decorator
