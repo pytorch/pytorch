@@ -338,7 +338,7 @@ def gen_pyi(
     """
 
     # Some of this logic overlaps with generate_python_signature in
-    # tools/autograd/gen_python_functions.py; however, this
+    # torchgen/autograd/gen_python_functions.py; however, this
     # function is all about generating mypy type signatures, whereas
     # the other function generates are custom format for argument
     # checking.  If you are update this, consider if your change
@@ -1173,7 +1173,7 @@ def main() -> None:
     parser.add_argument(
         "--deprecated-functions-path",
         metavar="DEPRECATED",
-        default="tools/autograd/deprecated.yaml",
+        default="torchgen/autograd/deprecated.yaml",
         help="path to deprecated.yaml",
     )
     parser.add_argument(

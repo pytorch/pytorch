@@ -6589,7 +6589,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
 
   // FIXME: complex gradients not handled correctly
   // For now this is ok as scatter_reduce isn't added to the whitelist
-  // in tools/autograd/gen_variable_type.py
+  // in torchgen/autograd/gen_variable_type.py
 
   if (!grad.defined()) {
     return std::make_tuple(grad_self, grad_src);

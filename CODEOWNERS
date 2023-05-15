@@ -13,7 +13,7 @@
 # on the PRs to push them into a high priority inbox.
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
-/tools/autograd/ @albanD @soulitzer
+/torchgen/autograd/ @albanD @soulitzer
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD

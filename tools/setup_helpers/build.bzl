@@ -5,7 +5,7 @@ def define_targets(rules):
         visibility = ["//:__pkg__"],
         deps = [
             rules.requirement("PyYAML"),
-            "//tools/autograd",
+            "//torchgen/autograd",
             "//torchgen",
         ],
     )

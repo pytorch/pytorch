@@ -10473,7 +10473,7 @@
                 "path": "test/test_nn.py"
               },
               {
-                "path": "tools/autograd/derivatives.yaml"
+                "path": "torchgen/autograd/derivatives.yaml"
               }
             ],
             "pageInfo": {
@@ -24419,13 +24419,13 @@
                 "path": "third_party/fbgemm"
               },
               {
-                "path": "tools/autograd/derivatives.yaml"
+                "path": "torchgen/autograd/derivatives.yaml"
               },
               {
-                "path": "tools/autograd/gen_inplace_or_view_type.py"
+                "path": "torchgen/autograd/gen_inplace_or_view_type.py"
               },
               {
-                "path": "tools/autograd/load_derivatives.py"
+                "path": "torchgen/autograd/load_derivatives.py"
               },
               {
                 "path": "tools/build_variables.bzl"

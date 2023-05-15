@@ -3,7 +3,7 @@ from typing import Callable, List, Optional, overload, Tuple
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype
 
-# Defined in tools/autograd/templates/python_nn_functions.cpp
+# Defined in torchgen/autograd/templates/python_nn_functions.cpp
 
 ${dispatched_hints}
 
@@ -29,7 +29,7 @@ def mkldnn_reorder_conv3d_weight(
 # Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
 def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 
-# Defined at tools/autograd/templates/python_nn_functions.cpp
+# Defined at torchgen/autograd/templates/python_nn_functions.cpp
 @overload
 def _parse_to(
     device: _device,
