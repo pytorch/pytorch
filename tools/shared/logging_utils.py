@@ -12,8 +12,8 @@ def to_time_str(seconds: float) -> str:
     if seconds < 0.00001:
         return "0s"
     elif seconds < 60:
-        return f"{seconds:.2f}s"
+        return f"{seconds:.1f}s"
     elif seconds < 3600:
-        return f"{seconds / 60:.2f}m"
+        return f"{seconds / 60:.1f}m"
     else:
-        return f"{seconds / 3600:.2f}h"
+        return f"{seconds / 3600:.1f}h"

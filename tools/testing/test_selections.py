@@ -154,7 +154,6 @@ def _get_previously_failing_tests() -> Set[str]:
 
 def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
     prioritized_tests = set()
-    print(f"Found {len(last_failed_tests)} test in cache file")
 
     # The keys are formatted as "test_file.py::test_class::test_method[params]"
     # We just need the test_file part
@@ -162,7 +161,6 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
         parts = test.split("::")
         if len(parts) > 1:
             test_file = parts[0]
-            print(f"Adding part: {test_file}. Parts had len {len(parts)}")
             prioritized_tests.add(test_file)
 
     return prioritized_tests
@@ -206,11 +204,11 @@ def get_reordered_tests(
     prioritized_tests: Set[str] = set()
 
     pri_test = _get_previously_failing_tests()
-    print_tests(pri_test, "Prioritizing these tests since they previously failed")
+    print_tests(pri_test, "If run, these tests will prioritized since they previously failed")
     prioritized_tests |= pri_test
 
     pri_test |= _get_modified_tests()
-    print_tests(pri_test, "Prioritizing these tests since they were modified")
+    print_tests(pri_test, "If run, these tests will be prioritized since they were modified")
     prioritized_tests |= pri_test
 
     bring_to_front = []
@@ -239,12 +237,12 @@ def get_reordered_tests(
     # TODO: Would be great to upload these stats to RDS/Rockset
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-    print(f"Prioritized tests will run up to {to_time_str(time_savings_sec)} sooner")
+    print(f"Prioritized tests estimated to run up to {to_time_str(time_savings_sec)} sooner than they would've otherwise")
 
     prioritized_test_names = [t.name for t in bring_to_front]
     print(f"Prioritized: {prioritized_test_names}")
     remaining_test_names = [t.name for t in the_rest]
-    print(f"The rest: {remaining_test_names}")
+    print(f"The Rest: {remaining_test_names}")
 
     return (bring_to_front, the_rest)
 
