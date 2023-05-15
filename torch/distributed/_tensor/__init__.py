@@ -118,8 +118,6 @@ def empty(
     *size,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
-    memory_format=torch.contiguous_format,
-    pin_memory=False,
     requires_grad: bool = False,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
