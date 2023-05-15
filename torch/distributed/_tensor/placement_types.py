@@ -51,9 +51,8 @@ class Shard(Placement):
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         assert (
-            tensor.size(self.dim) >= num_chunks
-        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as "
-        f"the number of devices in that dimension {num_chunks}"
+            tensor.size(self.dim) > 0
+        ), f"Tensor size along dim{self.dim} is 0. There is nothing to be sharded."
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
@@ -184,11 +183,11 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return tensor
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
@@ -219,11 +218,11 @@ class Shard(Placement):
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
 
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
+
         # check if it needs to pad input tensor before all_gather
         full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
         chunk_sizes = [

@@ -298,6 +298,17 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave(self):
+        def fn(y):
+            return torch.repeat_interleave(y, 2, output_size=8)
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        self.common(
+            fn,
+            (a,),
+        )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
