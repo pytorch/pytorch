@@ -37,6 +37,13 @@ class _Faketqdm:  # type: ignore[no-redef]
             sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
         sys.stderr.flush()
 
+    # Don't bother implementing; use real tqdm if you want
+    def set_description(self, *args, **kwargs):
+        pass
+
+    def write(self, s):
+        sys.stderr.write(f"{s}\n")
+
     def close(self):
         self.disable = True
 
@@ -589,7 +596,8 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     return model
 
 
-def download_url_to_file(url, dst, hash_prefix=None, progress=True):
+def download_url_to_file(url: str, dst: str, hash_prefix: Optional[str] = None,
+                         progress: bool = True) -> None:
     r"""Download object at the given URL to a local path.
 
     Args:
@@ -654,14 +662,14 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 # Hub used to support automatically extracts from zipfile manually compressed by users.
 # The legacy zip format expects only one file from torch.save() < 1.6 in the zip.
 # We should remove this support since zipfile is now default zipfile format for torch.save().
-def _is_legacy_zip_format(filename):
+def _is_legacy_zip_format(filename: str) -> bool:
     if zipfile.is_zipfile(filename):
         infolist = zipfile.ZipFile(filename).infolist()
         return len(infolist) == 1 and not infolist[0].is_dir()
     return False
 
 
-def _legacy_zip_load(filename, model_dir, map_location):
+def _legacy_zip_load(filename: str, model_dir: str, map_location: MAP_LOCATION, weights_only: bool) -> Dict[str, Any]:
     warnings.warn('Falling back to the old format < 1.6. This support will be '
                   'deprecated in favor of default zipfile format introduced in 1.6. '
                   'Please redo torch.save() to save it in the new zipfile format.')
@@ -675,7 +683,7 @@ def _legacy_zip_load(filename, model_dir, map_location):
         f.extractall(model_dir)
         extraced_name = members[0].filename
         extracted_file = os.path.join(model_dir, extraced_name)
-    return torch.load(extracted_file, map_location=map_location)
+    return torch.load(extracted_file, map_location=map_location, weights_only=weights_only)
 
 
 def load_state_dict_from_url(
@@ -684,7 +692,8 @@ def load_state_dict_from_url(
     map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
-    file_name: Optional[str] = None
+    file_name: Optional[str] = None,
+    weights_only: bool = False,
 ) -> Dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
@@ -708,6 +717,8 @@ def load_state_dict_from_url(
             ensure unique names and to verify the contents of the file.
             Default: False
         file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
+        weights_only(bool, optional): If True, only weights will be loaded and no complex pickled objects.
+            Recommended for untrusted sources. See :func:`~torch.load` for more details.
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_HUB)
@@ -746,5 +757,5 @@ def load_state_dict_from_url(
         download_url_to_file(url, cached_file, hash_prefix, progress=progress)
 
     if _is_legacy_zip_format(cached_file):
-        return _legacy_zip_load(cached_file, model_dir, map_location)
-    return torch.load(cached_file, map_location=map_location)
+        return _legacy_zip_load(cached_file, model_dir, map_location, weights_only)
+    return torch.load(cached_file, map_location=map_location, weights_only=weights_only)

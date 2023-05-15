@@ -1463,7 +1463,7 @@ class TestAutograd(TestCase):
             mean.retain_grad()
             # node has two retains_grad hooks
             var.mul_(2)
-            # the retain_grad hook multi-output node refers shoudl now be a nullptr
+            # the retain_grad hook multi-output node refers should now be a nullptr
             (var + mean).sum().backward()
             gvar = var.grad
             gmean = mean.grad
@@ -2398,10 +2398,8 @@ class TestAutograd(TestCase):
             y = torch.randn((3, 3), requires_grad=True)
             MyFunction.apply(x, y).sum().backward()
 
-            has_deprecated = map(lambda warn:
-                                 'deprecated' in str(warn) and
-                                 'saved_variables' in str(warn),
-                                 warns)
+            has_deprecated = ('deprecated' in str(warn) and
+                              'saved_variables' in str(warn) for warn in warns)
             has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
             self.assertTrue(has_deprecated)
 
@@ -5623,6 +5621,23 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
             out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn)
 
+    def test_checkpoint_warns_if_use_reentrant_not_passed_explcitly(self):
+        a = torch.randn(1, requires_grad=True)
+
+        # Passing explicitly should not warn
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint(lambda x: x, a, use_reentrant=False)
+        self.assertEqual(len(w), 0)
+
+        # Not passing explicitly warns
+        with warnings.catch_warnings(record=True) as w:
+            checkpoint(lambda x: x, a)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "please pass in use_reentrant=True or use_reentrant=False explicitly",
+            str(w[0].message)
+        )
+
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
 
@@ -5741,7 +5756,7 @@ for shape in [(1,), ()]:
                 "none of output has requires_grad=True"
             )
             if use_reentrant
-            else contextlib.suppress()
+            else contextlib.nullcontext()
         )
 
         a = torch.randn(2, 2, requires_grad=True)

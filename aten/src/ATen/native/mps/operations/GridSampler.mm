@@ -1,18 +1,24 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
-namespace at {
-namespace native {
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/grid_sampler_2d.h>
+#endif
 
+namespace at::native {
+namespace mps {
 void grid_sampler_2d_mps_impl(Tensor& output,
                               const Tensor& input,
                               const Tensor& grid,
                               int64_t interpolation_mode,
                               int64_t padding_mode,
                               bool align_corners) {
-// Grid Sampler support has been added in macOS 13.1
-#if defined(__MAC_13_2)
+  // Grid Sampler support has been added in macOS 13.2
   using namespace mps;
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
@@ -63,56 +69,47 @@ void grid_sampler_2d_mps_impl(Tensor& output,
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
   @autoreleasepool {
     string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" + std::to_string(interpolation_mode) +
         ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
 
-    CachedGraph* cachedGraph = static_cast<CachedGraph*>(cache_->LookUp(key));
-    if (!cachedGraph) {
-      MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
-        CachedGraph* newCachedGraph = nil;
-        @autoreleasepool {
-          MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      MPSGraphTensor* gridTensor = mpsGraphRankedPlaceHolder(mpsGraph, grid);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
-          MPSGraphTensor* gridTensor = mpsGraphRankedPlaceHolder(mpsGraph, grid);
+      MPSGraphTensor* outputTensor = nil;
+      if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Nearest) {
+        outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
+                                           coordinateTensor:gridTensor
+                                                     layout:inputTensorLayout
+                                       normalizeCoordinates:TRUE
+                                        relativeCoordinates:FALSE
+                                               alignCorners:align_corners
+                                                paddingMode:paddingMode
+#if defined(__MAC_13_2)
+                                        nearestRoundingMode:MPSGraphResizeNearestRoundingModeRoundToEven
+#else
+                                        nearestRoundingMode:(MPSGraphResizeNearestRoundingMode)4L
+#endif
+                                              constantValue:0.0f
+                                                       name:nil];
+      } else {
+        outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
+                                           coordinateTensor:gridTensor
+                                                     layout:inputTensorLayout
+                                       normalizeCoordinates:TRUE
+                                        relativeCoordinates:FALSE
+                                               alignCorners:align_corners
+                                                paddingMode:paddingMode
+                                               samplingMode:samplingMode
+                                              constantValue:0.0f
+                                                       name:nil];
+      }
 
-          MPSGraphTensor* outputTensor = nil;
-          if (static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Nearest) {
-            outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
-                                               coordinateTensor:gridTensor
-                                                         layout:inputTensorLayout
-                                           normalizeCoordinates:TRUE
-                                            relativeCoordinates:FALSE
-                                                   alignCorners:align_corners
-                                                    paddingMode:paddingMode
-                                            nearestRoundingMode:MPSGraphResizeNearestRoundingModeRoundToEven
-                                                  constantValue:0.0f
-                                                           name:nil];
-          } else {
-            outputTensor = [mpsGraph sampleGridWithSourceTensor:inputTensor
-                                               coordinateTensor:gridTensor
-                                                         layout:inputTensorLayout
-                                           normalizeCoordinates:TRUE
-                                            relativeCoordinates:FALSE
-                                                   alignCorners:align_corners
-                                                    paddingMode:paddingMode
-                                                   samplingMode:samplingMode
-                                                  constantValue:0.0f
-                                                           name:nil];
-          }
-
-          newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->gridTensor_ = gridTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
-        }
-        return newCachedGraph;
-      });
-      cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
-    }
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->gridTensor_ = gridTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
     Placeholder gridPlaceholder = Placeholder(cachedGraph->gridTensor_, grid);
@@ -127,22 +124,16 @@ void grid_sampler_2d_mps_impl(Tensor& output,
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-#endif // defined(__MAC_13_2)
 }
+} // namespace mps
 
 Tensor grid_sampler_2d_mps(const Tensor& input,
                            const Tensor& grid,
                            int64_t interpolation_mode,
                            int64_t padding_mode,
                            bool align_corners) {
-#if defined(__MAC_13_2)
-  bool xcode_sdk_13_2_or_higher = true;
-#else
-  bool xcode_sdk_13_2_or_higher = false;
-#endif
-
-  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) || !xcode_sdk_13_2_or_higher) {
-    TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.1. ",
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS)) {
+    TORCH_WARN_ONCE("MPS: grid_sampler_2d op is supported natively starting from macOS 13.2. ",
                     "Falling back on CPU. This may have performance implications.");
 
     return at::grid_sampler_2d(input.to("cpu"), grid.to("cpu"), interpolation_mode, padding_mode, align_corners)
@@ -154,9 +145,8 @@ Tensor grid_sampler_2d_mps(const Tensor& input,
   auto grid_size = grid.sizes();
   auto output = at::empty({in_size[0], in_size[1], grid_size[1], grid_size[2]}, input.options());
 
-  grid_sampler_2d_mps_impl(output, input, grid, interpolation_mode, padding_mode, align_corners);
+  mps::grid_sampler_2d_mps_impl(output, input, grid, interpolation_mode, padding_mode, align_corners);
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

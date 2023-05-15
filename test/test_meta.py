@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torchgen.utils import YamlLoader
+from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
 import sys
@@ -304,6 +304,7 @@ CHECK_STRIDES_SKIPS = {
     aten._linalg_svd.default,
     aten.binary_cross_entropy.default,
     aten.complex.default,
+    aten.polar.default,
     aten.copysign.Tensor,
     aten.div.Tensor_mode,
     aten.floor_divide.default,
@@ -579,7 +580,7 @@ meta disagrees with real impl:
             else:
                 seen_succeeded.setdefault(func, set()).add(dtype)
                 if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
-                    raise RuntimeError(f"unexpected success {resolve_name(func)}")
+                    raise RuntimeError(f"unexpected success {resolve_name(func)} {meta_args} {meta_kwargs}")
 
     return rs
 
@@ -593,20 +594,16 @@ meta_function_expected_failures = {
     torch.argwhere : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.combinations : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
-    torch.count_nonzero : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
     torch.functional.istft : {f64, c64, c128, f32},
     torch.geqrf : {f64, c64, c128, f32},
     torch.linalg.householder_product : {f64, c64, c128, f32},
-    torch.linalg.solve_triangular : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
-    torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
-    torch.take : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
+    torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
@@ -615,7 +612,6 @@ meta_function_expected_failures = {
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.logcumsumexp : {f64, bf16, f32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
@@ -630,7 +626,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
-    torch.polar : {f64, f32},
     torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.cholesky : {f64, f32, c128, c64},
@@ -643,6 +638,10 @@ meta_function_expected_failures = {
 
 meta_function_expected_failures_only_outplace = {
     torch.nn.functional.rrelu : {f64, bf16, f32},
+}
+
+meta_function_expected_failures_conditional = {
+    torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
 }
 
 """
@@ -681,11 +680,8 @@ meta_function_skips = {
     torch.take_along_dim : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.vstack : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.aminmax : {i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummax : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
-    torch.cummin : {bf16, i8, i64, u8, f64, b8, f32, i32, i16},
     torch.diff : {b8},
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
-    torch.functional.cdist : {f64, f32},
     torch.nanmean : {bf16, f64, f32, f16, c32, c64, c128},
     torch.nn.functional.cross_entropy : {bf16, f64, f32},
     torch.nn.functional.interpolate : {bf16, f64, f32, u8},
@@ -721,8 +717,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
-    torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
-    torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
@@ -747,8 +741,6 @@ meta_function_device_skips['cpu'] = {
 }
 
 meta_function_device_skips['cuda'] = {
-    torch.cummax: {f16},
-    torch.cummin: {f16},
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
     torch.linalg.matrix_power: {f32, f64},
@@ -808,6 +800,8 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
             test_expect = TestExpect.XFAILURE
         elif self.dtype in meta_function_device_expected_failures[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
+        elif meta_function_expected_failures_conditional.get(func, lambda *_, **__: False)(self.dtype, *args, **kwargs):
+            test_expect = TestExpect.XFAILURE
         elif not self.inplace and \
                 self.dtype in meta_function_device_expected_failures_only_outplace[self.device_type].get(func, set()):
             test_expect = TestExpect.XFAILURE
@@ -828,25 +822,18 @@ meta_dispatch_expected_failures = {
     aten.cholesky_inverse.out : {c64, c128, f64, f32},
     aten.cholesky_solve.default : {c64, c128, f64, f32},
     aten.cholesky_solve.out : {c64, c128, f64, f32},
-    aten.count_nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.count_nonzero.dim_IntList : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_householder_product.default : {c64, c128, f64, f32},
     aten.linalg_householder_product.out : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.linalg_matrix_exp.default : {c64, bf16, f32, f64, c128},
-    aten.linalg_solve_triangular.default : {c64, c128, f64, f32},
-    aten.linalg_solve_triangular.out : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
-    aten.polar.out : {f32, f64},
-    aten.take.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.take.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
     aten.to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -867,8 +854,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.logcumsumexp.default : {bf16, f32, f64, c64, c128},
-    aten.logcumsumexp.out : {bf16, f32, f64, c64, c128},
     aten.max_pool3d_with_indices.default : {f32, f64},
     aten.max_unpool2d.default : {f32, f64},
     aten.max_unpool3d.default : {f32, f64},
@@ -880,7 +865,6 @@ meta_dispatch_expected_failures = {
     aten.multinomial.default : {bf16, f32, f64},
     aten.multinomial.out : {bf16, f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
-    aten.polar.default : {f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.searchsorted.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.searchsorted.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
@@ -895,8 +879,6 @@ meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.cummin.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.linalg_lu_solve.default: {c32, c64, c128},
     aten.linalg_lu_solve.out: {c32, c64, c128},
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
@@ -909,11 +891,13 @@ meta_dispatch_skips = {
 meta_dispatch_early_skips = set({
     torch.Tensor.float_power_,
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
 meta_inplace_skips = set({
     # Errors out in one of the tests, while ProxyTensor passes...
+    torch.Tensor.cumprod_,
     torch.Tensor.cumsum_,
 })
 
@@ -941,12 +925,8 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
-    aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
-    aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
-    aten.logcumsumexp.default: {bf16, f16},  # aten::_logcumsumexp
-    aten.logcumsumexp.out: {bf16, f16},  # aten::_logcumsumexp.out
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices
     aten.max_unpool2d.default: {f16},  # aten::max_unpool2d
     aten.max_unpool3d.default: {f16},  # aten::max_unpool3d
@@ -981,8 +961,6 @@ meta_dispatch_device_skips['cuda'] = {
     aten.softmax.int : {c32, c64},
     aten.softmax.int : {c32, c64},
 
-    aten.cummax.default: {f16},
-    aten.cummin.default: {f16},
     # ROCm stuff; technically this should be expected failure but it's
     # not worth it; these should get unified anyway
     aten.miopen_batch_norm.default: {f32},
@@ -1109,6 +1087,28 @@ class TestMeta(TestCase):
                 expected = func(*args, **kwargs)
                 if isinstance(expected, torch.Tensor) and op.supports_out:
                     func(*args, **kwargs, out=expected)
+
+            # Special test for functions taking "device" kwarg
+            # The crossref tests that replacing the device with "meta" works
+            # This part makes sure that *_like functions work well with a "meta"
+            # Tensor and their original device argument.
+            if "device" in kwargs and "_like" in op.name:
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    ref = func(*args, **kwargs)
+
+                # *_like functions take a Tensor as first argument
+                assert isinstance(args[0], torch.Tensor)
+                with torch.random.fork_rng():
+                    torch.manual_seed(123)
+                    args[0] = args[0].to(device="meta")
+                    meta = func(*args, **kwargs)
+
+                # empty_like is not deterministic
+                if op.name != "empty_like":
+                    self.assertEqual(ref, meta)
+
+
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef

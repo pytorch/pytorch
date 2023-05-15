@@ -206,12 +206,7 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-# This future is needed to print Python2 EOL message
-from __future__ import print_function
 import sys
-if sys.version_info < (3,):
-    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
     sys.exit(-1)
@@ -927,13 +922,6 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars['USE_ROCM']:
-        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
-        if os.path.exists(triton_req_file):
-            with open(triton_req_file) as f:
-                triton_req = f.read().strip()
-                extra_install_requires.append(triton_req)
-
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
@@ -1013,20 +1001,28 @@ def main():
         'sympy',
         'networkx',
         'jinja2',
+        'fsspec',
     ]
 
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        cmake_cache_vars = get_cmake_cache_vars()
+        if cmake_cache_vars['USE_ROCM']:
+            triton_text_file = "triton-rocm.txt"
+            triton_package_name = "pytorch-triton-rocm"
+        else:
+            triton_text_file = "triton.txt"
+            triton_package_name = "pytorch-triton"
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", triton_text_file)
         triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
         if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
             with open(triton_version_file) as f:
                 triton_version = f.read().strip()
-            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
+            extras_require['dynamo'] = [triton_package_name + '==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1058,6 +1054,7 @@ def main():
         'test/*',
         '_C/*.pyi',
         'cuda/*.pyi',
+        'fx/*.pyi',
         'optim/*.pyi',
         'autograd/*.pyi',
         'nn/*.pyi',
@@ -1112,6 +1109,7 @@ def main():
         'include/ATen/core/dispatch/*.h',
         'include/ATen/core/op_registration/*.h',
         'include/c10/core/impl/*.h',
+        'include/c10/core/impl/cow/*.h',
         'include/c10/util/*.h',
         'include/c10/cuda/*.h',
         'include/c10/cuda/impl/*.h',

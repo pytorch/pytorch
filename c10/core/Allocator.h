@@ -38,6 +38,9 @@ class C10_API DataPtr {
   void* get() const {
     return ptr_.get();
   }
+  void* mutable_get() {
+    return ptr_.get();
+  }
   void* get_context() const {
     return ptr_.get_context();
   }

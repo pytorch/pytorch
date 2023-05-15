@@ -33,7 +33,7 @@ from torch.optim.lr_scheduler import (
     PolynomialLR,
     EPOCH_DEPRECATION_WARNING,
 )
-from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
+from torch.optim.swa_utils import AveragedModel, SWALR, update_bn, get_swa_multi_avg_fn, get_ema_multi_avg_fn
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -56,11 +56,13 @@ load_tests = load_tests
 
 
 def rosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -77,28 +79,29 @@ class TestOptim(TestCase):
     ):
         if scheduler_constructors is None:
             scheduler_constructors = []
-        params_t = torch.tensor([1.5, 1.5])
+        # For rosenbrock tests, it is mandated that the param is a tensor with 2 numbers
+        param_t = torch.tensor([1.5, 1.5])
 
-        params = Parameter(params_t)
-        optimizer = constructor([params])
+        param = Parameter(param_t)
+        optimizer = constructor([param])
         schedulers = []
         for scheduler_constructor in scheduler_constructors:
             schedulers.append(scheduler_constructor(optimizer))
 
         if not sparse_only:
-            params_c = Parameter(params_t.clone())
-            optimizer_c = constructor([params_c])
+            param_c = Parameter(param_t.clone())
+            optimizer_c = constructor([param_c])
 
         solution = torch.tensor([1, 1])
         with torch.no_grad():
-            initial_dist = params.dist(solution)
+            initial_dist = param.dist(solution)
 
-        def eval(params, sparse_grad, w):
+        def eval(param, sparse_grad, w):
             # Depending on w, provide only the x or y gradient
             optimizer.zero_grad()
-            loss = rosenbrock(params)
+            loss = rosenbrock(param)
             loss.backward()
-            grad = drosenbrock(params.data)
+            grad = drosenbrock(param)
             # NB: We torture test the optimizer by returning an
             # uncoalesced sparse tensor
             if w:
@@ -112,28 +115,28 @@ class TestOptim(TestCase):
             x = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
             with torch.no_grad():
                 if sparse_grad:
-                    params.grad = x
+                    param.grad = x
                 else:
-                    params.grad = x.to_dense()
+                    param.grad = x.to_dense()
             return loss
 
         for i in range(2000):
             # Do cyclic coordinate descent
             w = i % 2
-            optimizer.step(functools.partial(eval, params, True, w))
+            optimizer.step(functools.partial(eval, param, True, w))
             for scheduler in schedulers:
                 if isinstance(scheduler, ReduceLROnPlateau):
-                    scheduler.step(rosenbrock(params))
+                    scheduler.step(rosenbrock(param))
                 else:
                     scheduler.step()
             if not sparse_only:
-                optimizer_c.step(functools.partial(eval, params_c, False, w))
-                self.assertEqual(params, params_c)
+                optimizer_c.step(functools.partial(eval, param_c, False, w))
+                self.assertEqual(param, param_c)
 
         if not maximize:
-            self.assertLessEqual(params.data.dist(solution), initial_dist)
+            self.assertLessEqual(param.dist(solution), initial_dist)
         else:
-            self.assertGreaterEqual(rosenbrock(params), rosenbrock(params_t))
+            self.assertGreaterEqual(rosenbrock(param), rosenbrock(param_t))
 
     def _test_basic_cases_template(
         self,
@@ -340,7 +343,7 @@ class TestOptim(TestCase):
             scheduler_constructors = []
 
         def make_two_arg_constructor(
-            constructor, maximize: bool = False, foreach: bool = False
+            constructor, maximize: bool, foreach: bool
         ):
             if constructor_accepts_maximize and constructor_accepts_foreach:
                 return lambda weight, bias: constructor(weight, bias, maximize, foreach)
@@ -420,9 +423,7 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
-    def _test_complex_2d(self, optimizer_constructor, f=None):
-        if f is None:
-            f = rosenbrock
+    def _test_complex_2d(self, optimizer_constructor):
         a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
         a1_real = a1.real.clone().detach()
         a1_imag = a1.imag.clone().detach()
@@ -435,8 +436,8 @@ class TestOptim(TestCase):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
-            f(a1).abs().backward()
-            f(a2).abs().backward()
+            rosenbrock(a1).abs().backward()
+            rosenbrock(a2).abs().backward()
 
             self.assertEqual(a1.grad.real, a1_real.grad)
             self.assertEqual(a1.grad.imag, a1_imag.grad)
@@ -453,13 +454,6 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: optim.SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
         self._test_basic_cases(
             lambda weight, bias, maximize, foreach: optim.SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
@@ -500,7 +494,7 @@ class TestOptim(TestCase):
             lambda weight, bias, maximize, foreach: optim.SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
             ),
-            [lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
+            scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
@@ -508,7 +502,7 @@ class TestOptim(TestCase):
             lambda weight, bias, maximize, foreach: optim.SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
             ),
-            [
+            scheduler_constructors=[
                 lambda opt: LinearLR(
                     opt, start_factor=0.4, end_factor=0.8, total_iters=4
                 )
@@ -520,7 +514,7 @@ class TestOptim(TestCase):
             lambda weight, bias, maximize, foreach: optim.SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
             ),
-            [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+            scheduler_constructors=[lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
@@ -528,7 +522,15 @@ class TestOptim(TestCase):
             lambda weight, bias, maximize, foreach: optim.SGD(
                 [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
             ),
-            [
+            scheduler_constructors=[lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
+            constructor_accepts_maximize=True,
+            constructor_accepts_foreach=True,
+        )
+        self._test_basic_cases(
+            lambda weight, bias, maximize, foreach: optim.SGD(
+                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
+            ),
+            scheduler_constructors=[
                 lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                 lambda opt: LinearLR(
                     opt, start_factor=0.4, end_factor=0.6, total_iters=4
@@ -596,14 +598,6 @@ class TestOptim(TestCase):
             constructor_accepts_maximize=True,
             constructor_accepts_foreach=True,
         )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: optim.SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SGD(None, lr=1e-2, momentum=-0.5)
 
@@ -614,7 +608,7 @@ class TestOptim(TestCase):
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.SGD(params, lr=0.0048, foreach=foreach),
-                [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+                scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
             )
 
     def test_sgd_complex(self):
@@ -1032,6 +1026,7 @@ class TestOptim(TestCase):
         )
         self._test_complex_2d(optim.Adam)
         self._test_complex_2d(functools.partial(optim.Adam, foreach=True))
+        self._test_complex_2d(functools.partial(optim.Adam, foreach=True, weight_decay=0.2))
 
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1093,9 +1088,9 @@ class TestOptim(TestCase):
         )
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2, maximize=True),
-            [],
-            True,
-            True,
+            scheduler_constructors=[],
+            sparse_only=True,
+            maximize=True,
         )
         with self.assertRaisesRegex(
             ValueError, "Invalid beta parameter at index 0: 1.0"
@@ -1268,7 +1263,7 @@ class TestOptim(TestCase):
             )
             self._test_rosenbrock_sparse(
                 lambda params: optim.Adagrad(params, lr=0.1, foreach=foreach),
-                [
+                scheduler_constructors=[
                     lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
                     lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
                 ],
@@ -1500,9 +1495,6 @@ class TestOptim(TestCase):
                     [params], maximize=False, weight_decay=0.9, foreach=foreach
                 )
             )
-            self._test_complex_optimizer(
-                lambda params: optim.ASGD([params], weight_decay=0.9, foreach=foreach)
-            )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optim.ASGD(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
 
@@ -1555,7 +1547,7 @@ class TestOptim(TestCase):
         )
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
-    def test_lbfgs_return_type(self):
+    def test_lbfgs_returns_consistent_type(self):
         params = [torch.randn(10, 5), torch.randn(10)]
         opt1 = optim.LBFGS(params, 0.01, tolerance_grad=math.inf)
         opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-math.inf)
@@ -1568,41 +1560,88 @@ class TestOptim(TestCase):
         self.assertEqual(type(res1), type(res2))
 
     def test_invalid_param_type(self):
-        with self.assertRaises(TypeError):
-            optim.SGD(Parameter(torch.randn(5, 5)), lr=3)
+        self.assertRaisesRegex(
+            TypeError,
+            'params argument given to the optimizer should be an iterable of Tensors or dicts',
+            lambda: optim.LBFGS(Parameter(torch.randn(5, 5)))
+        )
 
-    def test_duplicate_params_in_param_group(self):
-        param = Parameter(torch.randn(5, 5))
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            optim.SGD([param, param], lr=0.1)
-            self.assertEqual(len(w), 1)
-            self.assertIn(
-                "a parameter group with duplicate parameters", str(w[0].message)
-            )
+    def test_duplicate_params_in_one_param_group(self):
+        param = Parameter(torch.randn(1))
+        with self.assertWarnsOnceRegex(UserWarning, '.*a parameter group with duplicate parameters.*'):
+            optim.Adamax([param, param], lr=0.01)
 
-    def test_no_grad_for_all_params(self):
-        params = [torch.randn(5, 5, requires_grad=False) for _ in range(2)]
+    def test_duplicate_params_across_param_groups(self):
+        param = Parameter(torch.randn(1))
+        self.assertRaisesRegex(
+            ValueError,
+            'some parameters appear in more than one parameter group',
+            lambda: optim.Adadelta([{'params': param}, {'params': param}])
+        )
+
+    def test_step_is_noop_when_params_have_no_grad(self):
+        params = [torch.randn(2, 3, requires_grad=False) for _ in range(2)]
+        old_params = [p.clone().detach() for p in params]
+
+        def closure():
+            return torch.tensor([1])
 
         optimizer_list = [
             optim.Adadelta,
             optim.AdamW,
             optim.Adam,
+            optim.RAdam,
+            optim.NAdam,
             optim.Adagrad,
             optim.Adamax,
             optim.RMSprop,
             optim.SGD,
             optim.SparseAdam,
             optim.ASGD,
+            optim.LBFGS
         ]
         for optim_ctr in optimizer_list:
             opt = optim_ctr(params, lr=0.1)
-            # make sure step can still run even if
-            # all params have no grad
-            opt.step()
+            opt.step(closure)
+        self.assertEqual(old_params, params)
 
-    # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
-    def test_functional_fused_optimizer_with_foundinf(self):
+
+    def test_step_is_noop_for_empty_grads(self):
+        optimizers = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.RAdam,
+            optim.NAdam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+            optim.LBFGS
+        ]
+        param = torch.randn(5, 1, requires_grad=True)
+        old_param = param.clone().detach()
+
+        def closure():
+            return torch.tensor([1])
+
+        for optimizer in optimizers:
+            opt = optimizer([param], lr=1e-5)
+            param.grad = torch.zeros_like(param)
+            if optimizer is optim.SparseAdam:
+                # Intentionally construct a multidimensional empty v for the sparse grad
+                # Single dim v passes the test while multidim correctly repros the issue
+                # https://github.com/pytorch/pytorch/issues/82486
+                i = torch.empty(1, 0)
+                v = torch.empty(0, 1)
+                param.grad = torch.sparse_coo_tensor(i, v, (5, 1))
+            opt.step(closure)
+            self.assertEqual(old_param, param)
+
+
+    def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():
             self.skipTest("CUDA is required.")
 
@@ -1648,38 +1687,6 @@ class TestOptim(TestCase):
             )
             self.assertEqual(params, prev_params)
 
-    def test_empty_grad(self):
-        optimizers = [
-            torch.optim.Adadelta,
-            torch.optim.Adagrad,
-            torch.optim.Adam,
-            torch.optim.AdamW,
-            torch.optim.Adamax,
-            torch.optim.ASGD,
-            torch.optim.NAdam,
-            torch.optim.RAdam,
-            torch.optim.RMSprop,
-            torch.optim.Rprop,
-            torch.optim.SGD,
-            torch.optim.SparseAdam,
-        ]
-
-        for optimizer in optimizers:
-            net = torch.nn.Embedding(
-                5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam
-            )
-            original_params = (param.detach().clone() for param in net.parameters())
-            # Simulate a batch that only indexes the embedding at padding_idx
-            x = torch.tensor([[0, 0]]).int()
-            y = torch.tensor([[[3.0], [4.0]]])
-            opt = optimizer(net.parameters(), lr=1e-5)
-            torch.nn.MSELoss()(net.forward(x), y).backward()
-
-            opt.step()
-
-            for original_param, param in zip(original_params, net.parameters()):
-                # assert that the parameters have not changed
-                self.assertEqual(original_param, param)
 
     @skipIfTorchDynamo()
     def test_post_hook(self):
@@ -1787,36 +1794,34 @@ class TestOptim(TestCase):
                 optimizer_ctor([torch.empty((), device="cuda")], differentiable=True, fused=True)
 
 
-class SchedulerTestNet(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = torch.nn.Conv2d(1, 1, 1)
-        self.conv2 = torch.nn.Conv2d(1, 1, 1)
-
-    def forward(self, x):
-        return self.conv2(F.relu(self.conv1(x)))
-
-
-class LambdaLRTestObject:
-    def __init__(self, value):
-        self.value = value
-
-    def __call__(self, epoch):
-        return self.value * epoch
-
-    def __eq__(self, other):
-        if isinstance(other, self.__class__):
-            return self.__dict__ == other.__dict__
-        else:
-            return False
-
-
 class TestLRScheduler(TestCase):
+    class SchedulerTestNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = torch.nn.Conv2d(1, 1, 1)
+            self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+        def forward(self, x):
+            return self.conv2(F.relu(self.conv1(x)))
+
+
+    class LambdaLRTestObject:
+        def __init__(self, value):
+            self.value = value
+
+        def __call__(self, epoch):
+            return self.value * epoch
+
+        def __eq__(self, other):
+            if isinstance(other, self.__class__):
+                return self.__dict__ == other.__dict__
+            else:
+                return False
     exact_dtype = True
 
     def setUp(self):
         super().setUp()
-        self.net = SchedulerTestNet()
+        self.net = self.SchedulerTestNet()
         self.opt = SGD(
             [
                 {"params": self.net.conv1.parameters()},
@@ -3687,11 +3692,11 @@ class TestLRScheduler(TestCase):
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_lambda_lr_state_dict_obj(self):
-        scheduler = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(10))
+        scheduler = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(10))
         state = scheduler.state_dict()
         self.assertIsNotNone(state["lr_lambdas"][0])
 
-        scheduler_copy = LambdaLR(self.opt, lr_lambda=LambdaLRTestObject(-1))
+        scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__.keys():
             if key not in {"optimizer"}:
@@ -3962,42 +3967,40 @@ class TestLRScheduler(TestCase):
         self.assertLessEqual(last_lr, max_lr)
 
 
-class SWATestDNN(torch.nn.Module):
-    def __init__(self, input_features):
-        super().__init__()
-        self.n_features = 100
-        self.fc1 = torch.nn.Linear(input_features, self.n_features)
-        self.bn = torch.nn.BatchNorm1d(self.n_features)
-
-    def compute_preactivation(self, x):
-        return self.fc1(x)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.bn(x)
-        return x
-
-
-class SWATestCNN(torch.nn.Module):
-    def __init__(self, input_channels):
-        super().__init__()
-        self.n_features = 10
-        self.conv1 = torch.nn.Conv2d(
-            input_channels, self.n_features, kernel_size=3, padding=1
-        )
-        self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)
-
-    def compute_preactivation(self, x):
-        return self.conv1(x)
-
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn(x)
-        return x
-
-
 class TestSWAUtils(TestCase):
-    def _test_averaged_model(self, net_device, swa_device):
+    class SWATestDNN(torch.nn.Module):
+        def __init__(self, input_features):
+            super().__init__()
+            self.n_features = 100
+            self.fc1 = torch.nn.Linear(input_features, self.n_features)
+            self.bn = torch.nn.BatchNorm1d(self.n_features)
+
+        def compute_preactivation(self, x):
+            return self.fc1(x)
+
+        def forward(self, x):
+            x = self.fc1(x)
+            x = self.bn(x)
+            return x
+
+    class SWATestCNN(torch.nn.Module):
+        def __init__(self, input_channels):
+            super().__init__()
+            self.n_features = 10
+            self.conv1 = torch.nn.Conv2d(
+                input_channels, self.n_features, kernel_size=3, padding=1
+            )
+            self.bn = torch.nn.BatchNorm2d(self.n_features, momentum=0.3)
+
+        def compute_preactivation(self, x):
+            return self.conv1(x)
+
+        def forward(self, x):
+            x = self.conv1(x)
+            x = self.bn(x)
+            return x
+
+    def _test_averaged_model(self, net_device, swa_device, ema):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.ReLU(),
@@ -4010,32 +4013,48 @@ class TestSWAUtils(TestCase):
             torch.nn.Linear(5, 10),
         ).to(net_device)
 
-        averaged_dnn = AveragedModel(dnn, device=swa_device)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                p_avg += p.detach() / n_updates
-            averaged_dnn.update_parameters(dnn)
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, swa_device, ema)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
-            self.assertTrue(p.device == net_device)
+            self.assertTrue(p_avg.device == net_device)
         self.assertTrue(averaged_dnn.n_averaged.device == swa_device)
 
-    def test_averaged_model_all_devices(self):
+    def _run_averaged_steps(self, dnn, swa_device, ema):
+        ema_decay = 0.999
+        if ema:
+            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_ema_multi_avg_fn(ema_decay))
+        else:
+            averaged_dnn = AveragedModel(dnn, device=swa_device, multi_avg_fn=get_swa_multi_avg_fn())
+
+        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
+
+        n_updates = 10
+        for i in range(n_updates):
+            for p, p_avg in zip(dnn.parameters(), averaged_params):
+                p.detach().add_(torch.randn_like(p))
+                if ema:
+                    p_avg += p.detach() * ema_decay ** (n_updates - i - 1) * ((1 - ema_decay) if i > 0 else 1.0)
+                else:
+                    p_avg += p.detach() / n_updates
+            averaged_dnn.update_parameters(dnn)
+
+        return averaged_params, averaged_dnn
+
+    @parametrize("ema", [True, False])
+    def test_averaged_model_all_devices(self, ema):
         cpu = torch.device("cpu")
-        self._test_averaged_model(cpu, cpu)
+        self._test_averaged_model(cpu, cpu, ema)
         if torch.cuda.is_available():
             cuda = torch.device(0)
-            self._test_averaged_model(cuda, cpu)
-            self._test_averaged_model(cpu, cuda)
-            self._test_averaged_model(cuda, cuda)
+            self._test_averaged_model(cuda, cpu, ema)
+            self._test_averaged_model(cpu, cuda, ema)
+            self._test_averaged_model(cuda, cuda, ema)
 
-    def test_averaged_model_mixed_device(self):
+    @parametrize("ema", [True, False])
+    def test_averaged_model_mixed_device(self, ema):
         if not torch.cuda.is_available():
             return
         dnn = torch.nn.Sequential(
@@ -4043,14 +4062,8 @@ class TestSWAUtils(TestCase):
         )
         dnn[0].cuda()
         dnn[1].cpu()
-        averaged_dnn = AveragedModel(dnn)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                p_avg += p.detach() / n_updates
-            averaged_dnn.update_parameters(dnn)
+
+        averaged_params, averaged_dnn = self._run_averaged_steps(dnn, None, ema)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
             self.assertEqual(p_avg, p_swa)
@@ -4082,62 +4095,36 @@ class TestSWAUtils(TestCase):
         averaged_dnn = AveragedModel(dnn)
         pickle.dumps(averaged_dnn)
 
-    def test_averaged_model_exponential(self):
-        # Test AveragedModel with EMA as avg_fn
-        dnn = torch.nn.Sequential(
-            torch.nn.Conv2d(1, 5, kernel_size=3),
-            torch.nn.BatchNorm2d(5, momentum=0.3),
-            torch.nn.Linear(5, 10),
-        )
-        alpha = 0.9
-
-        def avg_fn(p_avg, p, n_avg):
-            return alpha * p_avg + (1 - alpha) * p
-
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn)
-        averaged_params = [torch.zeros_like(param) for param in dnn.parameters()]
-        n_updates = 10
-        for i in range(n_updates):
-            updated_averaged_params = []
-            for p, p_avg in zip(dnn.parameters(), averaged_params):
-                p.detach().add_(torch.randn_like(p))
-                if i == 0:
-                    updated_averaged_params.append(p.clone())
-                else:
-                    updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
-                    )
-            for b in dnn.buffers():
-                if b.size() != torch.Size([]):
-                    b.detach_().add_(torch.randn_like(b))
-
-            averaged_dnn.update_parameters(dnn)
-            averaged_params = updated_averaged_params
-
-        for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertEqual(p_avg, p_swa)
-        for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
-            self.assertEqual(b_avg, b_swa)
-
-    def test_averaged_model_exponential_buffers(self):
+    @parametrize("use_multi_avg_fn", [True, False])
+    @parametrize("use_buffers", [True, False])
+    def test_averaged_model_exponential(self, use_multi_avg_fn, use_buffers):
         # Test AveragedModel with EMA as avg_fn and use_buffers as True.
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.BatchNorm2d(5, momentum=0.3),
             torch.nn.Linear(5, 10),
         )
-        alpha = 0.9
+        decay = 0.9
 
-        def avg_fn(p_avg, p, n_avg):
-            return alpha * p_avg + (1 - alpha) * p
+        if use_multi_avg_fn:
+            averaged_dnn = AveragedModel(dnn, multi_avg_fn=get_ema_multi_avg_fn(decay), use_buffers=use_buffers)
+        else:
+            def avg_fn(p_avg, p, n_avg):
+                return decay * p_avg + (1 - decay) * p
 
-        averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=True)
-        dnn_params = itertools.chain(dnn.parameters(), dnn.buffers())
+            averaged_dnn = AveragedModel(dnn, avg_fn=avg_fn, use_buffers=use_buffers)
+
+        if use_buffers:
+            dnn_params = list(itertools.chain(dnn.parameters(), dnn.buffers()))
+        else:
+            dnn_params = list(dnn.parameters())
+
         averaged_params = [
             torch.zeros_like(param)
             for param in dnn_params
             if param.size() != torch.Size([])
         ]
+
         n_updates = 10
         for i in range(n_updates):
             updated_averaged_params = []
@@ -4149,18 +4136,24 @@ class TestSWAUtils(TestCase):
                     updated_averaged_params.append(p.clone())
                 else:
                     updated_averaged_params.append(
-                        (p_avg * alpha + p * (1 - alpha)).clone()
+                        (p_avg * decay + p * (1 - decay)).clone()
                     )
             averaged_dnn.update_parameters(dnn)
             averaged_params = updated_averaged_params
 
-        for p_avg, p_swa in zip(
-            averaged_params,
-            itertools.chain(
-                averaged_dnn.module.parameters(), averaged_dnn.module.buffers()
-            ),
-        ):
-            self.assertEqual(p_avg, p_swa)
+        if use_buffers:
+            for p_avg, p_swa in zip(
+                averaged_params,
+                itertools.chain(
+                    averaged_dnn.module.parameters(), averaged_dnn.module.buffers()
+                ),
+            ):
+                self.assertEqual(p_avg, p_swa)
+        else:
+            for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
+                self.assertEqual(p_avg, p_swa)
+            for b_avg, b_swa in zip(dnn.buffers(), averaged_dnn.module.buffers()):
+                self.assertEqual(b_avg, b_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
 
@@ -4218,11 +4211,11 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        dnn = SWATestDNN(input_features=input_features)
+        dnn = self.SWATestDNN(input_features=input_features)
         dnn.train()
         self._test_update_bn(dnn, dl_x, dl_xy, False)
         if torch.cuda.is_available():
-            dnn = SWATestDNN(input_features=input_features)
+            dnn = self.SWATestDNN(input_features=input_features)
             dnn.train()
             self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
         self.assertTrue(dnn.training)
@@ -4238,14 +4231,14 @@ class TestSWAUtils(TestCase):
         ds_xy = torch.utils.data.TensorDataset(x, y)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
         dl_xy = torch.utils.data.DataLoader(ds_xy, batch_size=5, shuffle=True)
-        dnn = SWATestCNN(input_channels=input_channels)
-        dnn.train()
-        self._test_update_bn(dnn, dl_x, dl_xy, False)
+        cnn = self.SWATestCNN(input_channels=input_channels)
+        cnn.train()
+        self._test_update_bn(cnn, dl_x, dl_xy, False)
         if torch.cuda.is_available():
-            dnn = SWATestCNN(input_channels=input_channels)
-            dnn.train()
-            self._test_update_bn(dnn.cuda(), dl_x, dl_xy, True)
-        self.assertTrue(dnn.training)
+            cnn = self.SWATestCNN(input_channels=input_channels)
+            cnn.train()
+            self._test_update_bn(cnn.cuda(), dl_x, dl_xy, True)
+        self.assertTrue(cnn.training)
 
     def test_bn_update_eval_momentum(self):
         # check that update_bn preserves eval mode
@@ -4255,16 +4248,17 @@ class TestSWAUtils(TestCase):
         x = torch.rand(objects, input_channels, height, width)
         ds_x = torch.utils.data.TensorDataset(x)
         dl_x = torch.utils.data.DataLoader(ds_x, batch_size=5, shuffle=True)
-        dnn = SWATestCNN(input_channels=input_channels)
-        dnn.eval()
-        update_bn(dl_x, dnn)
-        self.assertFalse(dnn.training)
+        cnn = self.SWATestCNN(input_channels=input_channels)
+        cnn.eval()
+        update_bn(dl_x, cnn)
+        self.assertFalse(cnn.training)
 
         # check that momentum is preserved
-        self.assertEqual(dnn.bn.momentum, 0.3)
+        self.assertEqual(cnn.bn.momentum, 0.3)
 
 
 instantiate_parametrized_tests(TestLRScheduler)
+instantiate_parametrized_tests(TestSWAUtils)
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
@@ -4431,8 +4425,8 @@ class TestDifferentiableOptimizer(TestCase):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
-        # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
-        # and so it shouldn't require gradients.
+        # `step` `eta` & `mu` are not continuous variables (even though we define them as floats)
+        # and so they shouldn't require gradients.
         state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
         state["eta"] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
         state["mu"] = torch.tensor(1.0, requires_grad=False, dtype=torch.float64)

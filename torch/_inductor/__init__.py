@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile", "list_mode_options", "list_options"]
+__all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
 def compile(
@@ -43,9 +43,15 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from .compile_fx import compile_fx
+    from .compile_fx import compile_fx_aot
 
-    return compile_fx(gm, example_inputs, config_patches=options, aot_mode=True)()
+    result = compile_fx_aot(
+        gm,
+        example_inputs,
+        config_patches=options,
+    )()
+    lib_path = result[0] if isinstance(result, (list, tuple)) else result
+    return lib_path
 
 
 def list_mode_options(mode: str = None) -> Dict[str, Any]:
@@ -62,11 +68,16 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
 
     mode_options = {
         "default": {},
+        # enable cudagraphs
         "reduce-overhead": {
             "triton.cudagraphs": True,
         },
+        # enable max-autotune
+        "max-autotune-no-cudagraphs": {
+            "max_autotune": True,
+        },
+        # enable both cuda-graphs and max-autotune
         "max-autotune": {
-            "epilogue_fusion": True,
             "max_autotune": True,
             "triton.cudagraphs": True,
         },
@@ -90,3 +101,10 @@ def list_options() -> Dict[str, Any]:
     current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
 
     return list(current_config.keys())
+
+
+def cudagraph_mark_step_begin():
+    "Indicates that a new iteration of inference or training is about to begin."
+    from .cudagraph_trees import mark_step_begin
+
+    mark_step_begin()

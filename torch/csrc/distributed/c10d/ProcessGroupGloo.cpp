@@ -759,7 +759,14 @@ ProcessGroupGloo::ProcessGroupGloo(
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
     auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options->timeout);
-    context->connectFullMesh(store, options->devices[i]);
+    try {
+      context->connectFullMesh(store, options->devices[i]);
+    } catch (const std::runtime_error& e) {
+      auto err = e.what();
+      // TORCH_CHECK to print the cpp stacktrace.
+      auto msg = c10::str("Gloo connectFullMesh failed with ", err);
+      logAndThrow(msg, msg);
+    }
     contexts_.push_back(std::move(context));
   }
 
@@ -1093,7 +1100,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.data_ptr<int64_t>()) {
+        : metadata_(metadata), data_(metadata_.mutable_data_ptr<int64_t>()) {
       AT_ASSERT(metadata.scalar_type() == at::kLong);
       AT_ASSERT(metadata.dim() == 1);
       AT_ASSERT(metadata.size(0) == dim);
@@ -1230,7 +1237,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgather metadata
     gloo::AllgatherOptions opts(context);
-    opts.setOutput(buffer.data_ptr<int64_t>(), buffer.numel());
+    opts.setOutput(buffer.mutable_data_ptr<int64_t>(), buffer.numel());
     opts.setTag(tag);
     gloo::allgather(opts);
 
@@ -1257,8 +1264,9 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
     // Allgatherv indices.
     gloo::AllgathervOptions opts(context);
-    opts.setInput(input.data_ptr<int64_t>(), input.numel());
-    opts.setOutput(output.data_ptr<int64_t>(), counts);
+    opts.setInput(
+        const_cast<int64_t*>(input.const_data_ptr<int64_t>()), input.numel());
+    opts.setOutput(output.mutable_data_ptr<int64_t>(), counts);
     opts.setTag(tag);
     gloo::allgatherv(opts);
 
@@ -2615,12 +2623,12 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::send(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.data_ptr();
+  auto ptr = tensor.const_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
   auto context = getContext(tag);
-  auto buf = context->createUnboundBuffer(ptr, size);
+  auto buf = context->createUnboundBuffer(const_cast<void*>(ptr), size);
   buf->send(dstRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
@@ -2634,7 +2642,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recv(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.data_ptr();
+  auto ptr = tensor.mutable_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -2652,7 +2660,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.data_ptr();
+  auto ptr = tensor.mutable_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.

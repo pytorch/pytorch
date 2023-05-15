@@ -8,22 +8,15 @@ import os.path
 import pstats
 import shutil
 import subprocess
-import sys
 from typing import Any, List
 from unittest.mock import patch
 
-from functorch.compile import (
-    config as functorch_config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
 
-from torch._dynamo import config as dynamo_config
-from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -101,7 +94,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         func1.__name__ = name
         return func1
 
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
+    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
@@ -134,15 +127,15 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
+                return any(in_output(x) for x in snode.snodes)
+            return any(isinstance(user.node, OutputNode) for user in snode.users)
 
         if in_output(snode):
             outputs.append(fx_node)
         name = snode.get_name()
         fx_node.name = name
 
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
+        fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
@@ -176,23 +169,13 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-    debug_graphs = functorch_config.debug_graphs
-    debug_joint_graphs = functorch_config.debug_joint
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
-    # if user has specified they want to see graphs via either env var
-    # add stream to std out
-    if debug_graphs or debug_joint_graphs:
-        stdout_handler = logging.StreamHandler(sys.stdout)
-        log.addHandler(stdout_handler)
-        stack.callback(lambda: log.removeHandler(stdout_handler))
-
     if not compile_debug:
         try:
             yield
@@ -203,8 +186,6 @@ def enable_aot_logging():
     # Enable all graphs to be logged to a file by setting the flags to True
     # and the log level of the file logger to DEBUG
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
-    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
 
     path = os.path.join(get_debug_dir(), "torchinductor")
     if not os.path.exists(path):
@@ -290,15 +271,15 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger("torch._inductor")
-
         if config.debug:
+            log = logging.getLogger("torch._dynamo")
+            prev_level = log.level
+            log.setLevel(logging.DEBUG)
 
             def reset_log_level(level):
-                dynamo_config.log_level = level
+                log.setLevel(level)
 
-            self._stack.callback(reset_log_level, dynamo_config.log_level)
-            dynamo_config.log_level = logging.DEBUG
+            self._stack.callback(reset_log_level, prev_level)
 
         self._stack.enter_context(V.set_debug_handler(self))
 

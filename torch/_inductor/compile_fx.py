@@ -4,9 +4,10 @@ import itertools
 import logging
 import sys
 import warnings
+
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
-import functorch
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
@@ -14,7 +15,7 @@ import torch._dynamo.config as dynamo_config
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.utils import fake_mode_from_tensors
+from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -22,11 +23,13 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides, pattern_matcher
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
+from .fx_passes.joint_graph import joint_graph_passes
+from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .mkldnn import convert_outplace_to_inplace
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -49,6 +52,15 @@ class BoxedBool:
         return False
 
 
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
+
+
 # copy_ fails when trying to write to tensors with memory overlap,
 # for expanded dimensions (a dimension which used to have size 1 -> ?)
 # we can select one element from that dimension and write to it
@@ -66,6 +78,7 @@ def index_expanded_dims(t, expanded_dims):
 def complex_memory_overlap(t):
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
+    t = index_expanded_dims(t, get_expanded_dims(t))
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
@@ -130,6 +143,56 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     return make_boxed_func(gm.forward)
 
 
+def inner_compile_with_cpp_wrapper(inner_compile):
+    @functools.wraps(inner_compile)
+    def wrapper(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], **kwargs):
+        """
+        Compile into cpp wrapper:
+        For CPU, this is currently done in one pass.
+        For GPU, this is done in two passes: JIT-compile the model with python wrapper code
+        and run it to generate autotuned kernel binaries in the first pass; and then generate
+        cpp wrapper code and compile it to a dynamic library in the second pass.
+        """
+        devices = (
+            {t.device.type for t in gm.parameters()}
+            | {t.device.type for t in gm.buffers()}
+            | {t.device.type for t in example_inputs if isinstance(t, torch.Tensor)}
+        )
+
+        if "cuda" not in devices:
+            kwargs_patched = {**kwargs, "cpp_wrapper": True}
+            return inner_compile(gm, example_inputs, **kwargs_patched)
+        else:
+            with config.patch(
+                {
+                    "triton.store_cubin": True,
+                }
+            ):
+                # first pass with regular python wrapper code
+                kwargs_patched = {
+                    **kwargs,
+                    "aot_mode": False,
+                    "cpp_wrapper": False,
+                    "cudagraphs": False,
+                }
+                compiled = inner_compile(gm, example_inputs, **kwargs_patched)
+                if detect_fake_mode(example_inputs):
+                    with torch.utils._python_dispatch._disable_current_modes():
+                        inputs_real = [defake(t) for t in example_inputs]
+                else:
+                    inputs_real = deepcopy(example_inputs)
+
+                with torch.utils._python_dispatch._disable_current_modes():
+                    compiled(inputs_real)
+                del inputs_real
+
+                # second pass
+                kwargs_patched = {**kwargs, "cpp_wrapper": True, "cudagraphs": False}
+                return inner_compile(gm, example_inputs, **kwargs_patched)
+
+    return wrapper
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
@@ -139,8 +202,10 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    cpp_wrapper=False,
     aot_mode=False,
     is_inference=False,
+    boxed_forward_device_index=None,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -165,7 +230,7 @@ def compile_fx_inner(
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    fake_mode = fake_mode_from_tensors(example_inputs)
+    fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -178,7 +243,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        pattern_matcher.fx_passes(gm)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -187,6 +252,7 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
@@ -205,7 +271,9 @@ def compile_fx_inner(
         ]
 
         complex_memory_overlap_inputs = any(
-            complex_memory_overlap(t) for t in example_inputs
+            complex_memory_overlap(t)
+            for t in example_inputs
+            if isinstance(t, torch.Tensor)
         )
 
         if (
@@ -213,8 +281,16 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and all(isinstance(t, torch.Tensor) for t in example_inputs)
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
+            if (
+                boxed_forward_device_index is not None
+                and not is_inference
+                and not is_backward
+            ):
+                boxed_forward_device_index.set(next(iter(graph.device_idxs)))
+
             compiled_fn = cudagraphify(
                 compiled_fn,
                 example_inputs,
@@ -226,6 +302,23 @@ def compile_fx_inner(
             )
         else:
             BoxedBool.disable(cudagraphs)
+
+            # See [Backward Generation Handling]
+            # if cudagraph'd the forward and set the device, we need to let the cudagraph manager
+            # know we are we running the backward even if we will not run it in cudagraphs
+            if is_backward and config.triton.cudagraph_trees:
+                assert boxed_forward_device_index.value is not None
+                compiled_fn_inner = compiled_fn
+
+                manager = torch._inductor.cudagraph_trees.get_manager(
+                    boxed_forward_device_index.value, create_if_none_exists=False
+                )
+                # should already exist from forward
+                assert manager is not None
+
+                def compiled_fn(new_inputs):
+                    manager.set_to_running_backward()
+                    return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
@@ -357,6 +450,13 @@ def static_input(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
+def index_expanded_dims_and_copy_(dst, src, expanded_dims):
+    "Index into expanded dimensions of both dst and src then copy_"
+    dst = index_expanded_dims(dst, expanded_dims)
+    src = index_expanded_dims(src, expanded_dims)
+    dst.copy_(src)
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
@@ -364,17 +464,22 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
     assert isinstance(inputs, (list, tuple))
-    static_inputs = [
-        static_input(x).copy_(x.detach())
-        if idx not in static_input_idxs
-        else x.detach()
-        for idx, x in enumerate(inputs)
-    ]
 
     inps_expanded_dims = [
         get_expanded_dims(x) if idx not in static_input_idxs else []
         for idx, x in enumerate(inputs)
     ]
+
+    # allocate static tensor inputs
+    static_inputs = [
+        static_input(x) if idx not in static_input_idxs else x.detach()
+        for idx, x in enumerate(inputs)
+    ]
+
+    # copy over input values for fresh allocations
+    for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
+        if idx not in static_input_idxs:
+            index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
     # warmup
     torch.cuda.synchronize()
@@ -407,9 +512,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
                     # TODO - could make one single op of multiple slices
                     # and avoid dispatch.
                     # Could also pre-index the `dst` tensors
-                    dst = index_expanded_dims(dst, expanded_dims)
-                    src = index_expanded_dims(src, expanded_dims)
-                    dst.copy_(src)
+                    index_expanded_dims_and_copy_(dst, src, expanded_dims)
             new_inputs.clear()
             graph.replay()
             return static_outputs
@@ -421,9 +524,10 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
         def run(new_inputs):
             for idx in copy_indices:
-                src = index_expanded_dims(static_inputs[idx], inps_expanded_dims[idx])
-                dst = index_expanded_dims(new_inputs[idx], inps_expanded_dims[idx])
-                dst.copy_(src)
+                expanded_dims = inps_expanded_dims[idx]
+                index_expanded_dims_and_copy_(
+                    static_inputs[idx], new_inputs[idx], expanded_dims
+                )
             new_inputs.clear()
             graph.replay()
             return static_outputs
@@ -451,6 +555,25 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+def compile_fx_aot(
+    model_: torch.fx.GraphModule,
+    example_inputs_: List[torch.Tensor],
+    inner_compile=compile_fx_inner,
+    config_patches: Optional[Dict[str, Any]] = None,
+):
+    config_patches = (
+        {"cpp_wrapper": True}
+        if config_patches is None
+        else {**config_patches, "cpp_wrapper": True}
+    )
+    return compile_fx(
+        model_,
+        example_inputs_,
+        inner_compile=functools.partial(inner_compile, aot_mode=True),
+        config_patches=config_patches,
+    )
+
+
 _graph_counter = itertools.count(0)
 
 
@@ -460,7 +583,6 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
-    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -471,20 +593,14 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
-                aot_mode=aot_mode,
             )
 
-    if aot_mode:
-        aot_config_patches = {
-            "cpp_wrapper": True,
-            "debug": True,
-            "triton.cudagraphs": False,
-        }
-        with config.patch(aot_config_patches):
+    if config.cpp_wrapper:
+        with config.patch({"cpp_wrapper": False}):
             return compile_fx(
                 model_,
                 example_inputs_,
-                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
                 decompositions=decompositions,
             )
 
@@ -512,9 +628,7 @@ def compile_fx(
 
         # Since handle_dynamo_export_graph will trigger compile_fx again,
         # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_, example_inputs_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -524,21 +638,21 @@ def compile_fx(
         )
 
     assert not config._raise_error_for_testing
-    functorch.compile.config.use_functionalize = True
-    functorch.compile.config.use_fake_tensor = True
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
         config.triton.cudagraphs and not dynamo_config.dynamic_shapes
     )
+    forward_device = BoxedDeviceIndex(None)
+
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
+        if is_inference:
+            # partition_fn won't be called
+            joint_graph_passes(model)
+
         fixed = len(example_inputs) - num_example_inputs
-        # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
-        # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
-        # implementation is used if available.
-        model = convert_outplace_to_inplace(model)
         return inner_compile(
             model,
             example_inputs,
@@ -546,10 +660,17 @@ def compile_fx(
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
+            boxed_forward_device_index=forward_device,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
     inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
+
+    def partition_fn(graph, joint_inputs, **kwargs):
+        joint_graph_passes(graph)
+        return min_cut_rematerialization_partition(
+            graph, joint_inputs, **kwargs, compiler="inductor"
+        )
 
     # Save and restore dynamic shapes setting for backwards, as it is
     # sometimes done as a context manager which won't be set when we
@@ -567,6 +688,7 @@ def compile_fx(
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=graph_id,
+                boxed_forward_device_index=forward_device,
             )
 
     with overrides.patch_functions():
@@ -580,16 +702,14 @@ def compile_fx(
             bw_compiler=bw_compiler,
             inference_compiler=inference_compiler,
             decompositions=decompositions,
-            partition_fn=functools.partial(
-                min_cut_rematerialization_partition, compiler="inductor"
-            ),
+            partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
 
 def _shape_env_from_inputs(inputs):
     shape_env = None
-    fake_mode = fake_mode_from_tensors(inputs)
+    fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
     # pass in real inputs for now.
@@ -683,7 +803,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
 def handle_dynamo_export_graph(gm, inputs, compile_gm):
     """
-    `torch._dynamo.export` embeds pytrees in the FX graph codgen object,
+    `torch._dynamo.export` embeds pytrees in the FX graph codegen object,
     convert that to a normal FX graph so inductor can compile it.
     """
     codegen = gm.graph._codegen

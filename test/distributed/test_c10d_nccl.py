@@ -16,8 +16,8 @@ from unittest import mock
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_nccl_available():
+    print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -381,6 +381,34 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     RuntimeError, "Cannot use " + err + " with NCCL"
             ):
                 allreduce(tensors, op)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_alltoall_ops_with_cudafree_race(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        opts = c10d.AllToAllOptions()
+        local_device = f"cuda:{self.rank_to_GPU[self.rank][0]}"
+        torch.cuda.set_device(local_device)
+        input = torch.rand(1000, 1000, device=local_device)
+        output = torch.rand(1000, 1000, device=local_device)
+        race_tensors = []
+        # create some tensors to race with alltoall collective
+        for _ in range(10):
+            tmp = []
+            for i in range(5):
+                tmp.append(torch.rand(10 ** (3 + i), device=local_device))
+            race_tensors.append(tmp)
+
+        for i in range(10):
+            race_tensors.pop()
+            work = pg.alltoall_base(output, input, [], [], opts)
+            # this triggers cudaFree
+            torch.cuda.empty_cache()
+            work.wait()
+        torch.cuda.synchronize(local_device)
+
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -2880,7 +2908,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
-        self._test_allgather_work_wait(
+        self._test_allreduce_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank,
         )
 
@@ -2985,6 +3013,42 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.reduce_scatter_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return self.rank
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_duplicated_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="nccl")
+
+
 
 if __name__ == "__main__":
     assert (
