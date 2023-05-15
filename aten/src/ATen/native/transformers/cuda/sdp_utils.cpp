@@ -27,17 +27,11 @@ constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
-bool check_requires_grad(sdp_params params, bool debug) {
+bool input_requires_grad(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled)) {
-    if (debug) {
-      TORCH_WARN("Flash Attention does not currently support training.");
-    }
-    return false;
-  }
-  return true;
+  return any_inputs_require_grad && gradmode_enabled;
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
@@ -78,7 +72,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
     // The training heuristic is taken from
     // https://github.com/pytorch/pytorch/pull/99644 Revisit when updated
     // cutlass kernel is upstreamed.
-    if (check_requires_grad(params, false)) {
+    if (input_requires_grad(params)) {
       if (6 * threads_flash > query_lengths)
         return efficient_first;
     } else if ((small_threads_flash && more_threads_cutlass) || large_head_dim)
@@ -128,11 +122,8 @@ bool check_for_non_zero_dropout(sdp_params params, bool debug) {
 }
 
 bool check_for_nested_inputs(sdp_params params) {
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    return true;
-  }
-  return false;
+  return (params.query.is_nested() || params.key.is_nested() ||
+          params.value.is_nested());
 }
 
 bool try_broadcast_param_size(
@@ -251,7 +242,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
 
 bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (check_for_nested_inputs(params) && !check_requires_grad(params, false)) {
+  if (check_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
       TORCH_WARN(
           "Memory efficient attention currently doesn't support training with NT inputs.");
@@ -521,7 +512,7 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 64 And the device is sm86 or newer.
-  if (!check_requires_grad(params, false) &&
+  if (input_requires_grad(params) &&
       !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
     if (debug) {
       TORCH_WARN(
