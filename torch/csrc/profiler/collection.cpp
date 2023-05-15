@@ -1214,18 +1214,18 @@ RecordQueue::getRecords(
 }
 
 namespace {
-std::atomic<bool>& record_concrete_inputs_enabled() {
-  static std::atomic<bool> val{true};
-  return val;
+std::function<bool()>& record_concrete_inputs_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
 }
 } // namespace
 
 bool get_record_concrete_inputs_enabled() {
-  return record_concrete_inputs_enabled();
+  return record_concrete_inputs_enabled_fn()();
 }
 
-void set_record_concrete_inputs_enabled(bool val) {
-  record_concrete_inputs_enabled() = val;
+void set_record_concrete_inputs_enabled_fn(std::function<bool()> fn) {
+  record_concrete_inputs_enabled_fn() = std::move(fn);
 }
 
 } // namespace impl

@@ -263,7 +263,11 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
         # but it would be overkill to add a true "view" variant of resize.
         # Instead, resize_() gets special treatment in functionalization,
         # and we have a resize() op that is non-aliasing + functional.
-        if "inplace_view" in f.tags and str(f.func.name) != "resize_":
+        if (
+            "inplace_view" in f.tags
+            and str(f.func.name) != "resize_"
+            and str(f.func.name) != "resize_as_"
+        ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
