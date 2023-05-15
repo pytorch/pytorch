@@ -5576,6 +5576,7 @@ class CommonTemplate:
         )
 
     @requires_cuda()
+    @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         if torch._dynamo.config.dynamic_shapes:
