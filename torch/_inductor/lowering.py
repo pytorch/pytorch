@@ -86,7 +86,6 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
@@ -1414,7 +1413,6 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, require_dense)
 
 make_fallback(aten.view_as_complex.default, require_contiguous)
 
@@ -1572,6 +1570,20 @@ make_fallback(aten.miopen_batch_norm, warn=False)
 if torch.version.hip is not None and torch.cuda.is_available():
     # tl.reduce not available yet in ROCm's version of triton
     make_fallback(aten.prod, warn=False)
+
+
+@register_lowering(aten.copy)
+def copy(self, src, non_blocking=False):
+    x = src
+    if self.get_device() != src.get_device():
+        x = to_device(x, self.get_device())
+    if self.get_dtype() == src.get_dtype():
+        x = to_dtype(x, self.get_dtype())
+
+    if self.get_size() != src.get_size():
+        out = expand(src, self.get_size())
+        return clone(out)
+    return clone(src)
 
 
 @register_lowering(aten.clone)

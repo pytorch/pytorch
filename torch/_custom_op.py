@@ -157,6 +157,10 @@ def custom_op(
             get_autograd_not_implemented_kernel(weakref.proxy(result))
         )
 
+        torch._C._dispatch_set_report_error_callback(
+            ophandle, functools.partial(report_error_callback, weakref.proxy(result))
+        )
+
         return result
 
     return inner
@@ -197,9 +201,34 @@ class CustomOp:
         # this is _opname but with namespace. e.g. "custom::foo"
         self._qualname: str = name
         self.__name__ = None  # mypy requires this
-        self._abstract_impl: typing.Optional[FuncAndLocation] = None
+        # NB: Some of these impls are registered as kernels to DispatchKeys.
+        # Modifying the _impls dict directly won't do anything in that case.
+        self._impls: typing.Dict[str, typing.Optional[FuncAndLocation]] = {}
 
         global_registry[self._qualname] = self
+
+    # Records the impl and the source location in self._impls
+    # Note that this doesn't cause torch.library to use the impl, that
+    # needs to be done in a separate self._lib.impl call.
+    def _register_impl(self, kind, func, stacklevel=2):
+        if self._has_impl(kind):
+            func_and_location = self._impls[kind]
+            assert func_and_location is not None  # Pacify mypy
+            location = func_and_location.location
+            raise RuntimeError(
+                f"Attempting to register a {kind} impl for operator {self._qualname} "
+                f"that already has a {kind} impl registered from Python at "
+                f"{location}. This is not supported."
+            )
+        frame = inspect.stack()[stacklevel]
+        location = f"{frame.filename}:{frame.lineno}"
+        self._impls[kind] = FuncAndLocation(func, location)
+
+    def _get_impl(self, kind):
+        return self._impls[kind]
+
+    def _has_impl(self, kind):
+        return kind in self._impls
 
     def _destroy(self):
         # NOTE: [CustomOp lifetime]
@@ -273,6 +302,7 @@ class CustomOp:
 
         def inner(f):
             for device_type in set(device_types):
+                self._register_impl(device_type, f)
                 dispatch_key = SUPPORTED_DEVICE_TYPE_TO_KEY[device_type]
                 library.impl(self._lib, self._opname, dispatch_key)(f)
             return f
@@ -283,6 +313,7 @@ class CustomOp:
         r"""Register an implementation for a factory function."""
 
         def inner(f):
+            self._register_impl("factory", f)
             library.impl(self._lib, self._opname, "BackendSelect")(f)
             return f
 
@@ -358,16 +389,8 @@ class CustomOp:
 
         def inner(f):
             frame = inspect.stack()[1]
-            if self._abstract_impl is not None:
-                raise RuntimeError(
-                    f"Attempting to register an abstract impl for operator {self._qualname} "
-                    f"that already has an abstract impl registered from Python at "
-                    f"{self._abstract_impl.location}. This is not supported."
-                )
-            new_location = f"{frame.filename}:{frame.lineno}"
-
-            # FakeTensor will look at _abstract_impl
-            self._abstract_impl = FuncAndLocation(f, new_location)
+            self._register_impl("abstract", f)
+            location = self._get_impl("abstract").location
 
             qualname = self._qualname
 
@@ -383,7 +406,7 @@ class CustomOp:
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
                         f"in the implementation registered with impl_abstract "
-                        f"at {new_location}"
+                        f"at {location}"
                     )
 
                 with set_ctx_getter(error_on_ctx):
@@ -721,11 +744,11 @@ def derived_types(
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
     if list_base:
-        result.append((typing.Tuple[base_type, ...], f"{cpp_type}[]"))
+        result.append((typing.Sequence[base_type], f"{cpp_type}[]"))  # type: ignore[valid-type]
     if optional_base_list:
-        result.append((typing.Tuple[typing.Optional[base_type], ...], f"{cpp_type}?[]"))
+        result.append((typing.Sequence[typing.Optional[base_type]], f"{cpp_type}?[]"))  # type: ignore[valid-type]
     if optional_list_base:
-        result.append((typing.Optional[typing.Tuple[base_type, ...]], f"{cpp_type}[]?"))
+        result.append((typing.Optional[typing.Sequence[base_type]], f"{cpp_type}[]?"))  # type: ignore[valid-type]
     return result
 
 
@@ -767,3 +790,33 @@ def parse_return(annotation, error_fn):
 
 
 SUPPORTED_PARAM_TYPES = get_supported_param_types()
+
+
+def report_error_callback(custom_op: typing.Any, key: str) -> None:
+    if key == "Undefined":
+        raise NotImplementedError(
+            f"{custom_op}: There were no Tensor inputs to this operator "
+            f"(e.g. you passed an empty list of Tensors). If your operator is a "
+            f"factory function (that is, it takes no Tensors and constructs "
+            f"a new one), then please use CustomOp.impl_factory to register "
+            f"an implementation for it"
+        )
+    if key == "Meta":
+        raise NotImplementedError(
+            f"{custom_op}: when running with device='Meta' tensors: there is no "
+            f"abstract impl registered for this CustomOp. Please register one via "
+            f"CustomOp.impl_abstract to get this CustomOp to work with Meta tensors"
+        )
+    if key in ("CPU", "CUDA"):
+        device = key.lower()
+        raise NotImplementedError(
+            f"{custom_op}: when running with device='{device}' tensors: there is no "
+            f"{device} impl registered for this CustomOp. Please register one via "
+            f"CustomOp.impl(device_type='{device}')"
+        )
+    raise NotImplementedError(
+        f"{custom_op}: No implementation for dispatch key {key}. It is likely "
+        f"that we have not added this functionality yet, please either open an "
+        f"issue or if you're feeling adventurous, use the low-level "
+        f"torch.library API"
+    )
