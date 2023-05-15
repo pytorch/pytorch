@@ -138,12 +138,6 @@ def empty(
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).\
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
-        memory_format (:class:`torch.memory_format`, optional): the desired memory format of
-            returned :class:`DTensor`.
-            Default: ``torch.contiguous_format``.
-        pin_memory (bool, optional): If set, returned :class:`DTensor` would be allocated
-            in the pinned memory. Works only for CPU :class:`DTensor`.
-            Default: ``False``.
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
@@ -159,8 +153,6 @@ def empty(
         torch_size,
         dtype=dtype,
         layout=layout,
-        memory_format=memory_format,
-        pin_memory=pin_memory,
         requires_grad=requires_grad,
         device_mesh=device_mesh,
         placements=placements,
