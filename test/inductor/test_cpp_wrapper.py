@@ -47,7 +47,7 @@ class TestCudaWrapper(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition=True, slow=False, test_inputs=None):
+def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -59,7 +59,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, test_inputs=
             assert callable(func), "not a callable"
             func = slowTest(func) if slow else func
             code = test_torchinductor.run_and_get_cpp_code(
-                func, *test_inputs if test_inputs is not None else []
+                func, *func_inputs if func_inputs else []
             )
             self.assertEqual("load_inline" in code, True)
         finally:
@@ -83,7 +83,7 @@ if RUN_CPU:
         tests: TorchTestCase = test_torchinductor.CpuTests()
         condition: bool = True
         slow: bool = False
-        test_inputs: list = None
+        func_inputs: list = None
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
@@ -95,7 +95,7 @@ if RUN_CPU:
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
             condition=torch._C.has_mkldnn,
-            test_inputs=[
+            func_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
                 ["op_convolution_pointwise_binary.call"],
             ],
@@ -106,7 +106,7 @@ if RUN_CPU:
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
             condition=torch._C.has_mkldnn,
-            test_inputs=[
+            func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
                 ["op_convolution_pointwise_binary_.call"],
             ],
@@ -149,7 +149,7 @@ if RUN_CPU:
             item.tests,
             item.condition,
             item.slow,
-            item.test_inputs,
+            item.func_inputs,
         )
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
