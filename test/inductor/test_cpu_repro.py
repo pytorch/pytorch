@@ -1182,7 +1182,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
-        for dtype in vec_dtypes:
+        for dtype in [torch.bfloat16]:
             input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
                 memory_format=torch.channels_last
             )

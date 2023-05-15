@@ -5898,7 +5898,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.int64,
+                torch.float,
                 torch.int64,
                 "argmin",
                 get_index,
@@ -5911,7 +5911,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.bool,
+                torch.float,
                 torch.bool,
                 "any",
                 get_index,
