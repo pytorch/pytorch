@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, skipIfMps, skipIfTorchInductor)
+    gradgradcheck, skipIfTorchInductor)
 from unittest.mock import patch, call
 
 
@@ -42,7 +42,6 @@ class TestModule(TestCase):
         _check_module(module.named_parameters(), "Parameter")
         _check_module(module.named_buffers(), "Buffer")
 
-    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     @modules(module_db)
     def test_forward(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
@@ -211,7 +210,6 @@ class TestModule(TestCase):
             m.__repr__()
             str(m)
 
-    @skipIfMps
     @modules(module_db)
     def test_pickle(self, device, dtype, module_info, training):
         # Test that module can be pickled and unpickled.
@@ -326,7 +324,6 @@ class TestModule(TestCase):
                 obj.grad = None
         self._traverse_obj(obj, inner_zero_grad)
 
-    @skipIfMps
     @modules(module_db)
     @skipIfTorchInductor("to be fixed")
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
@@ -382,12 +379,13 @@ class TestModule(TestCase):
                     grad_output = default_output.clone().detach_().normal_()
                     default_output.backward(grad_output, retain_graph=True)
                 else:
-                    grad_output = tuple(self._traverse_obj(o, lambda o: o.clone().detach_().normal_())
+                    grad_output = tuple(self._traverse_obj(o, lambda o: o.clone().detach_().normal_() if o.requires_grad else None)
                                         for o in default_output)
                     flattened_default_output, _ = torch.utils._pytree.tree_flatten(default_output)
                     flattened_grad_output, _ = torch.utils._pytree.tree_flatten(grad_output)
                     for o, g_o in zip(flattened_default_output, flattened_grad_output):
-                        o.backward(g_o, retain_graph=True)
+                        if (o.requires_grad):
+                            o.backward(g_o, retain_graph=True)
 
             default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
             default_param_grad = deepcopy([p.grad for p in m.parameters()])
@@ -413,7 +411,8 @@ class TestModule(TestCase):
                         flattened_out, _ = torch.utils._pytree.tree_flatten(out)
                         flattened_g_out_copy, _ = torch.utils._pytree.tree_flatten(g_out_copy)
                         for o, g_o in zip(flattened_out, flattened_g_out_copy):
-                            o.backward(g_o, retain_graph=True)
+                            if o.requires_grad:
+                                o.backward(g_o, retain_graph=True)
 
                 input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
                 self.assertEqual(out, default_output)
@@ -580,9 +579,9 @@ class TestModule(TestCase):
                     flatten_cpu_outputs, _ = torch.utils._pytree.tree_flatten(cpu_outputs)
                     flatten_gpu_outputs, _ = torch.utils._pytree.tree_flatten(gpu_outputs)
                     for cpu_output, gpu_output in zip(flatten_cpu_outputs, flatten_gpu_outputs):
-                        check_backward(cpu_output, gpu_output)
+                        if cpu_output.requires_grad:
+                            check_backward(cpu_output, gpu_output)
 
-    @skipIfMps
     @modules(module_db)
     @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
@@ -682,7 +681,6 @@ class TestModule(TestCase):
 
     # Test whether train and eval modes differ for each module. Use to verify
     # that the ModuleInfo entry flag is correct.
-    @skipIfMps  # the test doesn't work on MPS as double types are not supported
     @modules(module_db, train_eval_mode=TrainEvalMode.train_only)
     def test_if_train_and_eval_modes_differ(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
@@ -717,7 +715,7 @@ class TestModule(TestCase):
                 else:
                     raise e
 
-instantiate_device_type_tests(TestModule, globals())
+instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()

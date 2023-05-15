@@ -203,3 +203,27 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
         """
             in declarations
         )
+
+    def test_aten_lib_has_context_arg(self) -> None:
+        declarations = gen_functions_declarations(
+            native_functions=[
+                self.custom_1_native_function,
+            ],
+            static_dispatch_idx=self.static_dispatch_idx,
+            selector=SelectiveBuilder.get_nop_selector(),
+            use_aten_lib=True,
+        )
+        print(declarations)
+        self.assertTrue(
+            """
+namespace custom_1 {
+
+// custom_1::op_1() -> bool
+TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+    return at::op_1();
+}
+
+} // namespace custom_1
+        """
+            in declarations
+        )

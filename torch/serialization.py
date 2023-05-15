@@ -56,8 +56,10 @@ class SourceChangeWarning(Warning):
 @contextmanager
 def mkdtemp():
     path = tempfile.mkdtemp()
-    yield path
-    shutil.rmtree(path)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 _package_registry = []
@@ -154,6 +156,15 @@ def _meta_tag(obj):
         return 'meta'
 
 
+def _privateuse1_tag(obj):
+    backend_name = torch._C._get_privateuse1_backend_name()
+    if obj.device.type == backend_name:
+        if obj.device.index is None:
+            return backend_name
+        else:
+            return backend_name + ':' + str(obj.device.index)
+
+
 def _cpu_deserialize(obj, location):
     if location == 'cpu':
         return obj
@@ -197,10 +208,49 @@ def _meta_deserialize(obj, location):
         return torch.UntypedStorage(obj.nbytes(), device='meta')
 
 
+def _validate_privateuse1_device(location, backend_name):
+    device = torch.device(location)
+    device_index = device.index if device.index else 0
+    if not hasattr(torch, backend_name):
+        raise RuntimeError(f'The {backend_name.upper()} device module is not registered. '
+                           'If you are running on a CPU-only machine, '
+                           'please use torch.load with map_location=torch.device(\'cpu\') '
+                           'to map your storages to the CPU.')
+    device_module = getattr(torch, backend_name)
+    if hasattr(device_module, 'is_available') and not device_module.is_available():
+        raise RuntimeError(f'Attempting to deserialize object on a {backend_name.upper()} '
+                           f'device but torch.{backend_name}.is_available() is False. '
+                           'If you are running on a CPU-only machine, '
+                           'please use torch.load with map_location=torch.device(\'cpu\') '
+                           'to map your storages to the CPU.')
+    if hasattr(device_module, 'device_count'):
+        device_count = device_module.device_count()
+        if device_index >= device_count:
+            raise RuntimeError(f'Attempting to deserialize object on {backend_name.upper()} device '
+                               f'{device_index} but torch.{backend_name}.device_count() is {device_count}. '
+                               'Please use torch.load with map_location to map your storages '
+                               'to an existing device.')
+    return device_index
+
+
+def _privateuse1_deserialize(obj, location):
+    backend_name = torch._C._get_privateuse1_backend_name()
+    if location.startswith(backend_name):
+        if not hasattr(obj, backend_name):
+            raise RuntimeError(f'Attempting to load the storages to the {backend_name.upper()} device '
+                               f'but torch.storage._StorageBase.{backend_name}() or '
+                               f'torch.storage.TypedStorage.{backend_name}() is not generated. '
+                               'Please use torch.utils.generate_methods_for_privateuse1_backend '
+                               f'to generate storage.{backend_name}() method first.')
+        device_index = _validate_privateuse1_device(location, backend_name)
+        return getattr(obj, backend_name)(device_index)
+
+
 register_package(10, _cpu_tag, _cpu_deserialize)
 register_package(20, _cuda_tag, _cuda_deserialize)
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
+register_package(23, _privateuse1_tag, _privateuse1_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
@@ -285,10 +335,23 @@ class _open_zipfile_reader(_opener):
 
 class _open_zipfile_writer_file(_opener):
     def __init__(self, name) -> None:
-        super().__init__(torch._C.PyTorchFileWriter(str(name)))
+        self.file_stream = None
+        self.name = str(name)
+        try:
+            self.name.encode('ascii')
+        except UnicodeEncodeError:
+            # PyTorchFileWriter only supports ascii filename.
+            # For filenames with non-ascii characters, we rely on Python
+            # for writing out the file.
+            self.file_stream = io.FileIO(self.name, mode='w')
+            super().__init__(torch._C.PyTorchFileWriter(self.file_stream))
+        else:
+            super().__init__(torch._C.PyTorchFileWriter(self.name))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
+        if self.file_stream is not None:
+            self.file_stream.close()
 
 
 class _open_zipfile_writer_buffer(_opener):
@@ -1135,7 +1198,7 @@ def _get_restore_location(map_location):
         def restore_location(storage, location):
             location = map_location.get(location, location)
             return default_restore_location(storage, location)
-    elif isinstance(map_location, str):
+    elif isinstance(map_location, (str, bytes)):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
     elif isinstance(map_location, torch.device):

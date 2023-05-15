@@ -20,6 +20,9 @@ REGISTER_MPS_ALLOCATOR_CALLBACK("ReplayBufferCleaner", replay::ReplayBufferClean
 }
 
 TEST(MPSAllocator, MPSAllocatorCallbacks) {
+    // fail if mps isn't available
+    ASSERT_TRUE(torch::mps::is_available());
+
     std::vector<torch::Tensor> replay_buffer;
     replay::callback_action = [&]() {
         if (!replay_buffer.empty()) {
@@ -35,5 +38,9 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
         }
         replay_buffer.push_back(new_value);
     }
+    // call synchronize() explicitly to wait for all MPS streams to
+    // finish the Metal completionHandlers in MPSAllocator. Note that MPSAllocator
+    // does this implicitly, but we call this for testing purposes.
+    torch::mps::synchronize();
     ASSERT_TRUE(replay_buffer.size() < max_iter);
 }

@@ -1,23 +1,23 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/OpMathType.h>
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
-#include <ATen/Parallel.h>
-#include <ATen/TensorIndexing.h>
-#include <ATen/TensorIterator.h>
-#include <ATen/TensorOperators.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/native/mkldnn/Matmul.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -137,7 +137,7 @@
 namespace at {
 
 namespace detail {
-  void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
+  static void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
     if (opt_dtype.has_value()) {
       auto dtype = opt_dtype.value();
       TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype), name, ": dtype should"
@@ -440,7 +440,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     checkNotComplexTolerance(rtol, function_name, "rtol");
   } else {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
-    auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
+    auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.sym_size(-1), input.sym_size(-2)), options);
     rtol = atol_opt.has_value()
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
            : std::move(default_rtol);
@@ -453,12 +453,12 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     optional<double> atol_opt,
     optional<double> rtol_opt) {
   double atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
-  double rtol;
+  c10::SymFloat rtol;
   if (rtol_opt.has_value()) {
     rtol = rtol_opt.value();
   } else {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
-    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.sym_size(-1), input.sym_size(-2));
     rtol = (atol_opt.has_value() && atol_opt.value() > 0.0)
            ? 0.0
            : default_rtol;
@@ -715,7 +715,7 @@ Tensor& matrix_rank_impl(
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     result.fill_(0);
     return result;
   }
@@ -752,9 +752,9 @@ Tensor get_matrix_rank_result_tensor(const Tensor& input) {
   // avoid resizing in `out` variant.
   // See also `NOTE [matrix rank output shape]`
   auto result_shape =
-      IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+      SymIntArrayRef(input.sym_sizes().cbegin(), input.sym_sizes().cend() - 2);
   Tensor result =
-      at::empty(result_shape, input.options().dtype(ScalarType::Long));
+      at::empty_symint(result_shape, input.options().dtype(ScalarType::Long));
 
   return result;
 }
@@ -1284,11 +1284,11 @@ Tensor inner(const Tensor& self, const Tensor& other) {
 
   // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
-      self.size(-1) == other.size(-1),
+      self.sym_size(-1) == other.sym_size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
-      self.sizes(),
+      self.sym_sizes(),
       " and ",
-      other.sizes());
+      other.sym_sizes());
 
   return at::tensordot(self, other, -1, -1);
 }
@@ -1312,6 +1312,11 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
+
+  TORCH_CHECK(
+    m1.dtype() == m2.dtype(),
+    "expected m1 and m2 to have the same dtype, but got: ", m1.dtype(), " != ", m2.dtype()
+  )
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
@@ -1416,21 +1421,37 @@ static void addmm_impl_cpu_(
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
-  // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
-      result.scalar_type(), "addmm_impl_cpu_",
-      [&]{
-        using opmath_t = at::opmath_type<scalar_t>;
-        at::native::cpublas::gemm(
-            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            m, n, k,
-            alpha.to<opmath_t>(),
-            a.data_ptr<scalar_t>(), lda,
-            b.data_ptr<scalar_t>(), ldb,
-            beta.to<opmath_t>(),
-            c.data_ptr<scalar_t>(), ldc);
-      });
+  bool dispatched = false;
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
+  // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
+  // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
+  // additionally have support for running kernel with BF16 instructions
+  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+      // We have dispatched to ACL GEMM for single precision float
+      // so do not need to dispatch to BLAS GEMM below
+      dispatched = true;
+  }
+#endif
+
+  if(!dispatched) {
+    // Apply BLAS routine
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+        result.scalar_type(), "addmm_impl_cpu_",
+        [&]{
+          using opmath_t = at::opmath_type<scalar_t>;
+          at::native::cpublas::gemm(
+              transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              m, n, k,
+              alpha.to<opmath_t>(),
+              a.const_data_ptr<scalar_t>(), lda,
+              b.const_data_ptr<scalar_t>(), ldb,
+              beta.to<opmath_t>(),
+              c.mutable_data_ptr<scalar_t>(), ldc);
+        });
+  }
 
   if (!c.is_same(result)) {
     result.copy_(c);
@@ -1533,14 +1554,16 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   int64_t js = result.size(2);
   int64_t ks = self.size(2);
 
-  scalar_t alpha = alpha_.to<scalar_t>();
-  scalar_t beta = beta_.to<scalar_t>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t alpha = alpha_.to<opmath_t>();
+  opmath_t beta = beta_.to<opmath_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
@@ -1550,16 +1573,19 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
           auto r2 = r1[i];
           auto s2 = s1[i];
           for (const auto j : c10::irange(js)) {
-            scalar_t &r = r2[j];
+            opmath_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
+            for (const auto k : c10::irange(ks)) {
+              acc_value += static_cast<opmath_t>(s2[k]) *
+                  static_cast<opmath_t>(m1[k][j]);
+            }
             if (is_bmm) {
-              r = 0;
-              for (const auto k : c10::irange(ks)) {
-                r += s2[k] * m1[k][j];
-              }
+              r2[j] = acc_value;
             } else {
-              r *= beta;
-              for (const auto k : c10::irange(ks)) {
-                r += alpha * s2[k] * m1[k][j];
+              // For beta == 0, the r's value will be ignored, especially for nan value.
+              if (beta == opmath_t{0}) {
+                r2[j] = alpha * acc_value;
+              } else {
+                r2[j] = static_cast<opmath_t>(r2[j]) * beta + alpha * acc_value;
               }
             }
           }
@@ -2974,7 +3000,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     auto real_dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     return _linalg_cond_empty_matrix(self, real_dtype);
   }

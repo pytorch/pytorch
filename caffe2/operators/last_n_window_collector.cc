@@ -171,7 +171,7 @@ OPERATOR_SCHEMA(LastNWindowCollector)
     })
     .SetDoc(R"DOC(
 Collect the last N rows from input data. The purpose is to keep track of data
-accross batches, so for example suppose the LastNWindowCollector is called
+across batches, so for example suppose the LastNWindowCollector is called
 successively with the following input data
 
   [1, 2, 3, 4]

@@ -104,6 +104,39 @@ static void _cublasAdjustLdLevel3(
       *ldb = std::max<int64_t>(k, 1);
   }
 }
+
+uint32_t _getAlignment(uintptr_t address) {
+  // alignment are in bytes
+  uint32_t alignment = 256;
+  for (; ; alignment /= 2) {
+    if (!(address % alignment)) {
+      return alignment;
+    }
+  }
+}
+
+static size_t _parseChosenWorkspaceSize() {
+  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  if (val) {
+    try {
+      workspace_size = std::stoi(val);
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid CUBLAS_LT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("CUBLAS_LT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
+static size_t _getWorkspaceSize() {
+  static size_t workspace_size = _parseChosenWorkspaceSize();
+  return workspace_size;
+}
+
 } // anonymous namespace
 
 namespace at {
@@ -443,7 +476,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_16F,
         ldc,
         CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
@@ -541,7 +574,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       ldc,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // !defined(USE_ROCM)
@@ -618,7 +651,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
-template <typename Dtype, typename RDtype, typename BDtype>
+template <typename Dtype>
 void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -630,11 +663,12 @@ void gemm_and_bias(
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
-    const BDtype* bias,
-    RDtype* result_ptr,
+    const Dtype* bias,
+    Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic) {
+    GEMMAndBiasActivationEpilogue activation) {
+  using opmath_t = at::opmath_type<Dtype>;
+  opmath_t beta_val = 0; // bias is added in epilogue
 
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
@@ -653,19 +687,226 @@ void gemm_and_bias(
   } else if (std::is_same<Dtype, at::BFloat16>::value) {
     abcType = CUDA_R_16BF;
   }
-  cudaDataType_t abType = abcType;
-  cudaDataType_t cType = abcType;
-  if (std::is_same<Dtype, int8_t>::value) {
-    abType = CUDA_R_8I;
-    cType = CUDA_R_32I;
-    computeType = CUBLAS_COMPUTE_32I;
-    scaleType = CUDA_R_32I;
-    bool valid_rdtype = std::is_same<RDtype, int32_t>::value;
-    TORCH_CHECK(valid_rdtype, "Expected int32_t for result Tensor if given int8_t mat1, mat2.");
-  } else {
-    bool valid_rdtype = std::is_same<RDtype, Dtype>::value;
-    TORCH_CHECK(valid_rdtype, "Expected result and input dtypes to match.");
+
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_TRANSA,
+      &transa,
+      sizeof(transa)));
+  cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_TRANSB,
+      &transb,
+      sizeof(transb)));
+  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
+  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
+    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
+  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+#if CUDA_VERSION >= 11040
+    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#endif
   }
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_EPILOGUE,
+      &epilogue,
+      sizeof(epilogue)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_BIAS_POINTER,
+      &bias,
+      sizeof(Dtype*)));
+
+  CuBlasLtMatrixLayout Adesc(
+      abcType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
+  CuBlasLtMatrixLayout Bdesc(
+      abcType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
+  CuBlasLtMatrixLayout Cdesc(abcType, m, n, result_ld);
+
+  CuBlasLtMatmulPreference preference;
+  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
+  // setting this to 1M.
+  size_t workspaceSize = _getWorkspaceSize();
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+      &workspaceSize,
+      sizeof(workspaceSize)));
+
+  uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
+  uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES,
+      &a_alignment, sizeof(a_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES,
+      &b_alignment, sizeof(b_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+      &c_alignment, sizeof(c_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      &d_alignment, sizeof(d_alignment)));
+
+  auto workspace = at::empty(
+      {static_cast<int64_t>(workspaceSize)},
+      at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
+
+  cublasLtMatmulHeuristicResult_t heuristicResult = {};
+  int returnedResult = 0;
+  cublasLtHandle_t ltHandle =
+      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+      ltHandle,
+      computeDesc.descriptor(),
+      Adesc.descriptor(),
+      Bdesc.descriptor(),
+      Cdesc.descriptor(),
+      Cdesc.descriptor(),
+      preference.descriptor(),
+      1,
+      &heuristicResult,
+      &returnedResult));
+  if (returnedResult == 0) {
+    TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+  }
+
+  cublasStatus_t cublasStatus = cublasLtMatmul(
+      ltHandle,
+      computeDesc.descriptor(),
+      &alpha_val,
+      mat1_ptr,
+      Adesc.descriptor(),
+      mat2_ptr,
+      Bdesc.descriptor(),
+      &beta_val,
+      result_ptr,
+      Cdesc.descriptor(),
+      result_ptr,
+      Cdesc.descriptor(),
+      &heuristicResult.algo,
+      workspace.data_ptr(),
+      workspaceSize,
+      at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " result_ld ",
+      result_ld,
+      " abcType ",
+      abcType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType);
+}
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<double> alpha_val,
+    const double* mat1_ptr,
+    int64_t mat1_ld,
+    const double* mat2_ptr,
+    int64_t mat2_ld,
+    const double* bias,
+    double* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<float> alpha_val,
+    const float* mat1_ptr,
+    int64_t mat1_ld,
+    const float* mat2_ptr,
+    int64_t mat2_ld,
+    const float* bias,
+    float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::Half> alpha_val,
+    const at::Half* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Half* mat2_ptr,
+    int64_t mat2_ld,
+    const at::Half* bias,
+    at::Half* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::BFloat16> alpha_val,
+    const at::BFloat16* mat1_ptr,
+    int64_t mat1_ld,
+    const at::BFloat16* mat2_ptr,
+    int64_t mat2_ld,
+    const at::BFloat16* bias,
+    at::BFloat16* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+void int8_gemm(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld) {
+
+  cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
+  cudaDataType_t scaleType = CUDA_R_32I;
+
+  cudaDataType_t abType = CUDA_R_8I;
+  cudaDataType_t cType = CUDA_R_32I;
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -681,34 +922,6 @@ void gemm_and_bias(
       &transb,
       sizeof(transb)));
 
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_DEFAULT;
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS) {
-    epilogue = CUBLASLT_EPILOGUE_BIAS;
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS_RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS_GELU) {
-#if CUDA_VERSION >= 11040
-      epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
-#else
-      TORCH_CHECK(false, "CUBLASLT_EPILOGUE_GELU_BIAS is an unsupported feature for CUDA version ", CUDA_VERSION);
-#endif
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::NONE) {
-    TORCH_CHECK(bias == nullptr, "Expected bias to be a nullptr.");
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-        computeDesc.descriptor(),
-        CUBLASLT_MATMUL_DESC_EPILOGUE,
-        &epilogue,
-        sizeof(epilogue)));
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-        computeDesc.descriptor(),
-        CUBLASLT_MATMUL_DESC_BIAS_POINTER,
-        &bias,
-        sizeof(Dtype*)));
-  }
 
   CuBlasLtMatrixLayout Adesc(
       abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
@@ -716,51 +929,11 @@ void gemm_and_bias(
       abType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  CuBlasLtMatmulPreference preference;
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
-  void* workspace_data_ptr;
-
-  if (std::is_same<Dtype, int8_t>::value) {
-    workspaceSize = 0;
-  }
-  if (workspaceSize > 0) {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-        preference.descriptor(),
-        CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-        &workspaceSize,
-        sizeof(workspaceSize)));
-
-    auto workspace = at::empty(
-        {static_cast<int64_t>(workspaceSize)},
-        at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
-    workspace_data_ptr = workspace.data_ptr();
-  }
-
-  cublasLtMatmulHeuristicResult_t heuristicResult = {};
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  if (use_heuristic) {
-    int returnedResult = 0;
-    auto heuristic_return_value = cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        Bdesc.descriptor(),
-        Cdesc.descriptor(),
-        Cdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult);
-    TORCH_CUDABLAS_CHECK(heuristic_return_value);
-    if (returnedResult == 0) {
-      TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-    }
-  }
 
-  std::conditional_t<std::is_same<BDtype, std::nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
+  at::opmath_type<int8_t> alpha_val = 1.0;
+  float beta_val = 0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -774,9 +947,9 @@ void gemm_and_bias(
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
-      use_heuristic ? &heuristicResult.algo : nullptr,
-      workspaceSize > 0 ? workspace_data_ptr : nullptr,
-      workspaceSize,
+      nullptr, // Heuristics don't seem to work for int8
+      nullptr, // Non-zero workspace doesn't seem to work.
+      0,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
@@ -807,91 +980,6 @@ void gemm_and_bias(
       " scaleType ",
       scaleType);
 }
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<double> alpha_val,
-    const double* mat1_ptr,
-    int64_t mat1_ld,
-    const double* mat2_ptr,
-    int64_t mat2_ld,
-    const double* bias,
-    double* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<float> alpha_val,
-    const float* mat1_ptr,
-    int64_t mat1_ld,
-    const float* mat2_ptr,
-    int64_t mat2_ld,
-    const float* bias,
-    float* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<at::Half> alpha_val,
-    const at::Half* mat1_ptr,
-    int64_t mat1_ld,
-    const at::Half* mat2_ptr,
-    int64_t mat2_ld,
-    const at::Half* bias,
-    at::Half* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<at::BFloat16> alpha_val,
-    const at::BFloat16* mat1_ptr,
-    int64_t mat1_ld,
-    const at::BFloat16* mat2_ptr,
-    int64_t mat2_ld,
-    const at::BFloat16* bias,
-    at::BFloat16* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<int8_t> alpha_val,
-    const int8_t* mat1_ptr,
-    int64_t mat1_ld,
-    const int8_t* mat2_ptr,
-    int64_t mat2_ld,
-    const std::nullptr_t* bias,
-    int32_t* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic);
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
 template <>

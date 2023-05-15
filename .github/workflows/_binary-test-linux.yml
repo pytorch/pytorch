@@ -126,13 +126,17 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
+
         # Setup the environment
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
+
       - name: Clean workspace
         shell: bash
         run: |
@@ -145,6 +149,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
+
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -158,28 +163,44 @@ jobs:
           submodules: recursive
           repository: pytorch/builder
           path: builder
+
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
 
-      - uses: actions/download-artifact@v3
-        name: Download Build Artifacts
+      - name: Check if the job is disabled
+        id: filter
+        uses: ./pytorch/.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # NB: Use a mock test matrix with a default value here. After filtering, if the
+          # returned matrix is empty, it means that the job is disabled
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+
+      - name: Download Build Artifacts
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        uses: actions/download-artifact@v3
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' && steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: Pull Docker image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
 
       - name: Test Pytorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: ./pytorch/.github/actions/test-pytorch-binary
 
       - name: Teardown Linux

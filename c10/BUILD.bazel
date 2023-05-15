@@ -28,25 +28,3 @@ config_setting(
     name = "using_glog",
     flag_values = {":use_glog": "true"},
 )
-
-cc_library(
-    name = "headers",
-    hdrs = [
-        "//c10/core:headers",
-        "//c10/cuda:headers",
-        "//c10/mobile:headers",
-        "//c10/util:headers",
-    ],
-    deps = [
-        "//c10/core:alignment",
-        "//c10/cuda:Macros",
-        "//c10/macros:macros",
-    ] + select({
-        ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
-        "//conditions:default": [],
-    }) + select({
-        ":using_glog": ["@com_github_glog//:glog"],
-        "//conditions:default": [],
-    }),
-    visibility = ["//visibility:public"],
-)

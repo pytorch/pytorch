@@ -109,7 +109,7 @@ def distribute_module(
 #### High level API examples:
 
 ```python
-def MyModule(nn.Module):
+class MyModule(nn.Module):
     def __init__(self):
         super.__init__()
         self.fc1 = nn.Linear(8, 8)
@@ -119,21 +119,21 @@ def MyModule(nn.Module):
     def forward(self, input):
         return self.relu(self.fc1(input) + self.fc2(input))
 
-mesh = DeviceMesh(device_type="cuda", [[0, 1], [2, 3]])
+mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1], [2, 3]])
 
 def shard_params(mod_name, mod, mesh):
     rowwise_placement = [Shard(0)]
     def to_dist_tensor(t): return distribute_tensor(t, mesh, rowwise_placement)
     mod._apply(to_dist_tensor)
 
-sharded_module = distribute_module(model, device_mesh, partition_fn=shard_params)
+sharded_module = distribute_module(model, mesh, partition_fn=shard_params)
 
 def shard_fc(mod_name, mod, mesh):
     rowwise_placement = [Shard(0)]
     if mod_name == "fc1":
         mod.weight = torch.nn.Parameter(distribute_tensor(mod.weight, mesh, rowwise_placement))
 
-sharded_module = distribute_module(model, device_mesh, partition_fn=shard_fc)
+sharded_module = distribute_module(model, mesh, partition_fn=shard_fc)
 ```
 
 ## Compiler and PyTorch DTensor
@@ -150,7 +150,7 @@ GSPMD:
 -   GSPMD is now the fundamental component of JAX/TensorFlow distributed training and enables various optimizations with the XLA compiler to allow users to train their models efficiently in a large scale setting.
 -   Fundamentally, GSPMD have three types of sharding strategies within a tensor: “tiled”, “replicated”, “partially tiled” to represent sharding and replication.
 -   At the core of GSPMD Partitioner, it utilizes the XLA compiler to do advanced optimizations, i.e. sharding propagation and compiler based fusion.
--   XLA mark_sharding API: PyTorch XLA’s [mark_sharding](https://github.com/pytorch/xla/pull/3476) API uses [XLAShardedTensor](https://github.com/pytorch/xla/issues/3871) abstraction (i.e. sharding specs) in PyTorch/XLA. Under the hood XLAShardedTensor is utilizing the GPSMD partitioner to enable SPMD style training on TPU.
+-   XLA mark_sharding API: PyTorch XLA’s [mark_sharding](https://github.com/pytorch/xla/pull/3476) API uses [XLAShardedTensor](https://github.com/pytorch/xla/issues/3871) abstraction (i.e. sharding specs) in PyTorch/XLA. Under the hood XLAShardedTensor is utilizing the GSPMD partitioner to enable SPMD style training on TPU.
 
 OneFlow GlobalTensor:
 

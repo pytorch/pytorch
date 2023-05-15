@@ -1,11 +1,20 @@
 import os
 import textwrap
+from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
 from . import config
+from .config import is_fbcode
 
 from .utils import counters, format_bytecode
+
+if is_fbcode():
+    from torch.fb.exportdb.logging import exportdb_error_message
+else:
+
+    def exportdb_error_message(case_name):
+        return ""
 
 
 class TorchDynamoException(RuntimeError):
@@ -28,6 +37,13 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class InvalidBackend(TorchDynamoException):
+    def __init__(self, name):
+        super().__init__(
+            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+        )
+
+
 class ResetRequired(TorchDynamoException):
     def __init__(self):
         super().__init__(
@@ -44,7 +60,7 @@ class BackendCompilerFailed(TorchDynamoException):
     def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
-        msg = f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
+        msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg)
 
 
@@ -64,6 +80,53 @@ class Unsupported(TorchDynamoException):
     def add_to_stats(self, category="unimplemented"):
         self.category = category
         counters[category][self.msg] += 1
+
+
+class RecompileError(TorchDynamoException):
+    pass
+
+
+class ArgsMismatchError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
+class CondOpArgsMismatchError(ArgsMismatchError):
+    """
+    Internal error from cond() due to arguments mismatch.
+    """
+
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
+class UserErrorType(Enum):
+    DYNAMIC_CONTROL_FLOW = auto()
+    ANTI_PATTERN = auto()
+    STANDARD_LIBRARY = auto()
+    CONSTRAIN_VIOLATION = auto()
+
+
+class UserError(Unsupported):
+    def __init__(self, error_type: UserErrorType, msg, case_name=None):
+        """
+        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
+        The error message should tell user about next actions.
+
+        error_type: Type of user error
+        msg: Actionable error message
+        case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
+        """
+        if case_name is not None:
+            assert isinstance(case_name, str)
+            msg += exportdb_error_message(case_name)
+        super().__init__(msg)
+        self.error_type = error_type
+        self.message = msg
+
+
+class IncorrectUsage(Exception):
+    pass
 
 
 def unimplemented(msg: str):
@@ -103,25 +166,33 @@ def augment_exc_message(exc, msg="\n"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
 
-    if not config.verbose:
-        msg += "\nSet torch._dynamo.config.verbose=True for more information\n"
+    if not config.verbose and hasattr(exc, "real_stack"):
+        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"
     ):
-        msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
-            "this script to find the smallest traced graph which reproduces this error.\n"
-        )
+        if hasattr(exc.inner_exception, "buck_command"):
+            msg += (
+                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                f"this buck command to find the smallest traced graph "
+                f"which reproduces this error: {exc.inner_exception.buck_command}\n"
+            )
+        else:
+            msg += (
+                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                "this script to find the smallest traced graph which reproduces this error.\n"
+            )
 
     if not config.suppress_errors:
         msg += (
             "\n\n"
             "You can suppress this exception and fall back to eager by setting:\n"
+            "    import torch._dynamo\n"
             "    torch._dynamo.config.suppress_errors = True\n"
         )
 
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
+    old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     if isinstance(exc, KeyError):
         exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
@@ -149,12 +220,17 @@ def filter_stack(stack):
 
 
 def format_error_msg(exc, code, record_filename=None, frame=None):
-
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
+        msg = str(
+            format_bytecode(
+                "WON'T CONVERT",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()
