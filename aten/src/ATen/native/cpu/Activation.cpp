@@ -152,21 +152,43 @@ static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
-    using Vec = Vectorized<scalar_t>;
-    scalar_t threshold = threshold_scalar.to<scalar_t>();
-    Vec threshold_v = Vec(threshold);
-    scalar_t value = value_scalar.to<scalar_t>();
-    Vec value_v = Vec(value);
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t x, scalar_t other) -> scalar_t {
-          return x <= threshold ? value : other;
-        },
-        [&](Vec x, Vec other) -> Vec {
-          return Vec::blendv(other, value_v, x <= threshold_v);
-        });
-  });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "threshold_cpu", [&]() {
+      using Vec = Vectorized<float>;
+      float threshold = threshold_scalar.to<float>();
+      Vec threshold_v = Vec(threshold);
+      scalar_t value = value_scalar.to<scalar_t>();
+      Vec value_v = Vec(float(value));
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t x, scalar_t other) -> scalar_t {
+            return float(x) <= threshold ? value : other;
+          },
+          [&](Vectorized<scalar_t> x, Vectorized<scalar_t> other) -> Vectorized<scalar_t> {
+            Vec x0, x1, other0, other1;
+            std::tie(x0, x1) = convert_to_float<scalar_t>(x);
+            std::tie(other0, other1) = convert_to_float<scalar_t>(other);
+            return convert_from_float<scalar_t>(Vec::blendv(other0, value_v, x0 <= threshold_v),
+                                                Vec::blendv(other1, value_v, x1 <= threshold_v));
+          });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(iter.dtype(), "threshold_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      scalar_t threshold = threshold_scalar.to<scalar_t>();
+      Vec threshold_v = Vec(threshold);
+      scalar_t value = value_scalar.to<scalar_t>();
+      Vec value_v = Vec(value);
+      cpu_kernel_vec(
+          iter,
+          [&](scalar_t x, scalar_t other) -> scalar_t {
+            return x <= threshold ? value : other;
+          },
+          [&](Vec x, Vec other) -> Vec {
+            return Vec::blendv(other, value_v, x <= threshold_v);
+          });
+    });
+  }
 }
 
 void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
