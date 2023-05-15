@@ -1374,8 +1374,19 @@ try:
     # SymPy expression being translated must be already mapped to a Z3
     # integer variable.
     class SympyToZ3:
-        def __init__(self, symbols: Dict[sympy.Symbol, z3.ArithRef]):
+        def __init__(
+                self,
+                validator: "TranslationValidator",
+                symbols: Dict[sympy.Symbol, z3.ArithRef],
+        ) -> None:
+            self._validator = validator
             self._symbols = symbols
+
+        # This guarantees that the solution found does not depend on the
+        # solution of a division-by-zero, which is unspecified for Z3.
+        def _add_assertion_nonzero_denominator(self, denominator: z3.ArithRef) -> z3.ArithRef:
+            self._validator.add_assertion(denominator != 0)
+            return denominator
 
         # The 2 functions below are used for conditionally casting between
         # integer and reals.
@@ -1391,33 +1402,36 @@ try:
         # Implements Python division semantics.
         # This is needed because Z3 integer division does not have the
         # same semantics as Python true division.
-        def _div(self, num, divisor) -> z3.ArithRef:
-            return self._to_real(num) / self._to_real(divisor)
-
-        def _int(self, expr: int) -> z3.ArithRef:
-            return z3.IntVal(expr)
-
-        def _Symbol(self, expr: sympy.Symbol) -> z3.ArithRef:
-            return self._symbols[expr]
-
-        def _Rel(self, expr: sympy.Rel) -> z3.ArithRef:
-            opmap = {
-                "==": operator.eq,
-                "!=": operator.ne,
-                ">=": operator.ge,
-                ">": operator.gt,
-                "<=": operator.le,
-                "<": operator.lt,
-            }
-            assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
-            return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
+        def _div(self, numerator, denominator) -> z3.ArithRef:
+            denominator = self._add_assertion_nonzero_denominator(denominator)
+            return self._to_real(numerator) / self._to_real(denominator)
 
         def _Add(self, expr: sympy.Add) -> z3.ArithRef:
             return functools.reduce(operator.add, self(expr.args))
 
+        def _And(self, expr: sympy.And) -> z3.BoolRef:
+            return cast(z3.BoolRef, z3.And(*self(expr.args)))
+
+        def _bool(self, expr: sympy.logic.boolalg.BooleanAtom) -> z3.BoolRef:
+            return z3.BoolVal(bool(expr))
+
+        def _Float(self, expr: sympy.Float) -> z3.ArithRef:
+            return z3.RealVal(float(expr))
+
+        def _floor(self, expr: sympy.floor) -> z3.ArithRef:
+            return self._to_int(self(expr.args[0]))
+
+        def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
+            base, divisor = self(expr.args)
+            return self._to_int(self._div(base, divisor))
+
+        def _int(self, expr: int) -> z3.ArithRef:
+            return z3.IntVal(expr)
+
         def _Mod(self, expr: sympy.Mod) -> z3.ArithRef:
-            p, q = [self._to_int(self(a)) for a in expr.args]
-            return p % q
+            p, q = self(expr.args)
+            q = self._add_assertion_nonzero_denominator(q)
+            return self._to_int(p) % self._to_int(q)
 
         # Turns the multiplication into a division, if there is any
         # appropriate term.
@@ -1456,14 +1470,30 @@ try:
 
             return numerator
 
+        def _Not(self, expr: sympy.Not) -> z3.BoolRef:
+            return cast(z3.BoolRef, z3.Not(self(expr.args[0])))
+
         def _Pow(self, expr: sympy.Pow) -> z3.ArithRef:
             base, exp = self(expr.args)
             return base ** exp
 
-        def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
-            # After real division, ToInt gets the floor of the result.
-            base, divisor = [self._to_real(self(a)) for a in expr.args]
-            return self._to_int(base / divisor)
+        def _Rational(self, expr: sympy.Rational) -> z3.ArithRef:
+            return self._div(self(expr.p), self(expr.q))
+
+        def _Rel(self, expr: sympy.Rel) -> z3.ArithRef:
+            opmap = {
+                "==": operator.eq,
+                "!=": operator.ne,
+                ">=": operator.ge,
+                ">": operator.gt,
+                "<=": operator.le,
+                "<": operator.lt,
+            }
+            assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
+            return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
+
+        def _Symbol(self, expr: sympy.Symbol) -> z3.ArithRef:
+            return self._symbols[expr]
 
         # Entry point for the translation process.
         #
@@ -1500,6 +1530,10 @@ try:
                 }
                 typename = "int"
                 expr = constantmap[expr]
+            elif isinstance(expr, sympy.core.numbers.RationalConstant):
+                typename = "Rational"
+            elif isinstance(expr, sympy.logic.boolalg.BooleanAtom):
+                typename = "bool"
             else:
                 typename = type(expr).__name__
 
@@ -1551,8 +1585,12 @@ try:
             # i.e. those that will actually be used in the guard function.
             self._outputs = set()
 
+            # Set of Z3 expressions representing assertions over both the
+            # input and output expressions.
+            self._assertions = set()
+
             # Translator of SymPy expressions to Z3.
-            self._z3 = SympyToZ3(self._symbols)
+            self._z3 = SympyToZ3(self, self._symbols)
 
         # Creates a mapping for each free variable of the expression.
         #
@@ -1577,6 +1615,9 @@ try:
             self._add_freesymbols(e)
             self._outputs.add(self._z3(e))
 
+        def add_assertion(self, e) -> None:
+            self._assertions.add(e)
+
         # The result of a validation run.
         @dataclass
         class Result:
@@ -1594,6 +1635,10 @@ try:
             # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
             # and are potentially non-linear.
             solver = z3.SolverFor("QF_NRA")
+
+            # Add all the assertions to the solver.
+            for assertion in self._assertions:
+                solver.add(assertion)
 
             # "Is there any case where it's TRUE for the outputs but FALSE for the inputs?"
             solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
