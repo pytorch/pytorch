@@ -321,6 +321,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_basic(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):

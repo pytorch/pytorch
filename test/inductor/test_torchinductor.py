@@ -3111,6 +3111,13 @@ class CommonTemplate:
             (torch.randn([1, 2, 6, 6]),),
         )
 
+    def test_sign_dtype(self):
+        def fn(x):
+            y = torch.sign(x)
+            return torch.tanh(y)
+
+        self.common(fn, (torch.randn([1, 2, 6, 6]),))
+
     def test_fmod(self):
         def fn(a, b):
             return torch.fmod(a, b), torch.fmod(3.0 * a, b) - 2.0
