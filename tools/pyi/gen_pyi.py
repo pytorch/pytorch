@@ -8,16 +8,16 @@ from torchgen.api.python import (
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
-from torchgen.gen import parse_native_yaml
-
-from torchgen.model import DispatchKey, Variant
-from torchgen.utils import FileManager
 
 from torchgen.autograd.gen_python_functions import (
     group_overloads,
     load_signatures,
     should_generate_py_binding,
 )
+from torchgen.gen import parse_native_yaml
+
+from torchgen.model import DispatchKey, Variant
+from torchgen.utils import FileManager
 
 """
 This module implements generation of type stubs for PyTorch,

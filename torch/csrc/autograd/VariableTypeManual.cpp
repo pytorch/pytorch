@@ -332,7 +332,8 @@ Tensor& detach_(c10::DispatchKeySet ks, Tensor& self) {
 // for more details.
 // Invariant:
 // - Ops registered to CompositeImplicitAutograd or CompositeExplicitAutograd
-// below must match `MANUAL_BACKEND` set in torchgen/autograd/gen_variable_type.py.
+// below must match `MANUAL_BACKEND` set in
+// torchgen/autograd/gen_variable_type.py.
 //   and they have manual_kernel_registration=True in native_functions.yaml.
 // - Ops registered to DispatchKey::Autograd below must be included in
 // `MANUAL_AUTOGRAD` in torchgen/autograd/gen_variable_type.py

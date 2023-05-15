@@ -26,10 +26,9 @@ def generate_code(
     force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
-    from torchgen.selective_build.selector import SelectiveBuilder
-
     from torchgen.autograd.gen_annotated_fn_args import gen_annotated
     from torchgen.autograd.gen_autograd import gen_autograd, gen_autograd_python
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -40,7 +39,9 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(pathlib.Path(__file__).parent.parent.parent / "torchgen/autograd")
+    autograd_dir = os.fspath(
+        pathlib.Path(__file__).parent.parent.parent / "torchgen/autograd"
+    )
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
