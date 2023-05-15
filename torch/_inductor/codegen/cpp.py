@@ -84,6 +84,12 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+PYTHON_TO_CPP = {
+    "int": "long",
+    "float": "double",
+    "bool": "bool",
+}
+
 
 def ranges_tuple(node: SchedulerNode):
     iter_ranges, reduction_ranges = node.get_ranges()

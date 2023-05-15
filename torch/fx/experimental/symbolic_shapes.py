@@ -1585,12 +1585,20 @@ class DimConstraints:
         return expr
 
     def add(self, expr):
+        free_symbols = expr.free_symbols
+        if isinstance(expr, sympy.Rel):
+            # It is possible that `expr` will fail the consistency check below
+            # because of precision errors, i.e., on substituting its free symbols
+            # with their concrete values, we might end up comparing floats. Thus
+            # we approximate floats with rationals using concrete values as hints.
+            constants = [self._var_to_val[s] for s in free_symbols]
+            expr = type(expr)(*(sympy.nsimplify(arg, constants) for arg in expr.args))
         if expr == sympy.true:
             return
+        # `expr` should be consistent with concrete values
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
         assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
-        free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
             # multivariate: record and move on

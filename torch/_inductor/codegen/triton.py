@@ -1174,6 +1174,19 @@ class TritonKernel(Kernel):
         ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
+        # Guard against write-after-read corruption in triton.
+        # See # https://github.com/openai/triton/issues/1615
+        # This triton bug means that a load which is broadcasted over multiple
+        # warps may see the result of a store that happens later in the triton
+        # program. The workaround is to add a barrier before storing, which
+        # enforces that all warps have already read the data.
+        is_inplace = name in self.args.inplace_buffers
+        is_broadcasted = not set.issubset(
+            set(self.range_tree_nodes.keys()), original_index.free_symbols
+        )
+        if is_inplace and is_broadcasted:
+            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1731,8 +1744,18 @@ class TritonScheduling:
         # swap args to hit the case above
         return self.can_fuse(node2, node1)
 
-    can_fuse_vertical = can_fuse
-    can_fuse_horizontal = can_fuse
+    def can_fuse_vertical(self, node1, node2):
+        return self.can_fuse(node1, node2)
+
+    def can_fuse_horizontal(self, node1, node2):
+        if not config.aggressive_fusion:
+            common_deps_without_reorder = self.deps_from_active_loop_order(
+                node1
+            ) & self.deps_from_active_loop_order(node2)
+            if len(common_deps_without_reorder) == 0:
+                return False
+
+        return self.can_fuse(node1, node2)
 
     def is_loop_order_valid(self, nodes):
         for node in nodes:
