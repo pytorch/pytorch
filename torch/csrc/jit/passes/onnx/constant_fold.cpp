@@ -487,10 +487,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (q > 1) {
       return c10::nullopt;
     }
-    // If the device of indices tensor is not the same with it of the input tensor
-    // move it to the device of the input device
+    // If the device of indices tensor is not the same with it of the input
+    // tensor move it to the device of the input device
     auto indices_val = node->inputs()[1];
-    if(indices_val->node()->kind() == onnx::Constant) {
+    if (indices_val->node()->kind() == onnx::Constant) {
       if (inputTensorValues[0].device() != indices.device()) {
         indices = indices.to(inputTensorValues[0].device());
       }
