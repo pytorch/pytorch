@@ -579,6 +579,7 @@ void max_pool3d_kernel_impl(
     // really only contiguous in ChannelsLast3d
     if ((!input_cl_check.is_contiguous()) &&
                      input_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      TORCH_CHECK(output.ndimension() == 4 && indices.ndimension() == 4);
       DimVector out_sizes(output.sizes().begin(), output.sizes().end());
       out_sizes.insert(out_sizes.begin(), 1);
       output.resize_(out_sizes, at::MemoryFormat::ChannelsLast3d);
@@ -648,6 +649,7 @@ void max_pool3d_backward_kernel_impl(
     // really only contiguous in ChannelsLast3d
     if ((!grad_output_cl_check.is_contiguous()) &&
                      grad_output_cl_check.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
+      TORCH_CHECK(grad_input.ndimension() == 4 && indices.ndimension() == 4);
       DimVector sizes(grad_input.sizes().begin(), grad_input.sizes().end());
       sizes.insert(sizes.begin(), 1);
       grad_input.resize_(sizes, at::MemoryFormat::ChannelsLast3d);
