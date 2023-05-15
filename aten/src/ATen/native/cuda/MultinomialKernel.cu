@@ -25,19 +25,22 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
+#include <type_traits>
 
 namespace at::native {
 
 namespace {
 
-template <typename T>
-inline __device__ bool _isinf(T x) { return ::isinf(x); }
-
-inline __device__ bool _isinf(c10::Half x) {
-  return ::isinf(static_cast<float>(x));
-}
-inline __device__ bool _isinf(c10::BFloat16 x) {
-  return ::isinf(static_cast<float>(x));
+template <
+    typename T,
+    typename = std::enable_if_t<
+        std::is_floating_point_v<T> || std::is_convertible_v<T, float>>>
+inline __device__ bool _isinf(T x) {
+  if constexpr (std::is_floating_point_v<T>) {
+    return ::isinf(x);
+  } else {
+    return ::isinf(static_cast<float>(x));
+  }
 }
 
 #define MAX_NUM_BLOCKS 200
