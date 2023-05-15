@@ -223,6 +223,126 @@ if _has_triton():
     from typing import Optional, Tuple
 
     @triton.jit
+    def _sampled_addmm_kernel(
+        alpha,
+        beta,
+        IS_BETA_ZERO: tl.constexpr,
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
+        k,
+        TILE_K: tl.constexpr,
+        values_ptr,
+        values_batch_stride,
+        values_nnz_stride,
+        values_row_block_stride,
+        values_col_block_stride,
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        col_indices_ptr,
+        col_indices_batch_stride,
+        col_indices_stride,
+        mat1_ptr,
+        mat1_batch_stride,
+        mat1_tiled_row_stride,
+        mat1_tiled_col_stride,
+        mat1_row_block_stride,
+        mat1_col_block_stride,
+        mat2_ptr,
+        mat2_batch_stride,
+        mat2_tiled_row_stride,
+        mat2_tiled_col_stride,
+        mat2_row_block_stride,
+        mat2_col_block_stride,
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
+    ):
+        batch_pid = tl.program_id(axis=1)
+        row_block_pid = tl.program_id(axis=0)
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        # If it is zero, skip the row.
+        row_nnz = nnz_offset_next - nnz_offset
+        if row_nnz == 0:
+            return
+
+        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+
+        # Pointers are set to the first block of the current row.
+        values_block_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_nnz_stride * nnz_offset
+            + values_row_block_stride * row_block_arange[:, None]
+            + values_col_block_stride * col_block_arange[None, :]
+        )
+
+        col_index_nnz_ptr = (
+            col_indices_ptr
+            + col_indices_batch_stride * batch_pid
+            + col_indices_stride * nnz_offset
+        )
+
+        # Advance mat1 to the current tiled row, ignore columns.
+        mat1_block_ptrs = (
+            mat1_ptr
+            + mat1_batch_stride * batch_pid
+            + mat1_tiled_row_stride * row_block_pid
+            + mat1_row_block_stride * row_block_arange[:, None]
+        )
+
+        # Advance mat2 in batch and block col dimension.
+        mat2_block_ptrs = (
+            mat2_ptr
+            + mat2_batch_stride * batch_pid
+            + mat2_col_block_stride * col_block_arange[None, :]
+        )
+
+        k_tile_arange = tl.arange(0, TILE_K)
+        for _ in range(row_nnz):
+            acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+
+            # find column block index
+            col_block = tl.load(col_index_nnz_ptr)
+
+            for k_tile in range(0, k, TILE_K):
+                mask_k = (k_tile + k_tile_arange) < k
+
+                mat1_block = tl.load(
+                    mat1_block_ptrs + mat1_col_block_stride * (k_tile + k_tile_arange[None, :]),
+                    mask=mask_k[None, :], other=0.0
+                )
+                mat2_block = tl.load(
+                    mat2_block_ptrs
+                    + mat2_tiled_col_stride * col_block
+                    + mat2_row_block_stride * (k_tile + k_tile_arange[:, None]),
+                    mask=mask_k[:, None], other=0.0
+                )
+
+                acc_block += tl.dot(mat1_block, mat2_block)
+
+            if IS_BETA_ZERO:
+                acc_block *= alpha
+            else:
+                acc_block = alpha * acc_block + beta * tl.load(values_block_ptrs)
+
+            # write result
+            tl.store(values_block_ptrs, acc_block.to(values_ptr.dtype.element_ty))
+
+            # advance val/col_index ptrs to the next block in the row.
+            values_block_ptrs += values_nnz_stride
+            col_index_nnz_ptr += col_indices_stride
+
+    @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
         BLOCKSIZE_ROW: tl.constexpr,
         BLOCKSIZE_COL: tl.constexpr,
@@ -386,6 +506,49 @@ if _has_triton():
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
 
+    def _run_sampled_addmm_kernel(
+        alpha, beta, is_beta_zero,
+        blocksize, k, tile_k,
+        values, crow_indices, col_indices,
+        mat1, mat2,
+        max_grid
+    ):
+        n_batches = values.size(0)
+        n_block_rows = crow_indices.size(-1) - 1
+
+        full_grid = (n_batches, n_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2]))
+        else:
+            grid_blocks = None
+        tensor_dims_map = {
+            values: (0, None),
+            crow_indices: (0, -1),
+            col_indices: (0, None),
+            mat1: (0, -4),
+            mat2: (0, None),
+        }
+        if values.dtype in (torch.half, torch.bfloat16):
+            acc_dtype = tl.float32
+            allow_tf32 = True
+        else:
+            acc_dtype = tl.float64
+            allow_tf32 = False
+
+        def kernel(grid, *sliced_tensors):
+            _sampled_addmm_kernel[grid](
+                alpha, beta, is_beta_zero,
+                *blocksize, k, tile_k,
+                *ptr_stride_extractor(*sliced_tensors),
+                acc_dtype=acc_dtype,
+                allow_tf32=allow_tf32,
+                num_stages=1,
+                num_warps=4
+            )
+
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+
     def sampled_addmm(
         input: torch.Tensor,
         mat1: torch.Tensor,
@@ -415,20 +578,40 @@ if _has_triton():
 
         if out is None:
             out = input_broadcasted.clone()
+        else:
+            out.copy_(input_broadcasted)
 
         if out.numel() == 0 or out._nnz() == 0:
             return out
 
-        if alpha == 0.0:
-            out.values().mul_(beta)
-            return out
-
-        blocksize = input.values().shape[-2:]
+        blocksize = out.values().shape[-2:]
         m = mat1.size(-2)
         n = mat2.size(-1)
         k = mat1.size(-1)
 
-        return None
+        # NOTE: (m, 0) @ (0, n) == zeros(m, n)
+        if alpha == 0.0 or k == 0:
+            out.values().mul_(beta)
+            return out
+
+        # prepare inputs by reshaping them to be kernel-compatible
+        out_backup = out
+        crow_indices, col_indices, values, mat1, mat2 = prepare_inputs(out, mat1, mat2)
+
+        mat1 = tile_to_blocksize(mat1, (blocksize[0], k))
+        mat2 = tile_to_blocksize(mat2, (k, blocksize[1]))
+        tile_k = max(*blocksize)
+
+        _run_sampled_addmm_kernel(
+            alpha, beta, beta == 0.0,
+            blocksize, k, tile_k,
+            values, crow_indices, col_indices,
+            mat1, mat2,
+            max_grid
+        )
+
+        return out_backup
+        #return None
 
 
     def bsr_dense_mm(
@@ -505,8 +688,7 @@ if _has_triton():
         out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
 
         # Launch kernel
-        kernel = _run_dense_rowspace_kernel
-        kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
+        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
         return out_backup
 else:
