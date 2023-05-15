@@ -3021,6 +3021,14 @@ Failed inputs:
         """
         Given an expression, evaluates it, adding guards if necessary
         """
+        def guard_from(expr, concrete_val):
+            if concrete_val is sympy.true:
+                return expr
+            elif concrete_val is sympy.false:
+                return sympy.Not(expr)
+            else:
+                return sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
             return orig_expr
@@ -3032,14 +3040,13 @@ Failed inputs:
         else:
             concrete_val = sympy.sympify(hint)
 
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
-        else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+        # At first, we generate the guard without enabling SymPy evaluation.
+        # This helps us check if SymPy is doing something wrong.
+        with sympy.evaluate(False):
+            g = guard_from(expr, concrete_val)
 
-        self._add_input_guard(g)
+        if not self._suppress_guards_tls():
+            self._add_input_guard(g)  # type: ignore
 
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
@@ -3072,6 +3079,8 @@ Failed inputs:
             # simplifications are error prone anyway, so be sure not to
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+
+        g = guard_from(expr, concrete_val)
 
         if not self._suppress_guards_tls():
             tb = traceback.extract_stack()[:-1]
