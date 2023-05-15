@@ -42,7 +42,7 @@ jobs:
           git config --global core.symlinks true
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
-        uses: huydhn/test-infra/.github/actions/cleanup-runner@cleanup-windows-processes
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
