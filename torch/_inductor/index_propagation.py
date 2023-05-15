@@ -11,6 +11,7 @@ from torch._prims_common import is_boolean_dtype, is_integer_dtype
 @dataclass
 class TypedExpr:
     """A SymPy expression with associated type"""
+
     expr: sympy.Expr
     dtype: torch.dtype
 
@@ -22,6 +23,7 @@ class SymPyOps:
     either not defined, or returns NotImplemented
 
     """
+
     @staticmethod
     def identity(value):
         return value
