@@ -162,15 +162,15 @@ def data_type_propagation(node):
         body: LoopBody = node._body
         root_block = body.root_block
         sub_blocks = body.subblocks
-        masked_sub_block_dtypes = {}
+        masked_subblock_dtypes = {}
         for sub_block_name, sub_block in sub_blocks.items():
             assert "masked_subblock" in sub_block_name
             _sub_graph: torch.fx.Graph = sub_block.graph
-            _data_type_propagation(_sub_graph, masked_sub_block_dtypes)
+            _data_type_propagation(_sub_graph, masked_subblock_dtypes)
             masked_subblock_dtype = get_masked_subblock_data_type(_sub_graph)
-            sub_block_dtypes[sub_block_name] = masked_subblock_dtype
+            masked_subblock_dtypes[sub_block_name] = masked_subblock_dtype
 
-        _data_type_propagation(root_block.graph, masked_sub_block_dtypes)
+        _data_type_propagation(root_block.graph, masked_subblock_dtypes)
 
 
 class ExprPrinter(Printer):
