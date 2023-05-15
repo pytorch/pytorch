@@ -1597,7 +1597,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             y = x.as_strided([4, 3], [1, 4])
 
         found = False
-        for e in prof.events():
+        for e in p.events():
             if e.name in ("aten::as_strided"):
                 found = True
                 self.assertTrue(len(e.input_shapes) > 0)
@@ -1612,20 +1612,20 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         try:
             for (before, after) in [(True, False), (False, True)]:
                 x = torch.rand(2, 6)
-                set_record_concrete_inputs_enabled_val(before)
+                torch._C._profiler._set_record_concrete_inputs_enabled_val(before)
                 with profile(record_shapes=True) as p:
                     y = x.as_strided([4, 3], [1, 4])
-                    set_record_concrete_inputs_enabled_val(after)
+                    torch._C._profiler._set_record_concrete_inputs_enabled_val(after)
 
                 found = False
-                for e in prof.events():
+                for e in p.events():
                     if e.name in ("aten::as_strided"):
                         found = True
                         self.assertTrue(len(e.input_shapes))
 
                 self.assertTrue(found, "Expected to find aten::as_strided but did not")
         finally:
-            set_record_concrete_inputs_enabled_val(True)
+            torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
 
 
 def find_node_with_name(nodes, name):
