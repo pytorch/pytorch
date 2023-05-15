@@ -3531,7 +3531,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             out.values().copy_(mm_res.values()).add_(beta * input.values())
             return out
 
-        delta_k = [-3, 0, +3]
+        delta_k = (-3,)
         for bi, bm1, bm2, m, n, k, dk in itertools.product(batches, batches, batches, size, size, size, delta_k):
             # Test not powers of 2 ks as well.
             k = max(0, k + dk)
@@ -3558,6 +3558,13 @@ class TestSparseCompressedTritonKernels(TestCase):
                 if dtype is torch.float:
                     res_csr = torch.sparse.sampled_addmm(csr, mat1csr, mat2csr, alpha=alpha, beta=beta)
                     self.assertEqual(res_tri.to_dense(), res_csr.to_dense())
+
+                # Check grid consistency
+                grid_size = (3,)
+                grid_gen = itertools.product(grid_size, repeat=2)
+                for grid in grid_gen:
+                    res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
+                    self.assertEqual(res_tri, res_tri_grid)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

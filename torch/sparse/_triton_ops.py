@@ -315,16 +315,18 @@ if _has_triton():
             col_block = tl.load(col_index_nnz_ptr)
 
             for k_tile in range(0, k, TILE_K):
-                mask_k = (k_tile + k_tile_arange) < k
+                k_offsets = k_tile + k_tile_arange
+                mask_k = k_offsets < k
 
                 mat1_block = tl.load(
-                    mat1_block_ptrs + mat1_col_block_stride * (k_tile + k_tile_arange[None, :]),
+                    mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
                     mask=mask_k[None, :], other=0.0
                 )
+
                 mat2_block = tl.load(
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
-                    + mat2_row_block_stride * (k_tile + k_tile_arange[:, None]),
+                    + mat2_row_block_stride * k_offsets[:, None],
                     mask=mask_k[:, None], other=0.0
                 )
 
