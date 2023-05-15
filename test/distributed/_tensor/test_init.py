@@ -36,6 +36,48 @@ class DTensorConstructorTest(DTensorTestBase):
         return 4
 
     @with_comms
+    def test_ones(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        placements_list = [[Shard(0)], [Shard(1)], [Shard(2)], [Replicate()]]
+
+        # 1d mesh evenly sharding
+        tensor_size = [4, 8, 12]
+        for placements in placements_list:
+            local_tensor_size = tensor_size.copy()
+            if isinstance(placements[0], Shard):
+                shard_dim = placements[0].dim
+                local_tensor_size[shard_dim] //= self.world_size
+
+            dist_tensor = torch.distributed._tensor.ones(
+                tensor_size,
+                device_mesh=device_mesh,
+                placements=placements,
+            )
+            ones_expected = torch.ones(local_tensor_size)
+            self.assertEqual(ones_expected, dist_tensor.to_local())
+
+        # 1d mesh unevenly sharding
+        tensor_size = [5, 10, 15]
+        for placements in placements_list:
+            dist_tensor = torch.distributed._tensor.ones(
+                tensor_size,
+                device_mesh=device_mesh,
+                placements=placements,
+            )
+            if isinstance(placements[0], Shard):
+                shard_dim = placements[0].dim
+                ones_expected_list = list(
+                    torch.chunk(torch.ones(tensor_size), self.world_size, dim=shard_dim)
+                )
+                if self.rank < len(ones_expected_list):
+                    self.assertEqual(
+                        ones_expected_list[self.rank], dist_tensor.to_local()
+                    )
+            else:
+                ones_expected = torch.ones(tensor_size)
+                self.assertEqual(ones_expected, dist_tensor.to_local())
+
+    @with_comms
     def test_zeros_full_mesh(self):
         # construct a cuda device 1d mesh
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
