@@ -499,6 +499,8 @@ class QNNPackQuantizer(Quantizer):
                 if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
                     bias_node = ph
 
+            if act_node is None and weight_node is None and bias_node is None:
+                raise ValueError("Could not find any act, weight or bias node in linear pattern")
             # bias and output act
             # find use of act node within the matched pattern
             act_use_node = None
@@ -512,7 +514,7 @@ class QNNPackQuantizer(Quantizer):
                 )
             if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
                 _annotate_input_qspec_map(
-                    act_use_node, act_node, get_act_obs_or_fq_ctr(quantization_config)
+                    act_use_node, act_node, get_act_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
                 )
             if bias_node and _is_annotated([bias_node]) is False:
                 _annotate_output_qspec(
@@ -520,7 +522,7 @@ class QNNPackQuantizer(Quantizer):
                 )
             if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
                 _annotate_output_qspec(
-                    weight_node, get_weight_obs_or_fq_ctr(quantization_config)
+                    weight_node, get_weight_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
                 )
             if _is_annotated([output_node]) is False:
                 _annotate_output_qspec(
