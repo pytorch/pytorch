@@ -36,6 +36,7 @@ from torch.testing._internal.opinfo.utils import (
 if TEST_SCIPY:
     import scipy.special
 
+
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
@@ -156,8 +157,7 @@ op_db: List[OpInfo] = [
         aten_name="special_ndtr",
         decorators=(precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-4}),),
         ref=scipy.special.ndtr if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(

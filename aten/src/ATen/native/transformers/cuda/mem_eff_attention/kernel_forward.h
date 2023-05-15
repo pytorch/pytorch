@@ -106,6 +106,9 @@ struct AttentionKernel {
         output_accum_ptr; // [num_queries, num_heads, head_dim_value]
     lse_scalar_t* logsumexp_ptr; // [num_heads, num_queries] - can be null
 
+    // Softmax Scale
+    accum_t scale;
+
     // Dimensions/strides
     int32_t head_dim;
     int32_t head_dim_value;
@@ -481,7 +484,6 @@ struct AttentionKernel {
       int32_t problem_size_0_n =
           std::min(int32_t(kKeysPerBlock), p.num_keys - iter_key_start);
       int32_t const& problem_size_0_k = p.head_dim;
-      int32_t const& problem_size_1_m = problem_size_0_m;
       int32_t const& problem_size_1_n = p.head_dim_value;
       int32_t const& problem_size_1_k = problem_size_0_n;
 
@@ -608,7 +610,7 @@ struct AttentionKernel {
                                 warp_id(),
                                 p.num_keys - iter_key_start,
                                 iteratorC_tile_offset,
-                                1.0f / std::sqrt(float(p.head_dim)));
+                                p.scale);
                           }));
                     }));
 

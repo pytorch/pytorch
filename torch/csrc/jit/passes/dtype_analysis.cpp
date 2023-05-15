@@ -37,7 +37,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
   auto stack = std::make_unique<std::vector<IValue>>();
   for (Value* inp : n->inputs()) {
     if (auto tp = inp->type()->cast<TensorType>()) {
-      // Zero-dim tensors have special type promotion behavoir, hence the need
+      // Zero-dim tensors have special type promotion behavior, hence the need
       // for rank.
       auto rank = tp->symbolic_sizes().rank(); // Validity checked earlier
       auto tensor_size = std::vector<int64_t>(rank.value(), 1);
@@ -56,7 +56,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
       stack->emplace_back(false);
     } else {
       // Arrays of values are specifically not handled due
-      // to the fact that naive default vaules would likely be
+      // to the fact that naive default values would likely be
       // incorrect anyways.
       throw std::runtime_error("Unsupported input type for Tensor argument");
     }

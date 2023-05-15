@@ -228,7 +228,7 @@ If you're working with linear/conv2d layers, it's very probable that you just ne
 This is because there are many modules, for example **pooling** that behave the same way and do not need to be modified by the pruning code.
 
 ```python
-from torch.ao.pruning._experimental.pruner.prune_functions improt prune_conv2d_activation_conv2d
+from torch.ao.pruning._experimental.pruner.prune_functions import prune_conv2d_activation_conv2d
 
 def prune_conv2d_pool_activation_conv2d(
     c1: nn.Conv2d,

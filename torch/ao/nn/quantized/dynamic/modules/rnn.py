@@ -455,11 +455,11 @@ class LSTM(RNNBase):
         self, input: PackedSequence, hx: Optional[Tuple[Tensor, Tensor]] = None
     ) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+        max_batch_size = int(batch_sizes[0])
 
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)
@@ -610,6 +610,26 @@ class GRU(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. note::
+        The calculation of new gate :math:`n_t` subtly differs from the original paper and other frameworks.
+        In the original implementation, the Hadamard product :math:`(*)` between :math:`r_t` and the
+        previous hidden state :math:`h_{(t-1)}` is done before the multiplication with the weight matrix
+        `W` and addition of bias:
+
+        .. math::
+            \begin{aligned}
+                n_t = \tanh(W_{in} x_t + b_{in} + W_{hn} ( r_t * h_{(t-1)} ) + b_{hn})
+            \end{aligned}
+
+        This is in contrast to PyTorch implementation, which is done after :math:`W_{hn} h_{(t-1)}`
+
+        .. math::
+            \begin{aligned}
+                n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn}))
+            \end{aligned}
+
+        This implementation differs on purpose for efficiency.
+
     .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
@@ -701,10 +721,10 @@ class GRU(RNNBase):
         self, input: PackedSequence, hx: Optional[Tensor] = None
     ) -> Tuple[PackedSequence, Tensor]:
         input_, batch_sizes, sorted_indices, unsorted_indices = input
-        max_batch_size = batch_sizes[0]
-        max_batch_size = int(max_batch_size)
+        max_batch_size = int(batch_sizes[0])
         output_, hidden = self.forward_impl(
-            input_, hx, batch_sizes, max_batch_size, sorted_indices)
+            input_, hx, batch_sizes, max_batch_size, sorted_indices
+        )
 
         output = PackedSequence(output_, batch_sizes,
                                 sorted_indices, unsorted_indices)

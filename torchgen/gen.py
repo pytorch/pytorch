@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Sequence,
     Set,
@@ -19,7 +20,6 @@ from typing import (
 )
 
 import yaml
-from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -94,9 +94,8 @@ from torchgen.utils import (
     mapMaybe,
     NamespaceHelper,
     Target,
-    YamlDumper,
-    YamlLoader,
 )
+from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 T = TypeVar("T")
 
@@ -264,7 +263,11 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
         # but it would be overkill to add a true "view" variant of resize.
         # Instead, resize_() gets special treatment in functionalization,
         # and we have a resize() op that is non-aliasing + functional.
-        if "inplace_view" in f.tags and str(f.func.name) != "resize_":
+        if (
+            "inplace_view" in f.tags
+            and str(f.func.name) != "resize_"
+            and str(f.func.name) != "resize_as_"
+        ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
@@ -368,7 +371,6 @@ def translate_args(
     sig: Union[CppSignature, DispatcherSignature],
     cpp_sig: CppSignature,
 ) -> str:
-
     # Adds SpecialArgName.possibly_redundant_memory_format NamedCType for memory_format bindings
     def add_spl_memory_format_binding(input_bindings: List[Binding]) -> List[Binding]:
         output_bindings: List[Binding] = []
@@ -538,7 +540,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
@@ -1453,7 +1455,7 @@ def get_native_function_declarations(
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
             entity_name="",
-            max_level=3,
+            max_level=4,
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
@@ -1651,7 +1653,6 @@ def get_native_function_schema_registrations(
     aten_schema_registrations = []
     custom_namespace = None
     for namespace, funcs in ns_native_functions.items():
-
         schema_registrations_body = list(
             mapMaybe(RegisterSchema(schema_selector), funcs)
         )

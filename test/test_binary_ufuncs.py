@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 import itertools
+from itertools import chain
 from itertools import product
 import math
 import random
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     TEST_SCIPY,
     set_default_dtype,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -53,6 +55,7 @@ from torch.testing._internal.common_dtype import (
     floating_types_and,
     floating_and_complex_types,
     get_all_math_dtypes,
+    get_all_int_dtypes,
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
@@ -496,7 +499,7 @@ class TestBinaryUfuncs(TestCase):
         )
 
         def _supported(dtypes):
-            return all(map(lambda x: x in supported_dtypes, dtypes))
+            return all((x in supported_dtypes for x in dtypes))
 
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
@@ -1850,6 +1853,7 @@ class TestBinaryUfuncs(TestCase):
             _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
         def _wrapped_div(a, b):
@@ -1922,6 +1926,7 @@ class TestBinaryUfuncs(TestCase):
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
         def _wrapped_idiv_tensor(a, b):
             a /= b
@@ -2614,7 +2619,6 @@ class TestBinaryUfuncs(TestCase):
             rtol=0,
         )
 
-    @onlyCUDA
     @dtypes(torch.half)
     def test_divmul_scalar(self, device, dtype):
         x = torch.tensor(100.0, device=device, dtype=dtype)
@@ -3139,6 +3143,41 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
+    @onlyCPU
+    @dtypes(*get_all_int_dtypes())
+    def test_shift_limits(self, device, dtype):
+        "Ensure that CPU integer bit shifting works as expected with out-of-limits shift values."
+        # Issue #70904
+        iinfo = torch.iinfo(dtype)
+        bits = iinfo.bits
+        low = iinfo.min
+        high = iinfo.max
+        exact_dtype = dtype != torch.uint8  # numpy changes dtype from uint8 to int16 for some out-of-limits shift values
+        for input in (
+            torch.tensor([-1, 0, 1], device=device, dtype=dtype),  # small for non-vectorized operation
+            torch.tensor([low, high], device=device, dtype=dtype),  # small for non-vectorized operation
+            make_tensor((64, 64, 64), low=low, high=high, device=device, dtype=dtype),  # large for vectorized operation
+        ):
+            shift_left_expected = torch.zeros_like(input)
+            shift_right_expected = torch.clamp(input, -1, 0)
+            for shift in chain(range(-100, -1), range(bits, 100)):
+                shift_left = input << shift
+                self.assertEqual(shift_left, shift_left_expected, msg=f"<< {shift}")
+                self.compare_with_numpy(
+                    lambda x: x << shift,
+                    lambda x: np.left_shift(x, shift),
+                    input,
+                    exact_dtype=exact_dtype, msg=f"<< {shift}"
+                )
+                shift_right = input >> shift
+                self.assertEqual(shift_right, shift_right_expected, msg=f">> {shift}")
+                self.compare_with_numpy(
+                    lambda x: x >> shift,
+                    lambda x: np.right_shift(x, shift),
+                    input,
+                    exact_dtype=exact_dtype, msg=f">> {shift}"
+                )
+
     @onlyNativeDeviceTypes
     @dtypes(
         *list(
@@ -3415,6 +3454,12 @@ class TestBinaryUfuncs(TestCase):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
+        elif dtype in (torch.complex64, torch.complex128):
+            # numpy has not implemented logaddexp for complex
+            def _ref_func(x, y):
+                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            ref_func = _ref_func
+            our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp
             our_func = torch.logaddexp
@@ -3453,7 +3498,8 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 

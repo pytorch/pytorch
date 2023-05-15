@@ -5,7 +5,7 @@ import itertools
 from itertools import product
 
 import torch
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
+from torch.testing._internal.common_utils import run_tests, set_default_dtype, skipIfTorchDynamo, \
     instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks, IS_JETSON
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase
@@ -399,6 +399,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
+    @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)

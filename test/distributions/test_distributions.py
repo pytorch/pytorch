@@ -2589,6 +2589,18 @@ class TestDistributions(DistributionsTestCase):
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gumbel(1.0, 1.0).sample().size(), ())
         self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(20.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(50.0), 1.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float32),
+                                torch.tensor(1.0, dtype=torch.float32),
+                                validate_args=False).cdf(-5.0), 0.0, atol=1e-4, rtol=0)
+        self.assertEqual(Gumbel(torch.tensor(0.0, dtype=torch.float64),
+                                torch.tensor(1.0, dtype=torch.float64),
+                                validate_args=False).cdf(-10.0), 0.0, atol=1e-8, rtol=0)
 
         def ref_log_prob(idx, x, log_prob):
             l = loc.view(-1)[idx].detach()

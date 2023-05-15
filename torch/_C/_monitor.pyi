@@ -1,8 +1,8 @@
 # Defined in torch/csrc/monitor/python_init.cpp
 
-from typing import List, Dict, Callable, Union
-from enum import Enum
 import datetime
+from enum import Enum
+from typing import Callable, Dict, List, Union
 
 class Aggregation(Enum):
     VALUE = ...
@@ -16,7 +16,10 @@ class Stat:
     name: str
     count: int
     def __init__(
-        self, name: str, aggregations: List[Aggregation], window_size: int,
+        self,
+        name: str,
+        aggregations: List[Aggregation],
+        window_size: int,
         max_samples: int = -1,
     ) -> None: ...
     def add(self, v: float) -> None: ...

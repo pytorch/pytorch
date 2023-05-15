@@ -1,7 +1,7 @@
 # Owner(s): ["module: nvfuser"]
 
 try:
-    from _nvfuser.test_python_frontend import run_tests  # noqa: F403
+    from _nvfuser.test_python_frontend import *  # noqa: F403,F401
 except ImportError:
     def run_tests():
         return
