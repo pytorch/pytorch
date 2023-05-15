@@ -17,6 +17,7 @@ from .. import metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
+    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
@@ -428,10 +429,7 @@ class KernelArgs:
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
-                if val.is_integer:
-                    buffer_types[name] = torch.int64
-                else:
-                    buffer_types[name] = torch.float64
+                buffer_types[name] = get_sympy_Expr_dtype(val)
             else:
                 buffer_types[name] = val.get_dtype()
         buffer_types.update(
