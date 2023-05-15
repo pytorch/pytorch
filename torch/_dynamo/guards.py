@@ -807,7 +807,8 @@ class CheckFunctionManager:
                     self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
                         "stride"
                     ]
-                )
+                # NB: NT doesn't support stride() queries at all
+                ) if not t.is_nested else [None] * t.dim()
                 for t in tensor_check_examples
             ]
 

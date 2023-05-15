@@ -641,7 +641,8 @@ class InputWriter:
             t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
         )
         maybe_stride = ""
-        if _stride_or_default(None, shape=t.shape) != t.stride():
+        # TODO: Address this for NTs properly
+        if t.is_nested or _stride_or_default(None, shape=t.shape) != t.stride():
             maybe_stride = f", {tuple(t.stride())}"
         maybe_dtype = ""
         if _dtype_or_default(None) != t.dtype:

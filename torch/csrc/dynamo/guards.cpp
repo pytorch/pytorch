@@ -53,18 +53,16 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
       if (known_size.has_value()) {
-        if (known_size.value() != sizes[i]) {
+        if (known_size.value() != v.size(i)) {
           return false;
         }
       }
       if (known_stride.has_value()) {
-        if (known_stride.value() != strides[i]) {
+        if (known_stride.value() != v.stride(i)) {
           return false;
         }
       }
@@ -113,19 +111,17 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
-      if (known_size.has_value() && (known_size.value() != sizes[i])) {
+      if (known_size.has_value() && (known_size.value() != v.size(i))) {
         fail_reason << "size mismatch at index " << i << ". expected "
-                    << known_size.value() << ", actual " << sizes[i];
+                    << known_size.value() << ", actual " << v.size(i);
         return fail_reason.str();
       }
-      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+      if (known_stride.has_value() && known_stride.value() != v.stride(i)) {
         fail_reason << "stride mismatch at index " << i << ". expected "
-                    << known_stride.value() << ", actual " << strides[i];
+                    << known_stride.value() << ", actual " << v.stride(i);
         return fail_reason.str();
       }
     }

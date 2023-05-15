@@ -1343,7 +1343,7 @@ def wrap_to_fake_tensor_and_record(
         log.debug(
             "wrap_to_fake %s %s %s %s",
             source.name(),
-            tuple(e.shape),
+            tuple(e.shape) if not e.is_nested else "(nested)",
             dynamic_dims,
             constraint_dims,
         )
