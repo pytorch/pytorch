@@ -42,7 +42,7 @@ cublasOperation_t to_cublas(TransposeType trans) {
 // 'input' must be a contiguous tensor
 template <typename scalar_t>
 static Tensor get_device_pointers(const Tensor& input) {
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   int64_t input_mat_stride = matrixStride(input);
 
   // cublas/cusolver interface requires 'int'
