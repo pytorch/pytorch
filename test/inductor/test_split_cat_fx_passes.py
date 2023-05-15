@@ -247,6 +247,244 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    def test_split_cat_merge(self):
+        def simple_split_cat(x):
+            return torch.cat(torch.split(x, 4, dim=1), dim=1)
+
+        def simple_split_cat_argspec1(x):
+            return torch.cat(torch.split(x, 4, dim=1), 1)
+
+        def simple_split_cat_argspec2(x):
+            return torch.cat(tensors=torch.split(x, 4, dim=1), dim=1)
+
+        def simple_split_stack(x):
+            return torch.stack(torch.split(x, 4, dim=1), dim=1)
+
+        def simple_split_stack_argspec1(x):
+            return torch.stack(torch.split(x, 4, dim=1), 1)
+
+        def simple_split_stack_argspec2(x):
+            return torch.stack(tensors=torch.split(x, 4, dim=1), dim=1)
+
+        def split_cat_addn_args(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.cat(
+                [torch.ones(2, 5, 32, 16)] + split_output + [torch.ones(2, 6, 32, 16)],
+                dim=1,
+            )
+
+        def split_stack_addn_args(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.stack(
+                [torch.ones(2, 4, 32, 16)]
+                + split_output
+                + [torch.ones(2, 4, 32, 16), torch.ones(2, 4, 32, 16)],
+                dim=1,
+            )
+
+        def split_cat_addn_args_dim2(x):
+            split_output = list(torch.split(x, 4, dim=2))
+            return torch.cat(
+                [torch.ones(2, 32, 5, 16)] + split_output + [torch.ones(2, 32, 6, 16)],
+                dim=2,
+            )
+
+        # split_dim=1, cat_dim=2
+        def split_cat_dim_mismatch(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.cat(
+                [torch.ones(2, 4, 32, 16)] + split_output + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+
+        def split_stack_dim_mismatch(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.stack(
+                [torch.ones(2, 4, 32, 16)] + split_output + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+
+        # split_dim=1, cat_dim=3
+        def split_cat_dim_mismatch2(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.cat(
+                [torch.ones(2, 4, 32, 16)] + split_output + [torch.ones(2, 4, 32, 16)],
+                dim=3,
+            )
+
+        def split_stack_dim_mismatch2(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.stack(
+                [torch.ones(2, 4, 32, 16)] + split_output + [torch.ones(2, 4, 32, 16)],
+                dim=3,
+            )
+
+        # split_dim=2, cat_dim=0
+        def split_cat_dim_mismatch3(x):
+            split_output = list(torch.split(x, 4, dim=2))
+            return torch.cat(
+                [torch.ones(2, 32, 4, 16)] + split_output + [torch.ones(2, 32, 4, 16)],
+                dim=0,
+            )
+
+        def split_stack_dim_mismatch3(x):
+            split_output = list(torch.split(x, 4, dim=2))
+            return torch.stack(
+                [torch.ones(2, 32, 4, 16)] + split_output + [torch.ones(2, 32, 4, 16)],
+                dim=0,
+            )
+
+        def input_shuffling(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)]
+                + [split_output[5], split_output[6], split_output[7]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=1,
+            )
+
+        def input_shuffling_stack(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.stack(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)]
+                + [split_output[5], split_output[6], split_output[7]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=1,
+            )
+
+        def input_shuffling_dim_mismatch(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)]
+                + [split_output[5], split_output[6], split_output[7]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+
+        def input_shuffling_dim_mismatch_stack(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            return torch.stack(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)]
+                + [split_output[5], split_output[6], split_output[7]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+
+        def input_shuffling_multiple_output(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            relu1 = torch.relu(split_output[6])
+
+            return cat1, stack1, relu1
+
+        def unequal_split_multiple_output(x):
+            split_output = list(torch.split(x, [2, 4, 4, 4, 4, 4, 8, 2], dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            relu1 = torch.relu(split_output[6])
+
+            return cat1, stack1, relu1
+
+        # TODO: Add more tests:
+        # * Multiple splits going into a cat (not handled yet)
+        # * Cases where replacement shouldn't happen
+        args = [
+            torch.randn(2, 32, 32, 16),
+        ]
+        for (
+            fn,
+            expected_split_added,
+            expected_split_removed,
+            expected_cat_added,
+            expected_cat_removed,
+            expected_sections_removed,
+        ) in [
+            (simple_split_cat, 0, 1, 0, 1, 7),
+            (simple_split_cat_argspec1, 0, 1, 0, 1, 7),
+            (simple_split_cat_argspec2, 0, 1, 0, 1, 7),
+            (simple_split_stack, 0, 1, 0, 1, 7),
+            (simple_split_stack_argspec1, 0, 1, 0, 1, 7),
+            (simple_split_stack_argspec2, 0, 1, 0, 1, 7),
+            (split_cat_addn_args, 0, 1, 1, 1, 7),
+            (split_stack_addn_args, 0, 1, 1, 1, 7),
+            (split_cat_addn_args_dim2, 0, 1, 1, 1, 7),
+            (split_cat_dim_mismatch, 0, 1, 1, 1, 7),
+            (split_stack_dim_mismatch, 0, 1, 1, 1, 7),
+            (split_cat_dim_mismatch2, 0, 1, 1, 1, 7),
+            (split_stack_dim_mismatch2, 0, 1, 1, 1, 7),
+            (split_cat_dim_mismatch3, 0, 1, 1, 1, 7),
+            (split_stack_dim_mismatch3, 0, 1, 1, 1, 7),
+            (input_shuffling, 1, 1, 1, 1, 4),
+            (input_shuffling_stack, 1, 1, 1, 1, 4),
+            (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4),
+            (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4),
+            (input_shuffling_multiple_output, 1, 1, 2, 2, 3),
+            (unequal_split_multiple_output, 1, 1, 2, 2, 3),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=True)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_added"],
+                expected_split_added,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_removed"],
+                expected_split_removed,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_added"],
+                expected_cat_added,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_removed"],
+                expected_cat_removed,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_sections_removed"],
+                expected_sections_removed,
+            )
+            counters.clear()
+
     @torch._inductor.config.patch(split_cat_fx_passes=False)
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
