@@ -3,7 +3,7 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 from functorch import make_fx
 
@@ -347,7 +347,7 @@ def _compile(
         accessor = NamedMemberAccessor(mod)
 
         def swap(fqn_prefix: str, module: torch.nn.Module) -> None:
-            for override in module_override:
+            for override in module_override:  # type: ignore[union-attr]
                 for name, child in module.named_children():
                     if len(name) == 0:
                         continue
