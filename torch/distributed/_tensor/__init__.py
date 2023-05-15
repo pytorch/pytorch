@@ -6,7 +6,7 @@ import torch
 import torch.distributed._tensor.ops
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 # All public APIs from dtensor package
@@ -48,8 +48,8 @@ def zeros(
     Returns:
         A :class:`DTensor` object on each rank
     """
-    # if device_mesh is None, use the global one
-    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+    # if device_mesh is None, use the one from mesh resources
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
     # set default placements to replicated if not specified
     if placements is None:
         placements = [Replicate() for _ in range(device_mesh.ndim)]

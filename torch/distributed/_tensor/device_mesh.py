@@ -35,18 +35,17 @@ if TYPE_CHECKING:
         )
 
 
-_global_device_mesh: Optional["DeviceMesh"] = None
+class _MeshEnv(object):
+    def __init__(self) -> None:
+        self.mesh_stack: List[DeviceMesh] = []
+
+    def get_current_mesh(self) -> "DeviceMesh":
+        if len(self.mesh_stack) == 0:
+            raise RuntimeError("No device mesh is currently active!")
+        return self.mesh_stack[-1]
 
 
-def get_global_device_mesh() -> "DeviceMesh":
-    global _global_device_mesh
-    assert _global_device_mesh is not None, "Could not get a default device mesh!"
-    return _global_device_mesh
-
-
-def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
-    global _global_device_mesh
-    _global_device_mesh = mesh
+mesh_resources: _MeshEnv = _MeshEnv()
 
 
 class DeviceMesh(object):
@@ -228,14 +227,14 @@ class DeviceMesh(object):
         return dim_groups
 
     def __enter__(self) -> "DeviceMesh":
-        # set global device_mesh to this instance
-        set_global_device_mesh(self)
+        # set this mesh as the current mesh in mesh env
+        mesh_resources.mesh_stack.append(self)
         return self
 
     # pyre-fixme[2]: Parameter must be annotated.
     def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
-        # unset global device mesh
-        set_global_device_mesh(None)
+        # pop this mesh from mesh env
+        mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
