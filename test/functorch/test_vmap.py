@@ -3517,7 +3517,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
-        xfail('index_add'),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),

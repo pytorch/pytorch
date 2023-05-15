@@ -2637,7 +2637,8 @@ def error_inputs_index_add(op_info, device, **kwargs):
 
     yield ErrorInput(SampleInput(result, args=(0, torch.tensor([0, 2]), source)),
                      error_type=RuntimeError,
-                     error_regex="source tensor shape must match self tensor shape, excluding the specified dimension")
+                     error_regex=r'source tensor shape must match self tensor shape, '
+                     r'excluding the specified dimension. Got self.shape = \[3, 2\] source.shape = \[2\]')
 
 def error_inputs_logcumsumexp(op_info, device, **kwargs):
     dim = 3

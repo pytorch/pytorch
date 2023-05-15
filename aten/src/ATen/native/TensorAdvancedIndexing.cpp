@@ -343,8 +343,8 @@ void index_func_meta_impl(
     auto source_sizes = source.sizes().vec();
     self_sizes.erase(self_sizes.begin() + dim);
     source_sizes.erase(source_sizes.begin() + dim);
-    TORCH_CHECK(!(!self_sizes.empty() && source_sizes.empty()) && at::is_expandable_to(source_sizes, self_sizes),
-    "source tensor shape must match self tensor shape, excluding the specified dimension");
+    TORCH_CHECK(self_sizes == source_sizes,
+    "source tensor shape must match self tensor shape, excluding the specified dimension. Got self.shape = ", self.sizes(), " source.shape = ", source.sizes());
   }
 
   auto& result = meta.maybe_get_output(0);
