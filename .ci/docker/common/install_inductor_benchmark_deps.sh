@@ -24,11 +24,11 @@ function checkout_install_torchbench() {
   git checkout "$commit"
 
   if [ "$1" ]; then
-    python install.py --continue_on_fail models "$@"
+    as_jenkins python install.py --continue_on_fail models "$@"
   else
     # Occasionally the installation may fail on one model but it is ok to continue
     # to install and test other models
-    python install.py --continue_on_fail
+    as_jenkins python install.py --continue_on_fail
   fi
   popd
 }
