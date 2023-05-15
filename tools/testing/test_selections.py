@@ -204,11 +204,15 @@ def get_reordered_tests(
     prioritized_tests: Set[str] = set()
 
     pri_test = _get_previously_failing_tests()
-    print_tests(pri_test, "If run, these tests will prioritized because they previously failed")
+    print_tests(
+        pri_test, "If run, these tests will prioritized because they previously failed"
+    )
     prioritized_tests |= pri_test
 
     pri_test |= _get_modified_tests()
-    print_tests(pri_test, "If run, these tests will be prioritized because they were modified")
+    print_tests(
+        pri_test, "If run, these tests will be prioritized because they were modified"
+    )
     prioritized_tests |= pri_test
 
     bring_to_front = []
@@ -237,7 +241,9 @@ def get_reordered_tests(
     # TODO: Would be great to upload these stats to RDS/Rockset!
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-    print(f"Prioritized tests estimated to run up to {to_time_str(time_savings_sec)} sooner than they would've otherwise")
+    print(
+        f"Prioritized tests estimated to run up to {to_time_str(time_savings_sec)} sooner than they would've otherwise"
+    )
 
     prioritized_test_names = [t.name for t in bring_to_front]
     print(f"Prioritized: {prioritized_test_names}")

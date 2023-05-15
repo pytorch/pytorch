@@ -387,7 +387,7 @@ class TestParsePrevTests(unittest.TestCase):
     )
     @mock.patch(
         "tools.testing.test_selections._get_modified_tests",
-        return_value={"test2", "test4"}
+        return_value={"test2", "test4"},
     )
     def test_get_reordered_tests(
         self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
