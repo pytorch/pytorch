@@ -230,15 +230,18 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
 
     def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
         if args:
-            assert not kwargs, "Supported only tuple or dict like output setup, but both given"
+            if kwargs:
+                raise ValueError("Supported only tuple or dict like output setup, but both given")
+
             assert all(len(args[0]) == len(dataset) for dataset in args), "Size mismatch between datasets"  # type: ignore[arg-type]
 
+            self._length = len(args[0])  # type: ignore[arg-type]
             self.datasets = args
         else:
             assert kwargs, "At least one dataset should be passed"
             tmp = list(kwargs.values())
             assert all(len(tmp[0]) == len(dataset) for dataset in tmp), "Size mismatch between datasets"  # type: ignore[arg-type]
-
+            self._length = len(tmp[0])  # type: ignore[arg-type]
             self.datasets = kwargs
 
     def __getitem__(self, index):
@@ -247,9 +250,7 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
         return tuple(dataset[index] for dataset in self.datasets)
 
     def __len__(self):
-        if isinstance(self.datasets, dict):
-            return len(next(iter(self.datasets.values())))  # type: ignore[arg-type]
-        return len(self.datasets[0])  # type: ignore[arg-type]
+        return self._length
 
 
 class ConcatDataset(Dataset[T_co]):
