@@ -6,7 +6,7 @@ import torch
 import torch.distributed._tensor.ops
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 # All public APIs from dtensor package
@@ -20,33 +20,30 @@ __all__ = [
 ]
 
 
-def _dtensor_init_helper(init_op, *size, **kwargs) -> DTensor:
-    # get default device mesh if there's nothing specified
-    device_mesh = kwargs.pop("device_mesh", None)
-    if device_mesh is None:
-        device_mesh = get_global_device_mesh()
+def _dtensor_init_helper(
+    init_op,
+    size: torch.Size,
+    device_mesh = None,
+    placements = None,
+    **kwargs,
+) -> DTensor:
+    # if device_mesh is None, use the one from mesh resources
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    kwargs["device"] = device_mesh.device_type
 
     # set default placements to replicated if not specified
-    placements = kwargs.pop("placements", None)
-    if placements is None:
-        placements = [Replicate() for _ in range(device_mesh.ndim)]
+    placements = placements or [Replicate() for _ in range(device_mesh.ndim)]
 
     # check device_mesh againts placements
     assert device_mesh.ndim == len(
         placements
     ), "mesh dimension does not match the length of placements"
 
-    # normalize the size argument
-    if len(size) == 1 and isinstance(size[0], Sequence):
-        torch_size = size[0]
-    else:
-        torch_size = list(size)
-    torch_size = torch.Size(torch_size)
     assert kwargs["layout"] == torch.strided, "layout value not supported!"
-    torch_stride = torch._prims_common.make_contiguous_strides_for(torch_size)
+    torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
-    local_shape = compute_local_shape(torch_size, device_mesh, placements)
+    local_shape = compute_local_shape(size, device_mesh, placements)
     # initialize the local tensor
     if len(local_shape) == 0:
         local_tensor = torch.empty(0, **kwargs)
@@ -57,17 +54,26 @@ def _dtensor_init_helper(init_op, *size, **kwargs) -> DTensor:
         local_tensor=local_tensor,
         device_mesh=device_mesh,
         placements=placements,
-        shape=torch_size,
+        shape=size,
         dtype=local_tensor.dtype,
         stride=torch_stride,
         requires_grad=kwargs["requires_grad"],
     )
 
 
+def _normalize_to_torch_size(size) -> torch.Size:
+    # convert Union[Tuple[int], Tuple[Sequence[int]]] to torch.Size
+    # normalize the size argument
+    if len(size) == 1 and isinstance(size[0], Sequence):
+        torch_size = size[0]
+    else:
+        torch_size = list(size)
+    return torch.Size(torch_size)
+
+
 def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
     device_mesh: Optional[DeviceMesh] = None,
@@ -85,25 +91,22 @@ def ones(
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
             Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        device (:class:`torch.device`, optional): the desired device of returned :class:`DTensor`.
-            Default: if ``None``, uses the current device for the default :class:`DTensor` type
-            (see :func:`torch.set_default_tensor_type`). device will be the CPU for CPU
-            :class:`DTensor` types and the current CUDA device for CUDA :class:`DTensor` types.
-        layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
+        layout (:class:`torch.layout`, optional): the desired layout of returned DTensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
 
     Returns:
         A :class:`DTensor` object on each rank
     """
+    torch_size = _normalize_to_torch_size(size)
+
     return _dtensor_init_helper(
         torch.ones,
-        *size,
+        torch_size,
         dtype=dtype,
-        device=device,
         layout=layout,
         requires_grad=requires_grad,
         device_mesh=device_mesh,
@@ -114,7 +117,6 @@ def ones(
 def empty(
     *size,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
     layout: torch.layout = torch.strided,
     memory_format=torch.contiguous_format,
     pin_memory=False,
@@ -133,11 +135,7 @@ def empty(
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned :class:`DTensor`.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        device (:class:`torch.device`, optional): the desired device of returned :class:`DTensor`.
-            Default: if ``None``, uses the current device for the default :class:`DTensor` type
-            (see :func:`torch.set_default_tensor_type`). device will be the CPU for CPU
-            :class:`DTensor` types and the current CUDA device for CUDA :class:`DTensor` types.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).\
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         memory_format (:class:`torch.memory_format`, optional): the desired memory format of
@@ -149,16 +147,17 @@ def empty(
         requires_grad (bool, optional): If autograd should record operations on the
             returned :class:`DTensor`. Default: ``False``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
 
     Returns:
         A :class:`DTensor` object on each rank
     """
+    torch_size = _normalize_to_torch_size(size)
+
     return _dtensor_init_helper(
         torch.empty,
-        *size,
+        torch_size,
         dtype=dtype,
-        device=device,
         layout=layout,
         memory_format=memory_format,
         pin_memory=pin_memory,
@@ -191,14 +190,16 @@ def zeros(
         layout (:class:`torch.layout`, optional): the desired layout of returned :class:`DTensor`.
             Default: ``torch.strided``.
         device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
-        placement: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
+        placements: a sequence of :class:`Placement` type: ``Shard``, ``Replicate``, ``_Partial``
 
     Returns:
         A :class:`DTensor` object on each rank
     """
+    torch_size = _normalize_to_torch_size(size)
+
     return _dtensor_init_helper(
         torch.zeros,
-        *size,
+        torch_size,
         dtype=dtype,
         layout=layout,
         requires_grad=requires_grad,
