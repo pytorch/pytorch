@@ -10,11 +10,18 @@ from torch._prims_common import is_boolean_dtype, is_integer_dtype
 
 @dataclass
 class TypedExpr:
+    """A SymPy expression with associated type"""
     expr: sympy.Expr
     dtype: torch.dtype
 
 
 class SymPyOps:
+    """An ops handler where all IR values are SymPy expressions
+
+    When a value cannot be represented as a SymPy expression, the method is
+    either not defined, or returns NotImplemented
+
+    """
     @staticmethod
     def identity(value):
         return value
@@ -69,11 +76,18 @@ class SymPyOps:
 
 @dataclass
 class IndexPropVar:
-    rep: Any
+    rep: Any  # A wrapped IR value, if present
     expr: Optional[TypedExpr] = None
 
 
 class IndexPropagation:
+    """Ops wrapper that tries to propagate constant and index_expr values through the computation.
+
+    This aims to maximize the compile time simplification possible, and convert
+    indirect indexing from arange into normal static indexing.
+
+    """
+
     def __init__(self, inner):
         self._inner = inner
         self.id_iter = itertools.count()
@@ -84,9 +98,11 @@ class IndexPropagation:
     def unwrap(self, a):
         if not isinstance(a, IndexPropVar):
             return a
+        # Unwrap the inner IR value
         if a.expr is None:
             return a.rep
 
+        # Construct a new constant/index_expr from the SymPy expression
         expr, dtype = a.expr.expr, a.expr.dtype
         if isinstance(expr, sympy.Integer):
             return self._inner.constant(int(expr), dtype)
@@ -95,11 +111,13 @@ class IndexPropagation:
         return self._inner.index_expr(expr, dtype)
 
     def fallback(self, name, args, kwargs):
+        # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
         new_kwargs = {k: self.unwrap(v) for k, v in kwargs.items()}
         return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(self, name, args, kwargs):
+        # Builld a new SymPy expression from this ops call
         def unwrap(a):
             if not isinstance(a, IndexPropVar):
                 return a
@@ -130,6 +148,7 @@ class IndexPropagation:
         return inner
 
     def indirect_indexing(self, index, size):
+        # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.expr is not None:
             return index.expr.expr
         return self.fallback("indirect_indexing", (index, size), {}).rep

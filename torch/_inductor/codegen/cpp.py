@@ -23,7 +23,7 @@ from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
-from ..virtualized import V
+from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
@@ -866,7 +866,8 @@ class CppOverrides(OpOverrides):
     def mod(a, b):
         return f"mod({a}, {b})"
 
-    def constant(self, val, dtype):
+    @staticmethod
+    def constant(val, dtype):
         if dtype in (torch.float16, torch.bfloat16):
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -879,11 +880,12 @@ class CppOverrides(OpOverrides):
         elif math.isnan(val):
             return f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::quiet_NaN()"
         elif val is True or val is False:
-            return self.to_dtype(str(val).lower(), dtype)
-        return self.to_dtype(repr(val), dtype)
+            return ops.to_dtype(str(val).lower(), dtype)
+        return ops.to_dtype(repr(val), dtype)
 
-    def index_expr(self, expr, dtype):
-        return self.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
+    @staticmethod
+    def index_expr(expr, dtype):
+        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
     def masked(mask, body, other):
