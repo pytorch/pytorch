@@ -901,14 +901,6 @@ def load(
         pickle_load_args['encoding'] = 'utf-8'
 
     with _open_file_like(f, 'rb') as opened_file:
-        # TODO: proper handling for BinaryIO/IO[bytes] types for f
-        if tarfile.is_tarfile(f):  # type: ignore[arg-type]
-            if weights_only:
-                try:
-                    return _load(opened_file, map_location, _weights_only_unpickler, 'data.pkl', _mmap, **pickle_load_args)
-                except RuntimeError as e:
-                    raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
-            return _load(opened_file, map_location, pickle_module, 'data.pkl', _mmap, **pickle_load_args)
         if _is_zipfile(opened_file):
             # The zipfile reader is going to advance the current file position.
             # If we want to actually tail call to torch.jit.load, we need to
@@ -927,6 +919,14 @@ def load(
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
                 return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+        # TODO: proper handling for BinaryIO/IO[bytes] types for f
+        if tarfile.is_tarfile(f):  # type: ignore[arg-type]
+            if weights_only:
+                try:
+                    return _load(opened_file, map_location, _weights_only_unpickler, 'data.pkl', _mmap, **pickle_load_args)
+                except RuntimeError as e:
+                    raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
+            return _load(opened_file, map_location, pickle_module, 'data.pkl', _mmap, **pickle_load_args)
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
