@@ -19,15 +19,15 @@ import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
-from ._utils import _import_dotted_name, classproperty
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
-
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
 # https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
 def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
+
+from ._utils import _import_dotted_name, classproperty
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
+    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
