@@ -59,6 +59,14 @@ struct TORCH_API MPSHooksInterface {
   virtual void setMemoryFraction(double /*ratio*/) const {
     AT_ERROR("Cannot execute setMemoryFraction() without MPS backend.");
   }
+
+  virtual void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
+    AT_ERROR("Cannot execute profilerStartTrace() without MPS backend.");
+  }
+
+  virtual void profilerStopTrace() const {
+    AT_ERROR("Cannot execute profilerStopTrace() without MPS backend.");
+  }
 };
 
 struct TORCH_API MPSHooksArgs {};
