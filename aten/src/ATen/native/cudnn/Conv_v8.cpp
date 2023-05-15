@@ -387,7 +387,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       break;
     } catch (c10::OutOfMemoryError &e) {
       max_workspace_size /= 2;
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
       remove_invalid = true;
     }
   }
@@ -494,7 +494,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -508,7 +508,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -529,7 +529,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -550,7 +550,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -570,7 +570,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
       run_conv_plan(handle, x, y, w, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -597,22 +597,8 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
                                                                  deterministic, allow_tf32);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
-
-    /*
-     * The emptyCache() line here will cause crash when using cudagraph trees
-     * together with layout optimization.
-     *
-     * Here is the python stack trace: https://gist.github.com/shunting314/f8d39649d6e9054e9efd7504f921d81b
-     * Here is the C++ stack trace captured in GDB: https://gist.github.com/shunting314/3aa009de8073e74431612d389303155d
-     *
-     * Disable this line for now to unblock. Work with Elias to figure out the
-     * correct fix.
-     *
-     * UPDATE: fix from elias is here https://github.com/pytorch/pytorch/pull/101038.
-     * I'll rebase and remove this part after elias's PR is in.
-     */
-    if (std::getenv("CONV_EMPTY_CACHE")) {
-        c10::cuda::CUDACachingAllocator::emptyCache();
+    if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
+      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     try_plans(plans, key, handle, x, y, w);
   }
@@ -631,7 +617,7 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {

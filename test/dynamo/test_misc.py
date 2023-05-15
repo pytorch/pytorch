@@ -10,9 +10,11 @@ import math
 import operator
 import os
 import sys
+import traceback
 import typing
 import unittest
 import unittest.mock as mock
+import warnings
 import weakref
 from unittest.mock import patch
 
@@ -23,7 +25,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
-from torch._dynamo import bytecode_analysis, bytecode_transformation
+from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
@@ -3521,7 +3523,7 @@ def fn():
     def test_user_function_variable_supports_type_abcmeta_argument(self):
         class Foo(metaclass=abc.ABCMeta):
             @abc.abstractclassmethod
-            def read(self):
+            def read(self):  # noqa: B027
                 pass
 
         class Bar(Foo):
@@ -4721,6 +4723,60 @@ def fn():
         self.assertEquals(tab[0].end, 4)
         self.assertEquals(tab[0].target, 6)
 
+    def test_unhandled_exception_in_dynamo(self):
+        # traceback.format_exc() approximates an unhandled exception
+        def f(a):
+            a += 1
+            raise RuntimeError("smoge")
+            return a
+
+        opt_fn = torch._dynamo.optimize("eager")(f)
+        try:
+            opt_fn(torch.ones(2))
+        except RuntimeError as e:
+            self.assertIn("smoge", traceback.format_exc())
+
+    def test_unhandled_exception_in_dynamo2(self):
+        # segfaults in python 3.11 if shadow frame is freed improperly
+        from torch.testing import make_tensor
+
+        def fn():
+            # test that the errors are the same for dense and sparse versions
+            def test1(*, is_sparse):
+                # shapes must be compatible for matrix multiplication
+                a = make_tensor((2, 3), dtype=torch.float32, device="cpu")
+                if is_sparse:
+                    a_sparse = a.to_sparse_csr()
+                    return torch.addmm(a, a_sparse, a)
+                else:
+                    return torch.addmm(a, a, a)
+
+            try:
+                test1(is_sparse=False)
+            except RuntimeError as msg:
+                try:
+                    test1(is_sparse=True)
+                except RuntimeError as msg2:
+                    raise RuntimeError("smoge")
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        try:
+            opt_fn()
+        except RuntimeError:
+            self.assertIn("smoge", traceback.format_exc())
+
+    def test_variable_access_in_exception(self):
+        def fn():
+            x = torch.ones(3, 3)
+            try:
+                raise RuntimeError("bad")
+            except RuntimeError:
+                x += 1
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch.allclose(opt_fn(), torch.tensor([3.0]))
+
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 
@@ -4859,6 +4915,26 @@ def fn():
             return x * x
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    def test_anomaly_aot_autograd(self):
+        @allow_in_graph
+        def h(a):
+            r = a.sum()
+            # Trigger an exception in backwards
+            r.register_hook(lambda x: x + x.item())
+            return r
+
+        @torch.compile(backend="aot_eager")
+        def f(a):
+            return h(a)
+
+        with warnings.catch_warnings(record=True) as w, self.assertRaises(
+            torch._dynamo.exc.BackendCompilerFailed
+        ):
+            f(torch.randn(2, 2, requires_grad=True))
+
+        self.assertEqual(len(w), 1)
+        self.assertIn("forward call that caused the error", str(w[0].message))
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
