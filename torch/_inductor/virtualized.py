@@ -3,7 +3,6 @@ from contextlib import contextmanager
 from itertools import chain
 from threading import local
 from unittest.mock import patch
-from typing import Any
 
 import sympy
 
@@ -154,7 +153,7 @@ class WrapperHandler:
 
 MockHandler._init_cls()
 
-_ops = Virtualized("ops", MockHandler)
+ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
@@ -162,71 +161,13 @@ _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 
 
-class OpsValue:
-    """The turn type of most ops calls. This exists so we can do operator
-    overloading.
-    """
-    value: Any
-
-    def __init__(self, value):
-        self.value = value
-
-    def __add__(self, other):
-        return ops.add(self, other)
-
-    def __mul__(self, other):
-        return ops.mul(self, other)
-
-    def __sub__(self, other):
-        return ops.sub(self, other)
-
-    def __neg__(self):
-        return ops.neg(self)
-
-    def __truediv__(self, other):
-        return ops.truediv(self, other)
-
-    def __floordiv__(self, other):
-        return ops.floordiv(self, other)
-
-    def __mod__(self, other):
-        return ops.mod(self, other)
-
-    def __pow__(self, other):
-        return ops.pow(self, other)
-
-
-class OpsWrapper:
-    def __getattr__(cls, name):
-        def inner(*args, **kwargs):
-            new_args = [OpsWrapper._unwrap(a) for a in args]
-            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsValue(getattr(_ops, name)(*new_args, **new_kwargs))
-
-        return inner
-
-    @staticmethod
-    def _unwrap(x):
-        if isinstance(x, OpsValue):
-            return x.value
-        return x
-
-    @staticmethod
-    def indirect_indexing(index, size):
-        # Returns a sympy value, not IR value
-        index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size)
-
-ops = OpsWrapper()
-
-
 class _V:
     MockHandler = MockHandler
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler = _ops._set_handler
-    get_ops_handler = _ops._get_handler
+    set_ops_handler = ops._set_handler
+    get_ops_handler = ops._get_handler
     set_graph_handler = _graph._set_handler
     set_fake_mode = _fake_mode._set_handler
     set_kernel_handler = _kernel._set_handler
@@ -236,7 +177,7 @@ class _V:
     @property
     def ops(self) -> MockHandler:
         """The operator handler specific to the current codegen task"""
-        return _ops._get_handler()
+        return ops._get_handler()
 
     @property
     def graph(self):
