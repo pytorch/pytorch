@@ -1,12 +1,15 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+
+@interface MPSGraphExecutionDescriptor ()
+@property(readwrite, atomic) BOOL enableCommitAndContinue;
+@end
 
 namespace at {
 namespace mps {
-
-#define USE_COMMIT_AND_CONTINUE 1
 
 //-----------------------------------------------------------------
 //  MPSStream
@@ -17,15 +20,18 @@ MPSStream::MPSStream(Stream stream) : _stream(stream) {
   TORCH_CHECK(_stream.device_type() == DeviceType::MPS);
   _serialQueue = dispatch_queue_create("metal gpu stream", nullptr);
   _executionDescriptor = [MPSGraphExecutionDescriptor new];
-  _executionDescriptor.completionHandler =
-      ^(NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* resultsDictionary, NSError* _Nullable error) {
-      };
+  // disable commitAndContinue if Signpost tracing is enabled
+  if (getMPSProfiler().isSignpostTracingEnabled()) {
+    _enableCommitAndContinue = false;
+  }
+  _executionDescriptor.enableCommitAndContinue = _enableCommitAndContinue;
 }
 
 MPSStream::~MPSStream() {
   [_commandQueue release];
   _commandQueue = nil;
   [_executionDescriptor release];
+  _executionDescriptor = nil;
 
   assert(_commandBuffer == nil);
 }
@@ -38,51 +44,63 @@ MPSCommandBuffer* MPSStream::commandBuffer() {
   return _commandBuffer;
 }
 
+id<MTLComputeCommandEncoder> MPSStream::commandEncoder() {
+  if (!_commandEncoder) {
+    _commandEncoder = [commandBuffer() computeCommandEncoder].retain;
+  }
+
+  return _commandEncoder;
+}
+
 void MPSStream::synchronize(SyncType syncType) {
-  if (!_commandBuffer)
-    return;
+  endKernelCoalescing();
   switch (syncType) {
     case SyncType::NONE:
       // typically in GPU to GPU copies we won't commit explicitly
       break;
     case SyncType::COMMIT:
-      flush();
+      commit();
       break;
     case SyncType::COMMIT_ADAPTIVE:
       // the adaptive commit only commits if we hit the low watermark memory threshold
       if (getIMPSAllocator()->getLowWatermarkValue() <= 1) {
-#if USE_COMMIT_AND_CONTINUE
-        commitAndContinue();
-#else
-        flush();
-#endif
+        commit();
       }
       break;
     case SyncType::COMMIT_AND_WAIT:
       commitAndWait();
       break;
     case SyncType::COMMIT_AND_CONTINUE:
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_enableCommitAndContinue,
+                                       "CommitAndContinue is called but it is disabled globally!");
       commitAndContinue();
       break;
   }
 }
 
-void MPSStream::commit(bool doFlush) {
-#if USE_COMMIT_AND_CONTINUE
-  [commandBuffer() commitAndContinue];
-#else
-  if (doFlush) {
+void MPSStream::commit() {
+  if (_enableCommitAndContinue) {
+    [commandBuffer() commitAndContinue];
+  } else {
     flush();
   }
-#endif
 }
 
 void MPSStream::commitAndWait() {
-  assert(_commandBuffer);
-  [_commandBuffer commit];
-  [_commandBuffer waitUntilCompleted];
-  [_commandBuffer release];
-  _commandBuffer = nil;
+  if (_prevCommandBuffer) {
+    // the previous command buffer (if exists) has already been committed,
+    // so we just wait until it's completed and then dispose it.
+    [_prevCommandBuffer waitUntilCompleted];
+    [_prevCommandBuffer release];
+    _prevCommandBuffer = nil;
+  }
+
+  if (_commandBuffer) {
+    [_commandBuffer commit];
+    [_commandBuffer waitUntilCompleted];
+    [_commandBuffer release];
+    _commandBuffer = nil;
+  }
 }
 
 void MPSStream::commitAndContinue() {
@@ -90,21 +108,26 @@ void MPSStream::commitAndContinue() {
   [_commandBuffer commitAndContinue];
 }
 
-void MPSStream::flush() {
-  if (_commandBuffer) {
-    [_commandBuffer commit];
-    [_commandBuffer release];
-    _commandBuffer = nil;
+void MPSStream::endKernelCoalescing() {
+  if (_commandEncoder) {
+    [_commandEncoder endEncoding];
+    [_commandEncoder release];
+    _commandEncoder = nil;
   }
 }
 
-void MPSStream::_flush(bool commitAndWait) const {
-  assert(_commandBuffer);
-  [_commandBuffer commit];
-  if (commitAndWait) {
-    [_commandBuffer waitUntilCompleted];
+void MPSStream::flush() {
+  if (_commandBuffer) {
+    [_commandBuffer commit];
+    // if commitAndContinue is disabled (e.g., for Profiler), we keep the command
+    // buffer so we could wait on it later, if required.
+    if (!_enableCommitAndContinue) {
+      _prevCommandBuffer = _commandBuffer;
+    } else {
+      [_commandBuffer release];
+    }
+    _commandBuffer = nil;
   }
-  [_commandBuffer release];
 }
 
 void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
@@ -121,6 +144,7 @@ void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t 
     return;
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
+      endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
       [blitEncoder fillBuffer:buffer range:NSMakeRange(offset, length) value:value];
@@ -135,9 +159,11 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
                      size_t length,
                      size_t srcOffset,
                      size_t dstOffset,
+                     uint64_t profileId,
                      SyncType syncType) {
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
+      endKernelCoalescing();
       id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer() blitCommandEncoder];
 
       [blitEncoder copyFromBuffer:srcBuffer
@@ -146,7 +172,13 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
                 destinationOffset:(NSUInteger)dstOffset
                              size:(NSUInteger)length];
       [blitEncoder endEncoding];
-      synchronize(syncType);
+
+      // profilerId has a value only if copy profiling is enabled
+      if (profileId) {
+        getMPSProfiler().endProfileCopy(profileId, syncType);
+      } else {
+        synchronize(syncType);
+      }
     }
   });
 }
@@ -156,29 +188,48 @@ void MPSStream::copy_and_sync(id<MTLBuffer> srcBuffer,
                               size_t length,
                               size_t srcOffset,
                               size_t dstOffset,
-                              bool non_blocking) {
-  copy(
-      srcBuffer, dstBuffer, length, srcOffset, dstOffset, !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
+                              bool non_blocking,
+                              uint64_t profileId) {
+  copy(srcBuffer,
+       dstBuffer,
+       length,
+       srcOffset,
+       dstOffset,
+       profileId,
+       !non_blocking ? SyncType::COMMIT_AND_WAIT : SyncType::COMMIT);
 }
 
 void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType) {
+  auto& profiler = getMPSProfiler();
+  const bool isGraphProfilingEnabled = profiler.isOperationProfilingEnabled();
+
   dispatch_sync(_serialQueue, ^() {
-#if USE_COMMIT_AND_CONTINUE
+    endKernelCoalescing();
+    if (isGraphProfilingEnabled) {
+      // this function call is only relevant for interval-based Signposts
+      // which exclude schedule time (only includes GPU run time)
+      profiler.beginProfileGPUInterval(mpsGraph);
+    }
+    // note: CommitAndContinue feature is enabled/disabled via "_executionDescriptor"
     [mpsGraph encodeToCommandBuffer:commandBuffer()
                               feeds:feeds
                    targetOperations:nil
                   resultsDictionary:results
                 executionDescriptor:_executionDescriptor];
-    // mostly the syncType is NONE, but in some cases we may want to sync and wait (e.g., gatherViewTensor)
-    synchronize(syncType);
-#else
-    commit(true);
-    [mpsGraph runAsyncWithMTLCommandQueue:_commandQueue
-                                    feeds:feeds
-                         targetOperations:nil
-                        resultsDictionary:results
-                      executionDescriptor:_executionDescriptor];
-#endif
+
+    SyncType _syncType = syncType;
+    // if commitAndContinue is disabled, we need to always commit manually after encoding
+    if (!_enableCommitAndContinue && syncType != SyncType::COMMIT_AND_WAIT) {
+      _syncType = SyncType::COMMIT;
+    }
+
+    // check if graph execution profiling is enabled
+    if (isGraphProfilingEnabled) {
+      // with profiler enabled, we commit after adding the completedHandler in MPSProfiler
+      profiler.endProfileKernel(mpsGraph, _syncType);
+    } else {
+      synchronize(_syncType);
+    }
   });
 }
 

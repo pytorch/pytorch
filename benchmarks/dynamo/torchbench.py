@@ -73,12 +73,16 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
-    # https://github.com/pytorch/pytorch/issues/99201
-    "opacus_cifar10",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
     # https://github.com/pytorch/pytorch/issues/99438
     "vision_maskrcnn",
+}
+
+SKIP_FOR_CPU = {
+    "hf_T5_generate",  # OOMs
+    "cm3leon_generate",  # model is CUDA only
+    "nanogpt_generate",  # timeout
 }
 
 SKIP_FOR_CUDA = {
@@ -93,11 +97,7 @@ SKIP_TRAIN = {
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
-    # Unusual training setup
-    "opacus_cifar10",
     "maml",
-    # segfault: Internal Triton PTX codegen error
-    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -204,6 +204,11 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 }
 
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
+}
+
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
@@ -220,6 +225,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
 
     @property
     def skip_models_for_cuda(self):
@@ -255,6 +264,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
     def load_model(
         self,
         device,
@@ -265,10 +280,19 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        try:
-            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
-        except ModuleNotFoundError:
-            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
+        candidates = [
+            f"torchbenchmark.models.{model_name}",
+            f"torchbenchmark.canary_models.{model_name}",
+            f"torchbenchmark.models.fb.{model_name}",
+        ]
+        for c in candidates:
+            try:
+                module = importlib.import_module(c)
+                break
+            except ModuleNotFoundError:
+                pass
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -321,6 +345,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # the right example_inputs
         if model_name == "yolov3":
             example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
+        # See https://github.com/pytorch/benchmark/issues/1561
+        if model_name == "maml_omniglot":
+            batch_size = 5
+            assert example_inputs[0].shape[0] == batch_size
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name

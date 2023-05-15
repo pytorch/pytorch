@@ -3,11 +3,12 @@ import dataclasses
 import itertools
 import logging
 import warnings
+import pprint
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
 
 from functorch import make_fx
@@ -20,16 +21,16 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
-from torch._guards import detect_fake_mode
+from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
-from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions, PhiloxTotalOffsets
+from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
@@ -79,6 +80,16 @@ pytree._register_pytree_node(
         dict(zip(c, x))
     ),
 )
+
+def partial_asdict(obj: Any) -> Any:
+    if dataclasses.is_dataclass(obj):
+        return {field.name: getattr(obj, field.name) for field in dataclasses.fields(obj)}
+    elif isinstance(obj, (list, tuple)):
+        return obj.__class__([partial_asdict(item) for item in obj])
+    elif isinstance(obj, dict):
+        return {k: partial_asdict(v) for k, v in obj.items()}
+    else:
+        return obj
 
 aten = torch.ops.aten
 
@@ -416,6 +427,8 @@ class OutputAliasInfo:
     # - Tells us that the base of this alias is output_user_fwds[base_idx]
     #   here, this refers to the index of the *direct* traced
     base_idx: Optional[int]
+    # If it is a Tensor, what the dynamic dims are (otherwise is None)
+    dynamic_dims: Optional[Set[int]]
 
 
 # This class tells us info about user inputs.
@@ -534,6 +547,19 @@ class ViewAndMutationMeta:
             ]
         )
         self.num_mutated_inputs = self.num_mutated_data_inputs + self.num_mutated_metadata_only_inputs
+        self.dynamic_outputs = any(
+            o.dynamic_dims for o in self.output_info
+        )
+
+        self.is_rng_op_functionalized = config.functionalize_rng_ops
+        # All of the above metadata is collected by tracing the fw function.
+        # However, extra outputs for rng offsets behave differently. Both fwd
+        # and bwd graphs have their own outputs for the total consumed offsets.
+        # Unlike mutated inputs, we don't have to worry about sending the right
+        # set of tensors between fwd and bwd. Fwd and bwd offsets are
+        # independent and simpler to handle. Therefore, we track them
+        # separately.
+        self.num_outputs_rng_offset = 1 if self.is_rng_op_functionalized else 0
 
     def __eq__(self, other):
         if not isinstance(other, ViewAndMutationMeta):
@@ -543,20 +569,11 @@ class ViewAndMutationMeta:
                 self.requires_grad_info == other.requires_grad_info and
                 self.num_intermediate_bases == other.num_intermediate_bases and
                 self.keep_input_mutations == other.keep_input_mutations and
+                self.is_rng_op_functionalized == other.is_rng_op_functionalized and
+                self.num_outputs_rng_offset == other.num_outputs_rng_offset and
                 len(self.traced_tangents) == len(other.traced_tangents) and
                 all(x.shape == y.shape and x.dtype == y.dtype for x, y, in zip(self.traced_tangents, other.traced_tangents)))
 
-
-# This side data structures stores the functionalization of RNG related metadata
-# to be used at runtime. In future, we can repurpose this class to RuntimeMeta
-# if more metadata usecases popup
-@dataclass
-class RNGMeta:
-    # Stores if the config.functionalize_rng_ops was True at compile time
-    is_compiled_with_functional_rng_ops: bool
-
-    # Stores PhiloxTotalOffsets to be used at runtime
-    philox_total_offsets: PhiloxTotalOffsets
 
 # This class exists because:
 # - the autograd.Function.forward() in aot autograd returns outputs that might alias inputs
@@ -574,6 +591,9 @@ def has_same_metadata(t1, t2):
         t1.size() == t2.size()
         and t1.stride() == t2.stride()
         and t1.storage_offset() == t2.storage_offset()
+        and t1.storage_offset() == t2.storage_offset()
+        and t1.is_conj() == t2.is_conj()
+        and t1.is_neg() == t2.is_neg()
     )
 
 
@@ -758,19 +778,27 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Keep track of which outputs alias other outputs
         out_tensor_alias_counts = collections.defaultdict(int)
+        out_storage_to_tensors = collections.defaultdict(set)
         for o in flat_f_outs:
             if isinstance(o, torch.Tensor):
-                out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] += 1
+                curr_storage = StorageWeakRef(o.untyped_storage())
+                out_tensor_alias_counts[curr_storage] += 1
+                out_storage_to_tensors[curr_storage].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
         intermediate_bases: List[torch.Tensor] = []
         for o in flat_f_outs:
-            if (
-                isinstance(o, torch.Tensor)
-                and StorageWeakRef(o.untyped_storage()) in inp_storage_refs
-            ):
-                base_idx = inp_storage_refs[StorageWeakRef(o.untyped_storage())]
+            curr_storage = None if not isinstance(o, torch.Tensor) else StorageWeakRef(o.untyped_storage())
+            outs_with_identical_metadata_that_require_grad = [] if not isinstance(o, torch.Tensor) else [
+                curr for curr in out_storage_to_tensors[curr_storage]
+                if has_same_metadata(o, curr) and curr.requires_grad and o is not curr
+            ]
+            if not isinstance(o, torch.Tensor):
+                output_type = OutputType.non_alias
+                base_idx = None
+            elif curr_storage in inp_storage_refs:
+                base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 if is_input_tensor:
                     output_type = OutputType.is_input
@@ -781,12 +809,11 @@ def run_functionalized_fw_and_collect_metadata(
             # the intermediate base and the output require gradients.
             # See Note [AOT Autograd: outputs aliasing inputs or intermediates!]
             elif (
-                isinstance(o, torch.Tensor)
-                and o._base is not None
+                o._base is not None
                 and o.requires_grad
                 and o._base.requires_grad
             ):
-                if out_tensor_alias_counts[StorageWeakRef(o.untyped_storage())] == 1:
+                if out_tensor_alias_counts[curr_storage] == 1:
                     # Note [Intermediate Bases Optimization]
                     # Normally if we have an output that aliases an intermediate,
                     # we need to add the extra "intermediate base" logic further down
@@ -826,14 +853,33 @@ def run_functionalized_fw_and_collect_metadata(
                             output_type = OutputType.alias_of_intermediate_save_as_output
                             intermediate_base_tensor_id_to_output_idx[id(o._base)] = new_out_idx
                             intermediate_bases.append(o._base)
+            elif (
+                # See https://github.com/pytorch/pytorch/issues/100348 for this case.
+                # This protects against the specific case where a user fn returns (output, output.detach())
+                out_tensor_alias_counts[curr_storage] > 1
+                and len(outs_with_identical_metadata_that_require_grad) > 0
+                and not o.requires_grad
+            ):
+                assert len(outs_with_identical_metadata_that_require_grad) > 0
+                # In theory we could use any of these tensors to regenerat the aliased outputs from,
+                # since they all alias each other and have identical metatadata
+                out_alias = outs_with_identical_metadata_that_require_grad[0]
+                existing_out_idx = out_tensor_ids[id(out_alias)]
+                output_type = OutputType.alias_of_intermediate_base_is_user_output
+                base_idx = existing_out_idx
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
 
+            if isinstance(o, torch.Tensor):
+                dynamic_dims = {i for i, s in enumerate(o.shape) if not is_concrete_int(s)}
+            else:
+                dynamic_dims = None
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
+                dynamic_dims=dynamic_dims,
             )
             output_info.append(out_info)
             output_requires_grad_info.append(
@@ -1088,7 +1134,16 @@ def create_joint(
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
         ]
-    return inner_fn
+
+    def inner_fn_with_anomaly(*args):
+        with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with torch.autograd.detect_anomaly(check_nan=False):
+                return inner_fn(*args)
+
+    return inner_fn_with_anomaly
 
 # This creates the final function that we want to trace using make_fx(),
 # in both aot_dispatch_autograd and aot_dispatch_base.
@@ -1174,7 +1229,6 @@ def create_functionalized_graph(
 
     with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
-
 
     return fx_g
 
@@ -1317,21 +1371,41 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
+        adjusted_flat_args = flat_args
         if config.functionalize_rng_ops:
             # Add the seed and offset as example inputs to pass to the compiler
             fake_mode = detect_fake_mode()
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-            flat_args = (seed, offset, *flat_args)
-        compiled_fw = compiler(fw_module, flat_args)
+            adjusted_flat_args = [seed, offset, *flat_args]
+            flat_args.clear()  # Don't hold extra reference
+        compiled_fw = compiler(fw_module, adjusted_flat_args)
 
-    # Get the RNG functionalization related metadata to be used at runtime.
-    rng_metadata = RNGMeta(False, PhiloxTotalOffsets(0, 0))
-    if config.functionalize_rng_ops:
-        rng_metadata = RNGMeta(config.functionalize_rng_ops, PhiloxStateTracker.get_accumulated_offsets())
+    # This boxed_call handling happens inside create_runtime_wrapper as well.
+    # However, create_runtime_wrapper does not expect the rng offsets in the
+    # output. So, we have to create another wrapper and take out the offset. As
+    # a result, we have to account for not boxed_call compilers as well.
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
 
+    # Create a wrapper to set up the rng functionalize bits
+    @wraps(compiled_fw)
+    def rng_functionalization_wrapper(args):
+        # args is a list because compiled_fw is boxed_call
+        if fw_metadata.is_rng_op_functionalized:
+            # Add the seed and offset to args
+            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+            new_args = [seed, offset, *args]
+            args.clear()  # Remove the reference of inputs from the args itself
+
+            out = compiled_fw(new_args)
+
+            out = functionalized_rng_runtime_epilogue(fw_metadata, out)
+            return out
+        else:
+            return compiled_fw(args)
 
     compiled_fn = create_runtime_wrapper(
-        compiled_fw,
+        rng_functionalization_wrapper,
         runtime_metadata=fw_metadata,
         indices_of_inps_to_detach=[],
         trace_joint=False,
@@ -1339,19 +1413,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         disable_amp=disable_amp
     )
 
-    @wraps(compiled_fn)
-    def wrapper(*args):
-        if rng_metadata.is_compiled_with_functional_rng_ops:
-            # Add the seed and offset to args
-            seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-            out = compiled_fn(seed, offset, *args)
-            # Advance the rng state offset
-            CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_fwd_offset)
-            return out
-        else:
-            return compiled_fn(*args)
-
-    return wrapper
+    return compiled_fn
 
 
 # Returns the number of detected copy_
@@ -1621,16 +1683,11 @@ def format_guard_bug_msg(aot_config, expected):
 def remove_dupe_metadata(
     m: ViewAndMutationMeta,
     keep_arg_mask: List[bool],
+    add_dupe_map: List[int],
 ) -> ViewAndMutationMeta:
     assert len(m.input_info) == len(keep_arg_mask)
     # Easy invariant: the first argument should never be a dupe (it will be kept)
     assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
-    dupe_to_dedup_idx = [0]
-    for i, b in enumerate(keep_arg_mask[1:]):
-        if b:
-            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1] + 1)
-        else:
-            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1])
 
     # Filter dupe'd mutated inputs out of traced_tangents
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
@@ -1652,7 +1709,8 @@ def remove_dupe_metadata(
             OutputAliasInfo(
                 output_type=o.output_type,
                 raw_type=o.raw_type,
-                base_idx=None if o.base_idx is None else dupe_to_dedup_idx[o.base_idx]
+                dynamic_dims=o.dynamic_dims,
+                base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx]
             )
             for o in m.output_info
         ],
@@ -1735,12 +1793,14 @@ def create_synthetic_base_metadata(
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
             raw_type=torch.Tensor,
+            dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
             output_type=o.output_type,
             raw_type=o.raw_type,
+            dynamic_dims=o.dynamic_dims,
             # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
             base_idx=None if o.base_idx is None
             else synthetic_base_info[o.base_idx]
@@ -1922,13 +1982,15 @@ def aot_wrapper_dedupe(
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
-    for i, t in enumerate(flat_args):
-        if t in seen_args:
-            keep_arg_mask.append(False)
-            add_dupe_map.append(seen_args[t])
-            continue
+    for t in flat_args:
+        if isinstance(t, torch.Tensor):
+            if t in seen_args:
+                keep_arg_mask.append(False)
+                add_dupe_map.append(seen_args[t])
+                continue
+            seen_args[t] = j
+
         keep_arg_mask.append(True)
-        seen_args[t] = j
         add_dupe_map.append(j)
         j += 1
     assert len(add_dupe_map) == duped_arg_len, (
@@ -1946,7 +2008,7 @@ def aot_wrapper_dedupe(
     deduped_flat_args = remove_dupe_args(flat_args)
 
     # Update our input metadata to remove duped input metadata.
-    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
+    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask, add_dupe_map)
 
     tracing_context = TracingContext.get()
     if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
@@ -2097,8 +2159,10 @@ def aot_wrapper_synthetic_base(
             wrapped_flat_fn,
             keep_input_mutations=fw_metadata.keep_input_mutations,
         )(*flat_args_with_synthetic_bases)
-        assert ref_fw_metadata == fw_metadata_updated, \
-            f'ref_metadata={str(ref_fw_metadata)}, actual_metadata={str(fw_metadata_updated)}'
+        assert ref_fw_metadata == fw_metadata_updated, (
+            f'ref_metadata={pprint.pformat(partial_asdict(ref_fw_metadata))}, '
+            f'actual_metadata={pprint.pformat(partial_asdict(fw_metadata_updated))}'
+        )
 
     compiled_fn = compiler_fn(wrapped_flat_fn, flat_args_with_synthetic_bases, aot_config, fw_metadata=fw_metadata_updated)
 
@@ -2314,10 +2378,36 @@ def create_runtime_wrapper(
                 # AND a way to replay that custom view fn.
                 regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                 fw_outs_including_aliases.append(regenerated_out)
-            return fw_outs_including_aliases
+            ret_outs = fw_outs_including_aliases
         else:
-            return fw_outs
+            ret_outs = fw_outs
+
+        if runtime_metadata.dynamic_outputs:
+            for t, o in zip(ret_outs, runtime_metadata.output_info):
+                if o.dynamic_dims is None:
+                    continue
+                if hasattr(t, '_dynamo_weak_dynamic_indices'):
+                    t._dynamo_weak_dynamic_indices |= o.dynamic_dims
+                else:
+                    t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
+
+        return ret_outs
     return runtime_wrapper
+
+# Calling convention: If we are running functionalized RNG, then outs consists
+# of (user_outs, rng_offset)
+def functionalized_rng_runtime_epilogue(metadata, outs, return_new_outs=True):
+    if metadata.is_rng_op_functionalized:
+        assert metadata.num_outputs_rng_offset == 1
+        new_rng_offset = outs[-1]
+        CUDARngStateHelper.set_new_offset(new_rng_offset)
+        if return_new_outs:
+            user_outs = outs[:-1]
+            return user_outs
+        else:
+            return None
+    return outs
+
 
 def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     # Functionalization of rng ops changes the calling convention of the joint graph.
@@ -2325,6 +2415,8 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     # At runtime, we pass on the current seed and offset. This is hidden from
     # the user.
     fake_mode = detect_fake_mode()
+    if fake_mode is None:
+        fake_mode = nullcontext()
 
     def override_get_rng_state(device: Union[int, str, torch.device] = 'cuda'):
         out = PhiloxStateTracker.get_state_as_tensor()
@@ -2333,13 +2425,25 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
     def override_set_rng_state(x, device: Union[int, str, torch.device] = 'cuda'):
         PhiloxStateTracker.set_state_from_tensor(x)
 
+    def append_rng_offsets(args):
+        if trace_joint:
+            # args signature before: Tuple(fwd_outputs), Tuple(bwd_outputs)
+            # args signature after: Tuple(fwd_outputs, new_fwd_rng_offset), Tuple(bwd_offset, new_bwd_rng_offset)
+            return ((*args[0], PhiloxStateTracker.get_updated_fwd_offset()),
+                    (*args[1], PhiloxStateTracker.get_updated_bwd_offset()))
+        else:
+            # args signature before: Tuple(fwd_outputs)
+            # args signature after: Tuple(fwd_outputs, new_fwd_rng_offset)
+            return (*args, PhiloxStateTracker.get_updated_fwd_offset())
+
+
     def traced_joint(fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, primals, tangents):
         with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
-            return func(primals, tangents)
+            return append_rng_offsets(func(primals, tangents))
 
     def traced_forward(fwd_seed, fwd_base_offset, *primals):
         with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
-            return func(*primals)
+            return append_rng_offsets(func(*primals))
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
@@ -2400,7 +2504,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
-            num_inner_fwd_outputs = fw_metadata.num_mutated_inputs + fw_metadata.num_outputs + fw_metadata.num_intermediate_bases
+            num_inner_fwd_outputs = (
+                fw_metadata.num_mutated_inputs
+                + fw_metadata.num_outputs
+                + fw_metadata.num_intermediate_bases
+                + fw_metadata.num_outputs_rng_offset
+            )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
@@ -2468,7 +2577,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
         _indices_of_inps_to_detach = []
         bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
-        assert len(bw_outs) == len(fw_metadata.input_info)
+        assert len(bw_outs) == len(fw_metadata.input_info) + fw_metadata.num_outputs_rng_offset
         for i, (bw_out) in enumerate(bw_outs):
             if bw_out is None:
                 _indices_of_inps_to_detach.append(i)
@@ -2478,25 +2587,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             aot_graphs_log.info("%s", lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id))
 
         with track_graph_compiling(aot_config, "forward"):
+            adjusted_flat_args = flat_args
             if config.functionalize_rng_ops:
                 # Update example inputs for the fw_compiler
                 fake_mode = detect_fake_mode()
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-                flat_args = (seed, offset, *flat_args)
+                adjusted_flat_args = [seed, offset, *flat_args]
+                # We are not clearing flat_args here because
+                # 1) There is a check in the the debug compiler at the end
+                # 2) It does not matter as these are fake tensors
             compiled_fw_func = aot_config.fw_compiler(
-                fw_module, flat_args
+                fw_module, adjusted_flat_args
             )
 
 
-    # Get the rng_metadata so that it can be used at runtime
-    rng_metadata = RNGMeta(False, PhiloxTotalOffsets(0, 0))
-    if config.functionalize_rng_ops:
-        rng_metadata = RNGMeta(config.functionalize_rng_ops, PhiloxStateTracker.get_accumulated_offsets())
-        # Total offsets differ for each AOT traced graph, so they can't be saved
-        # in the PhiloxStateTracker singleton object. Therefore, we save them
-        # into rng_meta side datastructure.
-
-
+    saved_context = TracingContext.get()
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
@@ -2507,7 +2612,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
-            if rng_metadata.is_compiled_with_functional_rng_ops:
+            if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
                 args = (seed, offset, *args)
@@ -2536,8 +2641,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_mutated_metadata_only_inputs = (
                 CompiledFunction.metadata.num_mutated_metadata_only_inputs
             )
+            num_outputs_rng_offset = CompiledFunction.metadata.num_outputs_rng_offset
             # Our forward() returns both (mutated_inputs, outputs, output_intermediate_bases, saved_tensors, saved_symints)
             num_forward_returns = num_mutated_inputs + num_outputs + num_intermediate_bases
+            # In case of functionalization of rng ops, the fw_module returns one
+            # additinal output for rng offset. This rng offset is used right
+            # away to advance the rng state, and is not passed on to the raw
+            # outputs. However, we need to know the exact boundary to identify
+            # which tensors to be saved for the bwd graph.  num_forward captures
+            # this information.
+            num_forward = num_forward_returns + num_outputs_rng_offset
 
             assert num_forward_returns == len(
                 CompiledFunction.metadata.requires_grad_info
@@ -2546,23 +2659,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # Partitioners must put symint arguments at the end separate from tensor arguments
             if num_symints_saved_for_bw > 0:
                 tensors_saved_for_backwards = fw_outs[
-                    num_forward_returns:-num_symints_saved_for_bw
+                    num_forward:-num_symints_saved_for_bw
                 ]
                 assert all(
-                    [isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards]
+                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 symint_outs = fw_outs[-num_symints_saved_for_bw:]
                 assert all(
-                    [
-                        isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
-                        for x in symint_outs
-                    ]
+                    isinstance(x, (int, float, torch.SymInt, torch.SymFloat))
+                    for x in symint_outs
                 )
                 ctx.symints = symint_outs
             else:
-                tensors_saved_for_backwards = fw_outs[num_forward_returns:]
+                tensors_saved_for_backwards = fw_outs[num_forward:]
                 # See Note [Detaching saved tensors in AOTAutograd]
                 ctx.save_for_backward(*(x.detach() if x._is_view() else x for x in tensors_saved_for_backwards))
                 ctx.symints = []
@@ -2608,10 +2719,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
             ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
 
-
-            if rng_metadata.is_compiled_with_functional_rng_ops:
-                # Advance total fwd offset
-                CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_fwd_offset)
+            functionalized_rng_runtime_epilogue(
+                CompiledFunction.metadata,
+                fw_outs[num_forward_returns:num_forward],
+                return_new_outs=False
+            )
             return tuple(raw_returns)
 
         @staticmethod
@@ -2686,7 +2798,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             ]
 
             rng_args = []
-            if rng_metadata.is_compiled_with_functional_rng_ops:
+            if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
@@ -2700,9 +2812,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
+                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args
+                            bw_module, fx_placeholder_vals(bw_module)
                         )
 
                 ctx.maybe_clear_saved_tensors()
@@ -2713,9 +2825,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     disable_amp=disable_amp,
                 )
 
-                if rng_metadata.is_compiled_with_functional_rng_ops:
-                    # Advance total bwd rng offset
-                    CUDARngStateHelper.advance_torch_state(rng_metadata.philox_total_offsets.total_bwd_offset)
+                out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
                 return tuple(out)
 
             if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
@@ -2866,9 +2976,10 @@ def create_aot_dispatcher_function(
         fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = (
-            any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
+
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
@@ -2931,8 +3042,6 @@ def aot_function(
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
     num_params_buffers: int = 0,
-    hasher_type=None,  # deprecated
-    static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
     inference_compiler: Optional[Callable] = None,
     *,
@@ -2991,10 +3100,6 @@ def aot_function(
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
     """
-    if static_argnums is not None:
-        raise RuntimeError(
-            "static_argnums has been deprecated - manually wrap your function or use torchdynamo."
-        )
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -3126,8 +3231,6 @@ def aot_module_simplified(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
-    hasher_type=None,
-    static_argnums=None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
@@ -3174,6 +3277,7 @@ def aot_module_simplified(
         with stateless._reparametrize_module(
             mod, pytree.tree_unflatten(args[:params_len], params_spec)
         ):
+
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
@@ -3192,7 +3296,6 @@ def aot_module_simplified(
             )
         return out
 
-    assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:

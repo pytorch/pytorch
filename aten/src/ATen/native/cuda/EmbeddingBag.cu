@@ -63,7 +63,7 @@ std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
 // per_sample_weights are contiguous.
 template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_updateOutputKernel_max(
-    index_t *input, index_t *offsets, scalar_t *weight, scalar_t *output,
+    const index_t *input, const index_t *offsets, const scalar_t *weight, scalar_t *output,
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     index_t *bag_size, index_t *max_indices,
@@ -80,7 +80,7 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
     int64_t featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
     if (featureDim < featureSize) {
       int64_t bag = chunk / chunksPerBag;
-      scalar_t *weightFeat = weight + featureDim * weight_stride1;
+      const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       CUDA_KERNEL_ASSERT(end >= begin);
@@ -113,11 +113,11 @@ __global__ void EmbeddingBag_updateOutputKernel_max(
 // per_sample_weights are contiguous.
 template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
-    index_t *input, index_t *offsets, scalar_t *weight, scalar_t *output,
+    const index_t *input, const index_t *offsets, const scalar_t *weight, scalar_t *output,
     index_t *offset2bag, int64_t numIndices, int64_t numBags,
     int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, index_t *bag_size,
-    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
+    const scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
     index_t padding_idx, int64_t numRows) {
 
   // the strategy here is that each bag x feature is handled by a single thread
@@ -132,7 +132,7 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
     int64_t featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
     if (featureDim < featureSize) {
       int64_t bag = chunk / chunksPerBag;
-      scalar_t *weightFeat = weight + featureDim * weight_stride1;
+      const scalar_t *weightFeat = weight + featureDim * weight_stride1;
       int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       CUDA_KERNEL_ASSERT(end >= begin);
@@ -194,8 +194,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
     auto range = at::arange(num_indices, indices.options());
     // int64_t nbits = cuda::cub::get_num_bits(num_weights);
     cuda::cub::radix_sort_pairs(
-      indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
-      range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
+      indices.const_data_ptr<index_t>(), sorted_indices.mutable_data_ptr<index_t>(),
+      range.const_data_ptr<index_t>(), orig_indices.mutable_data_ptr<index_t>(),
       num_indices, false/*, 0, nbits*/);
   });
 
@@ -208,8 +208,8 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       // Compute an increasing sequence per unique item in sortedIndices:
       // sorted: 2 5 5 5 7 7 8 9 9
       //  count: 1 1 2 3 1 2 1 1 2
-      auto sorted_data = sorted_indices.data_ptr<index_t>();
-      auto count_data = count.data_ptr<index_t>();
+      auto sorted_data = sorted_indices.const_data_ptr<index_t>();
+      auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
         at_cuda_detail::cub::ConstantInputIterator<index_t>(1),
@@ -241,7 +241,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
 template <typename scalar_t, typename index_t>
 __global__ void EmbeddingBag_accGradParametersKernel_max(
-    index_t *max_indices, scalar_t *gradOutput,
+    const index_t *max_indices, const scalar_t *gradOutput,
     scalar_t *gradWeight, int64_t stride, int64_t numBags,
     index_t padding_idx, const index_t numel) {
 
@@ -296,8 +296,8 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
         AT_DISPATCH_INDEX_TYPES(max_indices.scalar_type(), "embedding_bag_backward_cuda_max", [&] () {
           EmbeddingBag_accGradParametersKernel_max<
               scalar_t, index_t><<<grid, block, 0, stream>>>(
-              max_indices.data_ptr<index_t>(), grad.data_ptr<scalar_t>(),
-              grad_weight.data_ptr<scalar_t>(), stride, numBags,
+              max_indices.const_data_ptr<index_t>(), grad.const_data_ptr<scalar_t>(),
+              grad_weight.mutable_data_ptr<scalar_t>(), stride, numBags,
               padding_idx, grad_weight.numel());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
@@ -403,20 +403,20 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cuda", [&] () {
       if (mode == MODE_MAX) {
         EmbeddingBag_updateOutputKernel_max<scalar_t, index_t><<<grid, block, 0, stream>>>(
-            indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
-            weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-            offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
-            weight.stride(0), weight.stride(1), bag_size.data_ptr<index_t>(),
-            max_indices.data_ptr<index_t>(),
+            indices.const_data_ptr<index_t>(), offsets.const_data_ptr<index_t>(),
+            weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
+            offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
+            weight.stride(0), weight.stride(1), bag_size.mutable_data_ptr<index_t>(),
+            max_indices.mutable_data_ptr<index_t>(),
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         EmbeddingBag_updateOutputKernel_sum_mean<scalar_t, index_t><<<grid, block, 0, stream>>>(
-            indices.data_ptr<index_t>(), offsets.data_ptr<index_t>(),
-            weight.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-            offset2bag.data_ptr<index_t>(), numIndices, numBags, featureSize,
-            weight.stride(0), weight.stride(1), mode, bag_size.data_ptr<index_t>(),
-            per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
+            indices.const_data_ptr<index_t>(), offsets.const_data_ptr<index_t>(),
+            weight.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
+            offset2bag.mutable_data_ptr<index_t>(), numIndices, numBags, featureSize,
+            weight.stride(0), weight.stride(1), mode, bag_size.mutable_data_ptr<index_t>(),
+            per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
             per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
             padding_idx, weight.size(0));
         C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -549,13 +549,13 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cuda", [&]() {
         _embedding_bag_per_sample_weights_backward_kernel<scalar_t, index_t>
           <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-            grad.data_ptr<scalar_t>(), grad.stride(0), grad.stride(1),
-            weight.data_ptr<scalar_t>(), weight.stride(0), weight.stride(1),
-            indices.data_ptr<index_t>(),
-            offset2bag.data_ptr<index_t>(),
+            grad.const_data_ptr<scalar_t>(), grad.stride(0), grad.stride(1),
+            weight.const_data_ptr<scalar_t>(), weight.stride(0), weight.stride(1),
+            indices.const_data_ptr<index_t>(),
+            offset2bag.const_data_ptr<index_t>(),
             num_samples,
             embedding_features,
-            output.data_ptr<scalar_t>(),
+            output.mutable_data_ptr<scalar_t>(),
             padding_idx);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });

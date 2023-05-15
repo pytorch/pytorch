@@ -13,9 +13,11 @@ import torch._dynamo
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -572,6 +574,106 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_unaligned_static_parameter(self):
+            def gen_inp():
+                inp = torch.ones([20], device="cuda")
+                return [inp[1:]]
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return (x + x,)
+
+            foo_cg = self.cudagraphify_impl(foo, gen_inp(), (0,))
+
+            for _ in range(3):
+                out = foo_cg(gen_inp())
+                self.assertEqual(out, foo(gen_inp()))
+                del out
+
+            node = self.curr_node()
+            self.assertEqual(node.static_input_data_ptrs, [None])
+
+        def test_amp_cache_disabled(self):
+            @torch.compile()
+            def foo(x):
+                return x + x
+
+            for _ in range(3):
+                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            # amp cache for cudagraph outputs should be disabled
+            t2 = torch.rand([4, 4], device="cuda")
+
+            with torch.cuda.amp.autocast():
+                run_once = out @ t2
+
+                out.detach().zero_()
+
+                run_twice = out @ t2
+
+                self.assertNotEqual(run_once, run_twice)
+
+        def test_multiple_insert_removal_caching(self):
+            torch._C._set_cached_tensors_enabled(True)
+            try:
+                x = torch.rand([4], device="cuda")
+
+                torch._C._add_cached_tensor(x)
+                self.assertTrue(torch._C._is_cached_tensor(x))
+
+                torch._C._add_cached_tensor(x)
+                torch._C._remove_cached_tensor(x)
+
+                self.assertFalse(torch._C._is_cached_tensor(x))
+            finally:
+                torch._C._set_cached_tensors_enabled(False)
+
+        def test_accumulate_grad(self):
+            # cudagraph trees shouldnt interfere with accumulation logic
+
+            def compute_grad(grad_output, create_graph):
+                x = torch.randn(5, 5, requires_grad=True, device="cuda")
+
+                @torch.compile()
+                def foo(x):
+                    return x + 2
+
+                y = foo(x)
+                y.backward(grad_output, retain_graph=True)
+                x_grad = x.grad
+                x_grad_clone = x.grad.clone()
+                y.backward(grad_output, create_graph=create_graph)
+                return x_grad, x_grad_clone
+
+            for _ in range(3):
+                grad_output = torch.ones(5, 5, device="cuda")
+
+                # Accumulate in-place when create_graph is False
+                x_grad, x_grad_clone = compute_grad(grad_output, create_graph=False)
+                self.assertEqual(x_grad, x_grad_clone * 2)
+
+                # Accumulate out-of-place when create_graph is False
+                x_grad, x_grad_clone = compute_grad(grad_output, create_graph=True)
+                self.assertEqual(x_grad, x_grad_clone)
+
+        def test_frozen_fn(self):
+            @torch.compile()
+            def foo(x):
+                return x @ x
+
+            for _ in range(3):
+                out = foo(torch.rand([10, 10], device="cuda"))
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
+            frozen = torch._dynamo.run(foo)
+
+            for _ in range(3):
+                out = frozen(torch.rand([10, 10], device="cuda"))
+
+            # didnt do additional recordings
+            self.assertTrue(self.get_manager().new_graph_id().id == 2)
+
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
 
@@ -581,7 +683,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 out = x + x
                 return (x, x[0])
 
-            foo_cg = self.cudagraphify_impl(foo, [inp])
+            foo_cg = self.cudagraphify_impl(foo, [inp], ())
 
             for _ in range(3):
                 out_1, out_2 = foo_cg([inp])
@@ -626,6 +728,42 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(all_live_block_count(), 1)
             del x
             self.assertEqual(all_live_block_count(), 0)
+
+        @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
+        def test_workspace_allocation_error(self):
+            torch._C._cuda_clearCublasWorkspaces()
+
+            prev = torch._inductor.cudagraph_trees.clear_cublas_manager
+
+            try:
+                torch._inductor.cudagraph_trees.clear_cublas_manager = (
+                    contextlib.nullcontext
+                )
+
+                @torch.compile()
+                def foo(x, y):
+                    return x @ x
+
+                inps = [torch.rand([400, 400], device="cuda") for _ in range(2)]
+
+                thrown = False
+                try:
+                    foo(*inps)
+                except Exception as e:
+                    thrown = True
+                    FileCheck().check("at::cuda::getNewWorkspace").check(
+                        "at::cuda::blas::gemm<float>"
+                    ).run(str(e))
+
+                self.assertTrue(thrown)
+
+            finally:
+                torch._C._cuda_clearCublasWorkspaces()
+                torch._inductor.cudagraph_trees.clear_cublas_manager = prev
+                torch._inductor.cudagraph_trees.get_container(
+                    self.device_idx
+                ).tree_manager = None
 
         def test_peristed_output_livenes(self):
             @torch.compile
@@ -856,19 +994,36 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             test()
             self.assertTrue(self.get_manager(device_index=1) is None)
 
-        def test_warnings_on_dealloc(self):
+        def test_error_on_dealloc_use(self):
             @torch.compile()
             def foo(x):
                 return x * x * x
 
             inp = torch.rand([4], device="cuda")
             out = foo(inp)
-            warnings.resetwarnings()
-            with warnings.catch_warnings(record=True) as w:
-                foo(inp)
+            out2 = foo(inp)
 
-            self.assertTrue(len(w) == 1)
-            self.assertTrue("x * x * x" in str(w[0]))
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out + out
+
+            foo(inp)
+
+            with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
+                out2 + out2
+
+        @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+        def test_conv_benchmark(self):
+            with torch.backends.cudnn.flags(
+                enabled=True, benchmark=True, deterministic=False
+            ):
+                m = torch.nn.Conv2d(5, 6, [3, 3]).cuda()
+                inp = torch.randn([2, 5, 16, 16]).cuda()
+
+                @torch.compile()
+                def foo(m, inp):
+                    return m(inp)
+
+                foo(m, inp)
 
         def test_single_stream_use(self):
             @torch.compile()
@@ -915,6 +1070,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             out = foo_opt(ones.detach())
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
+            self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_warn_on_pending_backward(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            warnings.resetwarnings()
+            with warnings.catch_warnings(record=True) as w:
+                out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            FileCheck().check(
+                "Unable to hit fast path of CUDAGraphs because of pending"
+            ).run(str(w[0]))
+            self.assertTrue(self.get_manager().new_graph_id().id == 0)
+
+        def test_mark_step(self):
+            @torch.compile
+            def foo(x):
+                return x * x * x
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
+
+            torch._inductor.cudagraph_mark_step_begin()
+            out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
 
