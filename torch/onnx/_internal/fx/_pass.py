@@ -102,7 +102,7 @@ def _transform_diagnose_call_message_formatter(
     *args: Any,
     **kwargs: Any,
 ) -> str:
-    return f"Running {self.__class__.__name__} pass."
+    return f"Running {self.__class__.__name__} pass. "
 
 
 def fx_graph_tabular(graph: torch.fx.Graph) -> str:
@@ -170,7 +170,6 @@ class Transform(abc.ABC):
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_pass,
-        exception_report_level=diagnostics.levels.ERROR,
         diagnostic_message_formatter=_transform_diagnose_call_message_formatter,
     )
     def run(self, *args, **kwargs) -> torch.fx.GraphModule:
