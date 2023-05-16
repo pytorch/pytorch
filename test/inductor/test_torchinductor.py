@@ -6058,6 +6058,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+
 @dataclasses.dataclass
 class TestFailure:
     suffixes: Tuple[str]

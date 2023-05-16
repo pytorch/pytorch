@@ -468,10 +468,6 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.log10()"
 
     @staticmethod
-    def erfc(x):
-        return f"{x}.erfc()"
-
-    @staticmethod
     def nextafter(x):
         return f"{x}.nextafter()"
 
@@ -849,10 +845,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
-
-    @staticmethod
-    def erfc(x):
-        return f"std::erfc({x})"
 
     @staticmethod
     def log10(x):
