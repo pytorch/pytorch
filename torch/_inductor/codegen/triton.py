@@ -1972,7 +1972,7 @@ class TritonScheduling:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
-                get_fused_kernel_name(node_schedule)
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names
                 else ""
             )
