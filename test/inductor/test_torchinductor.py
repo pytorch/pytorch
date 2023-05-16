@@ -6141,6 +6141,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_uint(self):
+        def fn():
+            x = torch.tensor(5, device="cuda", dtype=torch.uint8)
+            y = torch.neg(x)
+            return x < y
+
+        self.common(fn, ())
+
 
 @dataclasses.dataclass
 class TestFailure:

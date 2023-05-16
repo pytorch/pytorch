@@ -536,12 +536,17 @@ class KernelArgs:
             live_outs.add(outer)
         return live_outs
 
+
 # PyTorch only supports uint8. Use this list for future updates.
-_uint_types = [torch.uint8, ]
+_uint_types = [
+    torch.uint8,
+]
+
 
 def _torch_uint_type_to_tl_type(dtype):
     if dtype == torch.uint8:
         return "tl.uint8"
+
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
@@ -643,9 +648,11 @@ class CSE:
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
-                if assignment and name == 'constant' and origin_args[1] in _uint_types:
+                if assignment and name == "constant" and origin_args[1] in _uint_types:
                     target_tl_type = _torch_uint_type_to_tl_type(origin_args[1])
-                    line = f"{self.prefix}{var} = {self.prefix}{var}.to({target_tl_type})"
+                    line = (
+                        f"{self.prefix}{var} = {self.prefix}{var}.to({target_tl_type})"
+                    )
                     buffer.writeline(line)
 
         return self.cache[cache_key]
@@ -745,7 +752,10 @@ class Kernel(CodeGen):
             def __getattr__(name):
                 def inner(*args, **kwargs):
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs), origin_args=args, name=name
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),
+                        origin_args=args,
+                        name=name,
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
