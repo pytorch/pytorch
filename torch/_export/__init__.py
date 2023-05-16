@@ -11,6 +11,8 @@ import torch.fx
 from . import graph_module
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
+from torch._functorch.aot_autograd import aot_export_module
+from torch._guards import detect_fake_mode
 
 import torch.utils._pytree as pytree
 from torch._export.pass_base import PassType
@@ -105,16 +107,26 @@ def _export(
 
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
         try:
-            gm, _ = torch._dynamo.export(
+            gm_torch_level, _ = torch._dynamo.export(
                 f,
                 *args,
-                aten_graph=True,
-                tracing_mode="symbolic",
-                decomposition_table=DECOMP_TABLE,
+                aten_graph=False,
                 constraints=constraints,
                 assume_static_by_default=True,
-                functionalize=True,
             )
+
+            fake_inps = []
+            for node in gm_torch_level.graph.nodes:
+                if node.op == "placeholder" and "val" in node.meta:
+                    fake_val = node.meta["val"]
+                    fake_inps.append(fake_val)
+
+            fake_mode = detect_fake_mode(fake_inps)
+
+            fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
+
+            gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
