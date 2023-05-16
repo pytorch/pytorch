@@ -26,12 +26,12 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 
-log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def data_type_logger(msg):
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Data type propagation: %s", msg)
+    if schedule_log.isEnabledFor(logging.DEBUG):
+        schedule_log.debug("Data type propagation: %s", msg)
 
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
