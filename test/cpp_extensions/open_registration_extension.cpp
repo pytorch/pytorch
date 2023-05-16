@@ -24,6 +24,9 @@ static c10::DeviceIndex custom_device_index = 0;
 
 static uint64_t abs_counter = 0;
 static uint64_t last_abs_saved_value = 0;
+
+static uint64_t storageImpl_counter = 0;
+static uint64_t last_storageImpl_saved_value = 0;
 // register guard
 namespace at {
 namespace detail {
@@ -46,6 +49,27 @@ namespace at::native {
 REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 
 } // namespace at::native
+
+// // A dummy storageImp for our custom device, that secretly uses the CPU
+c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t, c10::SymInt size_bytes, c10::Allocator* allocator, bool resizable) {
+  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
+  storageImpl_counter += 1;
+  return custom_storage_impl;
+}
+
+// Register our dummy storageImpl create method.
+void custom_storage_registry() {
+  c10::SetStorageImplCreate(c10::DeviceType::PrivateUse1, &make_custom_storage_impl);
+}
+
+bool custom_storageImpl_called() {
+  if (storageImpl_counter > last_storageImpl_saved_value) {
+    last_storageImpl_saved_value = storageImpl_counter;
+    return true;
+  }
+  return false;
+}
+
 struct CustomBackendMetadata : public c10::BackendMeta {
   // for testing this field will mutate when clone() is called by shallow_copy_from.
   int backend_version_format_{-1};
@@ -327,4 +351,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
+    m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
+    m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");
 }
