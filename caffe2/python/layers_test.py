@@ -142,9 +142,9 @@ class TestLayers(LayersTestCase):
             ), self.model.loss.addLoss_auto_2
         )
         assert core.BlobReference('loss_blob_in_tuple_0')\
-         in self.model.loss.field_blobs()
+            in self.model.loss.field_blobs()
         assert core.BlobReference('loss_blob_in_tuple_1')\
-         in self.model.loss.field_blobs()
+            in self.model.loss.field_blobs()
 
     def testFilterMetricSchema(self):
         self.model.add_metric_field("a:b", schema.Scalar())
@@ -330,7 +330,7 @@ class TestLayers(LayersTestCase):
         input_record = self.new_record(
             schema.Struct(
                 ('history_sequence', schema.Scalar((np.float32, (max_length,
-                    input_dim)))),
+                                                                 input_dim)))),
             )
         )
         fc_out = self.model.FC(
@@ -351,7 +351,7 @@ class TestLayers(LayersTestCase):
         input_record = self.new_record(
             schema.Struct(
                 ('history_sequence', schema.Scalar((np.float32, (max_length,
-                    input_dim)))),
+                                                                 input_dim)))),
             )
         )
         fc_transposed_out = self.model.FC(
@@ -372,7 +372,7 @@ class TestLayers(LayersTestCase):
         input_record = self.new_record(
             schema.Struct(
                 ('history_sequence', schema.Scalar((np.float32, (max_length,
-                    input_dim)))),
+                                                                 input_dim)))),
             )
         )
         fc_transposed_out = self.model.FC(
@@ -494,7 +494,7 @@ class TestLayers(LayersTestCase):
 
         self.assertEqual(len(self.model.layers), 1)
         self.assertEqual(output_schema._items.metadata.categorical_limit,
-                modulo)
+                         modulo)
         train_init_net, train_net = self.get_training_nets()
         if use_divide_mod:
             self.assertEqual(len(train_net.Proto().op), 3)
@@ -507,10 +507,10 @@ class TestLayers(LayersTestCase):
     )
     def testSparseFeatureHashIdScoreList(self, use_hashing, modulo):
         record = schema.NewRecord(self.model.net,
-                schema.Map(schema.Scalar(np.int64,
-                    metadata=schema.Metadata(
-                        categorical_limit=60000)),
-                    np.float32))
+                                  schema.Map(schema.Scalar(np.int64,
+                                                           metadata=schema.Metadata(
+            categorical_limit=60000)),
+            np.float32))
 
         output_schema = self.model.SparseFeatureHash(
             record,

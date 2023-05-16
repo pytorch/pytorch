@@ -3362,10 +3362,8 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-            
                 "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
                 "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
-            
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
