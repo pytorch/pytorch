@@ -1523,7 +1523,7 @@ def run_tests(
 
 
 def check_pip_packages() -> None:
-    packages = ["pytest-rerunfailures", "pytest-shard", "pytest-flakefinder"]
+    packages = ["pytest-rerunfailures", "pytest-shard", "pytest-flakefinder", "pytest-xdist"]
     installed_packages = [i.key for i in pkg_resources.working_set]
     for package in packages:
         if package not in installed_packages:
