@@ -77,7 +77,7 @@ updates the parameters, so the scale factor does not interfere with the learning
 .. note::
 
   AMP/fp16 may not work for every model! For example, most bf16-pretrained models cannot operate in
-  the fp16 numerical range of max 65k and will cause gradients to overflow instead of underflow. In
+  the fp16 numerical range of max 65504 and will cause gradients to overflow instead of underflow. In
   this case, the scale factor may decrease under 1 as an attempt to bring gradients to a number
   representable in the fp16 dynamic range. While one may expect the scale to always be above 1, our
   GradScaler does NOT make this guarantee to maintain performance. If you encounter NaNs in your loss
