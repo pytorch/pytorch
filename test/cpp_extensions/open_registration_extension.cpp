@@ -50,7 +50,7 @@ REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
 
 } // namespace at::native
 
-// // A dummy storageImp for our custom device, that secretly uses the CPU
+// A dummy storageImpl for our custom device, that secretly uses the CPU
 c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t, c10::SymInt size_bytes, c10::Allocator* allocator, bool resizable) {
   c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
   storageImpl_counter += 1;
