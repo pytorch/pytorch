@@ -1,13 +1,17 @@
+import contextlib
 import itertools
 from typing import List
 
 import sympy
 
+import torch
+
 from .. import config
 from ..ir import Layout
-from ..utils import ceildiv, sympy_product
+from ..utils import ceildiv, free_symbol_startswith, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
+from .triton import TritonKernel
 from .triton_overrides import TritonOverrides
 from .triton_utils import (
     config_of,
@@ -21,60 +25,21 @@ from .triton_utils import (
 texpr = TritonPrinter().doprint
 
 
-class ListTracker:
-    def __init__(self, var, arg_names, layouts):
-        self.var: TritonCSEVariable = var
-        self.arg_names: List[str] = arg_names
-        self.layouts: List[Layout] = layouts
-        self.indexers = [layout.make_indexer() for layout in layouts]
-        self.range_trees: List[IterationRangesRoot] = []
-        self.index_vars: List[sympy.symbol] = []
-        name = "xindex"
-        for layout in layouts:
-            tree = IterationRangesRoot(
-                "xindex", sympy_product(layout.size), name[0], 0, V.kernel
-            )
-            self.range_trees.append(tree)
-            self.index_vars.append(tree.construct(layout.size))
-
-    def codegen_tile_ptrs(self, code: IndentedBuffer, list_index: int):
-        index_expr = self.index_expr(list_index)
-
-        nodes = [
-            V.kernel.range_tree_nodes[v]
-            for v in sorted(index_expr.free_symbols, key=lambda s: s.name)
-        ]
-        for node in nodes:
-            node.codegen_into(code)
-
-        code.splice(
-            f"{self.var}_tile_ptrs = {self.arg_names[list_index]} + ({index_expr})"
-        )
-
-    def index_expr(self, list_index: int):
-        expr = self.indexers[list_index](self.index_vars[list_index])
-        return V.graph.sizevars.simplify_with_ranges(
-            expr, self.range_trees[list_index].var_ranges
-        )
-
-
 class ForeachKernel(Kernel):
-    overrides = TritonOverrides
-
     @staticmethod
-    def partition_schedule(node_schedule):
+    def horizontal_partition(node_schedule):
         """Creates one or more ForeachKernels if the number of args exceeds CUDA limits."""
         assert len(node_schedule) >= 1
 
         MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
-        partitions = []
         cur_count = 0
+        kernels = []
         cur_partition = []
         for node in node_schedule:
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
             if cur_count + read_write_count > MAX_NUM_ARGS:
-                partitions.append(cur_partition)
+                kernels.append(ForeachKernel(cur_partition))
                 cur_partition = [node]
                 cur_count = read_write_count
             else:
@@ -82,11 +47,11 @@ class ForeachKernel(Kernel):
                 cur_partition.append(node)
 
         if cur_partition:
-            partitions.append(cur_partition)
+            kernels.append(ForeachKernel(cur_partition))
 
-        return partitions
+        return kernels
 
-    def __init__(self, num_sub_kernels):
+    def __init__(self, nodes):
         super().__init__()
         self.block_size = 1024  # Try tuning this value
         # self.grid = (
@@ -94,73 +59,34 @@ class ForeachKernel(Kernel):
         #    1,
         #    1,
         # )
+        self.nodes = nodes
         self.num_warps = 8
-        self.load_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
-        self.compute_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
-        self.store_buffers = [IndentedBuffer() for _ in range(num_sub_kernels)]
-        self.range_trees = []
+        self.sub_kernels = []
+        self.iter_vars_count = itertools.count()
+        for node in nodes:
+            _, els = node.group
+            sub_kernel = TritonKernel(*els, index_dtype="tl.int32")
+            sub_kernel.args = self.args
+            sub_kernel.iter_vars_count = self.iter_vars_count
+            self.sub_kernels.append(sub_kernel)
+        self.kernel = None
 
-    def set_index(self, index):
-        assert index >= 0 and index < len(self.load_buffers)
-        return self.swap_buffers(
-            self.load_buffers[index],
-            self.compute_buffers[index],
-            self.store_buffers[index],
-        )
+    def set_kernel(self, index):
+        assert index >= 0 and index < len(self.sub_kernels)
+        exitstack = contextlib.ExitStack()
 
-    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
-        """
-        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
+        @contextlib.contextmanager
+        def _set_kernel():
+            old_kernel = self.kernel
+            self.kernel = self.sub_kernels[index]
+            try:
+                yield
+            finally:
+                self.kernel = old_kernel
 
-        To do this we need to split up the iteration space of i0 into something like:
-            for i1 in s0:
-              for i2 in s1:
-                i0 = i1*s1 + i2
-                ....
+        exitstack.enter_context(_set_kernel())
 
-        This function matches and resplits lengths to the groups of
-        this kernel to enable tiled + non-tiled fusions.
-        """
-        groups = [rt.numel for rt in self.range_trees]
-        if not self.inside_reduction:
-            groups[-1] = sympy.Integer(1)
-
-        if len(lengths) == len(self.range_trees) and all(
-            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
-            for x, g in zip(lengths, groups)
-        ):
-            return self.set_ranges(*lengths)
-
-        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
-        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
-        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
-
-    def split_and_set_ranges(self, lengths: List[List[sympy.Expr]]):
-        """
-        We may want to fuse `for i0 in s0*s1` into a tiled kernel with groups (s0, s1).
-
-        To do this we need to split up the iteration space of i0 into something like:
-            for i1 in s0:
-              for i2 in s1:
-                i0 = i1*s1 + i2
-                ....
-
-        This function matches and resplits lengths to the groups of
-        this kernel to enable tiled + non-tiled fusions.
-        """
-        groups = [rt.numel for rt in self.range_trees]
-        if not self.inside_reduction:
-            groups[-1] = sympy.Integer(1)
-
-        if len(lengths) == len(self.range_trees) and all(
-            V.graph.sizevars.simplify(sympy_product(x) - g) == 0
-            for x, g in zip(lengths, groups)
-        ):
-            return self.set_ranges(*lengths)
-
-        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
-        itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
-        return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
+        return exitstack
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -219,39 +145,19 @@ class ForeachKernel(Kernel):
             + "@triton.jit"
         )
 
-    def _list_tracker(self, list_name, var, arg_names, layouts):
-        self.lists[list_name] = ListTracker(var, arg_names, layouts)
-        return self.lists[list_name]
+    def codegen(self):
+        self.codegen_sub_kernels()
+        self.codegen_kernel()
 
-    def get_list(self, list_name):
-        return V.graph.lists[list_name][
-            self.sublist_indices[0] : self.sublist_indices[1]
-        ]
+    def codegen_sub_kernels(self):
+        for node, kernel in zip(self.nodes, self.sub_kernels):
+            with kernel:
+                for sub_node in node.get_nodes():
+                    sub_node.mark_run()
 
-    # TODO: handle the case where we see the same list with different layouts
-    def load_list(self, list_name: str, layouts: List[Layout]):
-        if list_name not in self.lists:
-            var = self.cse.newvar()
-            arg_names = []
-
-            for buffer_name in self.get_list(list_name):
-                arg_names.append(self.args.input(buffer_name))
-
-            self._list_tracker(list_name, var, arg_names, layouts)
-            self.loads.writeline(f"{var} = tl.load({var}_tile_ptrs, mask=xmask)")
-
-        return self.lists[list_name].var
-
-    def store_list(self, list_name: str, layouts: List[Layout], value):
-        if list_name not in self.lists:
-            var = self.cse.newvar()
-
-            arg_names = []
-            for buffer_name in self.get_list(list_name):
-                arg_names.append(self.args.output(buffer_name))
-
-            self._list_tracker(list_name, var, arg_names, layouts)
-            self.stores.writeline(f"tl.store({var}_tile_ptrs, {value}, mask=xmask)")
+                for sub_node in node.get_nodes():
+                    index_vars = kernel.split_and_set_ranges(sub_node.get_ranges())
+                    sub_node.codegen(index_vars)
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -284,12 +190,18 @@ class ForeachKernel(Kernel):
             code.splice("pid = tl.program_id(0)")
             code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
 
-            self._gen_tile_ptrs(code)
+            for sub_kernel in self.sub_kernels:
+                code.splice(sub_kernel.loads)
+                code.splice(sub_kernel.compute)
+                code.splice(sub_kernel.stores)
 
-            code.splice(self.loads)
-            code.splice(self.compute)
-            code.splice(self.stores)
+            # self._gen_tile_ptrs(code)
 
+            # code.splice(self.loads)
+            # code.splice(self.compute)
+            # code.splice(self.stores)
+
+        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):

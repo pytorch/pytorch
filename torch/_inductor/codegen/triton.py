@@ -36,7 +36,6 @@ from .common import (
     PythonPrinter,
     SizeArg,
 )
-from .triton_foreach import ForeachKernel
 from .triton_overrides import triton_compute_type, triton_constant, TritonOverrides
 from .triton_utils import (
     config_of,
@@ -1333,16 +1332,10 @@ class TritonScheduling:
         V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
 
     def codegen_foreach(self, foreach_node):
-        """ """
-        schedules = ForeachKernel.partition_schedule(foreach_node.get_nodes())
-        for schedule in schedules:
-            kernel = ForeachKernel(len(schedule))
-            with kernel:
-                for ind, node in enumerate(schedule):
-                    with kernel.set_index(ind):
-                        node.mark_run()
-                        node.codegen()
-                src_code = kernel.codegen_kernel()
+        from .triton_foreach import ForeachKernel
+
+        for kernel in ForeachKernel.horizontal_partition(foreach_node.get_nodes()):
+            src_code = kernel.codegen()
             kernel_name = self.define_kernel(src_code, [foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
