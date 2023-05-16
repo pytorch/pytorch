@@ -319,12 +319,12 @@ class TestPasses(TestCase):
                 def true_fn(x, y):
                     b = x.item()
                     constrain_as_value(b, min=2, max=5)
-                    return x
+                    return x - b
 
                 def false_fn(x, y):
                     c = y.item()
                     constrain_as_value(c, min=2, max=5)
-                    return y
+                    return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
                 return ret
