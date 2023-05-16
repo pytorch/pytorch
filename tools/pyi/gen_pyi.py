@@ -13,7 +13,7 @@ from torchgen.gen import parse_native_yaml
 from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
 
-from tools.autograd.gen_python_functions import (
+from torchgen.autograd.gen_python_functions import (
     group_overloads,
     load_signatures,
     should_generate_py_binding,
