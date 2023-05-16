@@ -801,6 +801,10 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   return true;
 }
 
+// A allowlist of device type, currently available is PrivateUse1
+static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
+    c10::DeviceType::PrivateUse1};
+
 // The array to save function pointer for BackendMeta serialization.
 // key is the DeviceType, value is std::pair obj.
 // value.first represent get function and value.seconde represent set function
@@ -809,24 +813,29 @@ static std::array<
     at::COMPILE_TIME_MAX_DEVICE_TYPES>
     BackendMetaSerialization;
 
-// A whitelist of device type, currently available is PrivateUse1
-static std::unordered_set<c10::DeviceType> DeviceTypeWhitelist{
-    c10::DeviceType::PrivateUse1};
+// Dynamically obtain serialization function pairs
+// that require the corresponding backend.
+std::array<
+    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+    at::COMPILE_TIME_MAX_DEVICE_TYPES>
+GetBackendMetaSerialization() {
+  return BackendMetaSerialization;
+}
 
 // Register function pointer of Tensor BackendMetadata for serialization.
 void TensorBackendMetaRegistry(
     c10::DeviceType t,
     BackendMetaPtr get_fptr,
     BackendMetaPtr set_fptr) {
-  // Whitelist verification
-  // Only if the devicetype is in the whitelist,
+  // allowlist verification
+  // Only if the devicetype is in the allowlist,
   // we allow the serialization extension to be registered for backendmeta data.
   TORCH_CHECK(
-      DeviceTypeWhitelist.find(t) != DeviceTypeWhitelist.end(),
+      DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
       "It is not allowed to register the serialization method ",
       "of backendMeta data for PrivateUse1. ",
       "If you have related serialization requirements, ",
-      "please expand the whitelist");
+      "please expand the allowlist");
   // Register function pointer
   int device_type = static_cast<int>(t);
   TORCH_CHECK(
@@ -837,72 +846,6 @@ void TensorBackendMetaRegistry(
   BackendMetaSerialization[device_type] =
       c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
           std::make_pair(get_fptr, set_fptr));
-}
-
-// Return a map of Tensor Metadata which including BackendMetaData for
-// serialization. For now, it only takes care of `conj` and `neg` bit.
-std::unordered_map<std::string, bool> getTensorMetadata(const at::Tensor& t) {
-  // We don't support serializing `ZeroTensor` as it is not public
-  // facing yet.
-  TORCH_CHECK(
-      !t._is_zerotensor(),
-      "ZeroTensor is not serializable,",
-      " please file an issue if required.");
-  std::unordered_map<std::string, bool> metadata{};
-
-  // Only add meta-data if the value is not default.
-  if (t.is_conj()) {
-    metadata["conj"] = true;
-  }
-  if (t.is_neg()) {
-    metadata["neg"] = true;
-  }
-  // Only add BackendMetaData for custom backend if the function pointer is
-  // registered.
-  int device_type = static_cast<int>(t.device().type());
-  if (BackendMetaSerialization[device_type].has_value()) {
-    // Pass the tensor and metadata map references as parameters to the custom
-    // serialization function.
-    BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().first;
-    fptr(t, metadata);
-  }
-  return metadata;
-}
-
-void setTensorMetadata(
-    const at::Tensor& t,
-    std::unordered_map<std::string, bool> metadata) {
-  auto iter_end = metadata.end();
-  auto iter_temp = metadata.find("conj");
-  if (iter_temp != iter_end) {
-    t._set_conj(true);
-    metadata.erase(iter_temp);
-  }
-  iter_temp = metadata.find("neg");
-  if (iter_temp != iter_end) {
-    t._set_neg(true);
-    metadata.erase(iter_temp);
-  }
-  // Only set BackendMetaData for custom backend if the function pointer is
-  // registered.
-  int device_type = static_cast<int>(t.device().type());
-  if (BackendMetaSerialization[device_type].has_value()) {
-    // Pass the tensor and metadata map references as parameters to the custom
-    // deserialization function.
-    BackendMetaPtr fptr = BackendMetaSerialization[device_type].value().second;
-    fptr(t, metadata);
-  }
-}
-
-void setTensorMetadata(
-    const at::Tensor& t,
-    c10::Dict<c10::IValue, c10::IValue> metadata_idict) {
-  std::unordered_map<std::string, bool> metadata;
-  for (auto& pair : metadata_idict) {
-    auto key = *pair.key().toString();
-    metadata[key] = pair.value().toBool();
-  }
-  setTensorMetadata(t, std::move(metadata));
 }
 
 } // namespace torch::jit

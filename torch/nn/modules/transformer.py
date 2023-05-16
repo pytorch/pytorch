@@ -203,10 +203,14 @@ class TransformerEncoder(Module):
         Args:
             src: the sequence to the encoder (required).
             mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as mask (optional)
-                and ignores attn_mask for computing scaled dot product attention.
-                Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``is_causal`` provides a hint that ``mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -229,7 +233,6 @@ class TransformerEncoder(Module):
         )
 
         output = src
-        output_size = output.size()
         convert_to_nested = False
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
@@ -316,7 +319,7 @@ class TransformerEncoder(Module):
             output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = output.to_padded_tensor(0., output_size)
+            output = output.to_padded_tensor(0., src.size())
 
         if self.norm is not None:
             output = self.norm(output)
@@ -361,10 +364,21 @@ class TransformerDecoder(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -494,9 +508,14 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as src_mask.
-              Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
+            is_causal: If specified, applies a causal mask as ``src mask``.
+                Default: ``False``.
+                Warning:
+                ``is_causal`` provides a hint that ``src_mask`` is the
+                causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
 
         Shape:
             see the docs in Transformer class.
@@ -706,10 +725,22 @@ class TransformerDecoderLayer(Module):
             memory_mask: the mask for the memory sequence (optional).
             tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
-            tgt_is_causal: If specified, applies a causal mask as tgt mask.
-                Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as memory mask.
-                Mutually exclusive with providing memory_mask. Default: ``False``.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt mask``.
+                Default: ``False``.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
+
         Shape:
             see the docs in Transformer class.
         """

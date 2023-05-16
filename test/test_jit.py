@@ -4130,7 +4130,11 @@ def foo(x):
                 return torch.relu(x)
 
         f = torch.jit.script(Foo())
-        self.assertEqual('ScriptObject', str(f._c))
+
+        str_f = str(f._c)
+        self.assertTrue(str_f.startswith('ScriptObject'))
+        self.assertTrue('__torch__.' in str_f)
+        self.assertTrue('.Foo' in str_f)
 
     def test_jitter_bug(self):
         @torch.jit.script
