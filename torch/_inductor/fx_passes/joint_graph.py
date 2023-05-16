@@ -66,3 +66,17 @@ def pointless_convert(match: Match, arg, dtype1, dtype2):
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
         match.erase_nodes(graph)
+
+
+@register_graph_pattern(
+    CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
+    pass_dict=patterns,
+)
+def pointless_view(match: Match, arg, size):
+    """Remove no-op view"""
+    graph = match.graph
+    node = match.output_node()
+    arg_size = list(node.args[0].meta["val"].shape)
+    if size == arg_size:
+        node.replace_all_uses_with(node.args[0])
+        match.erase_nodes(graph)
