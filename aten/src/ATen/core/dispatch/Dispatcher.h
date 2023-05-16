@@ -13,7 +13,6 @@
 #include <mutex>
 #include <condition_variable>
 #include <type_traits>
-#include <c10/core/SafePyObject.h>
 
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
@@ -389,10 +388,6 @@ public:
 
   c10::ArrayRef<at::Tag> getTags() const {
     return operatorDef_->op.getTags();
-  }
-
-  void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
-    operatorDef_->op.setReportErrorCallback_(std::move(callback));
   }
 
   bool hasTag(const at::Tag& tag) const {

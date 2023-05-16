@@ -84,13 +84,9 @@ CI_SKIP[CI("eager", training=False)] = [
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
+    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
-    # KeyError: '_ignore_torch_cuda_oom'
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
