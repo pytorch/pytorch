@@ -44,7 +44,7 @@ class TestRebase(TestCase):
         mocked_run_git.assert_has_calls(calls)
         self.assertIn(
             f"Successfully rebased `master` onto `{MAIN_BRANCH}`",
-            mocked_post_comment.call_args[0][3]
+            mocked_post_comment.call_args[0][3],
         )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -75,7 +75,7 @@ class TestRebase(TestCase):
         mocked_run_git.assert_has_calls(calls)
         self.assertIn(
             f"Successfully rebased `master` onto `{VIABLE_STRICT_BRANCH}`",
-            mocked_post_comment.call_args[0][3]
+            mocked_post_comment.call_args[0][3],
         )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
@@ -106,7 +106,7 @@ class TestRebase(TestCase):
         mocked_run_git.assert_has_calls(calls)
         self.assertIn(
             "Tried to rebase and push PR #31093, but it was already up to date",
-            mocked_post_comment.call_args[0][3]
+            mocked_post_comment.call_args[0][3],
         )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
