@@ -4,7 +4,6 @@ import sys
 import unittest
 
 import torch
-
 import torch._dynamo
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
@@ -13,7 +12,12 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import DeterministicGuard, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    DeterministicGuard,
+    IS_FBCODE,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+)
 
 try:
     try:
@@ -111,6 +115,9 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @unittest.skipIf(
+        IS_FBCODE, "RuntimeError: Triton Error [CUDA]: invalid device context"
+    )
     def test_backward_context(self):
         def fn(x):
             return x * 3
@@ -306,7 +313,11 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import CachingAutotuner, grid
+        from torch._inductor.triton_heuristics import (
+            CachingAutotuner,
+            grid,
+            HeuristicType,
+        )
         from torch._inductor.utils import instance_descriptor
 
         def autotune(configs, meta):
@@ -318,6 +329,7 @@ class CudaReproTests(TestCase):
                     configs=configs,
                     save_cache_hook=False,
                     mutated_arg_names=["in_out_ptr0"],
+                    heuristic_type=HeuristicType.POINTWISE,
                 )
 
             return decorator
@@ -594,6 +606,37 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_embedding_var_mean(self):
+        def forward(arg0_1):
+            full = torch.ops.aten.full.default(
+                [1, 2048],
+                1,
+                dtype=torch.float32,
+                layout=torch.strided,
+                device=torch.device(type="cuda", index=0),
+                pin_memory=False,
+            )
+            convert_element_type_1 = torch.ops.prims.convert_element_type.default(
+                full, torch.int64
+            )
+            cumsum = torch.ops.aten.cumsum.default(convert_element_type_1, 1)
+            mul = torch.ops.aten.mul.Tensor(cumsum, convert_element_type_1)
+            sub_1 = torch.ops.aten.sub.Tensor(mul, 1)
+            slice_5 = torch.ops.aten.slice.Tensor(sub_1, 0, 0, 9223372036854775807)
+            slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 0, 9223372036854775807)
+            add_2 = torch.ops.aten.add.Tensor(slice_6, 2)
+            embedding_1 = torch.ops.aten.embedding.default(arg0_1, add_2)
+            var_mean = torch.ops.aten.var_mean.correction(
+                embedding_1, [2], correction=0, keepdim=True
+            )
+            return [var_mean[0], var_mean[1], add_2]
+
+        emb = torch.randn([2050, 768], device="cuda")
+        gm = make_fx(forward)(emb)
+        opt = torch._inductor.compile_fx.compile_fx_inner(gm, [emb])
+        opt([emb])
+        torch.cuda.synchronize()
+
     def test_deterministic_algorithms(self):
         N = 10000
 
@@ -613,10 +656,55 @@ class CudaReproTests(TestCase):
                 rn = fn(idx, values)
                 self.assertEqual(r1, rn, atol=0, rtol=0)
 
+    # https://github.com/pytorch/pytorch/issues/96406
+    def test_linear_cpu_input(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            def forward(self, data):
+                data = data.to("cuda")
+                return self.linear(data)
+
+        mod = Model().cuda().eval()
+        with torch.no_grad():
+            self.common(mod, (torch.randn(4, 4),))
+
+    def test_issue100806(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear1 = torch.nn.Linear(10, 20)
+                self.linear2 = torch.nn.Linear(20, 30)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = torch.cat((x, x), dim=1)
+                x = x.view(-1, 2, 30)
+                x = x[:, 1, :]
+                x = self.relu(x)
+                return x
+
+        device = "cuda"
+        batch_size = 2
+        x = torch.randn(batch_size, 10).to(device)
+        func = Model().to(device)
+
+        with torch.no_grad():
+            func.train(False)
+            jit_func = torch.compile(func)
+
+            res1 = func(x)
+            res2 = jit_func(x)
+            self.assertEqual(res1, res2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    if HAS_CUDA and not TEST_WITH_ASAN:
+    if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

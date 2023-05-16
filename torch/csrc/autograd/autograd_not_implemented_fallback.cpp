@@ -47,7 +47,7 @@ void _foreach_tensor(
 
 } // namespace
 
-void autogradNotImplementedFallbackImpl(
+static void autogradNotImplementedFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack) {
@@ -252,7 +252,7 @@ torch::CppFunction autogradNotImplementedFallback() {
       &autogradNotImplementedFallbackImpl>();
 }
 
-void autogradNotImplementedInplaceOrViewFallbackImpl(
+static void autogradNotImplementedInplaceOrViewFallbackImpl(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack) {

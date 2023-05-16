@@ -10,7 +10,8 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop"
+    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop",
+    "DefaultDeviceType"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -35,6 +36,56 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
         warnings.warn("None of the inputs have requires_grad=True. Gradients will be None")
 
 
+def _get_device_module(device='cuda'):
+    device_module = getattr(torch, device)
+    return device_module
+
+class DefaultDeviceType(object):
+    r"""
+    A class that manages the default device type for checkpointing.
+    If no non-CPU tensors are present, the default device type will
+    be used. The default value is 'cuda'. The device type is used in
+    the checkpointing process when determining which device states
+    to save and restore for recomputation.
+    """
+    _default_device_type = "cuda"
+
+    @staticmethod
+    def set_device_type(device: str = "cuda"):
+        """
+        Set the default device type for checkpointing.
+
+        Args:
+            device (str): The device type to be set as default. Default is 'cuda'.
+        """
+        DefaultDeviceType._default_device_type = device
+
+    @staticmethod
+    def get_device_type() -> str:
+        """
+        Get the current default device type for checkpointing.
+
+        Returns:
+            str: The current default device type.
+        """
+        return DefaultDeviceType._default_device_type
+
+def _infer_device_type(*args):
+    device_types = list({arg.device.type for arg in args
+                        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
+    if len(device_types) > 1:
+        warnings.warn("Tensor arguments, excluding CPU tensors, are detected on at least two types of devices. "
+                      "Device state will only be saved for devices of a single device type, and the remaining "
+                      "devices will be ignored. Consequently, if any checkpointed functions involve randomness, "
+                      "this may result in incorrect gradients. (Note that if CUDA devices are among the devices "
+                      "detected, it will be prioritized; otherwise, the first device encountered will be selected.)")
+    if len(device_types) == 0:
+        return DefaultDeviceType.get_device_type()
+    elif "cuda" in device_types:
+        return "cuda"
+    else:
+        return device_types[0]
+
 # We can't know if the run_fn will internally move some args to different devices,
 # which would require logic to preserve rng states for those devices as well.
 # We could paranoically stash and restore ALL the rng states for all visible devices,
@@ -45,32 +96,43 @@ def check_backward_validity(inputs: Iterable[Any]) -> None:
 def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # This will not error out if "arg" is a CPU tensor or a non-tensor type because
     # the conditionals short-circuit.
-    fwd_gpu_devices = list({arg.get_device() for arg in args
-                            if isinstance(arg, torch.Tensor) and arg.is_cuda})
+    fwd_device_ids = list({arg.get_device() for arg in args
+                          if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu"})
 
-    fwd_gpu_states = []
-    for device in fwd_gpu_devices:
-        with torch.cuda.device(device):
-            fwd_gpu_states.append(torch.cuda.get_rng_state())
+    fwd_device_states = []
+    device_module = _get_device_module(_infer_device_type(*args))
 
-    return fwd_gpu_devices, fwd_gpu_states
+    for device_id in fwd_device_ids:
+        with device_module.device(device_id):
+            fwd_device_states.append(device_module.get_rng_state())
+
+    return fwd_device_ids, fwd_device_states
 
 
 def set_device_states(devices, states) -> None:
+    device_module = _get_device_module(_infer_device_type(*states))
     for device, state in zip(devices, states):
-        with torch.cuda.device(device):
-            torch.cuda.set_rng_state(state)
+        with device_module.device(device):
+            device_module.set_rng_state(state)
 
-def _get_autocast_kwargs():
-    gpu_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
-                           "dtype": torch.get_autocast_gpu_dtype(),
-                           "cache_enabled": torch.is_autocast_cache_enabled()}
+
+def _get_autocast_kwargs(device="cuda"):
+
+    if device == "cuda":
+        device_autocast_kwargs = {"enabled": torch.is_autocast_enabled(),
+                                  "dtype": torch.get_autocast_gpu_dtype(),
+                                  "cache_enabled": torch.is_autocast_cache_enabled()}
+    else:
+        device_module = _get_device_module(device)
+        device_autocast_kwargs = {"enabled": device_module.is_autocast_enabled(),
+                                  "dtype": device_module.get_autocast_dtype(),
+                                  "cache_enabled": torch.is_autocast_cache_enabled()}
 
     cpu_autocast_kwargs = {"enabled": torch.is_autocast_cpu_enabled(),
                            "dtype": torch.get_autocast_cpu_dtype(),
                            "cache_enabled": torch.is_autocast_cache_enabled()}
 
-    return gpu_autocast_kwargs, cpu_autocast_kwargs
+    return device_autocast_kwargs, cpu_autocast_kwargs
 
 class CheckpointFunction(torch.autograd.Function):
 
@@ -80,17 +142,19 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
         # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-        ctx.gpu_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs()
+        ctx.device = _infer_device_type(*args)
+        ctx.device_autocast_kwargs, ctx.cpu_autocast_kwargs = _get_autocast_kwargs(ctx.device)
         if preserve_rng_state:
             ctx.fwd_cpu_state = torch.get_rng_state()
             # Don't eagerly initialize the cuda context by accident.
             # (If the user intends that the context is initialized later, within their
             # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
             # we have no way to anticipate this will happen before we run the function.)
-            ctx.had_cuda_in_fwd = False
-            if torch.cuda._initialized:
-                ctx.had_cuda_in_fwd = True
-                ctx.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
+            ctx.had_device_in_fwd = False
+            device_module = _get_device_module(ctx.device)
+            if device_module._initialized:
+                ctx.had_device_in_fwd = True
+                ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
         # Save non-tensor inputs in ctx, keep a placeholder None for tensors
         # to be filled out during the backward.
@@ -122,6 +186,7 @@ class CheckpointFunction(torch.autograd.Function):
         inputs = list(ctx.inputs)
         tensor_indices = ctx.tensor_indices
         tensors = ctx.saved_tensors
+        device_module = _get_device_module(ctx.device)
 
         # Fill in inputs with appropriate saved tensors.
         for i, idx in enumerate(tensor_indices):
@@ -131,16 +196,16 @@ class CheckpointFunction(torch.autograd.Function):
         # present at this time during forward.  Restore the surrounding state
         # when we're done.
         rng_devices = []
-        if ctx.preserve_rng_state and ctx.had_cuda_in_fwd:
-            rng_devices = ctx.fwd_gpu_devices
-        with torch.random.fork_rng(devices=rng_devices, enabled=ctx.preserve_rng_state):
+        if ctx.preserve_rng_state and ctx.had_device_in_fwd:
+            rng_devices = ctx.fwd_devices
+        with torch.random.fork_rng(devices=rng_devices, enabled=ctx.preserve_rng_state, device_type=ctx.device):
             if ctx.preserve_rng_state:
                 torch.set_rng_state(ctx.fwd_cpu_state)
-                if ctx.had_cuda_in_fwd:
-                    set_device_states(ctx.fwd_gpu_devices, ctx.fwd_gpu_states)
+                if ctx.had_device_in_fwd:
+                    set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
             detached_inputs = detach_variable(tuple(inputs))
             with torch.enable_grad(), \
-                 torch.cuda.amp.autocast(**ctx.gpu_autocast_kwargs), \
+                 device_module.amp.autocast(**ctx.device_autocast_kwargs), \
                  torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
                 outputs = ctx.run_function(*detached_inputs)
 
@@ -172,7 +237,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: bool = True,
+    use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     **kwargs
 ):
@@ -214,7 +279,7 @@ def checkpoint(
           Reentrant checkpoint always recomputes :attr:`function` in its
           entirety during the backward pass.
 
-       * The reentrant variant does not record the autograd graph during the
+        * The reentrant variant does not record the autograd graph during the
           forward pass, as it runs with the forward pass under
           :func:`torch.no_grad`. The non-reentrant version does record the
           autograd graph, allowing one to perform backward on the graph within
@@ -271,6 +336,15 @@ def checkpoint(
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    if use_reentrant is None:
+        warnings.warn(
+            "torch.utils.checkpoint: please pass in use_reentrant=True or "
+            "use_reentrant=False explicitly. The default value of use_reentrant "
+            "will be updated to be False in the future. To maintain current "
+            "behavior, pass use_reentrant=True. It is recommended that you use "
+            "use_reentrant=False. Refer to docs for more details on the "
+            "differences between the two variants.")
+        use_reentrant = True
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs and use_reentrant:
@@ -362,6 +436,13 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
+def _internal_assert(cond):
+    if not cond:
+        raise AssertionError(
+            "Something went unexpectedly wrong in activation checkpoint. "
+            "Please report this bug by filing an issue to PyTorch."
+        )
+
 # NOTE [ Nestable Checkpoint ]
 #
 # The semantics of nested checkpoint can be defined by two basic rules.
@@ -435,10 +516,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #
 # Rule 6. We support doing backward inside checkpoint context
 #
-# This section is just a bunch of random examples that we'd like to support,
-# and comments on how that forced us to make certain design decisions.
-#
-# [ Basic case ]
+# [ retain_graph is True]
 #
 # def fn(x):
 #   y = x.sin()
@@ -468,7 +546,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # - If there are multiple .grad()/.backward() calls, we would perform backward
 #   on the recomputed graph even if early-stop is enabled (see the example below)
 #
-# [ Multiple backwards ]
+# [ retain_graph is False ]
 #
 # The example below shows what happens if during recomputation we find that some
 # of the tensors we are trying to recompute have already been cleared.
@@ -479,24 +557,22 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #   y = x.sin()                           # (1)
 #   z = y.cos()                           # (2)
 #   gx, = torch.autograd.grad(z, x)       # (3)
-#   w = x.sin()                           # (4)
-#   v = w.cos()                           # (5)
-#   gx2, = torch.autograd.grad(v, x)      # (6)
-#   return x * gx * gx2
+#   return x.cos() * gx                   # (4)
 #
 # out = checkpoint(fn)(inp)
+# out.backward()                          # (5)
 #
-# In the code above fn is computed (potentially partially) 4 times in total.
-#
-# 1. Don't save x and y since we are inside a checkpoint.
-# 2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
-# 3. If early stop is enabled, stop at (2)
-# 4. Continue original forward at (4), not saving x and w.
-# 5. (5) triggers a recompute of fn
-# 6. During recompute, we see that in the original graph, gx has already
-#    cleared x and y since backward is run at (3) without retain_graph=True
-#    We save x and w, however.
-# 7. Continue with returning
+# 1, 2. Don't save x and y since we are inside a checkpoint.
+# 3. Trigger a recompute of fn since x and y weren't saved.
+#    And depending on whether early stop is enabled, either stop at (2) or
+#    continue running the function.
+#    Because we are running backward with retain_graph=False, we clear x and y's
+#    holders.
+# 4. Don't save x since we are inside a checkpoint.
+# 5. Calling backward triggers another recompute of fn. During recompute, we see
+#    that x and y have already been cleared in the original graph as indicated
+#    by holder=None. We skip over them. We still save x at (4) (since its holder
+#    is still alive.)
 
 _enable_checkpoint_early_stop = True
 
@@ -595,7 +671,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: int):
         def pack_hook(x):
             target_frame = target_frame_ref()
-            assert target_frame is not None
+            assert target_frame is not None  # appease mypy
             recomp_idx = target_frame.recomp_counter[gid]
             target_frame.recomp_counter[gid] += 1
 
@@ -605,21 +681,22 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                 return x.detach()
             holder = target_frame.weak_holders[recomp_idx]()
 
+            # This holder may have been cleared because someone may have called
+            # backward within forward. If so, we don't need to save.
             if holder is not None:
-                # See Rule 6: [ Multiple backwards ] above
-                if holder.handles.get(gid, None) is None:
-                    holder.handles[gid] = _Handle()
+                _internal_assert(holder.handles.get(gid, None) is None)
+                holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
             if target_frame.early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
-            # See Rule 6: [ Basic case ] above
+            # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 
         def unpack_hook(x):
-            # See Rule 6: [ Basic case ] above for an example of when the graph
-            # created during recomputation could be backwarded.
+            # See Rule 6: [ retain_graph is True ] above for an example of when
+            # the graph created during recomputation could be backwarded.
             return x
 
         super().__init__(pack_hook, unpack_hook)
@@ -653,15 +730,12 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
             if holder.handles[gid] is None:
                 raise RuntimeError(
-                    "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
-                    "Otherwise please open an issue with details on your use case."
+                    "torch.utils.checkpoint: unpack is being triggered for a tensor that was either "
+                    "never recomputed, or already unpacked once. If you are calling ctx.saved_tensors "
+                    "in backward, make sure to do so only once. Otherwise please open an issue with "
+                    "details on your use case."
                 )
-            if holder.handles[gid] not in frame.recomputed[gid]:
-                raise RuntimeError(
-                    "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                    " recomputation being triggered in between, this is not currently supported. Please"
-                    " open an issue with details on your use case."
-                )
+            _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
             holder.handles[gid] = None
             return ret
@@ -693,9 +767,11 @@ def _checkpoint_without_reentrant(
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    device = _infer_device_type(*args)
+    device_module = _get_device_module(device)
     forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
-    gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
+    device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device=device)
 
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
@@ -704,25 +780,25 @@ def _checkpoint_without_reentrant(
         # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
-        had_cuda_in_fwd = False
-        if torch.cuda._initialized:
-            had_cuda_in_fwd = True
-            fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
+        had_device_in_fwd = False
+        if device_module._initialized:
+            had_device_in_fwd = True
+            fwd_devices, fwd_device_states = get_device_states(*args)
 
     def recompute_fn(*inputs):
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
         rng_devices = []
-        if preserve_rng_state and had_cuda_in_fwd:
-            rng_devices = fwd_gpu_devices
-        with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
+        if preserve_rng_state and had_device_in_fwd:
+            rng_devices = fwd_devices
+        with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state, device_type=device):
             if preserve_rng_state:
                 torch.set_rng_state(fwd_cpu_state)
-                if had_cuda_in_fwd:
-                    set_device_states(fwd_gpu_devices, fwd_gpu_states)
+                if had_device_in_fwd:
+                    set_device_states(fwd_devices, fwd_device_states)
 
-            with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+            with device_module.amp.autocast(**device_autocast_kwargs), \
                  torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
                  recompute_context:
                 fn(*args, **kwargs)
@@ -739,11 +815,11 @@ def _checkpoint_without_reentrant(
          forward_context:
         ret = fn(*args, **kwargs)
 
-    if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
-        # Cuda was not initialized before running the forward, so we didn't
-        # stash the CUDA state.
+    if device_module._initialized and preserve_rng_state and not had_device_in_fwd:
+        # Device was not initialized before running the forward, so we didn't
+        # stash the device state.
         raise RuntimeError(
-            "PyTorch's CUDA state was initialized in the forward pass "
+            "PyTorch's device state was initialized in the forward pass "
             "of a Checkpoint, which is not allowed. Please open an issue "
             "if you need this feature.")
 
