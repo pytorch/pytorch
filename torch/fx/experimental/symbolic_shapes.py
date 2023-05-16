@@ -1473,9 +1473,14 @@ try:
         def _Not(self, expr: sympy.Not) -> z3.BoolRef:
             return cast(z3.BoolRef, z3.Not(self(expr.args[0])))
 
+        # We don't check for cases where:
+        #
+        # - 'base' is zero + 'exp' is negative
+        # - 'base' is negative + 'exp' is not an integer
+        #
+        # Ref: https://github.com/pytorch/pytorch/pull/101146#discussion_r1194404896
         def _Pow(self, expr: sympy.Pow) -> z3.ArithRef:
-            base, exp = self(expr.args)
-            return base ** exp
+            return self(expr.base) ** self(expr.exp)
 
         def _Rational(self, expr: sympy.Rational) -> z3.ArithRef:
             return self._div(self(expr.p), self(expr.q))
@@ -1600,12 +1605,12 @@ try:
             for s in e.free_symbols:
                 if s not in self._symbols:
                     assert isinstance(s, sympy.Symbol) and s.is_integer  # type: ignore
-                    self._symbols[s] = z3.Int(s.name)
+                    var = self._symbols[s] = z3.Int(s.name)
 
                     # If 's' is positive (SymPy assumption), we have to convey it to
                     # Z3 as well.
                     if s.is_positive:  # type: ignore
-                        self._outputs.add(self._symbols[s] > 0)
+                        self._outputs.add(var > 0)
 
         def add_input(self, e: sympy.Expr) -> None:
             self._add_freesymbols(e)
@@ -1646,7 +1651,7 @@ try:
             # "Is there any case where it's TRUE for the outputs but FALSE for the inputs?"
             solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
 
-            log.debug(f"translation validation: start: {len(self._inputs)} -> {len(self._outputs)}")
+            log.debug(f"translation validation: start")
             if dynamo_timed()(solver.check)() == z3.sat:
                 # Output expressions are unsound.
                 # Log the found model and input expressions that failed.
@@ -2274,6 +2279,10 @@ Failed inputs:
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(0, 1)
+        # Add output guards for the validator.
+        # Necessary, since they are implicit constraints. i.e. guards might not
+        # be issued because of them.
+        self._add_output_guard(sympy.And(sympy.Eq(symbol, 0), sympy.Eq(symbol, 1)))  # type: ignore
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
     def create_symbol(
@@ -2318,6 +2327,8 @@ Failed inputs:
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
+            # Add output assertions for the newly created symbols
+            self._add_output_guard(sympy.And(sympy.Ne(sympy_expr, 0), sympy.Ne(sympy_expr, 1)))  # type: ignore
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
@@ -2657,7 +2668,6 @@ Failed inputs:
                     if any(is_dim(source) for source in sources):
                         self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                     bounds.append(str(r.lower))
-                    self._add_output_guard(sympy.Le(r.lower, symbol))
                 bounds.append(source_ref(sources[0]))
                 # NB: This looks like an off-by-one error but it's not: the
                 # upper bound may be sys.maxsize - 1 because we intentionally
@@ -2670,8 +2680,6 @@ Failed inputs:
                     if any(is_dim(source) for source in sources):
                         self.dim_constraints.add(sympy.Le(symbol, r.upper))
                     bounds.append(str(r.upper))
-                if r.upper != sympy.oo:
-                    self._add_output_guard(sympy.Le(symbol, r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
 
@@ -2690,6 +2698,16 @@ Failed inputs:
                 raise ConstraintViolationError(f"Constraints violated!\n{err}")
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
+
+        if _translation_validator_enabled():
+            # Add value range bound guards for all symbols with no trivial bounds.
+            # Reason: '_maybe_evaluate_static' may eliminate guards based on the
+            # refined value ranges.
+            for sym, vr in self.var_to_range.items():
+                if vr.lower != -sympy.oo:
+                    self._add_output_guard(sympy.Le(vr.lower, sym))
+                if vr.upper != sympy.oo:
+                    self._add_output_guard(sympy.Le(sym, vr.upper))
 
         self._check_translation_validate()
         return exprs

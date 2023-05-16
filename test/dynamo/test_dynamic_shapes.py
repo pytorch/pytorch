@@ -139,23 +139,11 @@ unittest.expectedFailure(
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 
-translation_validation_xfail = [
+unittest.expectedFailure(
     # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
-    DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes,
-
-    # 'i0 >= 0' is ignored due to its value range, but its bounds guards are not
-    # generated because 'i0' doesn't get to 'produce_guards' function.
-    DynamicShapesExportTests.test_export_preserve_constraints_as_metadata_dynamic_shapes,
-    StaticDefaultDynamicShapesExportTests.test_export_preserve_constraints_as_metadata_dynamic_shapes_static_default,
-    DynamicShapesExportTests.test_exported_graph_serialization_dynamic_shapes,
-    StaticDefaultDynamicShapesExportTests.test_exported_graph_serialization_dynamic_shapes_static_default,
-
-    # Same as above, but for Ne(s0, 1).
-    DynamicShapesHigherOrderOpTests.test_fallback_on_graph_break_complicated_dynamic_shapes,
-]
-
-for test in translation_validation_xfail:
-    unittest.expectedFailure(test)
+    # Ref: https://github.com/sympy/sympy/issues/25146
+    DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
