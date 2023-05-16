@@ -275,16 +275,22 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
-          auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
-            if (is_result) {
-              return !cmp.zero_mask() ? a * poscoef_vec :
-                Vectorized<float>::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+          if (is_result) {
+            if (!cmp0.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              // return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
+              res0 = a0 * poscoef_vec;
             } else {
-              return Vectorized<float>::blendv(a * negiptcoef_vec * negcoef_vec * (b * negiptcoef_vec).exp(), a * poscoef_vec, cmp);
+              res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * (b0 + negcoef_vec), a0 * poscoef_vec, cmp0);
             }
-          };
-          res0 = get_res_masked(cmp0, a0, b0);
-          res1 = get_res_masked(cmp1, a1, b1);
+            if (!cmp0.zero_mask()) {
+              res1 = a1 * poscoef_vec;
+            } else {
+              res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * (b1 + negcoef_vec), a1 * poscoef_vec, cmp1);
+            }
+          } else {
+            res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * negcoef_vec * (b0 * negiptcoef_vec).exp(), a0 * poscoef_vec, cmp0);
+            res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * negcoef_vec * (b1 * negiptcoef_vec).exp(), a1 * poscoef_vec, cmp1);
+          }
           return convert_from_float<scalar_t>(res0, res1);
         });
     });

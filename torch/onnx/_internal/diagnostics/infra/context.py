@@ -9,9 +9,7 @@ import gzip
 
 import logging
 
-from typing import Callable, Generator, List, Mapping, Optional, Type, TypeVar
-
-from typing_extensions import Literal
+from typing import Callable, Generator, List, Literal, Mapping, Optional, Type, TypeVar
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
