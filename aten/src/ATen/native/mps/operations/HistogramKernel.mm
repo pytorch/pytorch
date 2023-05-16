@@ -33,18 +33,15 @@ enum BIN_SELECTION_ALGORITHM {
 // Re-implementation of std::upper_bound with some modifications.
 template<typename T, typename U>
 U upper_bound(constant T * arr, U first, U len, T val) {
-  U middle;
-  U half_;
-
   while (len > 0) {
-    half_ = len >> 1;
-    middle = first + half_;
+    U half_ = len >> 1;
+    U middle = first + half_;
 
     if (val < arr[middle]) {
       len = half_;
     } else {
-      first = ++middle;
-      len = len - half_ - 1;
+      first = middle + 1;
+      len -= half_ + 1;
     }
   }
   return first;
@@ -67,7 +64,7 @@ kernel void histogramdd(constant T  * input_            [[buffer(0)]],
                   constant uint8_t  & has_weight        [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
 
-  constexpr T eps = 8e-6;
+  constexpr T eps = 4e-6;
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
@@ -141,13 +138,7 @@ kernel void histogramdd<DTYPE>(                               \
   uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
-//REGISTER_HISTOGRAMDD_OP(half);
-//REGISTER_HISTOGRAMDD_OP(int);
-//REGISTER_HISTOGRAMDD_OP(long);
-//REGISTER_HISTOGRAMDD_OP(short);
-//REGISTER_HISTOGRAMDD_OP(char);
-//REGISTER_HISTOGRAMDD_OP(uchar);
-//REGISTER_HISTOGRAMDD_OP(bool);
+REGISTER_HISTOGRAMDD_OP(half);
 
 )HISTOGRAM_METAL";
 
