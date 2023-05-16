@@ -33,6 +33,7 @@ __all__ = [
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
+T_stack = TypeVar('T_stack', Tuple[T_co, ...], Dict[str, T_co])
 
 
 class Dataset(Generic[T_co]):
@@ -208,7 +209,7 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 
-class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
+class StackDataset(Dataset[T_stack]):
     r"""Dataset as a stacking of multiple datasets.
 
     This class is useful to assemble different parts of complex input data, given as datasets.
