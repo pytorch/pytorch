@@ -151,16 +151,16 @@ class TestControlFlow(TestCase):
 
     def test_map_autograd_no_grad_output(self):
         def f(x, y):
-            return x.sin().cos() + y, y.cos().sin()
+            return x[0].sin().cos() + y, y.cos().sin()
 
-        xs = torch.ones(3, 2, 2, requires_grad=True)
+        xs = [torch.ones(3, 2, 2, requires_grad=True), torch.ones(3, 3)]
         # Disable the gradient computation for y
         y = torch.ones(2, requires_grad=False)
         res = control_flow.map(f, xs, y)
         expected_res = _fake_map(f, xs, y)
         grad_out = torch.ones_like(res[0])
-        grads = torch.autograd.grad(res[0], (xs,), grad_out)
-        expected_grads = torch.autograd.grad(expected_res[0], (xs,), grad_out)
+        grads = torch.autograd.grad(res[0], (xs[0],), grad_out)
+        expected_grads = torch.autograd.grad(expected_res[0], (xs[0],), grad_out)
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
 
