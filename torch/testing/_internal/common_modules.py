@@ -2429,8 +2429,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule',
                                 dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Not implmented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
+                #    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                #                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
                                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule',
@@ -2470,8 +2470,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),
                    # Not implemented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
+                #    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                #                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
                                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule',
@@ -2507,8 +2507,8 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.complex32, torch.complex64], active_if=TEST_WITH_ROCM),
                    # Not implmented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
+                #    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
+                #                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
                                 dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule',

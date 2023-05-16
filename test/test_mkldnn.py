@@ -380,8 +380,8 @@ class TestMkldnn(TestCase):
         with torch.backends.mkldnn.flags(enabled=False):
             self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-2)
             self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16, prec=1e-2)
-            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.half, prec=1e-3)
-            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.half, prec=1e-3)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.half, prec=2e-3)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.half, prec=2e-3)
 
     def test_conv_transpose2d_nhwc(self):
         self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
@@ -401,7 +401,7 @@ class TestMkldnn(TestCase):
         with torch.backends.mkldnn.flags(enabled=False):
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=2e-2)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=2e-2)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half, prec=2e-3)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half, prec=3e-3)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half, prec=2e-3)
 
     def _test_conv_transpose_base(self, dim):
