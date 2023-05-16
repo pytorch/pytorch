@@ -1022,14 +1022,6 @@ def export(
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.info(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
-
         # Inline constraints added by users correspond to unbacked symbols in shape_env,
         new_graph.meta["inline_constraints"] = {
             k: v
