@@ -243,10 +243,7 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        # has some issues with memory in training
-        locality_reorder = is_inference and config.reordering
-
-        post_grad_passes(gm, locality_reorder=locality_reorder)
+        post_grad_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
