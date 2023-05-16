@@ -39,8 +39,8 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -2043,6 +2043,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
+    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -2082,6 +2083,7 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    @skipIfRocm
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -2114,6 +2116,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @skipIfRocm
     def test_convolution3(self):
         # Test stride or padding or dilation is 1 element list.
         m = torch.nn.Sequential(
@@ -3375,6 +3378,7 @@ class CommonTemplate:
                 ),
             )
 
+    @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -3792,7 +3796,7 @@ class CommonTemplate:
         inputs = (rand_strided((8,), (1,), device=self.device),)
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
-    @config.patch({"triton.cudagraphs": True})
+    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -3804,7 +3808,7 @@ class CommonTemplate:
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
-    @config.patch({"triton.cudagraphs": True})
+    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -4599,7 +4603,7 @@ class CommonTemplate:
 
         self.common(fn2, [torch.randn(55)])
 
-    @config.patch({"triton.cudagraphs": True})
+    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4629,7 +4633,7 @@ class CommonTemplate:
         def fn(a):
             return torch.nn.functional.dropout(a, 0.55, True)
 
-        for cg in (False, True):
+        for cg in [False, True] if not torch.version.hip else [False]:
             with patch.object(config.triton, "cudagraphs", cg):
                 torch._dynamo.reset()
 
@@ -4926,6 +4930,7 @@ class CommonTemplate:
             ],
         )
 
+    @skipIfRocm
     def test_avg_pool2d_backward2(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5486,7 +5491,9 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch({"triton.cudagraphs": True}),
+                lambda: config.patch(
+                    {"triton.cudagraphs": True if not torch.version.hip else False}
+                ),
             ]
 
         for context in contexts:
@@ -5576,6 +5583,7 @@ class CommonTemplate:
         )
 
     @requires_cuda()
+    @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
         if torch._dynamo.config.dynamic_shapes:
@@ -6395,6 +6403,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
 
+        @skipIfRocm
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")
@@ -6482,5 +6491,5 @@ if HAS_CPU:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

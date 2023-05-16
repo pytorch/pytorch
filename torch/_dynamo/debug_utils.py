@@ -687,7 +687,7 @@ class TestInputWriter(InputWriter):
         )
         self._storage_names.append(f"{storage}")
         self._lines.append(
-            f"{storage} = torch.tensor({t.tolist()}, dtype={t.dtype}, device='{t.device.type}')  # {name} \n"
+            f"{storage} = torch.randn({list(t.size())}, dtype={t.dtype}, device='{t.device.type}')  # {name} \n"
         )
 
     def _write_storage_line(
