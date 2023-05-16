@@ -607,8 +607,8 @@ def refresh_model_names_and_batch_sizes():
 
 def huggingface_main():
     # Code to refresh model names and batch sizes
-    # if "--find-batch-sizes" not in sys.argv:
-    #     refresh_model_names_and_batch_sizes()
+    if ("--find-all-batch-sizes" in sys.argv) and ("--only" not in '\t'.join(sys.argv)) and ("--accuracy" not in sys.argv):
+        refresh_model_names_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(HuggingfaceRunner())
