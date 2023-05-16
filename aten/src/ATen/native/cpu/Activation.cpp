@@ -269,29 +269,25 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
           }
         },
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
-          Vectorized<float> a0, a1, res0, res1;
+          Vectorized<float> a0, a1;
           std::tie(a0, a1) = convert_to_float<scalar_t>(a);
           Vectorized<float> b0, b1;
           std::tie(b0, b1) = convert_to_float<scalar_t>(b);
           auto cmp0 = (b0 > zero_vec);
           auto cmp1 = (b1 > zero_vec);
           if (is_result) {
-            if (!cmp0.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-              // return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
-              res0 = a0 * poscoef_vec;
+            if (!cmp0.zero_mask() && !cmp1.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+              return convert_from_float<scalar_t>(a0 * poscoef_vec, a1 * poscoef_vec);
             } else {
-              res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * (b0 + negcoef_vec), a0 * poscoef_vec, cmp0);
-            }
-            if (!cmp0.zero_mask()) {
-              res1 = a1 * poscoef_vec;
-            } else {
-              res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * (b1 + negcoef_vec), a1 * poscoef_vec, cmp1);
+              auto res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * (b0 + negcoef_vec), a0 * poscoef_vec, cmp0);
+              auto res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * (b1 + negcoef_vec), a1 * poscoef_vec, cmp1);
+              return convert_from_float<scalar_t>(res0, res1);
             }
           } else {
-            res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * negcoef_vec * (b0 * negiptcoef_vec).exp(), a0 * poscoef_vec, cmp0);
-            res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * negcoef_vec * (b1 * negiptcoef_vec).exp(), a1 * poscoef_vec, cmp1);
+            auto res0 = Vectorized<float>::blendv(a0 * negiptcoef_vec * negcoef_vec * (b0 * negiptcoef_vec).exp(), a0 * poscoef_vec, cmp0);
+            auto res1 = Vectorized<float>::blendv(a1 * negiptcoef_vec * negcoef_vec * (b1 * negiptcoef_vec).exp(), a1 * poscoef_vec, cmp1);
+            return convert_from_float<scalar_t>(res0, res1);
           }
-          return convert_from_float<scalar_t>(res0, res1);
         });
     });
   } else {
