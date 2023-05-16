@@ -540,7 +540,11 @@ class TestExport(TestCase):
         for node in gm.graph.nodes:
             if node.op == "call_function" and node.target == torch.ops.aten.add_.Tensor:
                 # No more inplace mutation
-                self.assertNotEqual(node.target, torch.ops.aten.add_.Tensor, "There shouldn't be any inplace mutation node in the graph.")
+                self.assertNotEqual(
+                    node.target,
+                    torch.ops.aten.add_.Tensor,
+                    "There shouldn't be any inplace mutation node in the graph."
+                )
             if node.op == "call_function" and node.target == torch.ops.aten.view.default:
                 view_count += 1
 
