@@ -169,6 +169,7 @@ class CompileCounter:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
+        print(gm.graph)
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
