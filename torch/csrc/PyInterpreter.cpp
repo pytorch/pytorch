@@ -44,7 +44,6 @@ struct ConcretePyInterpreterVTable final
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
-  void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
@@ -253,16 +252,6 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
-}
-
-void ConcretePyInterpreterVTable::reportErrorCallback(
-    PyObject* callback,
-    DispatchKey key) const {
-  py::gil_scoped_acquire g;
-  auto func = py::reinterpret_borrow<py::object>(callback);
-  // Not all DispatchKeys are pybind'ed into Python and we do not have infra
-  // to ensure this, so just pass a string back to Python.
-  func(c10::toString(key));
 }
 
 void ConcretePyInterpreterVTable::dispatch(
