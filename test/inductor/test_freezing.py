@@ -57,6 +57,8 @@ class TestCase(TorchTestCase):
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
+                    "freezing": True,
+                    "freezing_discard_parameters": True,
                 }
             )
         )
@@ -75,51 +77,17 @@ class TestCase(TorchTestCase):
         torch._dynamo.reset()
 
 
+class ConvBN(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
+        self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
+
+    def forward(self, x):
+        return self.bn(self.conv(x))
+
+
 class OptimizeForInferenceTemplate(TestCase):
-    def setUp(self):
-        super().setUp()
-        self.graph_stack = contextlib.ExitStack()
-        self.graph_stack.enter_context(
-            config.patch(
-                {
-                    "optimize_for_inference": True,
-                }
-            )
-        )
-
-    def test_unfolded_bn(self):
-        x = torch.rand([3, 32, 15, 15]).to(self.device)
-
-        mod = torch.nn.BatchNorm2d(32, eps=0.001).eval().to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x) + 10
-
-        with torch.no_grad():
-            out_eager = mod(x)
-            out_compiled, code = run_and_get_code(foo, mod, x)
-
-            self.assertEqual(out_eager, out_compiled)
-            breakpoint()
-
-    def test_folded_conv_bn(self):
-        mod = ConvBN(3, 32, kernel_size=3, stride=2).cuda().eval().to(self.device)
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            out_optimized_for_infernece = foo(mod, x)
-
-        with unittest.patch(config, "optimize_for_inference", False):
-            out_compiled = foo(mod, x)
-
-        # TODO - torch.compile gives different answers than eager
-        self.assertEqual(out_optimized_for_infernece, out_compiled)
-
     def test_mutation(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -147,6 +115,38 @@ class OptimizeForInferenceTemplate(TestCase):
             self.assertEqual(out_eager, out_comp)
             self.assertEqual(out_eager2, out_comp2)
 
+    def test_unfolded_bn(self):
+        x = torch.rand([3, 32, 15, 15]).to(self.device)
+
+        mod = torch.nn.BatchNorm2d(32, eps=0.001).eval().to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x) + 10
+
+        out_compiled_no_inference = foo(mod, x)
+
+        with torch.no_grad():
+            out_compiled, code = run_and_get_code(foo, mod, x)
+
+            self.assertEqual(out_compiled_no_inference, out_compiled)
+
+    def test_folded_conv_bn(self):
+        mod = ConvBN(3, 32, kernel_size=3, stride=2).cuda().eval().to(self.device)
+        x = torch.rand(3, 3, 32, 32).to(self.device)
+
+        @torch.compile()
+        def foo(mod, x):
+            return mod(x)
+
+        with torch.no_grad():
+            out_optimized_for_infernece = foo(mod, x)
+
+        with torch._inductor.config.patch("freezing", True):
+            out_compiled = foo(mod, x)
+
+        self.assertEqual(out_optimized_for_infernece, out_compiled)
+
     def test_autocast(self):
         if self.device == "cpu":
             raise unittest.SkipTest("MLKDNN Bug")
@@ -166,6 +166,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
+    # @unittest.skipIf()
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
         x = torch.rand(3, 3, 32, 32).to(self.device)

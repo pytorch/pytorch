@@ -27,6 +27,7 @@ from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -64,7 +65,10 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    StrictMinMaxConstraint,
+)
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -474,11 +478,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -631,10 +630,9 @@ def explain(f, *args, **kwargs):
 
 
 @dataclasses.dataclass
-class Constraint:
+class ConstraintTarget:
     """
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.  Don't create this
+    This represents input tensor dimensions.  Don't create this
     class directly; instead, use :func:`torch._export.dynamic_dim`.
     """
 
@@ -642,15 +640,30 @@ class Constraint:
     # TODO: We don't need t_id; we can get it off of w_tensor
     t_id: int
     dim: int
+
+
+@dataclasses.dataclass
+class Constraint(ConstraintTarget):
+    """
+    This represents constraints on input tensor dimensions, e.g., requiring
+    them to be fully polymorphic or within some range.  Don't create this
+    class directly; instead, use :func:`torch._export.dynamic_dim`.
+    """
+
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
     constraint_range: StrictMinMaxConstraint
+    # Represent that `constraint_range` is shared with another ConstraintTarget, which
+    # typically arises because of a specified equality with another dynamic dimension.
+    shared: Optional[ConstraintTarget] = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
             warn_only=False,
         )
-        return Constraint(self.w_tensor, self.t_id, self.dim, constraint_range)
+        return Constraint(
+            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
+        )
 
     def __ge__(self, lower):
         return self._clone_with_range(lower=lower)
@@ -691,6 +704,19 @@ class Constraint:
             "max": self.constraint_range.vr.upper,
         }
 
+    def __eq__(self, other):
+        constraint_range = StrictMinMaxConstraint(
+            vr=self.constraint_range.vr & other.constraint_range.vr,
+            warn_only=False,
+        )
+        return Constraint(
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
+        )
+
 
 def export(
     f: Callable[..., Any],
@@ -701,7 +727,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: List[Constraint] = None,
+    constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     functionalize: bool = False,
     **kwargs,
@@ -803,7 +829,6 @@ def export(
 
     fake_mode = None
     example_inputs = []
-    var_to_range_map = {}
 
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, inner_example_inputs
@@ -814,11 +839,9 @@ def export(
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
-        nonlocal fake_mode, example_inputs, var_to_range_map
+        nonlocal fake_mode, example_inputs
         fake_mode = _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
-        if fake_mode and fake_mode.shape_env:
-            var_to_range_map = fake_mode.shape_env.var_to_range
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -834,6 +857,7 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
+    constraint_violation_error = None
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
@@ -850,23 +874,34 @@ def export(
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        result_traced = opt_f(*args, **kwargs)
+        try:
+            result_traced = opt_f(*args, **kwargs)
+        except ConstraintViolationError as e:
+            constraint_violation_error = e
     remove_from_cache(f)
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        msg = dim_constraints.prettify_results(inspect.signature(f))
+        if constraint_violation_error:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            log.warning(
+                "Summary of dimension constraints:%s",
+                msg,
+            )
+    if constraint_violation_error:
+        raise constraint_violation_error
 
     assert (
         graph is not None
     ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
     assert out_guards is not None, "Failed to produce guards during tracing"
     assert fake_mode is not None
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -883,10 +918,21 @@ def export(
         ):
             super().__init__(m)
             arg_len = len(flat_args)
-            self.new_args = [
-                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-                for i in range(0, arg_len)
-            ]
+            self.new_args = []
+            for i in range(0, arg_len):
+                arg = super(ChangeInputOutputSignature, self).placeholder(
+                    f"arg{i}", (), {}
+                )
+                # Fill node.mata["val"] with faketensolintrunner from the input,
+                # if it's not found in matched_input_elements_positions
+                if (
+                    i not in matched_input_elements_positions
+                    and fake_mode is not None
+                    and isinstance(flat_args[i], torch.Tensor)
+                ):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+                self.new_args.append(arg)
+
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions
             )
@@ -972,15 +1018,24 @@ def export(
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
-    new_graph.meta["inline_constraints"] = {
-        node.meta["val"].node.expr: var_to_range_map[node.meta["val"].node.expr]
-        for node in new_graph.graph.nodes
-        if node.op != "placeholder" and "val" in node.meta
-        # Find constraints frome unbacked symints
-        and re.match(r"^i\d+$", str(node.meta["val"]))
-    }
+
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+        dim_constraints = shape_env.dim_constraints
+        assert dim_constraints is not None
+        dim_constraints.solve()
+        log.warning(
+            "Summary of dimension constraints:%s",
+            dim_constraints.prettify_results(inspect.signature(f)),
+        )
+
+        # Inline constraints added by users correspond to unbacked symbols in shape_env,
+        new_graph.meta["inline_constraints"] = {
+            k: v
+            for k, v in shape_env.var_to_range.items()
+            if re.match(r"^[if]\d+$", str(k))
+        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
