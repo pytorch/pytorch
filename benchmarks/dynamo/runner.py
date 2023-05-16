@@ -316,6 +316,13 @@ def parse_args():
         help="batch size for benchmarking",
     )
     parser.add_argument(
+        "--find-all-batch-sizes",
+        "--find_all_batch_sizes",
+        action="store_true",
+        default=False,
+        help="find batch size to fit GPU, and then run benchmarking for all models",
+    )
+    parser.add_argument(
         "--threads",
         "-t",
         type=int,
@@ -421,6 +428,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
+                    
+                    if args.find_all_batch_sizes:
+                        cmd = f"{cmd} --find-all-batch-sizes"
 
                     if args.log_operator_inputs:
                         cmd = f"{cmd} --log-operator-inputs"
