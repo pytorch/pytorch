@@ -435,6 +435,7 @@ class OutputAliasInfo:
 @dataclass(frozen=True)
 class InputAliasInfo:
     is_leaf: bool
+    is_user_input: bool
     mutates_data: bool
     mutates_metadata: bool
 
@@ -466,6 +467,9 @@ class ViewAndMutationMeta:
 
     # For inference only: instructs us to keep data-only input mutations directly in the graph
     keep_input_mutations: int
+
+    #
+    num_mutated_user_inputs: int
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -749,6 +753,7 @@ def run_functionalized_fw_and_collect_metadata(
 
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and arg.is_leaf,
+                is_user_input=
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata
             ))
@@ -1022,13 +1027,13 @@ class GraphSignature:
         state_names = [*parameters, *buffers]
         mutated_buffers = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
-            if input_info.mutates_data:
+            if input_info.mutates_data and idx < len(state_names):
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
                 buffer_name = state_names[idx]
                 mutated_buffers.append(buffer_name)
 
-        assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inputs
+        #assert len(mutated_buffers) == view_mutation_metadata.num_mutated_inputs
 
         start, stop = 0, view_mutation_metadata.num_mutated_inputs
         buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))

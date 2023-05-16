@@ -8,6 +8,7 @@ from collections import namedtuple
 import torch
 import torch._dynamo
 import torch.fx
+from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import graph_module
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
@@ -125,6 +126,25 @@ def _export(
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
+            # Fix the graph output signature to be tuple if scalar
+            return_val = f(*args)
+            # this means it is scalar return value
+            out_spec = gm_torch_level._out_spec
+            if not isinstance(return_val, (list, tuple, dict)):
+                out_spec = pytree.tree_flatten((return_val,))[1]
+
+            orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args
+
+            gm_torch_level.graph._codegen = _PyTreeCodeGen(
+                _PyTreeInfo(
+                    orig_args,
+                    gm_torch_level._in_spec,
+                    out_spec,
+                )
+            )
+
+            gm_torch_level.recompile()
+
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
 
         except (ConstraintViolationError, ValueRangeError) as e:
@@ -135,9 +155,6 @@ def _export(
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
     flat_args, in_spec = pytree.tree_flatten(args)
-    out_spec = (
-        gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
-    )
 
     input_shape_constraints = gm.meta.get("input_shape_constraints", None)
     inline_constraints = gm.meta.get("inline_constraints", None)

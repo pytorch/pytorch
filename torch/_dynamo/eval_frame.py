@@ -910,6 +910,11 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
+
+    matched_input_elements_to_fake = {val: example_fake_inputs[ix] for ix, val in enumerate(matched_input_elements_positions)}
+
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
@@ -928,14 +933,13 @@ def export(
                 arg = super(ChangeInputOutputSignature, self).placeholder(
                     f"arg{i}", (), {}
                 )
-                # Fill node.mata["val"] with faketensolintrunner from the input,
-                # if it's not found in matched_input_elements_positions
-                if (
-                    i not in matched_input_elements_positions
-                    and fake_mode is not None
-                    and isinstance(flat_args[i], torch.Tensor)
-                ):
-                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+                if i in matched_input_elements_to_fake:
+                    arg.node.meta["val"] = matched_input_elements_to_fake[i]
+                else:
+                    # Fill node.mata["val"] with faketensor from the input,
+                    # if it's not found in matched_input_elements_positions
+                    if (fake_mode is not None and isinstance(flat_args[i], torch.Tensor)):
+                        arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
                 self.new_args.append(arg)
 
             self.old_args_gen = (
@@ -962,9 +966,6 @@ def export(
             if "val" in self.current_node.meta:
                 r.node.meta["val"] = self.current_node.meta["val"]
             return r
-
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
