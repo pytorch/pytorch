@@ -258,6 +258,25 @@ class GraphLowering(torch.fx.Interpreter):
             config.layout_opt = False
             return
 
+        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
+        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
+        # for more details.
+        #
+        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
+        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
+        #
+        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
+        #
+        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
+        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
+        for n in gm.graph.nodes:
+            if n.target == torch.ops.aten._scaled_dot_product_flash_attention.default:
+                log.debug(
+                    "SKIP LAYOUT OPT BECAUSE _scaled_dot_product_flash_attention found"
+                )
+                config.layout_opt = False
+                return
+
     def find_nodes_prefer_channels_last(self):
         """
         The rule to decide if an node prefer channels last is simple.
