@@ -232,17 +232,15 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
         if args:
             if kwargs:
                 raise ValueError("Supported only tuple or dict like output setup, but both given")
-            if any(len(args[0]) != len(dataset) for dataset in args):  # type: ignore[arg-type]
-                raise ValueError("Size mismatch between datasets")
-
             self._length = len(args[0])  # type: ignore[arg-type]
+            if any(self._length != len(dataset) for dataset in args):  # type: ignore[arg-type]
+                raise ValueError("Size mismatch between datasets")
             self.datasets = args
         elif kwargs:
             tmp = list(kwargs.values())
-            if any(len(tmp[0]) != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
-                raise ValueError("Size mismatch between datasets")
-
             self._length = len(tmp[0])  # type: ignore[arg-type]
+            if any(len(self._length) != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
+                raise ValueError("Size mismatch between datasets")
             self.datasets = kwargs
         else:
             raise ValueError("At least one dataset should be passed")
