@@ -1,26 +1,12 @@
 import contextlib
 import itertools
-from typing import List
-
-import sympy
-
-import torch
 
 from .. import config
-from ..ir import Layout
-from ..utils import ceildiv, free_symbol_startswith, sympy_product
+from ..utils import ceildiv
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_overrides import TritonOverrides
-from .triton_utils import (
-    config_of,
-    IterationRangesRoot,
-    signature_of,
-    split_iteration_ranges,
-    TritonCSEVariable,
-    TritonPrinter,
-)
+from .triton_utils import config_of, signature_of, TritonPrinter
 
 texpr = TritonPrinter().doprint
 
