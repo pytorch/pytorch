@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -148,6 +149,10 @@ inductor_skips["cuda"] = {
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
 }
+
+if TEST_WITH_ROCM:
+    # Tensors are not alike
+    inductor_skips["cuda"]["logcumsumexp"] = {f32}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -367,6 +372,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
+if TEST_WITH_ROCM:
+    # AssertionError: expected size 5==5, stride 5==1 at dim=0
+    inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
+
+
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
@@ -385,8 +395,20 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "tanh": {f16},
 }
+
+if not TEST_WITH_ROCM:
+    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+else:
+    # aten.miopen_batch_norm is unsupported for lowering
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {
+        f16,
+        f32,
+    }
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {
+        f16,
+        f32,
+    }
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
