@@ -223,6 +223,9 @@ class cpp:
     # force usage as specified, without testing.
     vec_isa_ok = None
 
+    # similar to config.triton.descriptive_names
+    descriptive_names = "original_aten"
+
 
 # config specific to codegen/triton.py
 class triton:
