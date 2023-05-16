@@ -52,7 +52,7 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(value, dtype):
-        if isinstance(value, (sympy.Integer, sympy.Float)):
+        if isinstance(value.expr, (sympy.Integer, sympy.Float)):
             return SymPyOps.constant(value.expr, dtype)
         elif is_integer_dtype(dtype) and is_integer_dtype(value.dtype):
             return SymPyOps.index_expr(value.expr, dtype)
@@ -70,6 +70,11 @@ class SymPyOps:
         return TypedExpr(x.expr + y.expr, result_type)
 
     @staticmethod
+    def sub(x, y):
+        result_type = torch.promote_types(x.dtype, y.dtype)
+        return TypedExpr(x.expr - y.expr, result_type)
+
+    @staticmethod
     def mul(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr * y.expr, result_type)
@@ -77,10 +82,6 @@ class SymPyOps:
     @staticmethod
     def neg(x):
         return TypedExpr(-x.expr, x.dtype)
-
-    @staticmethod
-    def abs(x):
-        return TypedExpr(abs(x.expr), x.dtype)
 
 
 @dataclass
