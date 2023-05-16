@@ -216,12 +216,24 @@ def code_hash(code):
 
 
 def serialize_fx_arg(arg: Any):
-    # Special case for example_inputs, we only need the shape data for the hash
     if isinstance(arg, torch.fx.GraphModule):
+        # Special case for fx_graph
         return arg.print_readable(print_output=False).encode("utf-8")
     if isinstance(arg, list):
         if len(arg) > 0 and isinstance(arg[0], torch.Tensor):
-            return b"".join([pickle.dumps(t.shape) for t in arg])
+            # Special case for example_inputs, everything in torch/csrc/dynamo/guards.cpp
+            # Except for requires_grad, as that has already been handled
+            pickled_guards = []
+            for t in arg:
+                pickled_guards.append(
+                    b"".join([
+                        pickle.dumps(torch._C._dispatch_keys(t).__repr__()),
+                        pickle.dumps(t.dtype),
+                        pickle.dumps(t.device),
+                        pickle.dumps(t.shape),
+                    ])
+                )
+            return b"".join(pickled_guards)
     return pickle.dumps(arg)
 
 
@@ -269,7 +281,9 @@ class FxGraphCache:
     def load(cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]):
         fx_args_for_hashing = copy(fx_args)
         fx_args_for_hashing.extend(list(fx_kwargs.values()))
+        # Hash also on torch version and current triton config
         fx_args_for_hashing.append(torch.__version__)
+        fx_args_for_hashing.append(config.save_config())
         key = compiled_fx_graph_hash(fx_args_for_hashing)
         if key not in cls.cache:
             from filelock import FileLock
