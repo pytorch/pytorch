@@ -7,7 +7,8 @@
     "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
-      "BUILDKIT_INLINE_CACHE": "0"
+      "BUILDKIT_INLINE_CACHE": "0",
+      "CLANG_VERSION": "11"
     }
   },
 
@@ -21,7 +22,7 @@
   // "forwardPorts": [],
 
   // Use 'postCreateCommand' to run commands after the container is created.
-  "postCreateCommand": "bash scripts/install-dev-tools.sh",
+  "postCreateCommand": "bash .devcontainer/scripts/install-dev-tools.sh",
 
   // Configure tool-specific properties.
   // "customizations": {},

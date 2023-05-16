@@ -9,7 +9,7 @@
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
       "CUDA_VERSION": "11.8.0",
-      "USE_CLANG": "1"
+      "CLANG_VERSION": "11"
     }
   },
   "runArgs": ["--gpus", "all"],
@@ -17,7 +17,7 @@
   // "forwardPorts": [],
 
   // Use 'postCreateCommand' to run commands after the container is created.
-  "postCreateCommand": "bash scripts/install-dev-tools.sh",
+  "postCreateCommand": "bash .devcontainer/scripts/install-dev-tools.sh",
 
   // Configure tool-specific properties.
   // "customizations": {},

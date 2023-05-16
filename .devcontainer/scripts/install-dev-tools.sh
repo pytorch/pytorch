@@ -4,7 +4,7 @@ pip install -r requirements.txt
 git submodule sync
 git submodule update --init --recursive
 
-# This takes a long time for some reason
+# This takes some time
 make setup_lint
 
 # Add CMAKE_PREFIX_PATH to bashrc

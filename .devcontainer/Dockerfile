@@ -9,30 +9,26 @@ COPY .devcontainer/cuda/environment.yml .devcontainer/noop.txt /tmp/conda-tmp/
 RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/conda env update -n base -f /tmp/conda-tmp/environment.yml; fi \
     && sudo rm -rf /tmp/conda-tmp
 
-# Install the full llvm sweet
 # Tools needed for llvm
 RUN sudo apt-get -y update
 RUN sudo apt install -y lsb-release wget software-properties-common gnupg
 
-# # If USE_CLANG is set we will install
-# Can't build succesfully, The exports need to go in the .sh script
-# But also clang-15 might be two new for cuda 11.8
+# Install CLANG if version is specified
+ARG CLANG_VERSION
+RUN if [ -n "$CLANG_VERSION" ]; then \
+    sudo wget https://apt.llvm.org/llvm.sh; \
+    chmod +x llvm.sh; \
+    sudo ./llvm.sh "${CLANG_VERSION}"; \
+    echo 'export CC=clang' >> ~/.bashrc; \
+    echo 'export CXX=clang++' >> ~/.bashrc; \
+    sudo apt update; \
+    sudo apt install -y clang; \
+    sudo apt install -y libomp-dev; \
+    fi
 
-# ARG USE_CLANG
-# RUN if [ -n "$USE_CLANG" ]; then \
-#     sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"; \
-#     sudo .devcontainer/scripts/update_alternatives_clang.sh 15 10; \
-#     export CC=clang; \
-#     export CXX=clang++; \
-#     fi
 
-# This installs llvm toolchain
-
-# Instal cuda if version is specified
+# Install cuda if version is specified
 ARG CUDA_VERSION
 RUN if [ -n "$CUDA_VERSION" ]; then \
        conda install cuda -c "nvidia/label/cuda-${CUDA_VERSION}"; \
     fi
-# [Optional] Uncomment this section to install additional OS packages.
-# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get -y install --no-install-recommends <your-package-list-here>
