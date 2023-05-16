@@ -57,7 +57,7 @@
 
 ## Contributing to PyTorch
 
-Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important
+Thank you for your interest in contributing to PyTorch! Before you begin to write code, it is important
 that you share your intention to contribute with the team, based on the type of contribution:
 
 1. You want to propose a new feature and implement it.
