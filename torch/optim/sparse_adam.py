@@ -114,17 +114,17 @@ SparseAdam.__doc__ = r"""SparseAdam implements a lazy version of the Adam algori
     of a dense layout with gradients of a sparse layout. This is a special case where
     the module backwards produces grads with a sparse layout and we can thus take
     advantage of the sparsity of the grads. One example NN module that behaves as such
-    is `nn.Embedding(sparse=True)`.
+    is ``nn.Embedding(sparse=True)``.
 
     If you suspect your gradients are semantically sparse (but do not have sparse layout),
     this variant may not be the best for you. Ideally, you want to avoid materializing
     anything that is suspected to be sparse in the first place, since needing to convert
     all your grads from dense layout to sparse layout may outweigh the performance gain.
     Here, using Adam may be the best alternative, unless you can easily rig up your module
-    to output sparse grads similar to `nn.Embedding(sparse=True)`.
+    to output sparse grads similar to ``nn.Embedding(sparse=True)``.
 
     If you insist on converting your grads, you can do so by manually overriding your
-    parameter's `.grad` fields with their sparse equivalents before calling `.step()`.
+    parameter's ``.grad`` fields with their sparse equivalents before calling ``.step()``.
 
 
     Args:
