@@ -14,14 +14,17 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bi
 RUN sudo apt-get -y update
 RUN sudo apt install -y lsb-release wget software-properties-common gnupg
 
-# If USE_CLANG is set we will install
-ARG USE_CLANG
-RUN if [ -n "$USE_CLANG" ]; then \
-    sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"; \
-    sudo .devcontainer/scripts/update_alternatives_clang.sh 15 10; \
-    export CC=clang; \
-    export CXX=clang++;
-    fi
+# # If USE_CLANG is set we will install
+# Can't build succesfully, The exports need to go in the .sh script
+# But also clang-15 might be two new for cuda 11.8
+
+# ARG USE_CLANG
+# RUN if [ -n "$USE_CLANG" ]; then \
+#     sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"; \
+#     sudo .devcontainer/scripts/update_alternatives_clang.sh 15 10; \
+#     export CC=clang; \
+#     export CXX=clang++; \
+#     fi
 
 # This installs llvm toolchain
 
