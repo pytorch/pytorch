@@ -157,7 +157,6 @@ class ErasedTensor(torch.Tensor):
 
 @torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    # TODO - could just invalidate the parameters that were folded
     for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
         if not isinstance(mod, torch.nn.Module):
             continue
