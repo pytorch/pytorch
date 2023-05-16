@@ -16,6 +16,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 
 import torch.utils._pytree as pytree
+from torch._export.graph_module import EXPORT_METADATA
 from torch._export.pass_base import PassType
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -23,6 +24,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StrictMinMaxConstraint,
 )
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.passes import AddRuntimeAssertionsForConstraintsPass
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
@@ -129,7 +131,8 @@ def _export(
             # Fix the graph output signature to be tuple if scalar
             return_val = f(*args)
             # this means it is scalar return value
-            out_spec = gm_torch_level._out_spec
+            out_spec = orig_out_spec = gm_torch_level._out_spec
+
             if not isinstance(return_val, (list, tuple, dict)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
@@ -155,13 +158,10 @@ def _export(
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
     flat_args, in_spec = pytree.tree_flatten(args)
-
-    input_shape_constraints = gm.meta.get("input_shape_constraints", None)
-    inline_constraints = gm.meta.get("inline_constraints", None)
     # TODO: Track mutation
     mutation = None
     export_graph_module = graph_module.make_export_graph_module(
-        gm, gm.graph, in_spec, out_spec, mutation, input_shape_constraints, inline_constraints, flat_args
+        gm, gm.graph, in_spec, orig_out_spec, mutation, flat_args, graph_signature
     )
     return export_graph_module
 
@@ -247,7 +247,23 @@ class MultiMethodExportedProgram:
         "Please look up one of its methods first via "
         "`MultiMethodExportedProgram.find_method(method_name)`."""
 
-        return gm(*args, **kwargs)
+        assert EXPORT_METADATA in gm.meta, "Exported graph module must have EXPORT_METADATA field"
+        meta = gm.meta[EXPORT_METADATA]
+
+        params = {
+            **dict(gm.named_parameters(remove_duplicate=False)),
+            **dict(gm.named_buffers(remove_duplicate=False)),
+        }
+
+        params_flat, params_spec = pytree.tree_flatten(params)
+        params_flat = tuple(params_flat)
+
+        user_flat_args = pytree.tree_flatten(args)[0]
+        print("SIG", meta.graph_signature)
+
+        output = gm(*params_flat, *user_flat_args)
+
+        return output
 
     def __repr__(self) -> str:
         # TODO(gmagogsfm): Implement.
@@ -266,6 +282,9 @@ class MultiMethodExportedProgram:
         "please look up one of its methods first via `find_method(method_name)` "
         "to access property: {property_name}."""
         return getattr(default_module, property_name)
+
+    def add_runtime_assertions(self) -> "MultiMethodExportedProgram":
+        return self.transform(AddRuntimeAssertionsForConstraintsPass())
 
     @property
     def meta(self):

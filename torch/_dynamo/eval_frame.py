@@ -478,11 +478,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -1024,7 +1019,7 @@ def export(
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:

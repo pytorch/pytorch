@@ -435,7 +435,6 @@ class OutputAliasInfo:
 @dataclass(frozen=True)
 class InputAliasInfo:
     is_leaf: bool
-    is_user_input: bool
     mutates_data: bool
     mutates_metadata: bool
 
@@ -467,9 +466,6 @@ class ViewAndMutationMeta:
 
     # For inference only: instructs us to keep data-only input mutations directly in the graph
     keep_input_mutations: int
-
-    #
-    num_mutated_user_inputs: int
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -753,7 +749,6 @@ def run_functionalized_fw_and_collect_metadata(
 
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and arg.is_leaf,
-                is_user_input=
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata
             ))
