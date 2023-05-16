@@ -31,7 +31,7 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext
+from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 
@@ -323,18 +323,32 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if not isinstance(a, SymInt):
         if not (min <= a <= max):
             raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-        return
-    if isinstance(a.node.expr, sympy.Integer):
+    elif isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
-        return
-    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    elif isinstance(a.node.expr, sympy.Symbol):
+        pass
+    else:
+        raise ValueRangeError("constraining non-Symbols NYI")
+    
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    r = a.node.shape_env.var_to_range[a.node.expr]
-    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
+    if not isinstance(a, SymInt):
+        if detect_fake_mode() is None:
+            return
+        
+        # If we are tracing with a fake mode then add this integer to the
+        # shape_env's var_to_range
+        sym_integer = sympy.Integer(a)
+        shape_env = detect_fake_mode().shape_env
+        shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+        shape_env.var_to_stack[sym_integer] = ''.join(traceback.format_list(traceback.extract_stack()[0:2]))
+        return
+    var = a.node.expr
+    r = a.node.shape_env.var_to_range[var]
+    a.node.shape_env.var_to_range[var] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
 

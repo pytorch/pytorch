@@ -894,6 +894,16 @@ def export(
                 "Summary of dimension constraints:%s",
                 msg,
             )
+
+        # Error if we have any constraints on static values
+        for k in shape_env.var_to_range.keys():
+            if isinstance(k, sympy.Integer):
+                constraint_violation_error = ConstraintViolationError(
+                    f"{shape_env.var_to_stack[k]}\n"
+                    "It appears that you're trying to set a constraint on a "
+                    f"value which we evaluated to have a static value of {k}. "
+                    f"Scroll up to see where " 
+                )
     if constraint_violation_error:
         raise constraint_violation_error
 

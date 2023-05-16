@@ -5,7 +5,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._export import _export, export, dynamic_dim
 from torch._export.trace import do_not_use_experimental_export
-from torch._export.constraints import constrain_as_size
+from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.graph_module import get_export_meta
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -551,6 +551,24 @@ class TestExport(TestCase):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
+    def test_export_preserve_constraints_as_metadata(self):
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            c = y.dim()
+            constrain_as_value(c, min=1, max=3)
+            z = y[0:c]
+            return torch.empty((b, y.shape[0])), z
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = (x, y)
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError, "Cannot constrain symbol with constraints"
+        ):
+            export(f, example_inputs, constraints)
+    
 
 if __name__ == '__main__':
     run_tests()
