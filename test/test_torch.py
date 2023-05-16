@@ -2183,6 +2183,7 @@ else:
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
 
+    @skipIfTorchDynamo("AssertionError: make_fallback(aten.cauchy.default): a decomposition exists")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)

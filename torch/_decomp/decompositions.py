@@ -1418,9 +1418,13 @@ def native_batch_norm_helper(
 
     if weight is None:
         weight = input.new_ones(())
+    else:
+        weight = weight.flatten()
 
     if bias is None:
         bias = input.new_zeros(())
+    else:
+        bias = bias.flatten()
 
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)

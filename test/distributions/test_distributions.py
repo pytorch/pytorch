@@ -3476,6 +3476,7 @@ class TestRsample(DistributionsTestCase):
             ]))
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionShapes(DistributionsTestCase):
     def setUp(self):
         super().setUp()
@@ -3633,6 +3634,7 @@ class TestDistributionShapes(DistributionsTestCase):
 
     def test_cauchy_shape_scalar_params(self):
         cauchy = Cauchy(0, 1)
+        torch._dynamo.allow_in_graph(self.assertEqual)
         self.assertEqual(cauchy._batch_shape, torch.Size())
         self.assertEqual(cauchy._event_shape, torch.Size())
         self.assertEqual(cauchy.sample().size(), torch.Size())
