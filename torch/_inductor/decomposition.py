@@ -171,7 +171,8 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
-    assert utils.has_triton()
+    if not utils.has_triton():
+        return False
 
     import triton.testing
 
