@@ -3666,9 +3666,9 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        # TODO: fix me
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
+
         super().__init__(
             kernel_layout,
             reordered_inputs,
