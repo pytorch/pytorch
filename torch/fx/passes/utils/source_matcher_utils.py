@@ -44,7 +44,7 @@ class SourcePartition():
     output_nodes: List[Node] = field(default_factory=list)
 
     # Parameters that are being used
-    params: List[str] = field(default_factory=list)
+    params: List[Node] = field(default_factory=list)
 
 
 @compatibility(is_backward_compatible=False)
@@ -92,7 +92,7 @@ def get_source_partitions(
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
-                params.add(node.target)
+                params.add(node)
 
             for user in node.users.keys():
                 if user not in nodes:
