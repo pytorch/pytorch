@@ -5,7 +5,7 @@ RUN conda init
 
 # Copy environment.yml (if found) to a temp location so we update the environment. Also
 # copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-COPY .devcontainer/cpu/environment.yml .devcontainer/noop.txt /tmp/conda-tmp/
+COPY .devcontainer/cuda/environment.yml .devcontainer/noop.txt /tmp/conda-tmp/
 RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/conda env update -n base -f /tmp/conda-tmp/environment.yml; fi \
     && sudo rm -rf /tmp/conda-tmp
 
@@ -13,9 +13,23 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bi
 # Tools needed for llvm
 RUN sudo apt-get -y update
 RUN sudo apt install -y lsb-release wget software-properties-common gnupg
-# This installs llvm toolchain
-# RUN sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
+# If USE_CLANG is set we will install
+ARG USE_CLANG
+RUN if [ -n "$USE_CLANG" ]; then \
+    sudo bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"; \
+    sudo .devcontainer/scripts/update_alternatives_clang.sh 15 10; \
+    export CC=clang; \
+    export CXX=clang++;
+    fi
+
+# This installs llvm toolchain
+
+# Instal cuda if version is specified
+ARG CUDA_VERSION
+RUN if [ -n "$CUDA_VERSION" ]; then \
+       conda install cuda -c "nvidia/label/cuda-${CUDA_VERSION}"; \
+    fi
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>

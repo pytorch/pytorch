@@ -4,7 +4,7 @@
   "name": "PyTorch - CPU",
   "build": {
     "context": "../..",
-    "dockerfile": "Dockerfile",
+    "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0"

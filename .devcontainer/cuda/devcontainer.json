@@ -4,11 +4,12 @@
   "name": "PyTorch - CUDA",
   "build": {
     "context": "../..",
-    "dockerfile": "Dockerfile",
+    "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
-      "CUDA_VERSION": "11.8.0"
+      "CUDA_VERSION": "11.8.0",
+      "USE_CLANG": "1"
     }
   },
   "runArgs": ["--gpus", "all"],

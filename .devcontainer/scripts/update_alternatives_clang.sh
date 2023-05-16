@@ -6,7 +6,7 @@
 update_alternatives() {
     local version=${1}
     local priority=${2}
-    local master=${3}
+    local z=${3}
     local slaves=${4}
     local path=${5}
     local cmdln
