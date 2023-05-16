@@ -1,4 +1,3 @@
-import contextlib
 import itertools
 
 from .. import config
@@ -13,19 +12,20 @@ texpr = TritonPrinter().doprint
 
 class ForeachKernel(Kernel):
     @staticmethod
-    def horizontal_partition(node_schedule):
-        """Creates one or more ForeachKernels if the number of args exceeds CUDA limits."""
-        assert len(node_schedule) >= 1
+    def horizontal_partition(nodes):
+        """Generates a list of list of nodes where each node sublist is
+        guaranteed to not exceed CUDA limits for number of args (read/writes)."""
+        assert len(nodes) >= 1
 
         MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
         cur_count = 0
-        kernels = []
+        partitions = []
         cur_partition = []
-        for node in node_schedule:
+        for node in nodes:
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
             if cur_count + read_write_count > MAX_NUM_ARGS:
-                kernels.append(ForeachKernel(cur_partition))
+                partitions.append(cur_partition)
                 cur_partition = [node]
                 cur_count = read_write_count
             else:
@@ -33,11 +33,11 @@ class ForeachKernel(Kernel):
                 cur_partition.append(node)
 
         if cur_partition:
-            kernels.append(ForeachKernel(cur_partition))
+            partitions.append(cur_partition)
 
-        return kernels
+        return partitions
 
-    def __init__(self, nodes):
+    def __init__(self):
         super().__init__()
         self.block_size = 1024  # Try tuning this value
         # self.grid = (
@@ -45,34 +45,9 @@ class ForeachKernel(Kernel):
         #    1,
         #    1,
         # )
-        self.nodes = nodes
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
-        for node in nodes:
-            _, els = node.group
-            sub_kernel = TritonKernel(*els, index_dtype="tl.int32")
-            sub_kernel.args = self.args
-            sub_kernel.iter_vars_count = self.iter_vars_count
-            self.sub_kernels.append(sub_kernel)
-        self.kernel = None
-
-    def set_kernel(self, index):
-        assert index >= 0 and index < len(self.sub_kernels)
-        exitstack = contextlib.ExitStack()
-
-        @contextlib.contextmanager
-        def _set_kernel():
-            old_kernel = self.kernel
-            self.kernel = self.sub_kernels[index]
-            try:
-                yield
-            finally:
-                self.kernel = old_kernel
-
-        exitstack.enter_context(_set_kernel())
-
-        return exitstack
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -118,6 +93,19 @@ class ForeachKernel(Kernel):
 
             block_count += num_blocks
 
+    def create_sub_kernel(self, *groups, index_dtype, mutations, reduction_hint):
+        sub_kernel = TritonKernel(
+            *groups,
+            index_dtype=index_dtype,
+            mutations=mutations,
+            pid_cache=dict(),
+            reduction_hint=reduction_hint,
+        )
+        sub_kernel.args = self.args
+        sub_kernel.iter_vars_count = self.iter_vars_count
+        self.sub_kernels.append(sub_kernel)
+        return sub_kernel
+
     def jit_line(self):
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
@@ -130,20 +118,6 @@ class ForeachKernel(Kernel):
             f"@template(num_stages=1, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
         )
-
-    def codegen(self):
-        self.codegen_sub_kernels()
-        self.codegen_kernel()
-
-    def codegen_sub_kernels(self):
-        for node, kernel in zip(self.nodes, self.sub_kernels):
-            with kernel:
-                for sub_node in node.get_nodes():
-                    sub_node.mark_run()
-
-                for sub_node in node.get_nodes():
-                    index_vars = kernel.split_and_set_ranges(sub_node.get_ranges())
-                    sub_node.codegen(index_vars)
 
     def codegen_kernel(self, name=None):
         # from triton import next_power_of_2
@@ -177,9 +151,8 @@ class ForeachKernel(Kernel):
             code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
 
             for sub_kernel in self.sub_kernels:
-                code.splice(sub_kernel.loads)
-                code.splice(sub_kernel.compute)
-                code.splice(sub_kernel.stores)
+                sub_kernel.codegen_body()
+                code.splice(sub_kernel.body)
 
             # self._gen_tile_ptrs(code)
 
