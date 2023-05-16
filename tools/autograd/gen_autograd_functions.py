@@ -109,7 +109,11 @@ if (task_should_compute_output({ ${name}_ix })) {
   std::vector<Tensor> grad_result;
   grad_result.reserve(grads.size());
   for (const auto & i : c10::irange(grads.size())) {
-    grad_result.emplace_back(${derivative});
+    if (grads[i].defined()) {
+      grad_result.emplace_back(${derivative});
+    } else {
+      grad_result.emplace_back(Tensor());
+    }
   }
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
@@ -741,9 +745,9 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-    for var in info.all_saved_inputs:
+    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=False)
-    for var in info.all_saved_outputs:
+    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=True)
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
@@ -766,7 +770,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         # Generate aliases for gradients named for returned values.
         body.extend(
             f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
-            for name in info.used_named_gradients
+            for name in sorted(info.used_named_gradients)
         )
 
     def emit_derivative(

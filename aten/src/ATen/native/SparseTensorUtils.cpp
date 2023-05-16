@@ -6,6 +6,13 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace at {
 
 namespace native {
@@ -106,6 +113,17 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     });
   }
   return csr;
+}
+
+Tensor zeros_like_with_indices(const Tensor& t) {
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      t.sparse_dim(),
+      t.dense_dim(),
+      t.sizes(),
+      t._indices().clone(),
+      at::zeros({1}, t._values().options()).expand_as(t._values()),
+      t.options())._coalesced_(t.is_coalesced());
 }
 
 }} // namespace at::sparse

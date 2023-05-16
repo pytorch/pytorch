@@ -10,6 +10,7 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 
 namespace c10 {
 
@@ -217,7 +218,25 @@ class CUDAAllocator : public Allocator {
       MempoolId_t mempool_id) = 0;
   virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  // returns true if the allocated blocks are equal to expected live allocations
+  virtual bool checkPoolLiveAllocations(
+      int device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support checkPoolLiveAllocations. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual bool isHistoryEnabled() {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support recordHistory. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
@@ -353,6 +372,18 @@ inline void recordHistory(
       context_recorder,
       alloc_trace_max_entries,
       alloc_trace_record_context);
+}
+
+inline bool isHistoryEnabled() {
+  return get()->isHistoryEnabled();
+}
+
+inline bool checkPoolLiveAllocations(
+    int device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations) {
+  return get()->checkPoolLiveAllocations(
+      device, mempool_id, expected_live_allocations);
 }
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {

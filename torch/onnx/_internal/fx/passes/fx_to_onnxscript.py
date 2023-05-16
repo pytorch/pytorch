@@ -7,13 +7,12 @@ import operator
 import re
 import types
 import warnings
-from types import FunctionType
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
-from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
 import torch.fx
@@ -26,52 +25,15 @@ from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validat
 from torch.utils import _pytree
 
 
-def _onnx_function_diagnose_call_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> str:
-    if len(args) > 0 and isinstance(args[0], onnxscript.OnnxFunction):
-        onnx_function: onnxscript.OnnxFunction = args[0]  # self
-        return f"{onnx_function.name}: {onnxscript.OnnxFunction}"
-    return f"{fn.__name__}: {fn}"
-
-
-def _onnx_function_diagnose_call_append_symbolic_source_location(
-    diagnostic: diagnostics.infra.Diagnostic,
-    fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
-    return_values: Any,
-) -> None:
-    # TODO(bowbao): Record source location of symbolic.
-    # Need this separate step because normally only the source location of
-    # class `onnxscript.OnnxFunction.__call__` is recorded.
-    pass
-
-
-# TODO(bowbao): Delete this once diagnostics is introduced in onnxscript.
-_diagnose_onnx_function = diagnostics.diagnose_call(
-    rule=diagnostics.rules.atenlib_symbolic_function,
-    diagnostic_message_formatter=_onnx_function_diagnose_call_message_formatter,
-    diagnostic_modifier=_onnx_function_diagnose_call_append_symbolic_source_location,
-)
-for key, onnx_function in function_dispatcher._ATENLIB_FUNCTIONS.items():
-    if isinstance(onnx_function, FunctionType):
-        function_dispatcher._ATENLIB_FUNCTIONS[key] = _diagnose_onnx_function(
-            onnx_function
-        )
-onnxscript.OnnxFunction.__call__ = _diagnose_onnx_function(
-    onnxscript.OnnxFunction.__call__
-)
-
-
 @_beartype.beartype
 def _fx_node_to_onnx_message_formatter(
-    fn: Callable, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    fn: Callable,
+    diagnostic_context: diagnostics.DiagnosticContext,
+    node: torch.fx.Node,
+    *args,
+    **kwargs,
 ) -> str:
-    assert len(args) > 0
-    node = args[0]
-    assert isinstance(node, torch.fx.Node)
-    return f"FX Node: {node.op}:{node.target}[name={node.name}]"
+    return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
 
 
 def _location_from_fx_stack_trace(
@@ -116,7 +78,11 @@ def _location_from_fx_stack_trace(
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ):
@@ -200,7 +166,9 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
             continue
         if key == "dtype":
             if value is None:
-                filtered["dtype"] = -1
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
             else:
                 filtered["dtype"] = int(
                     _type_utils.JitScalarType.from_dtype(value).onnx_type()
@@ -221,6 +189,7 @@ def _fill_tensor_meta(
         torch.SymInt,
         torch.SymFloat,
         List[fake_tensor.FakeTensor],
+        Tuple[fake_tensor.FakeTensor, ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -295,7 +264,11 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ) -> Tuple[tuple, dict]:
@@ -312,15 +285,19 @@ def _wrap_fx_args_as_onnxscript_args(
 
 @_beartype.beartype
 @diagnostics.diagnose_call(
-    rule=diagnostics.rules.fx_node_to_onnx,
-    exception_report_level=diagnostics.levels.ERROR,
+    diagnostics.rules.fx_node_to_onnx,
     diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
 )
 def _export_fx_node_to_onnxscript(
+    diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
     fx_name_to_onnxscript_value: Dict[
-        str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
+        str,
+        Union[
+            graph_building.TorchScriptTensor,
+            Tuple[graph_building.TorchScriptTensor, ...],
+        ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
@@ -329,7 +306,7 @@ def _export_fx_node_to_onnxscript(
     # Record stack trace of node in diagnostic.
     node_stack_trace = node.stack_trace
     if node_stack_trace:
-        diagnostic = diagnostics.export_context().inflight_diagnostic(
+        diagnostic = diagnostic_context.inflight_diagnostic(
             rule=diagnostics.rules.fx_node_to_onnx
         )
         diagnostic.with_additional_message(
@@ -378,57 +355,10 @@ def _export_fx_node_to_onnxscript(
 
             fx_name_to_onnxscript_value[node.name] = output
             return
-        if node.target == operator.getitem:
-            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
-            exporter_key = "getitem"
-        elif (
-            isinstance(node.target, types.BuiltinFunctionType)
-            and node.target
-            in function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
-        ):
-            for node_arg in node.args:
-                if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
-                    isinstance(node_arg, torch.fx.Node)
-                    and not isinstance(
-                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
-                    )
-                ):
-                    raise ValueError(
-                        f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
-                        " only int/float/SymInt/SymFloat is supported with built-in ops!"
-                    )
 
-            # symbolic fx.graph contains built-in functions to calculate python values.
-            exporter_key = function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[
-                node.target  # type: ignore[index]
-            ]
-        elif (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target
-            ]
-        elif isinstance(node.target, torch._ops.OpOverloadPacket):
-            # aten::sym_size is the only OverloadPacket that we support.
-            # schema: aten::sym_size(Tensor self, int dim) -> Tensor
-            if node.target != torch.ops.aten.sym_size:
-                raise ValueError(
-                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
-                )
-            # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
-            # overloadpacket for some reasons.
-            # https://github.com/pytorch/pytorch/issues/97201
-            # We manually assigned overload for aten::sym_size.
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                torch.ops.aten.sym_size.int
-            ]
-        else:
-            raise RuntimeError(f"Unknown call_function target: {node.target}")
-        # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = function_dispatcher._ATENLIB_FUNCTIONS.get(exporter_key)
-        if symbolic_fn is None:
-            raise RuntimeError(f"Cannot find function for {exporter_key}")
+        symbolic_fn = function_dispatcher.get_symbolic_function(
+            diagnostic_context, node
+        )
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         complete_args, complete_kwargs = _fill_in_default_kwargs(node)
@@ -472,7 +402,7 @@ def _export_fx_node_to_onnxscript(
                     f"\nFound unsupported input types on PyTorch Op {node.target} with "
                     f"ValueError: \n{value_error}.\n"
                 )
-                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic = diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Op level debug fails due to unsupported input types\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
@@ -480,7 +410,7 @@ def _export_fx_node_to_onnxscript(
                 diagnostic.level = diagnostics.levels.ERROR
             else:
                 op_validation.validate_op_between_ort_torch(
-                    node, symbolic_fn, torch_args, torch_kwargs
+                    diagnostic_context, node, symbolic_fn, torch_args, torch_kwargs
                 )
         fx_name_to_onnxscript_value[node.name] = output
     elif node.op == "output":
@@ -532,6 +462,7 @@ def _export_fx_node_to_onnxscript(
 @_beartype.beartype
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
+    diagnostic_context: diagnostics.DiagnosticContext,
     fx_module_with_metadata: torch.fx.GraphModule,
     options: ResolvedExportOptions,
 ):
@@ -566,6 +497,7 @@ def export_fx_to_onnxscript(
     # node_fixed_shape is only used on op_level_debug purpose.
     for node in fx_module_with_metadata.graph.nodes:
         _export_fx_node_to_onnxscript(
+            diagnostic_context,
             node,
             onnxscript_graph,
             fx_name_to_onnxscript_value,

@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, TracingContext
+from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
     allowed_functions,
@@ -55,7 +55,13 @@ from .source import (
     GlobalWeakRefSource,
     LocalSource,
 )
-from .utils import counters, graph_break_dup_warning_checker, istype, proxy_args_kwargs
+from .utils import (
+    counters,
+    get_fake_value,
+    graph_break_dup_warning_checker,
+    istype,
+    proxy_args_kwargs,
+)
 from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
@@ -249,12 +255,35 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
-            # Manually insert torch._assert instead of python assert and jump over
+            # TODO maybe should respect DtoH sync intention of users later??
+            # Manually insert torch._assert_async instead of python assert and jump over
             # assert related instructions as we don't need them anymore.
+
+            # if we see Tensor as assert statement, no need to call scalar_tensor
+            if isinstance(value, TensorVariable):
+                self.output.create_proxy(
+                    "call_function",
+                    torch._assert_async,
+                    *proxy_args_kwargs((value, error_msg), {}),
+                )
+                self.jump(inst)
+                return
+
+            scalar_to_tensor_proxy = self.output.create_proxy(
+                "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
+            )
+
+            scalar_to_tensor = wrap_fx_proxy(
+                self,
+                scalar_to_tensor_proxy,
+                example_value=get_fake_value(scalar_to_tensor_proxy.node, self),
+                **VariableTracker.propagate([value]),
+            )
+
             self.output.create_proxy(
                 "call_function",
-                torch._assert,
-                *proxy_args_kwargs((value, error_msg), {}),
+                torch._assert_async,
+                *proxy_args_kwargs((scalar_to_tensor, error_msg), {}),
             )
             self.jump(inst)
             return
@@ -269,7 +298,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # compile a partial subgraph prefix then jump into user code
             if self.has_backedge():
                 msg = (
-                    "Skipping frame because there is a graph break in a for/while loop"
+                    "Skipping frame because there is a graph break in a for/while loop\n"
+                    f"{self.frame_summary()}"
                 )
                 log.info(msg)
                 raise exc.SkipFrame(msg)
@@ -355,7 +385,10 @@ def break_graph_if_unsupported(*, push):
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
-                    msg = "Skipping frame because there is a graph break in a for/while loop"
+                    msg = (
+                        "Skipping frame because there is a graph break in a for/while loop\n"
+                        f"{self.frame_summary()}"
+                    )
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
@@ -855,9 +888,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.warning(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
-                ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
@@ -1884,7 +1916,10 @@ class InstructionTranslator(InstructionTranslatorBase):
         mutated_closure_cell_contents: Set[str],
         frame_state,
     ):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {f_code.co_name}")
+        _step_logger()(
+            logging.INFO,
+            f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
+        )
         super().__init__(
             output=OutputGraph(
                 f_globals,
@@ -1906,70 +1941,69 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
-        self.one_graph: bool = one_graph
-        self.export = export
-        self.mutated_closure_cell_contents = mutated_closure_cell_contents
-        if self.export:
-            assert (
-                self.one_graph
-            ), "Export without one graph - something has gone wrong."
 
-        vars = list(code_options["co_varnames"])
-        vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+        # as soon as we create the tracing context we should keep it active, so any calls
+        # into dynamo apis can rely on finding it
+        with tracing(self.output.tracing_context):
+            self.one_graph: bool = one_graph
+            self.export = export
+            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            if self.export:
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
-        self.symbolic_locals = collections.OrderedDict(
-            (
-                k,
-                VariableBuilder(
-                    self,
-                    LocalSource(k)
-                    if k in code_options["co_varnames"]
-                    else LocalSource((k)),
-                )(f_locals[k]),
+            vars = list(code_options["co_varnames"])
+            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
+            self.symbolic_locals = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
+                )
+                for k in vars
+                if k in f_locals
             )
-            for k in vars
-            if k in f_locals
-        )
 
-        # symbolic_locals contains the mapping from original f_locals to the
-        # Variable objects. During the Variable building phase, each object also
-        # has its associated guards. At the end, we will accumulate these
-        # guards.
-        #
-        # One way of handling these guards is to just accumulate all of them
-        # right now. However, many f_locals might not be used in the frame and
-        # thus can unnecessarily increase guard execution overhead.  Therefore,
-        # we selectively update output.guards as we run the Python Bytecode
-        # instruction by instruction.
-        #
-        # An exception here is list/dict variables. Guards related to these
-        # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-        # next invocation when args is not a list, and args[0] is a runtime
-        # error. Therefore, we recursively add guards for list/dict variable here.
-        for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-            ):
-                local_guards = VariableTracker.propagate(val)["guards"]
-                index_guards = [
-                    guard
-                    for guard in local_guards
-                    if guard.create_fn
-                    in (
-                        GuardBuilder.LIST_LENGTH,
-                        GuardBuilder.DICT_KEYS,
-                        GuardBuilder.ODICT_KEYS,
-                        GuardBuilder.TUPLE_ITERATOR_LEN,
-                    )
-                ]
-                self.output.guards.update(index_guards)
+            # symbolic_locals contains the mapping from original f_locals to the
+            # Variable objects. During the Variable building phase, each object also
+            # has its associated guards. At the end, we will accumulate these
+            # guards.
+            #
+            # One way of handling these guards is to just accumulate all of them
+            # right now. However, many f_locals might not be used in the frame and
+            # thus can unnecessarily increase guard execution overhead.  Therefore,
+            # we selectively update output.guards as we run the Python Bytecode
+            # instruction by instruction.
+            #
+            # An exception here is list/dict variables. Guards related to these
+            # variables have indexed access, like Tensor_match on args[0], and if
+            # args is not used in this frame, we will miss a LIST_LENGTH check like
+            # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+            # next invocation when args is not a list, and args[0] is a runtime
+            # error. Therefore, we recursively add guards for list/dict variable here.
+            for val in self.symbolic_locals.values():
+                if isinstance(
+                    val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+                ):
+                    local_guards = VariableTracker.propagate(val)["guards"]
+                    index_guards = [
+                        guard
+                        for guard in local_guards
+                        if guard.create_fn
+                        in (
+                            GuardBuilder.LIST_LENGTH,
+                            GuardBuilder.DICT_KEYS,
+                            GuardBuilder.ODICT_KEYS,
+                            GuardBuilder.TUPLE_ITERATOR_LEN,
+                        )
+                    ]
+                    self.output.guards.update(index_guards)
 
-        self._freevars_ids = dict()
-        for name in self.code_options["co_freevars"]:
-            if name in f_locals:
-                self._freevars_ids[name] = id(f_locals[name])
+            self._freevars_ids = dict()
+            for name in self.code_options["co_freevars"]:
+                if name in f_locals:
+                    self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
         super().run()

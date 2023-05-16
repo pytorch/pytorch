@@ -329,7 +329,7 @@ class GetItemSource(Source):
             if self.index_is_slice:
                 return f"{self.base.name()}[{self.unpack_slice()!r}]"
             elif isinstance(self.index, enum.Enum):
-                return f"{self.base.name()}[{enum_repr(self.index)}]"
+                return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
 
