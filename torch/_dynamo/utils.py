@@ -1578,6 +1578,8 @@ def to_numpy_helper(___tmp_0):
     def convert(obj):
         if isinstance(obj, torch_np.ndarray):
             return obj.tensor.numpy()
+        elif isinstance(obj, torch.Tensor):
+            return obj.numpy()
         else:
             return obj
 
@@ -1586,15 +1588,37 @@ def to_numpy_helper(___tmp_0):
     return convert(___tmp_0)
 
 
-def to_torch_np_ndarray(___graph_out_0):
+def to_tensor(value):
     def convert(obj):
-        # if obj is np.ndarray, convert it to tensor first. This is due to a known behavior in numpy_torch_interop
-        # that it converts the dtype to be the default dtype.
         if isinstance(obj, np.ndarray):
-            return torch_np.asarray(torch.from_numpy(obj))
+            return torch.from_numpy(obj)
+        elif isinstance(obj, torch_np.ndarray):
+            return obj.tensor
         else:
-            return torch_np.asarray(obj)
+            return obj
 
-    if isinstance(___graph_out_0, tuple):
-        return tuple([convert(obj) for obj in ___graph_out_0])
-    return convert(___graph_out_0)
+    if isinstance(value, (tuple, list)):
+        return tuple([convert(obj) for obj in value])
+    return convert(value)
+
+
+class to_tensor_wrapper:
+    def __init__(self, f):
+        self.f = f
+        self.__name__ = "wrapped_" + self.f.__name__
+
+    def __repr__(self):
+        return f"<Wrapped function <original {self.f.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        out = self.f(*args, **kwargs)
+        return to_tensor(out)
+
+
+def attr_wrapper(obj, name):
+    if isinstance(obj, torch_np.ndarray):
+        out = getattr(obj, name)
+        return to_tensor(out)
+    elif isinstance(obj, torch.Tensor):
+        out = getattr(torch_np.ndarray(obj), name)
+        return to_tensor(out)

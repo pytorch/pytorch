@@ -41,6 +41,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 from ..utils import (
+    attr_wrapper,
     clone_input,
     get_fake_value,
     getfile,
@@ -864,14 +865,12 @@ class VariableBuilder:
         source = self.get_source()
         tensor_value = torch.from_numpy(value)
 
-        from ..utils import to_torch_np_ndarray
-
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
             tx=self.tx,
             proxy=self.tx.output.create_proxy(
                 "call_function",
-                to_torch_np_ndarray,
+                torch.from_numpy,
                 (arg_proxy,),
                 {},
             ),
@@ -1181,12 +1180,15 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+    elif config.numpy_ndarray_as_tensor and isinstance(
+        example_value, (np.ndarray, torch_np.ndarray)
+    ):
         proxy.node.meta["example_value"] = example_value
         return target_cls(proxy, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
+        attr_wrapper,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
