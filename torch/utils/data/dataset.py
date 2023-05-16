@@ -239,7 +239,7 @@ class StackDataset(Dataset[Union[Tuple[T_co, ...], Dict[str, T_co]]]):
         elif kwargs:
             tmp = list(kwargs.values())
             self._length = len(tmp[0])  # type: ignore[arg-type]
-            if any(len(self._length) != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
+            if any(self._length != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
             self.datasets = kwargs
         else:
