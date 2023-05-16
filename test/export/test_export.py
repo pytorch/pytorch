@@ -29,7 +29,7 @@ class TestExperimentalExport(TestCase):
         exported_program = do_not_use_experimental_export(mod, inp)
         self.assertEqual(exported_program.fw_module(*inp)[0], mod(*inp))
 
-    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
     def test_export_simple_model(self):
         class Foo(torch.nn.Module):
             def __init__(self, float_val):
@@ -67,7 +67,7 @@ class TestExperimentalExport(TestCase):
         self.assertEqual(output, mod(*inp))
 
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
     def test_export_constraints(self):
 
@@ -146,7 +146,7 @@ class TestDynamismExpression(TestCase):
         _export(branch_on_shape, inp)
 
 
-@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
     def test_capture_multiple(self) -> None:
         class MultipleMethodModule(torch.nn.Module):
@@ -540,7 +540,7 @@ class TestExport(TestCase):
         for node in gm.graph.nodes:
             if node.op == "call_function" and node.target == torch.ops.aten.add_.Tensor:
                 # No more inplace mutation
-                self.assertTrue(node.target != torch.ops.aten.add_.Tensor)
+                self.assertNotEqual(node.target, torch.ops.aten.add_.Tensor, "There shouldn't be any inplace mutation node in the graph.")
             if node.op == "call_function" and node.target == torch.ops.aten.view.default:
                 view_count += 1
 

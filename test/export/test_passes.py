@@ -244,6 +244,7 @@ class TestPasses(TestCase):
 
         ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
+        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view.default) == 0)
         self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view_copy.default) > 0)
 
     def test_views_op_having_view_copy(self) -> None:
