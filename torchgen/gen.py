@@ -1023,7 +1023,7 @@ def pythonify_default(s: str) -> object:
 # the C++ API argument type, except that Tensor and Tensor?
 # arguments simply present as Tensor.
 #
-# TODO: Get rid of dynamic_type, after getting tools/autograd
+# TODO: Get rid of dynamic_type, after getting torchgen/autograd
 # to use the new codegen framework
 def dynamic_type(t: Type) -> str:
     if isinstance(t, OptionalType):

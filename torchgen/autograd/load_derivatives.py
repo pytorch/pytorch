@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Counter, Dict, List, Match, Optional, Sequence, Set, Tuple
 
 import yaml
+
 from torchgen.api import cpp
 
 from torchgen.api.autograd import (
@@ -136,7 +137,7 @@ def load_derivatives(
         op_counter = Counter[str]()
 
         # infos is a dict that maps FunctionSchema -> a dict of per dispatch key DifferentiabilityInfos
-        # this is useful because in tools/autograd/gen_autograd.py:match_differentiability_info
+        # this is useful because in torchgen/autograd/gen_autograd.py:match_differentiability_info
         # we ultimately need to categorize the DifferentiabilityInfos by FunctionSchema
         infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]] = {}
         used_dispatch_keys: Set[str] = set()

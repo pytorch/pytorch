@@ -9,7 +9,7 @@ namespace at { namespace native {
 namespace {
 
 // TODO(crcrpar): Handle version bump in codegen.
-// rel: https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/tools/autograd/gen_inplace_or_view_type.py#L481-L482
+// rel: https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/torchgen/autograd/gen_inplace_or_view_type.py#L481-L482
 inline void increment_version(TensorList tensors) {
   for (const auto & t : tensors) {
     t.unsafeGetTensorImpl()->bump_version();

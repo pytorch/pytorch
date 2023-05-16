@@ -1051,7 +1051,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
             raise GradcheckError((
                 'Expected backward function to handle undefined output grads. '
                 'Please look at "Notes about undefined output gradients" in '
-                '"tools/autograd/derivatives.yaml"')) from e
+                '"torchgen/autograd/derivatives.yaml"')) from e
 
         for gi, i in zip(grads_input, diff_input_list):
             if (gi is not None) and (not gi.eq(0).all()):
@@ -1059,7 +1059,7 @@ def _test_undefined_backward_mode(func, outputs, inputs) -> bool:
                 raise GradcheckError((
                     'Expected all input grads to be undefined or zero when all output grads are undefined '
                     'or zero. Please look at "Notes about undefined output gradients" in '
-                    '"tools/autograd/derivatives.yaml"'))
+                    '"torchgen/autograd/derivatives.yaml"'))
         return True
 
     # All backward functions must work properly if all output grads are undefined

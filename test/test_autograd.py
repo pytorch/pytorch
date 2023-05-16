@@ -7363,7 +7363,7 @@ for shape in [(1,), ()]:
 
                     # We don't test `unique_dim_consecutive` here.
                     # It looks public but the python binding is actually manually disabled in
-                    # tools/autograd/gen_python_functions.py
+                    # torchgen/autograd/gen_python_functions.py
 
                     res = torch._unique2(inp, sorted=sort, return_inverse=return_inverse,
                                          return_counts=return_counts)

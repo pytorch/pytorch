@@ -598,7 +598,7 @@ def is_out_of_place(rel_filepath):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
         return False
-    if rel_filepath.startswith("tools/autograd/templates/"):
+    if rel_filepath.startswith("torchgen/autograd/templates/"):
         return False
     return True
 
@@ -614,7 +614,7 @@ def is_pytorch_file(rel_filepath):
         return True
     if rel_filepath.startswith("third_party/nvfuser/"):
         return True
-    if rel_filepath.startswith("tools/autograd/templates/"):
+    if rel_filepath.startswith("torchgen/autograd/templates/"):
         return True
     return False
 
