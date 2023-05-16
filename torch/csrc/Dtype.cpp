@@ -2,8 +2,8 @@
 
 #include <c10/core/ScalarType.h>
 #include <structmember.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
