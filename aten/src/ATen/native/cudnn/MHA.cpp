@@ -837,7 +837,7 @@ void run_mha_plan(cudnnHandle_t handle,
 		  void* devPtrV,
 		  void* devPtrO,
 		  void* devPtrDropoutSeed,
-                  void* devPtrDropoutOffset,
+          void* devPtrDropoutOffset,
 		  void* devPtrSoftmaxStats,
 		  float scale_dropout,
 		  float scaling_factor,
@@ -1018,16 +1018,16 @@ run_cudnn_LLM_fprop(int64_t b,
       tensorType = CUDNN_DATA_BFLOAT16;
     }
     std::cout << "LLM params " << " " <<  b << " " <<  h << " " <<  s_q << " " << s_kv << " " << d << " " <<  scaling_factor << " " <<  is_training << " " << dropout_probability;
-    o = at::empty({b, s_q, h, d}, q.options());
-    softmaxstats = at::empty({b, h, s_q}, q.options());
+    o = at::zeros({b, s_q, h, d}, q.options());
+    softmaxstats = at::zeros({b, h, s_q}, q.options());
     run_bf16_LLM_fprop( b, 
                    h, 
                    s_q,
                    s_kv,
                    d,
-                  MHA_Layout::SBH_INTERLEAVED,
+                  MHA_Layout::QKV_INTERLEAVED,
                   scaling_factor,
-                  is_training,
+                  false,
                   dropout_probability,
                   q.data_ptr(),
                   k.data_ptr(), 
