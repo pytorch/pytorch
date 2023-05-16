@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import contextlib
 import os
 import re
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Generator
 
 from github_utils import gh_post_pr_comment as gh_post_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
@@ -30,7 +31,6 @@ def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
 ) -> None:
     branch = f"pull/{pr.pr_num}/head"
-    onto_branch = f"refs/remotes/origin/{onto_branch}"
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
@@ -75,7 +75,6 @@ def rebase_ghstack_onto(
     ):
         subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    onto_branch = f"refs/remotes/origin/{onto_branch}"
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
@@ -159,6 +158,20 @@ def rebase_ghstack_onto(
             )
 
 
+@contextlib.contextmanager
+def git_config_guard(repo: GitRepo) -> Generator[None, None, None]:
+    """Restores user.name and user.email global properties after context is finished"""
+    user_email = repo._run_git("config", "user.email")
+    user_name = repo._run_git("config", "user.name")
+    try:
+        yield
+    finally:
+        if user_email:
+            repo._run_git("config", "--global", "user.email", user_email)
+        if user_name:
+            repo._run_git("config", "--global", "user.name", user_name)
+
+
 def main() -> None:
     args = parse_args()
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name(), debug=True)
@@ -166,6 +179,7 @@ def main() -> None:
 
     pr = GitHubPR(org, project, args.pr_num)
     onto_branch = args.branch if args.branch else pr.default_branch()
+    onto_branch = f"refs/remotes/{repo.remote}/{onto_branch}"
 
     msg = "@pytorchbot successfully started a rebase job."
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
@@ -182,15 +196,9 @@ def main() -> None:
         return
 
     try:
-        email = name = ""
-
         if pr.is_ghstack_pr():
-            # Check the configured name and email. If they are available, store them so that
-            # we can put them back after rebasing here
-            email = repo._run_git("config", "user.email")
-            name = repo._run_git("config", "user.name")
-
-            rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            with git_config_guard(repo):
+                rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
             rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
 
@@ -200,13 +208,6 @@ def main() -> None:
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-
-    finally:
-        if email:
-            repo._run_git("config", "--global", "user.email", email)
-
-        if name:
-            repo._run_git("config", "--global", "user.name", name)
 
 
 if __name__ == "__main__":
