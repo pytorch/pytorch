@@ -72,7 +72,7 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
-    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
+    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
         nvtoolsext_dll_path = os.path.join(
             os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
     else:
@@ -80,7 +80,7 @@ if sys.platform == 'win32':
 
     from .version import cuda as cuda_version
     import glob
-    if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
+    if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
@@ -1393,6 +1393,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
+import torch.backends.cpu
 import torch.backends.cuda
 import torch.backends.mps
 import torch.backends.cudnn
@@ -1529,6 +1530,41 @@ class _TorchCompileInductorWrapper:
 
         return compile_fx(model_, inputs_, config_patches=self.config)
 
+    def reset(self):
+        from torch._inductor import config
+        if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
+            if self.config.get("triton.cudagraphs", True):
+                from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+                reset_cudagraph_trees()
+
+class _TorchCompileWrapper:
+    def __init__(self, backend, mode, options, dynamic):
+        from torch._dynamo.backends.registry import lookup_backend
+
+        if isinstance(backend, str):
+            self.compiler_name = backend
+        elif hasattr(backend, "__name__"):
+            self.compiler_name = backend.__name__
+        else:
+            self.compiler_name = str(backend)
+        self.dynamic = dynamic
+        self.compiler_fn = lookup_backend(backend)
+        self.kwargs = {}
+        # only pass the args if they non-empty
+        if mode and mode != "default":
+            self.kwargs["mode"] = mode
+        if options:
+            self.kwargs["options"] = options
+
+    def __eq__(self, other):
+        return (isinstance(other, _TorchCompileWrapper) and
+                self.compiler_fn == other.compiler_fn and
+                self.kwargs == other.kwargs and
+                self.dynamic == other.dynamic)
+
+    def __call__(self, model_, inputs_):
+        return self.compiler_fn(model_, inputs_, **self.kwargs)
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
@@ -1594,6 +1630,8 @@ def compile(model: Optional[Callable] = None, *,
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+    else:
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 

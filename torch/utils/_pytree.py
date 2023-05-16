@@ -103,7 +103,7 @@ def _get_node_type(pytree: Any) -> Any:
 
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
-    return _get_node_type(pytree) not in SUPPORTED_NODES.keys()
+    return _get_node_type(pytree) not in SUPPORTED_NODES
 
 
 # A TreeSpec represents the structure of a pytree. It holds:

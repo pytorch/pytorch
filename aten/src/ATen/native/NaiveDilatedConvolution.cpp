@@ -259,7 +259,7 @@ void slow_conv_dilated_all_cpu_template(
         }
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data_ptr<scalar_t>(),
+            input_n.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -267,7 +267,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data_ptr<scalar_t>(),
+            columns.mutable_data_ptr<scalar_t>(),
             is_channels_last);
         /*
           Compute:
@@ -414,7 +414,7 @@ void slow_conv_dilated_all_cpu_template(
       if (grad_weight.defined()) {
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data_ptr<scalar_t>(),
+            input_n.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -422,7 +422,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data_ptr<scalar_t>(),
+            columns.mutable_data_ptr<scalar_t>(),
             is_channels_last);
         scalar_t scale = 1; // TODO: expose as argument?
         /*
@@ -628,7 +628,7 @@ Tensor slow_conv_dilated3d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -687,7 +687,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
