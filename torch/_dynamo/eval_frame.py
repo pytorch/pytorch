@@ -890,7 +890,7 @@ def export(
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.warning(
+            log.info(
                 "Summary of dimension constraints:%s",
                 msg,
             )
@@ -1025,7 +1025,7 @@ def export(
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
-        log.warning(
+        log.info(
             "Summary of dimension constraints:%s",
             dim_constraints.prettify_results(inspect.signature(f)),
         )
