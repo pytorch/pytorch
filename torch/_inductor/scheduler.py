@@ -691,8 +691,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
             reuse_score = 0
             combined = set()
             internal_deps = set()
-            external_deps = set()
-            external_writes_score = 0
+            external_reads = set()
+            external_writes = set()
             for node, order in ordering.items():
                 union = set(order.read_writes.reads_and_writes())
                 reuse_score += len(combined & union)
@@ -702,38 +702,42 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     if dep.name in all_node_names:
                         internal_deps.add(dep)
                     else:
-                        external_deps.add(dep)
+                        external_reads.add(dep)
                 for dep in order.read_writes.writes:
                     if all(u.get_name() in all_node_names for u in (node.users or ())):
                         internal_deps.add(dep)
                     else:
-                        external_deps.add(dep)
-                        external_writes_score -= int(order.permute_order is not None)
-                for dep in order.read_writes.index_exprs:
-                    internal_deps.add(dep)
+                        external_writes.add(dep)
+                # TODO(jansel): include this?
+                # for dep in order.read_writes.index_exprs:
+                #    internal_deps.add(dep)
 
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                external_writes_score,
-                sum(map(dep_symbols_score, external_deps)),
-                sum(map(dep_symbols_score, internal_deps)),
+                sum(map(score_dep, external_writes)),
+                sum(map(score_dep, external_reads)),
+                sum(map(score_dep, internal_deps)),
             )
 
-        def dep_symbols_score(dep):
-            """
-            This score is relying on normalization to merge contiguous
-            dims together, therefor fewer symbols mean more contiguous
-            dims.
-            """
-            if isinstance(dep, StarDep):
+        def score_dep(dep: dependencies.MemoryDep, limit=2):
+            # TODO(jansel): include indirect?
+            if (
+                isinstance(dep, dependencies.StarDep)
+                or dep.is_indirect()
+                or dep.is_scalar()
+            ):
                 return 0
+            strides = V.graph.sizevars.stride_hints(dep.index, dep.var_names)
+            sizes = V.graph.sizevars.size_hints(dep.size)
+            assert len(strides) == len(sizes)
             score = 0
-            symbols = set(dep.index.free_symbols)
-            for v in dep.var_names:
-                if v in symbols:
-                    score -= 1
-            return score
+            expected = 1
+            for size, stride in zip(reversed(sizes), reversed(strides)):
+                score -= int(stride != expected)
+                expected = stride * size
+            # TODO(jansel): different limit?
+            return max(-limit, score)
 
         all_node_names = functools.reduce(set.union, (n.get_names() for n in snodes))
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]

@@ -709,6 +709,7 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html

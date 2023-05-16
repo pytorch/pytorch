@@ -22,7 +22,14 @@ from torch._prims_common import is_float_dtype
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self, sympy_dot, sympy_product, sympy_subs, sympy_symbol
+from ..utils import (
+    cache_on_self,
+    get_fused_kernel_name,
+    sympy_dot,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -357,6 +364,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.erf()"
 
     @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
@@ -470,10 +481,6 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def log10(x):
         return f"{x}.log10()"
-
-    @staticmethod
-    def erfc(x):
-        return f"{x}.erfc()"
 
     @staticmethod
     def nextafter(x):
@@ -723,6 +730,10 @@ class CppOverrides(OpOverrides):
         return f"std::erf({x})"
 
     @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
@@ -849,10 +860,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
-
-    @staticmethod
-    def erfc(x):
-        return f"std::erfc({x})"
 
     @staticmethod
     def log10(x):
@@ -987,8 +994,10 @@ class CppOverrides(OpOverrides):
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
         result = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
-        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        scalar_zero = f"decltype({x})(0)"
+        scalar_one = f"decltype({x})(1)"
+        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
+        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
@@ -2475,7 +2484,7 @@ class CppScheduling:
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
 
-        kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
     def codegen_sync(self):
         pass
@@ -2493,23 +2502,28 @@ class KernelGroup:
         self.ws = WorkSharing(self.loops_code)
         self.stack = contextlib.ExitStack()
         self.stack.enter_context(self.ws)
-        self.count = 0
+        self.scheduled_nodes = []
 
     def new_kernel(self, cls, *args):
         return cls(self.args, parallel_num_threads(), *args)
 
-    def finalize_kernel(self, new_kernel, scheduler):
-        self.count += 1
+    def finalize_kernel(self, new_kernel, nodes):
+        self.scheduled_nodes += nodes
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
-        if self.count == 0:
+        if not self.scheduled_nodes:
             return
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        fused_name = (
+            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)

@@ -168,6 +168,12 @@ class IndexExprDep(typing.NamedTuple):
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
+    def is_indirect(self):
+        return False
+
+    def is_scalar(self):
+        return False
+
 
 @dataclasses.dataclass
 class ReadWrites:

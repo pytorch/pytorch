@@ -1636,6 +1636,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIs(act.act, nn.functional.gelu)
         self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
+    def test_dropout_inline(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            return torch.nn.Dropout(0.1)(x)
+
+        y = torch.randn(10)
+        torch.manual_seed(1337)
+        ref = nn.functional.dropout(y, 0.1)
+        torch.manual_seed(1337)
+        res = fn(y)
+        self.assertTrue(same(ref, res))
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
