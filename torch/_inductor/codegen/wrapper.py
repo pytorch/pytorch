@@ -653,7 +653,9 @@ class WrapperCodeGen(CodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
-        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        self.wrapper_call.writeline(
+            f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
+        )
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
