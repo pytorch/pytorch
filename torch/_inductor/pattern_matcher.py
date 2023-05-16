@@ -24,7 +24,6 @@ from ..fx import Transformer
 from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
-from .virtualized import V
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
