@@ -76,12 +76,12 @@ updates the parameters, so the scale factor does not interfere with the learning
 
 .. note::
 
-  AMP/fp16 may not be for every model! For example, most bf16-pretrained models cannot operate in
+  AMP/fp16 may not work for every model! For example, most bf16-pretrained models cannot operate in
   the fp16 numerical range of max 65k and will cause gradients to overflow instead of underflow. In
   this case, the scale factor may decrease under 1 as an attempt to bring gradients to a number
-  representable in fp16. While one may expect the scale to always be above 1, our GradScaler does
-  NOT make this guarantee to maintain performance. If you encounter NaNs in your loss or gradients
-  when running with AMP or fp16, verify your model is compatible.
+  representable in the fp16 dynamic range. While one may expect the scale to always be above 1, our
+  GradScaler does NOT make this guarantee to maintain performance. If you encounter NaNs in your loss
+  or gradients when running with AMP/fp16, verify your model is compatible.
 
 .. currentmodule:: torch.cuda.amp
 
