@@ -226,7 +226,7 @@ def _should_pad_bench_impl(mat1, mat2, op, input=None):
         warmup=5,
     )
 
-    with no_dispatch():
+    with no_dispatch(), torch.utils._python_dispatch._disable_current_modes():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
             k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
