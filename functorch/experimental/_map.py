@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
-from torch._functorch.aot_autograd import create_joint
+from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -31,6 +31,15 @@ class MapWrapper(HigherOrderOperator):
 
 map = MapWrapper("map")
 map_impl = HigherOrderOperator("map_impl")
+
+dummy_aot_config = AOTConfig(fw_compiler=None,
+                             bw_compiler=None,
+                             partition_fn=None,
+                             decompositions={},
+                             num_params_buffers=0,
+                             aot_id=0,
+                             keep_inference_input_mutations=False)
+
 
 def create_fw_bw_graph(f, num_mapped_args, *args):
     mapped_xs = args[:num_mapped_args]
@@ -80,7 +89,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                 fw_out = f(*args)
                 return fw_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in fw_out]
 
-            joint = create_joint(fw_with_masks)
+            joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
             _, grads = joint(list(mapped_input) + list(args),
                              [grad for grad in mapped_grads if grad is not None and grad.requires_grad])
 
