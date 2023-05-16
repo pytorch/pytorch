@@ -24,7 +24,7 @@ import torch.fx
 from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype
 
-from torch.onnx._internal.fx import registration
+from torch.onnx._internal.fx import diagnostics, registration
 
 if TYPE_CHECKING:
     import onnx.defs  # type: ignore[import]
@@ -59,15 +59,22 @@ class OnnxDispatcher:
         b. Otherwise, find the nearest one with matching score.
     """
 
-    def __init__(self, registry: registration.OnnxRegistry, opset_version: int = 18):
+    def __init__(
+        self,
+        registry: registration.OnnxRegistry,
+        diagnostic_context: diagnostics.DiagnosticContext,
+        opset_version: int = 18,
+    ):
         """Initialize the Dispatcher.
 
         Args:
             registry: The registration registry.
             opset_version: The model opset version.
+            diagnostic_context: The diagnostic context to use for diagnostic messages.
         """
         self._registry = registry
         self._opset_version = opset_version
+        self._diagnostic_context = diagnostic_context
 
     @property
     def opset_version(self) -> int:
@@ -124,9 +131,14 @@ class OnnxDispatcher:
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor
             if node.target != torch.ops.aten.sym_size:
-                raise ValueError(
-                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
+                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                    diagnostics.rules.no_symbolic_function_for_call_function,
+                    diagnostics.levels.ERROR,
+                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!",
+                    unsupported_fx_node=node,
                 )
+                self._diagnostic_context.log(diagnostic)
+                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
@@ -141,20 +153,37 @@ class OnnxDispatcher:
                         node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
                     )
                 ):
-                    raise ValueError(
+                    # TODO: reduce number of explicit initializations.
+                    # TODO: Log location, stack.
+                    diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                        diagnostics.rules.no_symbolic_function_for_call_function,
+                        diagnostics.levels.ERROR,
                         f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
-                        " only int/float/SymInt/SymFloat is supported with built-in ops!"
+                        " only int/float/SymInt/SymFloat is supported with built-in ops!",
+                        unsupported_fx_node=node,
                     )
+                    self._diagnostic_context.log(diagnostic)
+                    raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             aten_op = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[node.target]
             return aten_op.name()
         if isinstance(node.target, torch._ops.OpOverload):
             return node.target.name()
 
-        raise RuntimeError(f"Unknown call_function target: {node.target}")
+        # Unexpected target, raise error.
+        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+            diagnostics.rules.no_symbolic_function_for_call_function,
+            diagnostics.levels.ERROR,
+            f"Unknown call_function target: {node.target}",
+            unsupported_fx_node=node,
+        )
+        self._diagnostic_context.log(diagnostic)
+        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
     @_beartype.beartype
     def _get_function_overloads(
-        self, node: torch.fx.Node, aten_name: str
+        self,
+        node: torch.fx.Node,
+        aten_name: str,
     ) -> Set[Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]]:
         """Get the function overloads from the registry."""
         function_group = None
@@ -181,9 +210,15 @@ class OnnxDispatcher:
                 if function_overloads is not None:
                     return function_overloads
 
-        raise RuntimeError(
-            f"aten name: {aten_name} is not registered in the ONNX registry!"
+        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+            diagnostics.rules.no_symbolic_function_for_call_function,
+            diagnostics.levels.ERROR,
+            f"Cannot find symbolic function for {aten_name}, "
+            f"which should be registered under {node.target}.",
+            unsupported_fx_node=node,
         )
+        self._diagnostic_context.log(diagnostic)
+        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
 
 @_beartype.beartype
@@ -278,7 +313,9 @@ class OpSchemaWrapper:
 
     @_beartype.beartype
     def perfect_match_inputs(
-        self, args: Sequence[Union[_TensorLike, str, int, float, bool, list]], kwargs
+        self,
+        args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        kwargs,
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
 
@@ -314,7 +351,9 @@ class OpSchemaWrapper:
 
     @_beartype.beartype
     def _record_matching_score(
-        self, args: Sequence[Union[_TensorLike, str, int, float, bool, list]], kwargs
+        self,
+        args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        kwargs,
     ):
         """Calculate the inputs matching score of the OpSchema requirements.
 

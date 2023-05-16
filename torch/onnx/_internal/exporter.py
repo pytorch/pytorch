@@ -151,6 +151,18 @@ class ResolvedExportOptions(ExportOptions):
 
             self.fx_tracer = dynamo_graph_extractor.DynamoExport()
 
+            self.logger = resolve(
+                options.logger, lambda: logging.getLogger().getChild("torch.onnx")
+            )
+            # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
+            # Options:
+            #   - Add a shim and make it noop if onnxscript is not available.
+            #   - Try local import and raise.
+            # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
+            self.diagnostic_context = infra.DiagnosticContext(
+                "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
+            )
+
             # TODO(titaiwang): opset version for registry should be provided from torchlib (source)
             # However, torchlib doesn't have opset version in anywhere yet. We need to revisit this
             # once torchlib has multiple opset version.
@@ -161,21 +173,9 @@ class ResolvedExportOptions(ExportOptions):
                 )
             )
             self.onnx_dispatcher = function_dispatcher.OnnxDispatcher(
-                self.onnx_registry, self.opset_version
+                self.onnx_registry, self.diagnostic_context, self.opset_version
             )
             self.op_level_debug = resolve(options.op_level_debug, False)
-            self.logger = resolve(
-                options.logger, lambda: logging.getLogger().getChild("torch.onnx")
-            )
-
-            # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
-            # Options:
-            #   - Add a shim and make it noop if onnxscript is not available.
-            #   - Try local import and raise.
-            # Similar procedure needs to be done for diagnostics in `torch.onnx.export`.
-            self.diagnostic_context = infra.DiagnosticContext(
-                "torch.onnx.dynamo_export", torch.__version__, logger=self.logger
-            )
 
             for key in dir(options):
                 if not key.startswith("_"):  # skip private attributes
@@ -410,7 +410,7 @@ class FXGraphExtractor(abc.ABC):
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
         # TODO: Import here to prevent circular dependency
-        import torch.onnx._internal.fx.passes as passes
+        from torch.onnx._internal.fx import analysis, passes
 
         diagnostic_context = options.diagnostic_context
 
@@ -447,6 +447,10 @@ class FXGraphExtractor(abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
+            analysis.UnsupportedFxNodesAnalysis(diagnostic_context, module).analyze(
+                infra.levels.ERROR
+            )
+
             onnxscript_graph = passes.export_fx_to_onnxscript(
                 diagnostic_context, module, options
             )
@@ -537,6 +541,16 @@ class UnsatisfiedDependencyError(RuntimeError):
     def __init__(self, package_name: str, message: str):
         super().__init__(message)
         self.package_name = package_name
+
+
+class OnnxExporterError(RuntimeError):
+    """Raised when an ONNX exporter error occurs. Diagnostic context is enclosed."""
+
+    diagnostic_context: Final[infra.DiagnosticContext]
+
+    def __init__(self, diagnostic_context: infra.DiagnosticContext, message: str):
+        super().__init__(message)
+        self.diagnostic_context = diagnostic_context
 
 
 @_beartype.beartype
@@ -640,7 +654,9 @@ def dynamo_export(
             f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
-        raise RuntimeError(message) from e
+        raise OnnxExporterError(
+            resolved_export_options.diagnostic_context, message
+        ) from e
 
 
 __all__ = [
