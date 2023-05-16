@@ -327,12 +327,10 @@ cxx_binary(
         "flatbuffers/include",
     ],
     raw_headers = [
-        "flatbuffers/grpc/src/compiler/config.h",
         "flatbuffers/grpc/src/compiler/cpp_generator.h",
         "flatbuffers/grpc/src/compiler/go_generator.h",
         "flatbuffers/grpc/src/compiler/java_generator.h",
         "flatbuffers/grpc/src/compiler/python_generator.h",
-        # "flatbuffers/grpc/src/compiler/python_private_generator.h",
         "flatbuffers/grpc/src/compiler/schema_interface.h",
         "flatbuffers/grpc/src/compiler/swift_generator.h",
         "flatbuffers/grpc/src/compiler/ts_generator.h",
