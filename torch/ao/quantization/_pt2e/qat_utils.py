@@ -204,32 +204,57 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     match_pattern = _get_aten_graph_module(_conv2d_bn_pattern, example_inputs)
     replacement_pattern = _get_aten_graph_module(_qat_conv2d_bn_pattern, example_inputs)
     # TODO: use the public replace_pattern API once it also returns replacement nodes
-    match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern)
+    match_and_replacement = _replace_pattern(m, match_pattern, replacement_pattern, ignore_literals=True)
     m.recompile()
 
-    # Copy over metadata from original subgraph
-    # This ensures the stack traces and annotations are preserved in the new subgraph
-    # TODO: handle this in replace_pattern
+    # Due to limited functionality in the subgraph rewriter, here we manually
+    # update the replacement graph as follows:
+    #
+    #   (1) Copy over metadata from original subgraph. This ensures the stack traces
+    #       and annotations are preserved in the new subgraph
+    #
+    #   (2) Copy over constant args for conv from the original subgraph
+    #       TODO: do this for constant args for batchnorm as well
+    #
+    # In the future, we should try to push as much of this functionality into the
+    # subgraph rewriter as possible, so we don't have to manually copy anything over.
+    # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
+
     for mr in match_and_replacement:
-        # Find replacement conv and bn nodes by climbing upwards from anchor node
-        assert len(mr.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
         replacement_bn_node = None
-        replacement_getitem_node = mr.replacements[0]
-        assert replacement_getitem_node.target == operator.getitem
-        n = replacement_getitem_node
-        while replacement_conv_node is None or replacement_bn_node is None:
-            if n.target == torch.ops.aten.convolution.default:
-                replacement_conv_node = n
-            if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                replacement_bn_node = n
-            assert isinstance(n.args[0], Node)
-            n = n.args[0]
+        replacement_getitem_node = None
+
+        for replacement in mr.replacements:
+            if (
+                replacement.op == "call_function"
+                and replacement.target == torch.ops.aten.convolution.default
+            ):
+                replacement_conv_node = replacement
+            elif (
+                replacement.op == "call_function"
+                and replacement.target == torch.ops.aten._native_batch_norm_legit.default
+            ):
+                replacement_bn_node = replacement
+            elif (
+                replacement.op == "call_function"
+                and replacement.target == operator.getitem
+            ):
+                replacement_getitem_node = replacement
+
+        assert replacement_conv_node is not None
+        assert replacement_bn_node is not None
+        assert replacement_getitem_node is not None
 
         # Copy over metadata for all three nodes in [conv - bn - getitem]
-        for match_pattern_node, original_node in mr.nodes_map.items():
+        # Also copy over constant args for conv
+        for original_node in mr.nodes_map.values():
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
+                # Note: Unlike other tensor args like conv weights and biases, literal args are
+                # preserved in the original nodes after replacement, so we can access them here
+                # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
+                replacement_conv_node.args = replacement_conv_node.args[:3] + original_node.args[3:]
             if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
                 replacement_bn_node.meta = original_node.meta
             if original_node.target == operator.getitem:

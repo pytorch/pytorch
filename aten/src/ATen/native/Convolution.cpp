@@ -87,6 +87,9 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+
+static bool conv_benchmark_empty_cache = true;
+
 // Check workload to activate fast depthwise FP16 cudnn conv kernels
 template <typename T>
 bool check_cudnn_depthwise_workload(const at::Tensor& input, int stride) {
@@ -2256,5 +2259,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
 }
+
+void _cudnn_set_conv_benchmark_empty_cache(bool enable) {
+  conv_benchmark_empty_cache = enable;
+}
+
+bool _cudnn_get_conv_benchmark_empty_cache() {
+  return conv_benchmark_empty_cache;
+}
+
+
 
 }} // at::native
