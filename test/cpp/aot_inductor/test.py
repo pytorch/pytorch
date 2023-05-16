@@ -18,11 +18,10 @@ x = torch.randn((32, 64), device="cuda")
 y = torch.randn((32, 64), device="cuda")
 
 for dynamic in [True, False]:
-    torch._dynamo.config.dynamic_shapes = dynamic 
+    torch._dynamo.config.dynamic_shapes = dynamic
     torch._dynamo.reset()
 
     with torch.no_grad():
-        from torch.fx.experimental.proxy_tensor import make_fx
         module, _ = torch._dynamo.export(Net().cuda(), x, y)
         lib_path = torch._inductor.aot_compile(module, [x, y])
 

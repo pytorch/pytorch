@@ -678,6 +678,18 @@ class WrapperCodeGen(CodeGen):
     def val_to_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
+        elif isinstance(s, sympy.Expr):
+            return pexpr(s)
+        elif isinstance(s, (tuple, list)):
+
+            @dataclasses.dataclass
+            class Shim:
+                ref: Any
+
+                def __repr__(self):
+                    return self.ref
+
+            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
         else:
             return repr(s)
 
