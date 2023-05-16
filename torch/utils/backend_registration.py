@@ -85,7 +85,7 @@ def _check_register_once(module, attr):
         raise RuntimeError(f"The custom device module of {module} has already been registered with {attr}")
 
 
-def _normalization_device(custom_backend_name: str, device: Optional[Union[int, torch.device]] = None) -> int:
+def _normalization_device(custom_backend_name: str, device: Optional[Union[int, str, torch.device]] = None) -> int:
     def _get_current_device_index():
         _get_device_index = "current_device"
         if hasattr(torch, custom_backend_name) and \
@@ -104,6 +104,12 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
             device_idx = _get_current_device_index()
         else:
             device_idx = device.index
+    # if isinstance(device, str), this means that the parameter passed in is in the string format "foo:0"
+    elif isinstance(device, str):
+        if device.split(":")[0] == custom_backend_name:
+            device_idx = int(device.split(":")[-1])
+        else:
+            raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
     # if isinstance(device, int), we can take the index number directly
     else:
         device_idx = device
