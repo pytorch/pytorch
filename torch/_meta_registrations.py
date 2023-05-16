@@ -54,6 +54,14 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
+def check_inplace_broadcast(self_shape, *args_shape):
+    broadcasted_shape = tuple(_broadcast_shapes(self_shape, *args_shape))
+    check(
+        broadcasted_shape == self_shape,
+        lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
 def meta_take(self, index, *, out=None):
     # Type and device checks
@@ -2092,6 +2100,8 @@ def meta_zero_(self):
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -2104,6 +2114,8 @@ def meta_binop_inplace(self, other):
     ],
 )
 def meta_binop_inplace_alpha(self, other, alpha=1):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -2141,6 +2153,7 @@ def meta_index_put(self, indices, values, accumulate=False):
 
 @register_meta(aten.masked_fill_.Scalar)
 def meta_masked_fill_(self, mask, value):
+    check_inplace_broadcast(self.shape, mask.shape)
     return self
 
 
