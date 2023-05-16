@@ -2,7 +2,7 @@ import itertools
 
 import unittest
 import weakref
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -15,7 +15,6 @@ from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
 from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
 from .decomposition import select_decomp_table
-
 
 aten = torch.ops.aten
 
@@ -41,10 +40,10 @@ def replace_node_with_constant(gm, node, constant):
     setattr(gm, qualname, constant)
 
 
-def replace_params_with_constants(fake_gm, real_inputs, example_inputs_, fw_metadata):
-    fake_inp_nodes = [node for (_, node) in zip(real_inputs, fake_gm.graph.nodes)]
+def replace_params_with_constants(gm, real_inputs, example_inputs_, fw_metadata):
+    fake_inp_nodes = [node for (_, node) in zip(real_inputs, gm.graph.nodes)]
 
-    g = fake_gm.graph
+    g = gm.graph
 
     preserved_arg_indices = []
 
@@ -57,15 +56,15 @@ def replace_params_with_constants(fake_gm, real_inputs, example_inputs_, fw_meta
             preserved_arg_indices.append(i)
             continue
 
-        replace_node_with_constant(fake_gm, node, real_input)
+        replace_node_with_constant(gm, node, real_input)
 
     # add on non param inputs
     preserved_arg_indices.extend(range(len(real_inputs), len(example_inputs_)))
 
     g.lint()
     # is this necessary ?
-    fake_gm.recompile()
-    return fake_gm, preserved_arg_indices
+    gm.recompile()
+    return gm, preserved_arg_indices
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -80,17 +79,16 @@ def constant_fold(gm):
             if unknown_value in pytree.tree_flatten((args, kwargs))[0]:
                 return unknown_value
 
+            # All mutations should either be removed or on inputs which we did not make constant
             if (
                 isinstance(node.target, torch._ops.OpOverload)
                 and torch.Tag.nondeterministic_seeded in node.target.tags
             ):
                 return unknown_value
 
-            # All mutations should either be removed or on inputs which we did not make constant
-            # TODO - check rng state did not change ?
-
             out = super().run_node(node)
 
+            # TODO - remove constant from node_replacement when it has no uses
             if node.op != "get_attr" and isinstance(out, torch.Tensor):
                 node_replacements[node] = out
 
@@ -129,7 +127,6 @@ def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
 
     # constant params will be real tensors, not fake
     # TODO: fake_mode should should enable py dispatcher if its symbolic ?
-    # TODO: is there a better way of decomposing just some nodes ? graph pattern matcher ?
     with unittest.mock.patch.object(
         fake_mode, "allow_non_fake_inputs", True
     ), fake_mode:
@@ -140,19 +137,24 @@ def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
     return gm
 
 
-def optimize_for_inference(
-    symbolic_traced_gm: torch.fx.GraphModule,
+def freeze(
+    original_gm: torch.fx.GraphModule,
     gm: torch.fx.GraphModule,
-    example_inputs_,
+    example_inputs_: List[torch.Tensor],
     fw_metadata,
-):
+) -> Tuple[torch.fx.GraphModule, List[int]]:
+    "Inlines unmutated parameters into constants and runs constant propagation and other optimizations"
+
     params = {
-        **dict(symbolic_traced_gm.named_parameters(remove_duplicate=False)),
-        **dict(symbolic_traced_gm.named_buffers(remove_duplicate=False)),
+        **dict(original_gm.named_parameters(remove_duplicate=False)),
+        **dict(original_gm.named_buffers(remove_duplicate=False)),
     }
     params_flat, _ = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
 
+    # TODO - aot_autograd currently doesn't have a way of not updating the calling convention to include
+    # parameters, so we need to drop parameters that became constants from inputs. This also prevents
+    # deallocating unused parameters if `freezing_discard_parameters` is True.
     gm, preserved_arg_indices = replace_params_with_constants(
         gm, params_flat, example_inputs_, fw_metadata
     )
@@ -167,17 +169,14 @@ def optimize_for_inference(
     # now, decomp batch norm if we were unable to fuse it
     gm = decompose_unfused_batchnorms(gm, example_inputs_, preserved_arg_indices)
 
-    # patterns = get_freezing_patterns()
+    patterns = get_freezing_patterns()
 
-    # patterns.apply(gm.graph)
-    # torch.fx.passes.tools_common.legalize_graph(gm)
-    # constant_fold(gm)
-
-    # breakpoint()
-    # print(gm)
+    patterns.apply(gm.graph)
+    torch.fx.passes.tools_common.legalize_graph(gm)
+    constant_fold(gm)
 
     # invalidate nn Modules
-    if config.optimize_for_inference_discard_parameters:
+    if config.freezing_discard_parameters:
         invalidate_eager_modules()
 
     return gm, preserved_arg_indices
@@ -192,17 +191,25 @@ class ErasedTensor(torch.Tensor):
         self.erased_name = name
         self.owning_mod_ref = weakref.ref(mod)
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        erased_tensors = [
+            e
+            for e in pytree.tree_flatten((args, kwargs))[0]
+            if isinstance(e, ErasedTensor)
+        ]
+        assert len(erased_tensors) > 0
+        e = erased_tensors[0]
+
         raise RuntimeError(
             f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
             "The original parameters have been discarded for memeory efficiency. "
-            f"Found in op {func} for erased parameter {self.erased_name} of {self.owning_mod_ref()}"
+            f"Found in op {func} for erased parameter {e.erased_name} of {e.owning_mod_ref()}"
         )
 
 
 @torch.utils._python_dispatch._disable_current_modes()
 def invalidate_eager_modules():
-    # TODO - could just invalidate the parameters that were folded
     for mod in torch._guards.TracingContext.get().module_context.nn_modules.values():
         if not isinstance(mod, torch.nn.Module):
             continue

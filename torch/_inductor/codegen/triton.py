@@ -144,6 +144,11 @@ class TritonCSEVariable(CSEVariable):
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
 class TritonOverrides(OpOverrides):
@@ -411,6 +416,13 @@ class TritonOverrides(OpOverrides):
         quot = f"{a} // {b}"
         rem = f"{a} % {b}"
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
 
     @staticmethod
     def trunc(x):
@@ -1166,6 +1178,19 @@ class TritonKernel(Kernel):
             and torch.version.hip is None
         ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
+
+        # Guard against write-after-read corruption in triton.
+        # See # https://github.com/openai/triton/issues/1615
+        # This triton bug means that a load which is broadcasted over multiple
+        # warps may see the result of a store that happens later in the triton
+        # program. The workaround is to add a barrier before storing, which
+        # enforces that all warps have already read the data.
+        is_inplace = name in self.args.inplace_buffers
+        is_broadcasted = not set.issubset(
+            set(self.range_tree_nodes.keys()), original_index.free_symbols
+        )
+        if is_inplace and is_broadcasted:
+            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
@@ -1947,7 +1972,7 @@ class TritonScheduling:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
-                get_fused_kernel_name(node_schedule)
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names
                 else ""
             )

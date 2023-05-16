@@ -19,9 +19,9 @@ from ..pattern_matcher import (
     KeywordArg,
     ListOf,
     Match,
-    MultiOutputPattern,
     MULTIPLE,
     PatternMatcherPass,
+    register_graph_pattern,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -29,6 +29,7 @@ from ..virtualized import V
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -38,7 +39,7 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule):
+def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -49,8 +50,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if config.reordering:
-        # has some issues with mutation in inference mode
+    if locality_reorder:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
@@ -125,19 +125,6 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 
 
 @register_lowering_pattern(
-    MultiOutputPattern(
-        (
-            CallFunction(aten.mm.default, KeywordArg("inp"), KeywordArg("w1")),
-            CallFunction(aten.mm.default, KeywordArg("inp"), KeywordArg("w2")),
-        )
-    )
-)
-def foo(*args, **kwargs):
-    breakpoint()
-    raise
-
-
-@register_lowering_pattern(
     CallFunction(
         aten.add,
         CallFunction(aten.mm, Arg(), Arg()),
@@ -148,88 +135,39 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
-# @register_lowering_pattern(
-#     MultiOutputPattern((
-#         CallFunction(
-#             torch.ops.aten.view.default,
-#             KeywordArg("self"), Arg(),
-#         ),
-#         CallFunction(
-#             torch.ops.aten.view.default,
-#             KeywordArg("self"), Arg(),
-#         ),
-#     )),
-#     pass_number=0,
-#     extra_check=is_same_view,
-# )
-
-
-def elias(*args):
-    breakpoint()
-    raise
-
-
-@register_lowering_pattern(
-    MultiOutputPattern(
-        (
+@register_graph_pattern(
+    CallFunction(
+        aten.cumsum.default,
+        CallFunction(
+            prims.convert_element_type.default,
             CallFunction(
-                torch.ops.aten.mm.default,
-                KeywordArg("self"),
-                Arg(),
+                torch.ops.aten.full.default,
+                [Arg(), Arg()],
+                1,
+                dtype=Ignored(),
+                layout=Ignored(),
+                device=KeywordArg("device"),
+                pin_memory=False,
+                _users=MULTIPLE,
             ),
-            CallFunction(
-                torch.ops.aten.mm.default,
-                KeywordArg("self"),
-                Arg(),
-            ),
-        )
+            KeywordArg("dtype"),
+            _users=MULTIPLE,
+        ),
+        1,
     ),
-    pass_number=1,
-    extra_check=elias,
+    pass_dict=pass_patterns[1],
 )
-def temp(*args, **kwargs):
-    breakpoint()
-    raise
+def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
+    """Based on a pattern in OPTForCausalLM"""
 
+    def repl():
+        return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
+            size0, size1
+        )
 
-def _sfdp_pattern_7():
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
-    div = div.to(torch.float32)
-    attn_weight = torch.softmax(div, dim=-1)
-    attn_weight = torch.dropout(attn_weight, dropout_p, True)
-    attn_weight = attn_weight.to(torch.float16)
-    return attn_weight @ v
-
-
-def _sfdp_replacement_7(query, key, value, dropout_p):
-    counters["inductor"]["fuse_attention"] += 1
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    return aten.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        attn_mask=None,  # attn_mask,
-        dropout_p=dropout_p,
-        is_causal=False,
-    )
-
-
-# @register_lowering_pattern(
-#     CallFunction(
-#         torch.ops.aten.mm.default,
-#         KeywordArg("inp"), Arg(),
-#     ),
-#     pass_number=1,
-#     extra_check=elias,
-# )
-# def temp(*args, **kwargs):
-#     breakpoint()
-#     raise
+    # only replace the output node, not all nodes
+    match.nodes = [match.output_node()]
+    match.replace_by_example(repl, [])
 
 
 def shape_of_mm(a, b):
@@ -350,7 +288,9 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
+    # size should be within first.get_size()[dim] such that the optimization is valid.
+    # For negative `end`, we currently fallback to not optimizing.
+    if size >= 0 and V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [
