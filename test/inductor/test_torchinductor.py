@@ -5611,7 +5611,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            [torch.randn((4, 2)), torch.randn((4))],
+            [torch.randn((4, 2)), torch.randn(4)],
         )
 
     @requires_cuda()

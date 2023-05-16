@@ -1571,7 +1571,7 @@ class Module:
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+                    var = next(v for v in var.values() if isinstance(v, torch.Tensor))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn

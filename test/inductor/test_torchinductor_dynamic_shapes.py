@@ -62,7 +62,7 @@ if TEST_WITH_ROCM:
         ("cuda"), is_skip=True
     )
     # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure("cuda")
 
 
 def make_dynamic_cls(cls):

@@ -3724,7 +3724,7 @@ class TestLogical(TestCaseMPS):
             result_cpu = torch.logical_and(cpu_x, cpu_other)
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3748,7 +3748,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
@@ -3772,7 +3772,7 @@ class TestLogical(TestCaseMPS):
 
             self.assertEqual(result, result_cpu)
 
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
         helper(
             self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
             self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)

@@ -443,9 +443,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(

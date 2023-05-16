@@ -7665,7 +7665,7 @@ def _buildEquivalentAffineTransforms2d(device, input_size, output_size, angle_ra
         outtrans_ary)
     grid_ary = np.dot(np.dot(np.dot(reorder_ary, rotation_ary.T), outscale_ary), outtrans_ary)
 
-    transform_tensor = torch.from_numpy((rotation_ary)).to(device, torch.float32)
+    transform_tensor = torch.from_numpy(rotation_ary).to(device, torch.float32)
     transform_tensor = transform_tensor[:2].unsqueeze(0)
 
     return transform_tensor, transform_ary, grid_ary
@@ -7738,7 +7738,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
         outtrans_ary)
     grid_ary = np.dot(np.dot(np.dot(reorder_ary, np.linalg.inv(scipyRotation_ary)), outscale_ary), outtrans_ary)
 
-    transform_tensor = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
+    transform_tensor = torch.from_numpy(torchRotation_ary).to(device, torch.float32)
     transform_tensor = transform_tensor[:3].unsqueeze(0)
 
     return transform_tensor, transform_ary, grid_ary

@@ -264,8 +264,8 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
 
         # Reference implementation of cross entropy with soft labels
         def soft_label_xentr_ref(X, label):
-            xent = [np.sum((-label[j][i] * np.log(max(X[j][i], 1e-20))
-                            for i in range(len(X[0])))) for j in range(b)]
+            xent = [np.sum(-label[j][i] * np.log(max(X[j][i], 1e-20))
+                            for i in range(len(X[0]))) for j in range(b)]
             return (xent,)
 
         op = core.CreateOperator("CrossEntropy", ["X", "label"], ["Y"])

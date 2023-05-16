@@ -599,7 +599,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
         def label_softmax_crossent(X, label, weights=None):
             probs = np.zeros((n, D))
-            rowmax = np.zeros((n))
+            rowmax = np.zeros(n)
             for i in range(n):
                 rowmax[i] = max(X[i, ])
                 # We need to subtract the max to avoid numerical issues

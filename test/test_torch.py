@@ -6614,9 +6614,9 @@ class TestTorch(TestCase):
 
         # fail parse with > 1 element variables
         self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
         self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
 
         # fail parse with additional positional args after intlist arg
         self.assertRaisesRegex(TypeError,

@@ -1006,7 +1006,7 @@ def sample_inputs_linalg_solve(
         nrhs = [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+        yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
 
 
 def sample_inputs_linalg_solve_triangular(

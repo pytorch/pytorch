@@ -712,7 +712,7 @@ class TestLayers(LayersTestCase):
         N = 5
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('all_embeddings', schema.Scalar(
-                ((np.float32, (N, embedding_dim)))
+                (np.float32, (N, embedding_dim))
             )),
         ))
         current = self.model.PairwiseSimilarity(
@@ -734,10 +734,10 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
             ('y_embeddings', schema.Scalar(
-                ((np.float32, (6, embedding_dim)))
+                (np.float32, (6, embedding_dim))
             )),
         ))
         current = self.model.PairwiseSimilarity(
@@ -771,10 +771,10 @@ class TestLayers(LayersTestCase):
 
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
             ('y_embeddings', schema.Scalar(
-                ((np.float32, (6, embedding_dim)))
+                (np.float32, (6, embedding_dim))
             )),
             ('indices_to_gather', indices_to_gather),
         ))
@@ -800,7 +800,7 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
         ))
         with self.assertRaises(AssertionError):

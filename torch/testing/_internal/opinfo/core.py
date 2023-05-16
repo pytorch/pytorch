@@ -874,10 +874,10 @@ class OpInfo:
 
         # Attribute to verify dynamic_dtypes are used.
         self.dynamic_dtypes = any(
-            (
+            
                 isinstance(dtypes, utils._dynamic_dispatch_dtypes)
                 for dtypes in dtypes_args
-            )
+            
         )
 
         if self.dynamic_dtypes:

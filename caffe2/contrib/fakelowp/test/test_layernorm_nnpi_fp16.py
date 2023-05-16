@@ -33,7 +33,7 @@ class LayerNorm(serial.SerializedTestCase):
         workspace.ResetWorkspace()
         axis = 1
 
-        dims = np.array(([batch_size, size]))
+        dims = np.array([batch_size, size])
         X = np.random.uniform(size=dims).astype(np.float32) - 0.5
         gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
         beta = np.random.randn(*X.shape[axis:]).astype(np.float32)
@@ -90,7 +90,7 @@ class LayerNorm(serial.SerializedTestCase):
         workspace.RunNet(pred_net_ref.name)
         Y_c2 = workspace.FetchBlob("Y")
 
-        dims1 = np.array(([1, *dims]))
+        dims1 = np.array([1, *dims])
         X_glow = X.reshape(dims1)
         workspace.FeedBlob("X", X_glow)
 
@@ -149,7 +149,7 @@ class LayerNorm(serial.SerializedTestCase):
         workspace.ResetWorkspace()
         axis = 1
 
-        dims = np.array(([batch_size, size]))
+        dims = np.array([batch_size, size])
         X = np.random.uniform(size=dims).astype(np.float32) - 0.5
         gamma = np.random.randn(*X.shape[axis:]).astype(np.float32)
         beta = np.random.randn(*X.shape[axis:]).astype(np.float32)

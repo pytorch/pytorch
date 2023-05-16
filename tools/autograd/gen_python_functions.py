@@ -873,7 +873,7 @@ def method_impl(
         name=name,
         pycname=pycname,
         method_header=method_header,
-        max_args=max((o.signature.arguments_count() for o in overloads)),
+        max_args=max(o.signature.arguments_count() for o in overloads),
         signatures=signatures,
         traceable=traceable,
         check_has_torch_function=gen_has_torch_function_check(
@@ -1255,10 +1255,10 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-            (
+            
                 f"{a.type_str} {a.name}"
                 for a in dispatch_lambda_args(ps, f, symint=symint)
-            )
+            
         )
         lambda_return = dispatch_lambda_return_str(f)
 

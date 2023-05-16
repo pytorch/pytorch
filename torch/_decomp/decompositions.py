@@ -3089,7 +3089,7 @@ def grid_sampler_2d(
             )
             return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
 
-        coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
+        coeffs = tuple(get_coeff(ofs) for ofs in range(4))
         return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
 
 
@@ -3337,10 +3337,10 @@ def upsample_bicubic2d_default(
         return a[N_idx, C_idx, y_idx, x_idx]
 
     def get_x_interp(y):
-        coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
+        coeffs_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
         return _upsample_cubic_interp1d(coeffs_x, t_x)
 
-    coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
+    coeffs_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
     result = _upsample_cubic_interp1d(coeffs_y, t_y)
 
     # convert output to correct memory format, if necessary

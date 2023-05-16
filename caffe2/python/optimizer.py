@@ -1613,14 +1613,14 @@ class AdamOptimizer(Optimizer):
         self.enableRAdam = enableRAdam
         if use_smart_decay:
             if rowWise:
-                raise NotImplementedError(('Smart decay is not implemented for rowWise Adam.  '
-                                           'Set rowWise or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented for rowWise Adam.  '
+                                           'Set rowWise or use_smart_decay to False.')
             if enableRAdam:
-                raise NotImplementedError(('Smart decay is not implemented for RAdam.  '
-                                           'Set enableRAdam or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented for RAdam.  '
+                                           'Set enableRAdam or use_smart_decay to False.')
             if use_lr_adaption:
-                raise NotImplementedError(('Smart decay is not implemented with lr_adaption.  '
-                                           'Set use_lr_adaption or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented with lr_adaption.  '
+                                           'Set use_lr_adaption or use_smart_decay to False.')
 
         self.use_smart_decay = use_smart_decay
         self.init_kwargs = kwargs

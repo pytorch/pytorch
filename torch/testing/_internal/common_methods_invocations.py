@@ -1825,9 +1825,9 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    yield SampleInput((make_tensor((S, S), dtype=dtype, device=device,
+    yield SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                    low=None, high=None,
-                                   requires_grad=requires_grad)))
+                                   requires_grad=requires_grad))
 
 
 def error_inputs_trace(op, device):
@@ -3947,7 +3947,7 @@ def error_inputs_group_norm(opinfo, device, **kwargs):
 
     # check that input has minimum number of dimensions
     err_msg1 = "Expected at least 2 dimensions for input tensor but received"
-    s1 = SampleInput(make_arg((1)), args=(1,))
+    s1 = SampleInput(make_arg(1), args=(1,))
     yield ErrorInput(s1, error_regex=err_msg1)
 
     # check that the channels dimension is compatible with number of groups
@@ -6877,7 +6877,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
 
         if mask_t.sum() == 0:
             def random_index(shape):
-                return tuple((random.randrange(0, max_idx) for max_idx in shape))
+                return tuple(random.randrange(0, max_idx) for max_idx in shape)
 
             mask_t[random_index(mask_t.shape)] = True
             return mask_t

@@ -1584,7 +1584,7 @@ class NormalizationTestModel(torch.nn.Module):
         super().__init__()
         self.quant = torch.ao.quantization.QuantStub()
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm((8))
+        self.layer_norm = torch.nn.LayerNorm(8)
         self.group_norm = torch.nn.GroupNorm(2, 8)
         self.instance_norm1d = torch.nn.InstanceNorm1d(8)
         self.instance_norm2d = torch.nn.InstanceNorm2d(8)

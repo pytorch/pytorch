@@ -683,7 +683,7 @@ class DistributedDataParallel(Module, Joinable):
             for n, p in module.named_parameters()
             if n not in self.parameters_to_ignore
         ]
-        if not any((p.requires_grad for p in self._module_parameters)):
+        if not any(p.requires_grad for p in self._module_parameters):
             if len(self._delay_all_reduce_params):
                 logger.info("Delay the AllReduce of all parameters.")
             else:

@@ -272,7 +272,7 @@ class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
         blob_names = workspace.Blobs()
-        self.assertTrue(any((bn.endswith('_last_seen') for bn in blob_names)))
+        self.assertTrue(any(bn.endswith('_last_seen') for bn in blob_names))
         for param in optimizer.get_auxiliary_parameters().shared:
             workspace.FetchBlob(param)
         for param in optimizer.get_auxiliary_parameters().local:

@@ -643,7 +643,7 @@ class TestModuleContainers(JitTestCase):
 
         n._reconstruct(m._c)
 
-        inp = torch.rand((3))
+        inp = torch.rand(3)
 
         # Check that both modules produce the same output.
         with torch.no_grad():

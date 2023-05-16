@@ -812,7 +812,7 @@ class TestTensorCreation(TestCase):
             torch_fn(t)
         # Test error for a single array
         with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
-            torch_fn((t))
+            torch_fn(t)
 
         # Test 0-D
         num_tensors = random.randint(1, 5)
