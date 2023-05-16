@@ -500,12 +500,14 @@ class QNNPackQuantizer(Quantizer):
                     bias_node = ph
 
             if act_node is None and weight_node is None and bias_node is None:
-                raise ValueError("Could not find any act, weight or bias node in linear pattern")
+                raise ValueError(
+                    "Could not find any act, weight or bias node in linear pattern"
+                )
             # bias and output act
             # find use of act node within the matched pattern
             act_use_node = None
             for node in match.nodes_map.values():
-                if node in act_node.users:
+                if node in act_node.users:  # type: ignore[union-attr]
                     act_use_node = node
                     break
             if act_use_node is None:
@@ -529,7 +531,7 @@ class QNNPackQuantizer(Quantizer):
                     output_node, get_act_obs_or_fq_ctr(quantization_config)
                 )
             nodes_to_mark_annotated = list(match.nodes_map.values())
-            nodes_to_mark_annotated.remove(act_node)
+            nodes_to_mark_annotated.remove(act_node)  # type: ignore[arg-type]
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     # TODO: move to `_pt2e/_propagate_annotation.py` after we have
