@@ -2176,7 +2176,7 @@ def upsample_nearest3d(
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_d, scales_h, scales_w)
     )
-    result = aten._unsafe_index(input, (None, None, h_indices, w_indices, d_indices))
+    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
 
     return result
 
