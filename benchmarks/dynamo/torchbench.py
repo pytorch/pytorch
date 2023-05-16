@@ -4,9 +4,12 @@ import importlib
 import logging
 import os
 import re
+import subprocess
 import sys
 import warnings
 from os.path import abspath, exists
+
+log = logging.getLogger(__name__)
 
 import torch
 
@@ -45,6 +48,46 @@ def setup_torchbench_cwd():
 
     return original_dir
 
+MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "torchbench_models_bs_list.txt")
+MODELS_NAME_FILENAME = os.path.join(os.path.dirname(__file__), "all_torchbench_models_list.txt")
+
+TORCHBENCH_MODELS = dict()
+
+def read_models_and_batch_sizes():
+    with open(MODELS_FILENAME, "r") as fh:
+        lines = fh.readlines()
+        lines = [line.rstrip() for line in lines]
+        for line in lines:
+            if line:
+                model_name, batch_size = line.split(",")
+                TORCHBENCH_MODELS[model_name] = int(batch_size)
+        
+    return TORCHBENCH_MODELS
+
+def refresh_model_batch_sizes():
+    new_filename = os.path.join(os.path.dirname(__file__),"torchbench_models_bs_list_temp.txt")
+    if os.path.exists(new_filename):
+        subprocess.check_call(["rm", new_filename])
+    TORCHBENCH_MODELS_NAMES = []
+    with open(MODELS_NAME_FILENAME, "r") as fh:
+        lines = fh.readlines()
+        lines = [line.rstrip() for line in lines]
+        for line in lines:
+            if line:
+                TORCHBENCH_MODELS_NAMES.append(str(line))
+    for model_name in TORCHBENCH_MODELS_NAMES:
+        if model_name not in SKIP_TRAIN:
+            try:
+                subprocess.check_call(
+                    [sys.executable]
+                    + sys.argv
+                    + ["--find-batch-sizes"]
+                    + [f"--only={model_name}"]
+                    + [f"--output={new_filename}"]
+                )
+            except subprocess.SubprocessError:
+                log.warning(f"Failed to find suitable batch size for {model_name}")
+    subprocess.check_call(f"cp -f {new_filename} {MODELS_FILENAME}", shell=True)
 
 # Some models have large dataset that doesn't fit in memory. Lower the batch
 # size to test the accuracy.
@@ -298,6 +341,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             not getattr(benchmark_cls, "ALLOW_CUSTOMIZE_BSIZE", True)
             or model_name in DONT_CHANGE_BATCH_SIZE
         )
+        if model_name in TORCHBENCH_MODELS:
+            batch_size = TORCHBENCH_MODELS[model_name]
         if cant_change_batch_size:
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
@@ -422,6 +467,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
 def torchbench_main():
     original_dir = setup_torchbench_cwd()
+    if ("--find-all-batch-sizes" in sys.argv) and ("--only" not in '\t'.join(sys.argv)) and ("--accuracy" not in sys.argv):
+        refresh_model_batch_sizes()
+    if os.path.exists(MODELS_FILENAME):
+        read_models_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
