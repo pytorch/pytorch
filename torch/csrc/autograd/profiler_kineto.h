@@ -57,6 +57,7 @@ struct TORCH_API KinetoEvent {
   std::string backend() const;
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
+  int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
 
  private:
