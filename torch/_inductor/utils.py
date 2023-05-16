@@ -894,6 +894,16 @@ def is_cpu_device(inputs):
     )
 
 
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
+
+
 @contextlib.contextmanager
 def maybe_profile(should_profile, *args, **kwargs):
     if should_profile:

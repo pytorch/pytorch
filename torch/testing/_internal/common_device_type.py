@@ -564,6 +564,32 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class PrivateUse1TestBase(DeviceTypeTestBase):
+    primary_device: ClassVar[str]
+    device_mod = None
+    device_type = 'privateuse1'
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
+        num_devices = cls.device_mod.device_count()
+        prim_device = cls.get_primary_device()
+        device_str = f'{cls.device_type}:{{0}}'
+        non_primary_devices = [device_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        return [prim_device] + non_primary_devices
+
+    @classmethod
+    def setUpClass(cls):
+        cls.device_type = torch._C._get_privateuse1_backend_name()
+        cls.divice_mod = getattr(torch, device_type, None)
+        assert cls.device_mod is not None, f'''torch has no module of `{cls.device_type}`, you should register
+                                            a module by `torch._register_device_module`.'''
+        cls.primary_device = '{device_type}:{id}'.format(device_type=cls.device_type, id=cls.device_mod.current_device())
+
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
@@ -581,6 +607,10 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        device_type = torch._C._get_privateuse1_backend_name()
+        device_mod = getattr(torch, device_type, None)
+        if hasattr(device_mod, "is_available") and device_mod.is_available():
+            test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
         # elif torch.backends.mps.is_available():

@@ -81,9 +81,9 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             # For multi-output views, we want to map each output view to the base,
             # but this mapping involves two separate nodes in FX IR.
             # e.g. "a, b = x_1.split(...)" becomes:
-            #    %split_tensor : [num_users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
-            #    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
-            #    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
+            #    %split_tensor : [#users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
+            #    %getitem : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
+            #    %getitem_1 : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
             # And we'd like to set:
             #    getitem1.meta['view_of'] = x_1
             elif node.target is _operator.getitem:
