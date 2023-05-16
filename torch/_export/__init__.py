@@ -125,13 +125,10 @@ def _export(
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
     )
-
-    input_shape_constraints = gm.meta.get("input_shape_constraints", None)
-    inline_constraints = gm.meta.get("inline_constraints", None)
     # TODO: Track mutation
     mutation = None
     export_graph_module = graph_module.make_export_graph_module(
-        gm, gm.graph, in_spec, out_spec, mutation, input_shape_constraints, inline_constraints, flat_args
+        gm, gm.graph, in_spec, out_spec, mutation, flat_args
     )
     return export_graph_module
 

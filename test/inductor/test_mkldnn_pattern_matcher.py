@@ -6,7 +6,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 unary_list = {
@@ -466,5 +466,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
+    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn and not TEST_WITH_ROCM:
         run_tests()

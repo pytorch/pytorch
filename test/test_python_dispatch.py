@@ -803,6 +803,28 @@ class TestCustomOp(TestCase):
         self.assertEqual(result.shape, foo_meta(x, 1).shape)
         foo._destroy()
 
+    def test_duplicate_impl(self):
+        @custom_op('_torch_testing::foo')
+        def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
+            ...
+
+        @foo.impl_abstract()
+        def foo_meta(x, dim):
+            output_shape = list(x.shape)
+            del output_shape[dim]
+            return x.new_empty(output_shape)
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"already has a abstract impl.*at .*test_python_dispatch.py:\d+"):
+            @foo.impl_abstract()
+            def foo_meta2(x, dim):
+                output_shape = list(x.shape)
+                del output_shape[dim]
+                return x.new_empty(output_shape)
+
+        foo._destroy()
+
     def test_new_data_dependent_symint(self):
         @custom_op('_torch_testing::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -847,7 +869,7 @@ class TestCustomOp(TestCase):
         foo._destroy()
 
     def test_abstract_registration_location(self):
-        loc = torch.testing._internal.custom_op_db.numpy_nonzero._abstract_impl.location
+        loc = torch.testing._internal.custom_op_db.numpy_nonzero._get_impl('abstract').location
         matches = re.match(r'.*custom_op_db.py:\d+', loc)
         self.assertIsNotNone(matches)
 
@@ -1562,7 +1584,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
     def test_with_nested_modes(self):
         class ErrorA(RuntimeError):
             def __init__(self, msg):
-                return super().__init__(msg)
+                super().__init__(msg)
 
         class A(TorchDispatchMode):
             def __init__(self, msg):
@@ -2305,6 +2327,29 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
 
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
+
+    def test_data_ptr_respects_numel_slow_path(self):
+        data = torch.randn(6, 2)
+
+        class NumelDefaultReturn(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, wrapper):
+                return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func.overloadpacket == torch.ops.aten.dim:
+                    return data.dim()
+                if func.overloadpacket == torch.ops.aten.sym_numel:
+                    numel_called[0] = True
+                    return None
+                return NotImplemented
+
+        for use_wrapper_subclass in (False, True):
+            numel_called = [False]
+            e = NumelDefaultReturn(torch.randn(2, 2), use_wrapper_subclass)
+            e.data_ptr()
+            self.assertTrue(numel_called[0])
 
     def test_layout_slow_path(self):
         for use_wrapper_subclass in [True, False]:

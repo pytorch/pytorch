@@ -458,7 +458,7 @@ def fresh_inductor_cache(cache_entries=None):
                         )
 
 
-def argsort(seq):
+def argsort(seq) -> List[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -892,6 +892,16 @@ def is_cpu_device(inputs):
         for item in inputs
         if isinstance(item, torch.Tensor)
     )
+
+
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
 
 
 @contextlib.contextmanager
