@@ -1693,7 +1693,7 @@ class TestSDPA(NNTestCase):
         if PLATFORM_SUPPORTS_FUSED_SDPA:
             batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
-            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True)
+            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True, requires_grad=True)
 
             qkv = make_tensor(shape, type=type)
             query, key, value = qkv.chunk(3, dim=-1)
@@ -1990,6 +1990,7 @@ class TestSDPA(NNTestCase):
             tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
             output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
                 query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
+            assert all(not isinstance(o, torch.Tensor) or o.is_cuda for o in output_tuple)
         g.replay()
         out_first = output_tuple[0].clone()
         dbug_mask_first = output_tuple[-1].clone()
