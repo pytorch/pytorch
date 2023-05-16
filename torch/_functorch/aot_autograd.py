@@ -1287,7 +1287,7 @@ def create_joint(
             )
             with torch.autograd.set_multithreading_enabled(
                 False
-            ), with torch.autograd.detect_anomaly(check_nan=False):
+            ), torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(*args)
 
     return inner_fn_with_anomaly
