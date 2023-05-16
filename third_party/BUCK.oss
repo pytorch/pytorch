@@ -306,6 +306,7 @@ cxx_binary(
         "flatbuffers/src/bfbs_gen_lua.cpp",
         "flatbuffers/src/bfbs_gen_nim.cpp",
         "flatbuffers/src/flatc_main.cpp",
+        "flatbuffers/src/idl_gen_binary.cpp",
         "flatbuffers/src/idl_gen_cpp.cpp",
         "flatbuffers/src/idl_gen_csharp.cpp",
         "flatbuffers/src/idl_gen_dart.cpp",
