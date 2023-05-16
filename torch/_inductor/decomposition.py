@@ -204,15 +204,15 @@ def should_pad_bench_key(mat1, mat2, op, input=None):
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
-    key = should_pad_bench_key(mat1, mat2, op, input)
+    # key = should_pad_bench_key(mat1, mat2, op, input)
 
-    cached_pad = get_cached_should_pad(key)
-    if cached_pad is not None:
-        return cached_pad
+    # cached_pad = get_cached_should_pad(key)
+    # if cached_pad is not None:
+    #     return cached_pad
 
     should_pad = _should_pad_bench_impl(mat1, mat2, op, input)
 
-    set_cached_should_pad(key, should_pad)
+    # set_cached_should_pad(key, should_pad)
 
     return should_pad
 
