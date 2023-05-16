@@ -162,12 +162,12 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
         kernel(grid, *sliced_tensors)
 
 
-def prepare_inputs(bsr, *tensors):
+def prepare_inputs(bsr, *dense_tensors):
     # Introduce fake batch dimension if not present for convenience.
     crow_indices = bsr.crow_indices().unsqueeze(0)
     col_indices = bsr.col_indices().unsqueeze(0)
     values = make_triton_contiguous(bsr.values().unsqueeze(0))
-    tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in tensors]
+    tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
 
     # Compute broadcasted batch dimension
     batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
@@ -319,7 +319,8 @@ if _has_triton():
                 mask_k = k_offsets < k
 
                 mat1_block = tl.load(
-                    mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
+                    mat1_block_ptrs
+                    + mat1_col_block_stride * k_offsets[None, :],
                     mask=mask_k[None, :], other=0.0
                 )
 
@@ -575,8 +576,15 @@ if _has_triton():
             check_mm_compatible_shapes(f_name, mat1, mat2)
             if out is not None:
                 check_bsr_layout(f_name, out)
-            # TODO: insert all checks
-        # TODO: insert out checks
+                check_device(f_name, out, input.device)
+                check_dtype(f_name, out, input.dtype)
+                check(
+                    out.shape == input_broadcasted.shape
+                    and out._nnz() == input._nnz(),
+                    f"{f_name}(): Expects `out` to be of shape {input_broadcasted.shape} "
+                    f"and with nnz equal to {input_broadcasted._nnz()} "
+                    f"but got out.shape = {out.shape} and out.nnz = {out._nnz()}"
+                )
 
         if out is None:
             out = input_broadcasted.clone()

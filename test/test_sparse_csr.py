@@ -3535,20 +3535,31 @@ class TestSparseCompressedTritonKernels(TestCase):
         for bi, bm1, bm2, m, n, k, dk in itertools.product(batches, batches, batches, size, size, size, delta_k):
             # Test not powers of 2 ks as well.
             k = max(0, k + dk)
+            # Non-trivial sparsity pattern.
+            # Plus with tril inputs the result is also tril,
+            # so we can compare BSR and CSR impelementations.
             input = tensor(bi + (m, n)).tril_()
             bsr = input.to_sparse_bsr(block_size)
             mat1 = tensor(bm1 + (m, k)).tril_()
             mat2 = tensor(bm2 + (k, n)).tril_()
 
+            batch_dim = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[:-2])
+
             if dtype is torch.float:
-                batch_dim = torch.broadcast_shapes(input.shape[:-2], mat1.shape[:-2], mat2.shape[:-2])
                 csr = input.broadcast_to(batch_dim + input.shape[-2:]).to_sparse_csr()
                 mat1csr = mat1.broadcast_to(batch_dim + mat1.shape[-2:])
                 mat2csr = mat2.broadcast_to(batch_dim + mat2.shape[-2:])
 
+            input_broadcasted_clone = broadcast_batch_dims_bsr(
+                "test_triton_sampled_addmm",
+                bsr, mat1, mat2
+            ).clone()
+
             scalars = (0.0, 2.0)
-            for alpha, beta in itertools.product(scalars, scalars):
-                res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
+            for alpha, beta, out in itertools.product(scalars, scalars, (None, input_broadcasted_clone)):
+                res_tri = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, out=out)
+                if out is not None:
+                    self.assertTrue(res_tri is out)
                 res_ref = sampled_addmm_ref(bsr, mat1, mat2, alpha=alpha, beta=beta)
 
                 batch_broadcasted_shape = torch.broadcast_shapes(*(t.shape[:-2] for t in (input, mat1, mat2)))
