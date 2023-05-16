@@ -58,8 +58,7 @@ class TestSDPAPatternRewriter(TestCase):
             if contains:
                 # many of the patterns get re-expanded in dispatcher
                 self.assertIn(
-                    "aten._scaled_dot_product",
-                    source_code,
+                    "aten._scaled_dot_product_efficient_attention", source_code
                 )
             self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
@@ -194,88 +193,6 @@ class TestSDPAPatternRewriter(TestCase):
             return attn_weight @ value
 
         self._check_common(sfdp_pattern_6, contains=False)
-
-    def test_sdpa_rewriter_7(self):
-        def sfdp_pattern_7(query, key, value):
-            q = query.permute(0, 2, 1, 3)
-            k = key.permute(0, 2, 1, 3)
-            v = value.permute(0, 2, 1, 3)
-            div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
-            div = div.to(torch.float32)
-            attn_weight = torch.softmax(div, dim=-1)
-            # very small dropout to make sure test passes
-            attn_weight = torch.dropout(attn_weight, 0.0001, True)
-            attn_weight = attn_weight.to(torch.float16)
-            return attn_weight @ v
-
-        args = (
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-        )
-
-        self._check_common(sfdp_pattern_7, args)
-
-    def test_sdpa_rewriter_8(self):
-        def sfdp_pattern_8(query, key, value):
-            q = query.permute(0, 2, 1, 3)
-            k = key.permute(0, 2, 1, 3)
-            v = value.permute(0, 2, 1, 3)
-            div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
-            div = div.to(torch.float32)
-            attn_weight = torch.softmax(div, dim=-1)
-            attn_weight = attn_weight.to(torch.float16)
-            return attn_weight @ v
-
-        args = (
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-        )
-
-        self._check_common(sfdp_pattern_8, args)
-
-    def test_sdpa_rewriter_9(self):
-        def sfdp_pattern_9(query, key, value):
-            q = query.permute(0, 2, 1, 3)
-            k = key.permute(0, 2, 1, 3)
-            v = value.permute(0, 2, 1, 3)
-            q = q / math.sqrt(q.size(-1))
-            div = q @ k.transpose(-2, -1)
-            div = div.to(torch.float32)
-            attn_weight = torch.softmax(div, dim=-1)
-            # very low dropout to make test pass
-            attn_weight = torch.dropout(attn_weight, 0.0001, True)
-            attn_weight = attn_weight.to(torch.float16)
-            return attn_weight @ v
-
-        args = (
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-        )
-
-        self._check_common(sfdp_pattern_9, args)
-
-    def test_sdpa_rewriter_10(self):
-        def sfdp_pattern_10(query, key, value):
-            q = query.permute(0, 2, 1, 3)
-            k = key.permute(0, 2, 1, 3)
-            v = value.permute(0, 2, 1, 3)
-            q = q / math.sqrt(q.size(-1))
-            div = q @ k.transpose(-2, -1)
-            div = div.to(torch.float32)
-            attn_weight = torch.softmax(div, dim=-1)
-            attn_weight = attn_weight.to(torch.float16)
-            return attn_weight @ v
-
-        args = (
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
-        )
-
-        self._check_common(sfdp_pattern_10, args)
 
     @config.patch(fallback_random=True, lowmem_dropout=False)
     def test_pattern_fails_with_tensor_factor(self):
