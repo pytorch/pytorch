@@ -27,6 +27,28 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+def post_already_uptodate(
+    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool
+) -> None:
+    msg = f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date."
+    def_branch = pr.default_branch()
+    def_branch_fcn = f"refs/remotes/{repo.remote}/{def_branch}"
+    if onto_branch != def_branch_fcn and repo.rev_parse(
+        def_branch_fcn
+    ) != repo.rev_parse(onto_branch):
+        def_branch_url = f"https://github.com/{pr.org}/{pr.project}/tree/{def_branch}"
+        msg += f" Try rebasing against [{def_branch}]({def_branch_url}) by issuing:"
+        msg += f"\n`@pytorchbot rebase -b {def_branch}`"
+
+    gh_post_comment(
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        msg,
+        dry_run=dry_run,
+    )
+
+
 def rebase_onto(
     pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
 ) -> None:
@@ -45,13 +67,7 @@ def rebase_onto(
     else:
         push_result = repo._run_git("push", "-f", remote_url, refspec)
     if "Everything up-to-date" in push_result:
-        gh_post_comment(
-            pr.org,
-            pr.project,
-            pr.pr_num,
-            f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date",
-            dry_run=dry_run,
-        )
+        post_already_uptodate(pr, repo, onto_branch, dry_run)
     else:
         gh_post_comment(
             pr.org,
@@ -149,13 +165,7 @@ def rebase_ghstack_onto(
             f"Skipped https://github.com/{org}/{project}/pull/{pr.pr_num}"
             in push_result
         ):
-            gh_post_comment(
-                pr.org,
-                pr.project,
-                pr.pr_num,
-                f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date",
-                dry_run=dry_run,
-            )
+            post_already_uptodate(pr, repo, onto_branch, dry_run)
 
 
 @contextlib.contextmanager
@@ -180,8 +190,11 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     onto_branch = args.branch if args.branch else pr.default_branch()
     onto_branch = f"refs/remotes/{repo.remote}/{onto_branch}"
+    onto_branch_url = (
+        f"https://github.com/{org}/{project}/commit/{repo.rev_parse(onto_branch)}"
+    )
 
-    msg = "@pytorchbot successfully started a rebase job."
+    msg = f"@pytorchbot started a rebase job onto [{onto_branch}]({onto_branch_url})."
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
     gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
