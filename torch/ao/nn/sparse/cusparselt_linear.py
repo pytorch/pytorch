@@ -27,7 +27,7 @@ class cuSPARSELtLinear(nn.Module):
         cusparselt.cslt = torch.classes.cusparselt.CusparseLtLinear(
             cusparselt.weight, cusparselt.bias
         )
-        cusparselt.cslt.set_compressed(mod.weight.data.T)
+        cusparselt.cslt.set_compressed(mod.weight.data.T.contiguous())
 
         return cusparselt
 
@@ -60,6 +60,6 @@ class cuSPARSELtLinearInt8(nn.Module):
         cusparselt.cslt = torch.classes.cusparselt.CusparseLtLinear(
             cusparselt.weight, cusparselt.bias
         )
-        cusparselt.cslt.set_compressed(int8_weight.T)
+        cusparselt.cslt.set_compressed(int8_weight.T.contiguous())
 
         return cusparselt

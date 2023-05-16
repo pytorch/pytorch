@@ -39,35 +39,32 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   // cupsarselt constructs
   cusparseLtHandle_t handle;
   cusparseLtMatDescriptor_t weight_descriptor, activation_descriptor, res_descriptor;
-  cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  void* dBias;  
   float alpha{1.0};
   float beta{0.0};
   unsigned alignment{16};
+  int64_t num_A_rows;
   int num_streams{0};
   cudaStream_t stream{nullptr};
   cudaStream_t* streams{nullptr};
   void* d_workspace{nullptr};
   int alg_id{7777};
   int* d_valid;
-  int64_t n;
 
-  cusparseLtPruneAlg_t pruning_algo;
-  cusparseOperation_t opB{CUSPARSE_OPERATION_TRANSPOSE};
+  cusparseLtPruneAlg_t pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP};
+  cusparseOperation_t opA{CUSPARSE_OPERATION_NON_TRANSPOSE};
   cudaDataType type = CUDA_R_16F;
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
-  at::Tensor masked_mm(const at::Tensor& input);
+  at::Tensor cusparselt_mm(const at::Tensor& input);
+  at::Tensor cusparselt_addmm(const at::Tensor& input, const at::Tensor& bias);
+  at::Tensor cusparselt_helper(const at::Tensor& input, void* dBias, int64_t biasStride);
   void set_compressed(const at::Tensor& weight);
 
   // defining constructor, which will prune and compress the weights
-  CusparseLtLinear(const at::Tensor& weight_compressed,
-                   const at::Tensor& bias)
-  : weight_compressed{weight_compressed},
-    dBias{bias.data_ptr()},
-    pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP}
+  CusparseLtLinear(const at::Tensor& weight_compressed)
+  : weight_compressed{weight_compressed}
   {
     // CUDA VERSION CHECK
     // --------------------------------------------------------------------------
@@ -93,9 +90,10 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     }
 
     // handle initilization
+    //--------------------------------------------------------------------------
     CHECK_CUSPARSE( cusparseLtInit(&handle) )
 
-    // set matrix dtype and compute type if int8 matrix is passed in
+    // set matrix dtype and compute type
     if (weight_compressed.dtype() == torch::kInt8) {
       type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
@@ -104,31 +102,30 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 
 };
 
+
 void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
-  // Initializing values
+  // SETTING UP VALUES 
   //--------------------------------------------------------------------------
-  int64_t k = weight.size(0);
-  n = weight.size(1);
+  int64_t m = weight.size(0);
+  int64_t k = weight.size(1);
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
-  bool isB_transposed = (opB != CUSPARSE_OPERATION_NON_TRANSPOSE);
+  bool isA_transposed = (opA != CUSPARSE_OPERATION_NON_TRANSPOSE);
 
-  auto     num_B_rows     = (isB_transposed) ? n : k;
-  auto     num_B_cols     = (isB_transposed) ? k : n;
-  auto     ldb            = (is_rowmajor) ? num_B_cols : num_B_rows;
+  num_A_rows     = (isA_transposed) ? k : m;
+  auto     num_A_cols     = (isA_transposed) ? m : k;
+  auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
+
   
   CHECK_CUDA( cudaMalloc((void**)&d_valid, sizeof(*d_valid)) )
 
-  // Initialize the weight descriptor, since this does not change across different calculations. 
-  // We are calculating res = xW^T + b so the weight is the B matrix
-  //--------------------------------------------------------------------------
   CHECK_CUSPARSE(
     cusparseLtStructuredDescriptorInit(
       &handle,
       &weight_descriptor,
-      num_B_rows,
-      num_B_cols,
-      ldb,
+      num_A_rows,
+      num_A_cols,
+      lda,
       alignment,
       type,
       order,
@@ -140,8 +137,8 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
     cusparseLtSpMMAPrune2(
       &handle,
       &weight_descriptor, 
-      false, 
-      opB,
+      true, 
+      opA,
       weight.data_ptr(),
       weight.data_ptr(),
       pruning_algo,
@@ -150,8 +147,8 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
     cusparseLtSpMMAPruneCheck2(
       &handle,
       &weight_descriptor,
-      false,
-      opB,
+      true,
+      opA,
       weight.data_ptr(),
       d_valid,
       stream) )
@@ -181,56 +178,62 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
       &compressed_size,
       &compressed_buffer_size) )
   
-  void* dB_compressedBuffer = nullptr;
+  void* dA_compressedBuffer = nullptr;
 
-  // CHECK_CUDA( cudaMalloc((void**)&dB_compressed, compressed_size) )
-  CHECK_CUDA( cudaMalloc((void**)&dB_compressedBuffer, compressed_buffer_size) )
+  CHECK_CUDA( cudaMalloc((void**)&dA_compressedBuffer, compressed_buffer_size) )
 
   CHECK_CUSPARSE(
     cusparseLtSpMMACompress2(
       &handle,
       &weight_descriptor,
-      false,
-      opB,
+      true,
+      opA,
       weight.data_ptr(),
       weight_compressed.data_ptr(),
-      dB_compressedBuffer,
+      dA_compressedBuffer,
       stream) )
+
 
 }
 
-// this function assumes the weight tensor already has the mask applied
-at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
+at::Tensor CusparseLtLinear::cusparselt_mm(const at::Tensor& input) {
+    return CusparseLtLinear::cusparselt_helper(input, nullptr, 0);
+}
+
+at::Tensor CusparseLtLinear::cusparselt_addmm(const at::Tensor& input, const at::Tensor& bias) {
+    return CusparseLtLinear::cusparselt_helper(input, bias.data_ptr(), 0);
+}
+
+
+at::Tensor CusparseLtLinear::cusparselt_helper(const at::Tensor& input, void* dBias, int64_t biasStride) {
   // create tensor
-  auto res = input.new_empty({input.size(0), input.size(1), n});
+  cusparseLtMatmulDescriptor_t matmul;
+  auto res = input.new_empty({num_A_rows, input.size(1)});
 
-  int num_batches = (int)input.size(0);
-  int64_t m = input.size(1);
-  int64_t k = input.size(2);
+  int64_t k = input.size(0);
+  int64_t n = input.size(1);
 
+  bool isB_transposed = !input.is_contiguous();
+  auto opB = isB_transposed? CUSPARSE_OPERATION_TRANSPOSE: CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
-  bool isA_transposed = !input.is_contiguous();
-
-  auto     opA            = isA_transposed? CUSPARSE_OPERATION_TRANSPOSE: CUSPARSE_OPERATION_NON_TRANSPOSE;
-  auto     num_A_rows     = (isA_transposed) ? k : m;
-  auto     num_A_cols     = (isA_transposed) ? m : k;
-  auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
-
+  auto     num_B_rows     = (isB_transposed) ? n : k;
+  auto     num_B_cols     = (isB_transposed) ? k : n;
   auto     num_C_rows     = num_A_rows;
   auto     num_C_cols     = n;
 
+  bool     is_rowmajor    = (order == CUSPARSE_ORDER_ROW);
+  auto     ldb            = (is_rowmajor) ? num_B_cols : num_B_rows;
   auto     ldc            = (is_rowmajor) ? num_C_cols : num_C_rows;
 
-  // A and C mat init
+  // B and C mat init
   //--------------------------------------------------------------------------
   CHECK_CUSPARSE(
     cusparseLtDenseDescriptorInit(
       &handle,
       &activation_descriptor,
-      num_A_rows,
-      num_A_cols,
-      lda,
+      num_B_rows,
+      num_B_cols,
+      ldb,
       alignment,
       type,
       order) )
@@ -246,59 +249,6 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       type,
       order) )
 
-  // set options
-  int64_t batch_strideA = k * m;
-  int64_t batch_strideB = 0;
-  int64_t batch_strideC = m * n;
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &weight_descriptor,
-      CUSPARSELT_MAT_NUM_BATCHES,
-      &num_batches,
-      sizeof(num_batches)) )
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &activation_descriptor,
-      CUSPARSELT_MAT_NUM_BATCHES,
-      &num_batches,
-      sizeof(num_batches)) )
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &res_descriptor,
-      CUSPARSELT_MAT_NUM_BATCHES,
-      &num_batches,
-      sizeof(num_batches)) )
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &activation_descriptor,
-      CUSPARSELT_MAT_BATCH_STRIDE,
-      &batch_strideA,
-      sizeof(batch_strideA)) )
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &weight_descriptor,
-      CUSPARSELT_MAT_BATCH_STRIDE,
-      &batch_strideB,
-      sizeof(batch_strideB)) )
-
-  CHECK_CUSPARSE(
-    cusparseLtMatDescSetAttribute(
-      &handle,
-      &res_descriptor,
-      CUSPARSELT_MAT_BATCH_STRIDE,
-      &batch_strideC,
-      sizeof(batch_strideC)) )
-
   // matmul, algorithm selection, and plan initialization
   //--------------------------------------------------------------------------
   CHECK_CUSPARSE(
@@ -307,8 +257,8 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       &matmul,
       opA,
       opB,
-      &activation_descriptor,
       &weight_descriptor,
+      &activation_descriptor,
       &res_descriptor,
       &res_descriptor,
       compute_type) )
@@ -323,7 +273,14 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       &dBias,
       sizeof(dBias)) )
 
-  
+  CHECK_CUSPARSE(
+    cusparseLtMatmulDescSetAttribute(
+      &handle,
+      &matmul,
+      CUSPARSELT_MATMUL_BIAS_STRIDE,
+      &biasStride,
+      sizeof(biasStride)) )
+
   CHECK_CUSPARSE(
     cusparseLtMatmulAlgSelectionInit(
       &handle,
@@ -352,8 +309,8 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
         &handle,
         &plan,
         &alpha,
-        input.data_ptr(),
         weight_compressed.data_ptr(),
+        input.data_ptr(),
         &beta,
         res.data_ptr(),
         res.data_ptr(),
@@ -383,8 +340,8 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
       &handle,
       &plan,
       &alpha,
-      input.data_ptr(),
       weight_compressed.data_ptr(),
+      input.data_ptr(),
       &beta,
       res.data_ptr(),
       res.data_ptr(),
@@ -403,8 +360,9 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLtLinear>("CusparseLtLinear")
-    .def(torch::init<const at::Tensor&, const at::Tensor&>())
-    .def("masked_mm", &CusparseLtLinear::masked_mm)
+    .def(torch::init<const at::Tensor&>())
+    .def("cusparselt_mm", &CusparseLtLinear::cusparselt_mm)
+    .def("cusparselt_addmm", &CusparseLtLinear::cusparselt_addmm)
     .def("set_compressed", &CusparseLtLinear::set_compressed)
   ;
 }
