@@ -1,3 +1,4 @@
+import hipify_torch
 from hipify_torch.version import __version__
 from hipify_torch import hipify_python
 from hipify_torch import constants
