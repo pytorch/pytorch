@@ -6,7 +6,7 @@
 
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/RefcountedDeleter.h>
+#include <c10/core/RefcountedDeleter.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
