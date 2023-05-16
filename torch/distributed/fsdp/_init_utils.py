@@ -304,9 +304,7 @@ def _init_device_handle(
             "cuda", torch.cuda.current_device()
         )
 
-    state._device_handle = _FSDPDeviceHandle.from_device(
-        torch.device("cuda", torch.cuda.current_device())
-    )
+    state._device_handle = _FSDPDeviceHandle.from_device(determined_device)
     return state
 
 
