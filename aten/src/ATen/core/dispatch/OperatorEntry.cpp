@@ -510,7 +510,7 @@ void OperatorEntry::reportSignatureError(const CppSignature& call_signature, con
   );
 };
 
-std::string post_process_dispatch_key_str(std::string dispatch_key) {
+static std::string post_process_dispatch_key_str(std::string dispatch_key) {
   const std::string substr = "PrivateUse1";
   if (substr.size() <= dispatch_key.size() && std::equal(substr.rbegin(), substr.rend(), dispatch_key.rbegin())) {
     auto privateuse1_backend = get_privateuse1_backend();

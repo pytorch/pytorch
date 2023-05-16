@@ -109,22 +109,22 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   bool resizable() const {
     return resizable_;
-  };
+  }
 
   at::DataPtr& mutable_data_ptr() {
     return data_ptr_;
-  };
+  }
 
   const at::DataPtr& data_ptr() const {
     return data_ptr_;
-  };
+  }
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
     at::DataPtr old_data_ptr(std::move(data_ptr_));
     data_ptr_ = std::move(data_ptr);
     return old_data_ptr;
-  };
+  }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {
     data_ptr_ = std::move(data_ptr);
@@ -148,7 +148,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   const at::Allocator* allocator() const {
     return allocator_;
-  };
+  }
 
   // You generally shouldn't use this method, but it is occasionally
   // useful if you want to override how a tensor will be reallocated,
