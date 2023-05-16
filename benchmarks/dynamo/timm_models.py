@@ -13,6 +13,7 @@ from common import BenchmarkRunner, download_retry_decorator, main
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
+log = logging.getLogger(__name__)
 
 def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
@@ -28,16 +29,38 @@ finally:
     from timm.data import resolve_data_config
     from timm.models import create_model
 
+MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 TIMM_MODELS = dict()
-filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
-with open(filename, "r") as fh:
-    lines = fh.readlines()
-    lines = [line.rstrip() for line in lines]
-    for line in lines:
-        model_name, batch_size = line.split(" ")
-        TIMM_MODELS[model_name] = int(batch_size)
+def read_models_and_batch_sizes():
+    with open(MODELS_FILENAME, "r") as fh:
+        lines = fh.readlines()
+        lines = [line.rstrip() for line in lines]
+        for line in lines:
+            if line:
+                model_name, batch_size = line.split(",")
+                TIMM_MODELS[model_name] = int(batch_size)
+        
+    return TIMM_MODELS
+    
 
+def refresh_model_batch_sizes():
+    new_filename = os.path.join(os.path.dirname(__file__),"timm_models_list_temp.txt")
+    if os.path.exists(new_filename):
+        subprocess.check_call(["rm", new_filename])
+    TIMM_MODELS = read_models_and_batch_sizes()
+    for model_name in sorted(list(TIMM_MODELS.keys())):
+        try:
+            subprocess.check_call(
+                [sys.executable]
+                + sys.argv
+                + ["--find-batch-sizes"]
+                + [f"--only={model_name}"]
+                + [f"--output={new_filename}"]
+            )
+        except subprocess.SubprocessError:
+            log.warning(f"Failed to find suitable batch size for {model_name}")
+    subprocess.check_call(f"cp -f {new_filename} {MODELS_FILENAME}", shell=True) 
 
 # TODO - Figure out the reason of cold start memory spike
 
@@ -323,6 +346,9 @@ class TimmRunnner(BenchmarkRunner):
 
 
 def timm_main():
+    if ("--find-all-batch-sizes" in sys.argv) and ("--only" not in '\t'.join(sys.argv)) and ("--accuracy" not in sys.argv):
+        refresh_model_batch_sizes()
+    read_models_and_batch_sizes()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TimmRunnner())
