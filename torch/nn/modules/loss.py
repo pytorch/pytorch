@@ -690,8 +690,10 @@ class BCEWithLogitsLoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+        pos_weight (Tensor, optional): a weight of positive examples. Must be a tensor with equal 
+            dimensions to the target tensor and equal size along the class dimension to the number 
+            of classes. To apply the same positive weight along all spacial dimensions for a 2D 
+            multi-class target [C, H, W] use: [C, 1, 1]. Default: ``None`
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
