@@ -8,7 +8,7 @@
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
-      "CLANG_VERSION": "11"
+      "CLANG_VERSION": ""
     }
   },
 

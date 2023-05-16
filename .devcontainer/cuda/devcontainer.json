@@ -9,7 +9,7 @@
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
       "CUDA_VERSION": "11.8.0",
-      "CLANG_VERSION": "11"
+      "CLANG_VERSION": ""
     }
   },
   "runArgs": ["--gpus", "all"],
