@@ -4,6 +4,10 @@ LearningToPaint,pass,9
 Super_SloMo,pass,9
 alexnet,pass,9
 attention_is_all_you_need_pytorch,pass,9
+basic_gnn_edgecnn,pass,24
+basic_gnn_gcn,pass,15
+basic_gnn_gin,pass,9
+basic_gnn_sage,pass,9
 dcgan,pass,9
 drq,pass,8
 fastNLP_Bert,pass,14

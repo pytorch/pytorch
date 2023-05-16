@@ -80,6 +80,7 @@ SKIP = {
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
+    "nanogpt_generate",  # timeout
     "vision_maskrcnn",  # The size of tensor a (36) must match the size of tensor b (34)
 }
 
@@ -287,6 +288,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 break
             except ModuleNotFoundError:
                 pass
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
