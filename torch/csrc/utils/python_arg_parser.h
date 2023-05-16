@@ -509,7 +509,7 @@ inline void throw_intlist_exception(
     PyObject* obj,
     size_t idx) {
   throw TypeError(
-      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+      "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
       args->signature.name.c_str(),
       args->signature.params[i].name.c_str(),
       args->signature.params[i].type_name().c_str(),
@@ -683,7 +683,7 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
       throw TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+          "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
           signature.name.c_str(),
           signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(),

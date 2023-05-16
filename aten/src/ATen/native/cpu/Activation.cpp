@@ -12,6 +12,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/core/TensorBase.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -23,44 +24,9 @@ namespace at::native {
 
 namespace {
 
-template <typename scalar_t>
-inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
-  if (input.scalar_type() == kBFloat16) {
-    using Vec = Vectorized<BFloat16>;
-    BFloat16* output_data = output.data_ptr<BFloat16>();
-    BFloat16* buffer_data = buffer.data_ptr<BFloat16>();
-    BFloat16* input_data = input.data_ptr<BFloat16>();
-    parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
-      int64_t size = end - begin;
-      int64_t d = 0;
-      for (; d < size - (size % Vec::size()); d += Vec::size()) {
-        Vec data_vec = Vec::loadu(input_data + begin+ d);
-        Vectorized<float> data_vec0, data_vec1;
-        std::tie(data_vec0, data_vec1) = convert_bfloat16_float(data_vec);
-        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
-        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
-        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
-        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
-        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
-        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
-        convert_float_bfloat16(buffer_vec0, buffer_vec1).store(buffer_data + begin + d);
-        convert_float_bfloat16(output_vec0, output_vec1).store(output_data + begin + d);
-      }
-      if (size - d > 0) {
-        Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-        Vectorized<float> data_vec0, data_vec1;
-        std::tie(data_vec0, data_vec1) = convert_bfloat16_float(data_vec);
-        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
-        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
-        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
-        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
-        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
-        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
-        convert_float_bfloat16(buffer_vec0, buffer_vec1).store(buffer_data + begin + d, size - d);
-        convert_float_bfloat16(output_vec0, output_vec1).store(output_data + begin + d, size - d);
-      }
-    });
-  } else {
+static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
+  if (at::isReducedFloatingType(input.scalar_type())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     scalar_t* output_data = output.data_ptr<scalar_t>();
     scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
@@ -70,59 +36,93 @@ inline void _vec_log_sigmoid(TensorBase &output, TensorBase &buffer, const Tenso
       int64_t d = 0;
       for (; d < size - (size % Vec::size()); d += Vec::size()) {
         Vec data_vec = Vec::loadu(input_data + begin+ d);
-        Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
-        Vec buffer_vec = data_vec.abs().neg().exp();
-        Vec output_vec = min_vec - buffer_vec.log1p();
-        buffer_vec.store(buffer_data + begin + d);
-        output_vec.store(output_data + begin + d);
+        Vectorized<float> data_vec0, data_vec1;
+        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
+        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
+        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
+        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
+        convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d);
+        convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d);
       }
       if (size - d > 0) {
         Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
-        Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
-        Vec buffer_vec = data_vec.abs().neg().exp();
-        Vec output_vec = min_vec - buffer_vec.log1p();
-        buffer_vec.store(buffer_data + begin + d, size - d);
-        output_vec.store(output_data + begin + d, size - d);
+        Vectorized<float> data_vec0, data_vec1;
+        std::tie(data_vec0, data_vec1) = convert_to_float<scalar_t>(data_vec);
+        Vectorized<float> min_vec = minimum(data_vec0, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec0 = data_vec0.abs().neg().exp();
+        Vectorized<float> output_vec0 = min_vec - buffer_vec0.log1p();
+        min_vec = minimum(data_vec1, Vectorized<float>(float(0)));
+        Vectorized<float> buffer_vec1 = data_vec1.abs().neg().exp();
+        Vectorized<float> output_vec1 = min_vec - buffer_vec1.log1p();
+        convert_from_float<scalar_t>(buffer_vec0, buffer_vec1).store(buffer_data + begin + d, size - d);
+        convert_from_float<scalar_t>(output_vec0, output_vec1).store(output_data + begin + d, size - d);
       }
+    });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
+      using Vec = Vectorized<scalar_t>;
+      scalar_t* output_data = output.data_ptr<scalar_t>();
+      scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
+      scalar_t* input_data = input.data_ptr<scalar_t>();
+      parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
+        int64_t size = end - begin;
+        int64_t d = 0;
+        for (; d < size - (size % Vec::size()); d += Vec::size()) {
+          Vec data_vec = Vec::loadu(input_data + begin+ d);
+          Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
+          Vec buffer_vec = data_vec.abs().neg().exp();
+          Vec output_vec = min_vec - buffer_vec.log1p();
+          buffer_vec.store(buffer_data + begin + d);
+          output_vec.store(output_data + begin + d);
+        }
+        if (size - d > 0) {
+          Vec data_vec = Vec::loadu(input_data + begin + d, size - d);
+          Vec min_vec = vec::minimum(data_vec, Vec(scalar_t(0)));
+          Vec buffer_vec = data_vec.abs().neg().exp();
+          Vec output_vec = min_vec - buffer_vec.log1p();
+          buffer_vec.store(buffer_data + begin + d, size - d);
+          output_vec.store(output_data + begin + d, size - d);
+        }
+      });
     });
   }
 }
 
-static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, input.scalar_type(), "log_sigmoid_cpu", [&] {
-    _vec_log_sigmoid<scalar_t>(output, buffer, input);
-  });
-}
-
 static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
-  if (iter.dtype() == kBFloat16) {
-    using Vec = Vectorized<BFloat16>;
-    auto zero_val = float(0);
-    auto zero_vec = Vectorized<float>(zero_val);
-    auto one_val = float(1);
-    auto one_vec = Vectorized<float>(one_val);
-    cpu_kernel_vec(iter,
-      [=](BFloat16 a, BFloat16 b, BFloat16 c) -> BFloat16 {
-        auto in_negative = float(a) < float(0);
-        auto max_deriv = in_negative ? float(1) : float(0);
-        auto sign = in_negative ? float(1) : -float(1);
-        return (max_deriv - sign * (float(b) / (float(1) + b))) * float(c);
-      },
-      [=](Vec a, Vec b, Vec c) -> Vec {
-        Vectorized<float> a0, a1, b0, b1, c0, c1;
-        std::tie(a0, a1) = convert_bfloat16_float(a);
-        std::tie(b0, b1) = convert_bfloat16_float(b);
-        std::tie(c0, c1) = convert_bfloat16_float(c);
-        auto mask = a0 < zero_vec;
-        auto max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
-        auto sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
-        a0 = (max_deriv_vec - sign_vec * (b0 / (one_vec + b0))) * c0;
-        mask = a1 < zero_vec;
-        max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
-        sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
-        a1 = (max_deriv_vec - sign_vec * (b1 / (one_vec + b1))) * c1;
-        return convert_float_bfloat16(a0, a1);
-      });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
+      using Vec = Vectorized<scalar_t>;
+      auto zero_val = float(0);
+      auto zero_vec = Vectorized<float>(zero_val);
+      auto one_val = float(1);
+      auto one_vec = Vectorized<float>(one_val);
+      cpu_kernel_vec(iter,
+        [=](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+          auto in_negative = float(a) < float(0);
+          auto max_deriv = in_negative ? float(1) : float(0);
+          auto sign = in_negative ? float(1) : -float(1);
+          return (max_deriv - sign * (float(b) / (float(1) + b))) * float(c);
+        },
+        [=](Vec a, Vec b, Vec c) -> Vec {
+          Vectorized<float> a0, a1, b0, b1, c0, c1;
+          std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+          std::tie(b0, b1) = convert_to_float<scalar_t>(b);
+          std::tie(c0, c1) = convert_to_float<scalar_t>(c);
+          auto mask = a0 < zero_vec;
+          auto max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
+          auto sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
+          a0 = (max_deriv_vec - sign_vec * (b0 / (one_vec + b0))) * c0;
+          mask = a1 < zero_vec;
+          max_deriv_vec = Vectorized<float>::blendv(zero_vec, one_vec, mask);
+          sign_vec = Vectorized<float>::blendv(one_vec.neg(), one_vec, mask);
+          a1 = (max_deriv_vec - sign_vec * (b1 / (one_vec + b1))) * c1;
+          return convert_from_float<scalar_t>(a0, a1);
+        });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -151,7 +151,7 @@ static void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "threshold_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "threshold_cpu", [&] {
     using Vec = Vectorized<scalar_t>;
     scalar_t threshold = threshold_scalar.to<scalar_t>();
     Vec threshold_v = Vec(threshold);
@@ -766,23 +766,25 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Scalar& max) {
-  if (iter.dtype() == kBFloat16) {
-    auto min_val = min.to<float>();
-    auto max_val = max.to<float>();
-    cpu_kernel_vec(
-        iter,
-        [=](BFloat16 grad_val, BFloat16 self_val) -> BFloat16 {
-          return (float(self_val) <= min_val || float(self_val) >= max_val) ? BFloat16(0) : grad_val;
-        },
-        [=](Vectorized<BFloat16> grad_val, Vectorized<BFloat16> self_val) -> Vectorized<BFloat16> {
-          Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
-          std::tie(grad_val0, grad_val1) = convert_bfloat16_float(grad_val);
-          std::tie(self_val0, self_val1) = convert_bfloat16_float(self_val);
-          return convert_float_bfloat16(
-            ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
-            ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
-          );
-        });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&]() {
+      auto min_val = min.to<float>();
+      auto max_val = max.to<float>();
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t grad_val, scalar_t self_val) -> scalar_t {
+            return (float(self_val) <= min_val || float(self_val) >= max_val) ? scalar_t(0) : grad_val;
+          },
+          [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
+            Vectorized<float> grad_val0, grad_val1, self_val0, self_val1;
+            std::tie(grad_val0, grad_val1) = convert_to_float<scalar_t>(grad_val);
+            std::tie(self_val0, self_val1) = convert_to_float<scalar_t>(self_val);
+            return convert_from_float<scalar_t>(
+              ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
+              ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
+            );
+          });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();

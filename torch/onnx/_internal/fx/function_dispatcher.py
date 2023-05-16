@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import operator
-
-from typing import Callable, Dict, Mapping, Union
+import types
+from typing import Any, Callable, Dict, Mapping, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 
-import torch
+import torch._ops
+
+import torch.fx
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 
 
 TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
@@ -306,3 +309,82 @@ def _create_onnx_friendly_decomposition_table() -> (
 DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
     torch._ops.OpOverload, Callable
 ] = _create_onnx_friendly_decomposition_table()
+
+
+def get_symbolic_function(
+    diagnostic_context: diagnostics.DiagnosticContext,
+    node: torch.fx.Node,
+) -> Union[onnxscript.OnnxFunction, Callable[..., Any]]:
+    if node.target == operator.getitem:
+        # __getitem__ on Tensor or Sequence of tensors. Not tuple.
+        exporter_key = "getitem"
+    elif (
+        isinstance(node.target, types.BuiltinFunctionType)
+        and node.target in _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
+    ):
+        for node_arg in node.args:
+            if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
+                isinstance(node_arg, torch.fx.Node)
+                and not isinstance(node_arg.meta["val"], (torch.SymInt, torch.SymFloat))
+            ):
+                # TODO: reduce number of explicit initializations.
+                # TODO: Log location, stack.
+                diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                    diagnostics.rules.no_symbolic_function_for_call_function,
+                    diagnostics.levels.ERROR,
+                    f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
+                    " only int/float/SymInt/SymFloat is supported with built-in ops!",
+                    unsupported_fx_node=node,
+                )
+                diagnostic_context.log(diagnostic)
+                raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+
+        # symbolic fx.graph contains built-in functions to calculate python values.
+        exporter_key = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[
+            node.target  # type: ignore[index]
+        ]
+    elif (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+    ):
+        exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[node.target]
+    elif isinstance(node.target, torch._ops.OpOverloadPacket):
+        # aten::sym_size is the only OverloadPacket that we support.
+        # schema: aten::sym_size(Tensor self, int dim) -> Tensor
+        if node.target != torch.ops.aten.sym_size:
+            diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!",
+                unsupported_fx_node=node,
+            )
+            diagnostic_context.log(diagnostic)
+            raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+        # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+        # overloadpacket for some reasons.
+        # https://github.com/pytorch/pytorch/issues/97201
+        # We manually assigned overload for aten::sym_size.
+        exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.ops.aten.sym_size.int]
+    else:
+        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+            diagnostics.rules.no_symbolic_function_for_call_function,
+            diagnostics.levels.ERROR,
+            f"Unknown call_function target: {node.target}",
+            unsupported_fx_node=node,
+        )
+        diagnostic_context.log(diagnostic)
+        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+    # Only the latest opset version is only supported in atenlib for now
+    symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
+    if symbolic_fn is None:
+        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+            diagnostics.rules.no_symbolic_function_for_call_function,
+            diagnostics.levels.ERROR,
+            f"Cannot find symbolic function for {exporter_key}, "
+            f"which should be registered under {node.target}.",
+            unsupported_fx_node=node,
+        )
+        diagnostic_context.log(diagnostic)
+        raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+
+    return symbolic_fn
