@@ -82,28 +82,26 @@ class SemiSparseTensor(torch.Tensor):
         self.is_2x4sparse = False
         self.transpose = transpose
 
-    def set_compressed(self):
-        if not self.is_2x4sparse:
-            num_bytes = (
-                self.original_tensor.nelement() * self.original_tensor.element_size()
-            )
-            compressed_size_bytes = num_bytes * 9 // 16
-            compressed_size = compressed_size_bytes // self.original_tensor.element_size()
+    def set_compressed(self, original_tensor):
+        num_bytes = (
+            original_tensor.nelement() * original_tensor.element_size()
+        )
+        compressed_size_bytes = num_bytes * 9 // 16
+        compressed_size = compressed_size_bytes // original_tensor.element_size()
 
-            self.compressed_weight = torch.empty(
-                (compressed_size,), 
-                dtype=self.original_tensor.dtype,
-                device=self.original_tensor.device,
-            )
+        self.compressed_weight = torch.empty(
+            (compressed_size,), 
+            dtype=original_tensor.dtype,
+            device=original_tensor.device,
+        )
 
-            self.cslt = torch.classes.cusparselt.CusparseLtLinear(self.compressed_weight)
+        self.cslt = torch.classes.cusparselt.CusparseLtLinear(self.compressed_weight)
 
-            self.num_elements = self.original_tensor.nelement() // 2 
-            self.m = self.original_tensor.shape[0]
+        self.num_elements = original_tensor.nelement() // 2 
+        self.m = original_tensor.shape[0]
 
-            self.cslt.set_compressed(self.original_tensor)
-            self.is_2x4sparse = True
-            del self.original_tensor
+        self.cslt.set_compressed(original_tensor)
+        self.is_2x4sparse = True
 
     def __repr__(self):
         m = self.m
@@ -118,10 +116,14 @@ mask = {self.compressed_weight[self.num_elements:].view(m, -1)})"
 
         if func is torch.ops.aten.detach.default:
             return SemiSparseTensor(args[0].original_tensor.detach())
+            # args[0].original_tensor.detach()
+            # return args[0]
 
         if func is torch.ops.aten.t.default:
+            # args[0].transpose 
             new_transpose = not args[0].transpose
-            return SemiSparseTensor(args[0].original_tensor, transpose=new_transpose)
+            # return args[0]
+            return SemiSparseTensor(args[0].original_tensor.t(), transpose=new_transpose)
 
         if func is torch.ops.aten.addmm.default and args[0].is_floating_point() and args[0].is_cuda:
             bias, a, b = args
@@ -130,13 +132,16 @@ mask = {self.compressed_weight[self.num_elements:].view(m, -1)})"
             # print(a.shape)
             # print(b.shape)
             if isinstance(b, SemiSparseTensor):
-                # return b.t().cslt.cusparselt_addmm_t(a.T, bias)
-                temp = b.t()
-                temp.set_compressed()
-                return temp.cslt.cusparselt_addmm(a.T, bias).T
+                # can't call this because 
+                # temp = b.t()
+                if not b.is_2x4sparse:
+                    b.set_compressed(b.original_tensor)
+                return b.cslt.cusparselt_addmm(a.T, bias).T
+                # return func(bias, a, b.original_tensor)
+                # cusparselt_addmm(a.t(), bias).t()
             else:
                 # CURRENTLY BIAS is broadcasted the wrong way in cuSPARSELT
-                a.set_compressed()
+                a.set_compressed(a.transpose)
                 return a.cslt.cusparselt_addmm(b, bias)
 
         if func is torch.ops.aten.mm.default:
@@ -158,23 +163,34 @@ def test_linear(m, k, n, dtype):
     model.weight = A
     print(model.linear.weight.shape)
     print(model.linear.bias.shape)
-
-    temp = model(B)
-
+    # get latency
     dense_measurement = benchmark.Timer(
         stmt="model(input_tensor)",
         globals={"input_tensor": B, "model": model},
     ).blocked_autorange()
 
+    temp = model(B)
+
+
     model.linear.weight = nn.Parameter(SemiSparseTensor(model.linear.weight))
     res = model(B)
 
-    # get latency
+
     sparse_measurement = benchmark.Timer(
         stmt="model(input_tensor)",
         globals={"input_tensor": B, "model": model},
     ).blocked_autorange()
 
+    addmm_measurement = benchmark.Timer(
+        stmt="torch.addmm(bias, input_tensor, weight)",
+        globals={"input_tensor": B, "weight": model.linear.weight.t(), "bias": model.linear.bias},
+    ).blocked_autorange()
+
+    # import cProfile
+    # import re
+    # cProfile.runctx('sparse_measurement.blocked_autorange()', globals=globals(), locals=locals(), sort="")
+
+    # sparse_measurement = sparse_measurement.blocked_autorange()
 
     correct = torch.allclose(temp, res, rtol=1e-3, atol=1e-3)
     print("sanity check", correct)
@@ -188,6 +204,7 @@ def test_linear(m, k, n, dtype):
         "dtype": str(dtype),
         "sparse_latency (ms)": sparse_measurement.median * 1001,
         "dense_latency (ms)": dense_measurement.median * 1000,
+        "addmm_latency(ms)": addmm_measurement.median * 1000,
         "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
         "correct": correct,
     }

@@ -53,7 +53,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   int* d_valid;
 
   cusparseLtPruneAlg_t pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP};
-  cusparseOperation_t opA{CUSPARSE_OPERATION_NON_TRANSPOSE};
+  cusparseOperation_t opA;
   cudaDataType type = CUDA_R_16F;
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
@@ -110,10 +110,11 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   int64_t k = weight.size(1);
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
-  bool isA_transposed = (opA != CUSPARSE_OPERATION_NON_TRANSPOSE);
+  bool isSparse_transposed = !weight.is_contiguous();
+  opA = (isSparse_transposed) ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  num_A_rows     = (isA_transposed) ? k : m;
-  auto     num_A_cols     = (isA_transposed) ? m : k;
+  num_A_rows     = (isSparse_transposed) ? k : m;
+  auto     num_A_cols     = (isSparse_transposed) ? m : k;
   auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
 
   
