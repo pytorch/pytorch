@@ -1406,16 +1406,12 @@ class View(BaseView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        if 0 in new_size and is_storage_and_layout(x):
-            storage, old_layout = as_storage_and_layout(x, freeze=False)
-            new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                new_size,
-                FlexibleLayout.contiguous_strides(new_size),
-                old_layout.offset,
-            )
-            return ReinterpretView(storage, new_layout)
+        if 0 in new_size:
+
+            def fake_reindex(index):
+                return tuple([0] * len(old_size))
+
+            return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
