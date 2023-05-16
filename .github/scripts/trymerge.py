@@ -1684,7 +1684,7 @@ def categorize_checks(
                 failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
-        print(
+        warn(
             f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
             + ", ".join([x[0] for x in ok_failed_checks])
             + (
