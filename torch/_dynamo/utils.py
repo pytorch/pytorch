@@ -1589,17 +1589,14 @@ def to_numpy_helper(___tmp_0):
 
 
 def to_tensor(value):
-    def convert(obj):
-        if isinstance(obj, np.ndarray):
-            return torch.from_numpy(obj)
-        elif isinstance(obj, torch_np.ndarray):
-            return obj.tensor
-        else:
-            return obj
-
-    if isinstance(value, (tuple, list)):
-        return tuple([convert(obj) for obj in value])
-    return convert(value)
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor
+    elif isinstance(value, np.ndarray):
+        return torch.from_numpy(value)
+    elif isinstance(value, (tuple, list)):
+        return type(value)(to_tensor(obj) for obj in value)
+    else:
+        return value
 
 
 class to_tensor_wrapper:
