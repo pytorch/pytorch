@@ -1317,6 +1317,8 @@ class BenchmarkRunner:
                     batch_size,
                 )
                 self.model_iter_fn(model, example_inputs)
+                #optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                #optimized_model_iter_fn(model, example_inputs)
                 return batch_size
             except RuntimeError as e:
                 error_str = str(e)
@@ -2035,6 +2037,19 @@ def parse_args(args=None):
         default=1,
         help="Set per-process GPU memory fraction (limit) for reducing usable size and reproducing OOMs",
     )
+    
+    parser.add_argument(
+        "--find-batch-sizes",
+        action="store_true",
+        help="finds the largest batch size that could fit on GPUs",
+    )
+    
+    parser.add_argument(
+        "--find-all-batch-sizes",
+        action="store_true",
+        help="finds the largest batch size that could fit on GPUs",
+    )
+
     group_fuser = parser.add_mutually_exclusive_group()
     # --nvfuser is now the default, keep the option to not break scripts
     group_fuser.add_argument("--nvfuser", action="store_true", help=argparse.SUPPRESS)
@@ -2112,11 +2127,6 @@ def parse_args(args=None):
         "--recompile_profiler",
         action="store_true",
         help="Run the dynamo recompilation profiler on each model.",
-    )
-    group.add_argument(
-        "--find-batch-sizes",
-        action="store_true",
-        help="finds the largest batch size that could fit on GPUs",
     )
 
     mode_group = parser.add_mutually_exclusive_group(required=True)
