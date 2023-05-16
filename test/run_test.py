@@ -492,7 +492,7 @@ def run_test(
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     if use_sharded_test:
         if is_cpp_test:
-            stepcurrent_key = f"{test_file}"
+            stepcurrent_key = test_file
         else:
             unittest_args.extend(
                 [
