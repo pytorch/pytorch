@@ -1,6 +1,8 @@
 #include <unordered_map>
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/ArrayRef.h>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -11,12 +13,17 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
 
 static uint64_t add_counter = 0;
 static uint64_t last_saved_value = 0;
+static c10::DeviceIndex custom_device_index = 0;
 
+static uint64_t abs_counter = 0;
+static uint64_t last_abs_saved_value = 0;
 // register guard
 namespace at {
 namespace detail {
@@ -25,6 +32,20 @@ C10_REGISTER_GUARD_IMPL(PrivateUse1, c10::impl::NoOpDeviceGuardImpl<DeviceType::
 
 }} // namespace at::detail
 
+namespace {
+
+void abs_kernel(::at::TensorIteratorBase& iter) {
+  // Since this custom device is just for testing, not bothering to implement kernels.
+  abs_counter += 1;
+}
+
+} // namespace
+
+namespace at::native {
+
+REGISTER_PRIVATEUSE1_DISPATCH(abs_stub, &abs_kernel);
+
+} // namespace at::native
 struct CustomBackendMetadata : public c10::BackendMeta {
   // for testing this field will mutate when clone() is called by shallow_copy_from.
   int backend_version_format_{-1};
@@ -95,12 +116,17 @@ at::Tensor custom_add_Tensor(const at::Tensor & self, const at::Tensor & other, 
   return at::empty(self.sizes(), self.options());
 }
 
+// basic abs function
+at::Tensor& custom_abs_out(const at::Tensor& self, at::Tensor& out) {
+  return at::native::abs_out(self, out);
+}
+
 // A dummy allocator for our custom device, that secretly uses the CPU
 struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = c10::alloc_cpu(nbytes);
-    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, 0)};
+    return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
 
   static void ReportAndDelete(void* ptr) {
@@ -225,6 +251,7 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
 // This macro registers your kernels to the PyTorch Dispatcher.
 // More details on the dispatcher can be found at http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/.
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("abs.out", &custom_abs_out);
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
@@ -255,6 +282,15 @@ bool custom_add_called() {
   return called;
 }
 
+bool custom_abs_called() {
+  bool called = false;
+  if (abs_counter > last_abs_saved_value) {
+    called = true;
+    last_abs_saved_value = abs_counter;
+  }
+  return called;
+}
+
 class PrivateGeneratorImpl : public at::CPUGeneratorImpl {
 public:
   // Constructors
@@ -274,6 +310,10 @@ void register_generator() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
+void set_custom_device_index(c10::DeviceIndex device_index) {
+  custom_device_index = device_index;
+}
+
 // Here, we're exposing a custom device object that corresponds to our custom backend.
 // We do this using pybind: exposing an "extension_name.custom_device()" function in python,
 // that's implemented in C++.
@@ -281,7 +321,9 @@ void register_generator() {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
+    m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
     m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_set_backend_meta", &custom_set_backend_meta, "a fake set tensor BackendMeta function");
     m.def("check_backend_meta", &check_backend_meta, "check if BackendMeta serialization correctly");
     m.def("custom_serialization_registry", &custom_serialization_registry, "register custom serialization function");
