@@ -1438,7 +1438,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfc, warn=False)
 make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
@@ -1570,20 +1569,6 @@ make_fallback(aten.miopen_batch_norm, warn=False)
 if torch.version.hip is not None and torch.cuda.is_available():
     # tl.reduce not available yet in ROCm's version of triton
     make_fallback(aten.prod, warn=False)
-
-
-@register_lowering(aten.copy)
-def copy(self, src, non_blocking=False):
-    x = src
-    if self.get_device() != src.get_device():
-        x = to_device(x, self.get_device())
-    if self.get_dtype() == src.get_dtype():
-        x = to_dtype(x, self.get_dtype())
-
-    if self.get_size() != src.get_size():
-        out = expand(src, self.get_size())
-        return clone(out)
-    return clone(src)
 
 
 @register_lowering(aten.clone)
