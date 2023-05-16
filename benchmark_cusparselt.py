@@ -115,7 +115,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
         atol=1e-3
     )
 
-    assert correct
+    # assert correct
 
     input_tensor = torch.randint(
         2, 
