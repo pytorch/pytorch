@@ -1,6 +1,6 @@
 import itertools
 import weakref
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
