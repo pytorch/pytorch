@@ -124,12 +124,12 @@ class OptimizeForInferenceTemplate(TestCase):
         def foo(mod, x):
             return mod(x) + 10
 
+        out_compiled_no_inference = foo(mod, x)
+
         with torch.no_grad():
-            out_eager = mod(x)
             out_compiled, code = run_and_get_code(foo, mod, x)
 
-            self.assertEqual(out_eager, out_compiled)
-            breakpoint()
+            self.assertEqual(out_compiled_no_inference, out_compiled)
 
     def test_folded_conv_bn(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).cuda().eval().to(self.device)
