@@ -14,6 +14,10 @@ from ..virtualized import V
 from .common import CSEVariable, Kernel, PythonPrinter, SizeArg, TensorArg
 
 
+class CantSplit(Exception):
+    pass
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(self, name):
         super().__init__(name)

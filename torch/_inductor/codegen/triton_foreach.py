@@ -5,9 +5,7 @@ from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_of, TritonPrinter
-
-texpr = TritonPrinter().doprint
+from .triton_utils import config_of, signature_of
 
 
 class ForeachKernel(Kernel):

@@ -38,6 +38,7 @@ from .common import (
 )
 from .triton_overrides import triton_compute_type, triton_constant, TritonOverrides
 from .triton_utils import (
+    CantSplit,
     config_of,
     IterationRangesRoot,
     signature_of,
@@ -1549,7 +1550,3 @@ class EnableReduction:
                 pass
             else:
                 yield node
-
-
-class CantSplit(Exception):
-    pass
