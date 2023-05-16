@@ -47,7 +47,7 @@ jobs:
         python3 -m tools.pyi.gen_pyi \
           --native-functions-path aten/src/ATen/native/native_functions.yaml \
           --tags-path aten/src/ATen/native/tags.yaml \
-          --deprecated-functions-path "tools/autograd/deprecated.yaml"
+          --deprecated-functions-path "torchgen/autograd/deprecated.yaml"
 
         RC=0
         # Run lintrunner on all files

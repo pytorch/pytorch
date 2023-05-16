@@ -10,7 +10,7 @@ from ._profiler import (
     ProfilerConfig,
 )
 
-# Defined in tools/autograd/init.cpp
+# Defined in torchgen/autograd/init.cpp
 
 class DeviceType(Enum):
     CPU = ...

@@ -655,7 +655,7 @@ void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
   torch_functions.assign(
       torch_functions_manual, torch_functions_manual + num_functions);
   // NOTE: Must be synced with num_shards in
-  // tools/autograd/gen_python_functions.py
+  // torchgen/autograd/gen_python_functions.py
   gatherTorchFunctions_0(torch_functions);
   gatherTorchFunctions_1(torch_functions);
   gatherTorchFunctions_2(torch_functions);

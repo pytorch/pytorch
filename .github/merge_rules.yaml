@@ -124,7 +124,7 @@
   - torch/_linalg_utils.py
   - torch/**python_linalg_functions.*
   - torch/**linalg.h
-  - tools/autograd/templates/python_linalg_functions.cpp
+  - torchgen/autograd/templates/python_linalg_functions.cpp
   - test/test_linalg.py
   approved_by:
   - mruberry
@@ -145,7 +145,7 @@
   - torch/fft/**
   - torch/csrc/api/include/torch/fft.h
   - torch/**python_fft_functions.*
-  - tools/autograd/templates/python_fft_functions.cpp
+  - torchgen/autograd/templates/python_fft_functions.cpp
   - test/cpp/api/fft.cpp
   approved_by:
   - mruberry
