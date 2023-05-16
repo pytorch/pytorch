@@ -1,11 +1,11 @@
+import functools
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import Callable, Dict
 
 import torch
 import torch._decomp as decomp
+from torch._decomp import get_decompositions
 from torch._ops import OpOverload
-from torch._prims_common import make_contiguous_strides_for
 
 aten = torch.ops.aten
 
@@ -24,27 +24,6 @@ def throw_on_non_cuda(device):
     )
 
 
-def rand_offset_calculator(shape):
-    # For impl, look at the function calc_execution_policy in the file
-    # aten/src/ATen/native/cuda/DistributionTemplates.h. The impl was copied at
-    # commit hash 72aa0667bd16707d50eb8fa337092a1f5d11dfb6
-    numel = 1
-    for dim_size in shape:
-        numel *= dim_size
-
-    block_size = 256
-    unroll = 4
-    curand4_engine_calls = 4
-    device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
-    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-    grid_size = (numel + block_size - 1) // block_size
-    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
-    offset = (
-        (numel - 1) // (block_size * grid_size * unroll) + 1
-    ) * curand4_engine_calls
-    return offset
-
-
 # TODO - We have to register many more distributions here, and also higher level
 # ops like dropout which have fused implementation and can hide the rand inside.
 @register_rng_decomposition(aten.rand)
@@ -53,10 +32,11 @@ def rand(shape, dtype=None, layout=torch.strided, device=None, pin_memory=False)
         throw_on_non_cuda(device)
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
     dtype = dtype or torch.float32
-    stride = make_contiguous_strides_for(shape)
-    r = torch.ops.rngprims.philox_rand(shape, seed, offset, None, device, dtype)
-    PhiloxStateTracker.advance_offset(rand_offset_calculator(shape))
-    return r
+    out, offset_jump = torch.ops.rngprims.philox_rand(
+        shape, seed, offset, None, device, dtype
+    )
+    PhiloxStateTracker.advance_offset(offset_jump)
+    return out
 
 
 @register_rng_decomposition(aten.rand_like)
@@ -73,9 +53,11 @@ def rand_like(
         throw_on_non_cuda(device)
     dtype = dtype or x.dtype
     seed, offset = PhiloxStateTracker.get_state_as_tuple()
-    r = torch.ops.rngprims.philox_rand(x.shape, seed, offset, None, device, dtype)
-    PhiloxStateTracker.advance_offset(rand_offset_calculator(x.shape))
-    return r
+    out, offset_jump = torch.ops.rngprims.philox_rand(
+        x.shape, seed, offset, None, device, dtype
+    )
+    PhiloxStateTracker.advance_offset(offset_jump)
+    return out
 
 
 class PhiloxState:
@@ -98,7 +80,7 @@ class PhiloxState:
         assert self.seed.numel() != 0 and self.base_offset.numel() != 0
 
     def advance_offset(self, consumed_offset):
-        self.relative_offset += consumed_offset
+        self.relative_offset = self.relative_offset + consumed_offset
 
     def set_state(self, seed, base_offset, relative_offset=0):
         self.seed = seed
@@ -120,27 +102,15 @@ class PhiloxState:
         self.relative_offset = 0
 
 
-@dataclass
-class PhiloxTotalOffsets:
-    """
-    PhiloxStateTracker computes the total fwd and bwd offsets for an AOT
-    Autograd traced graph. However, PhiloxStateTracker is a singleton class, but
-    the total offsets are specific to each traced graph. These offsets are
-    stored as part of AOT graph. This class just encapsulates the fwd and bwd
-    offsets to be used at runtime.
-    """
-
-    total_fwd_offset: int
-    total_bwd_offset: int
-
-
 class PhiloxStateTracker:
     """
     Singleton class to track the philox rng state during AOT Autograd tracing.
     For each aot tracing instance, AOT Autograd resets this tracker and keeps
     track of both forward and backward offsets. At runtime, we only care about
-    the total consumed forward and backward offsets. There are stored as part of
-    aot_config (PhiloxTotalOffsets), which is a config object per aot-tracing.
+    the total consumed forward and backward offsets. For dynamic shapes, these
+    offsets are a function of input shapes. Therefore, the AOT generated graphs
+    have additional outputs that compute total consumed forward and backward
+    offsets.
     """
 
     running_state: PhiloxState
@@ -215,8 +185,69 @@ class PhiloxStateTracker:
     def get_current_relative_offset(cls):
         return cls.running_state.relative_offset
 
+    @staticmethod
+    def multiple_of_4(offset):
+        # torch cuda rng state offset must be a multiple of 4. For inductor, as
+        # we sum up all the numel, the result might not be a multiple of 4. This
+        # method achieves that.
+        return (offset + 3) // 4 * 4
+
     @classmethod
-    def get_accumulated_offsets(cls):
-        fwd_offset = cls.fwd_state.relative_offset
-        bwd_offset = cls.bwd_state.relative_offset
-        return PhiloxTotalOffsets(fwd_offset, bwd_offset)
+    def get_updated_fwd_offset(cls):
+        return cls.multiple_of_4(
+            cls.fwd_state.base_offset + cls.fwd_state.relative_offset
+        )
+
+    @classmethod
+    def get_updated_bwd_offset(cls):
+        return cls.multiple_of_4(
+            cls.bwd_state.base_offset + cls.bwd_state.relative_offset
+        )
+
+
+# Adding more decompositions which eventually use rand_like inside decomps.
+# Adding these in rng_decompositins ensures the functionalization of rand_like
+# ops used in these decomps. The list is copied from inductor codebase, which
+# uses it for similar purpose.
+#
+# Caution - These decomps do not have same accuracy as that of eager. However,
+# we can't just disable them with a config flag like fallback_random, because
+# for fuctionalization of rng ops, we have to decompose these ops.
+extra_random_decomps = get_decompositions(
+    [
+        aten.cauchy,
+        aten.cauchy_,
+        aten.exponential,
+        aten.exponential_,
+        aten.geometric,
+        aten.geometric_,
+        aten.native_dropout,
+        aten.normal,
+        aten.normal_,
+        aten.normal_functional,
+        aten.log_normal,
+        aten.log_normal_,
+        aten.uniform_,
+    ]
+)
+register_extra_random_decomp = functools.partial(
+    decomp.register_decomposition, registry=extra_random_decomps
+)
+
+
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
+
+
+rng_decompositions.update(extra_random_decomps)  # type: ignore[arg-type]

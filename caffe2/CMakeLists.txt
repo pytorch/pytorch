@@ -758,6 +758,7 @@ if(NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/lr_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/step_lr.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
   )
@@ -825,6 +826,10 @@ endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
+if(USE_MPS OR USE_PYTORCH_METAL)
+  enable_language(OBJC OBJCXX)
+endif()
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
@@ -1173,6 +1178,11 @@ if(BUILD_TEST)
     endif()
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy
                      ${CMAKE_BINARY_DIR}/test_lazy)
+  endif()
+  if(BUILD_AOT_INDUCTOR_TEST)
+    add_subdirectory(
+      ${TORCH_ROOT}/test/cpp/aot_inductor
+      ${CMAKE_BINARY_DIR}/test_aot_inductor)
   endif()
 endif()
 
@@ -1677,7 +1687,9 @@ if(BUILD_TEST)
     foreach(test_src ${Caffe2_MPS_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
-      target_link_libraries(${test_name} torch_library gtest_main)
+      find_library(metal NAMES Metal)
+      find_library(foundation NAMES Foundation)
+      target_link_libraries(${test_name} torch_library gtest_main ${metal} ${foundation})
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
@@ -1778,7 +1790,7 @@ if(BUILD_PYTHON)
   # location).  It varies from system to system.
   # We should pin the path separator to the forward slash on Windows.
   # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/master/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
+  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
   pycmd(PYTHON_SITE_PACKAGES "
       import os
       import sysconfig

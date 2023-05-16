@@ -207,6 +207,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // shapes of input tensors
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
+      .def(
+          "concrete_inputs",
+          [](const KinetoEvent& e) {
+            std::vector<py::object> as_pyobj;
+            std::transform(
+                e.concreteInputs().begin(),
+                e.concreteInputs().end(),
+                std::back_inserter(as_pyobj),
+                [](const c10::IValue& val) {
+                  return torch::jit::toPyObject(val);
+                });
+            return as_pyobj;
+          })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
@@ -303,6 +316,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
       activities.insert(ActivityType::XPU);
+    }
+    if (at::hasMTIA()) {
+      activities.insert(ActivityType::MTIA);
     }
 #endif
     return activities;

@@ -203,6 +203,7 @@ def replace_pattern_with_filters(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
+    ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
     See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
@@ -214,7 +215,7 @@ def replace_pattern_with_filters(
             See matcher_utils.py for definition of InternalMatch.
     """
 
-    return _replace_pattern(gm, pattern, replacement, match_filters)
+    return _replace_pattern(gm, pattern, replacement, match_filters, ignore_literals)
 
 
 def _replace_pattern(
@@ -222,6 +223,7 @@ def _replace_pattern(
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
     match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+    ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
@@ -243,7 +245,7 @@ def _replace_pattern(
         replacement_graph = symbolic_trace(replacement).graph
 
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
-                              remove_overlapping_matches=True)
+                              remove_overlapping_matches=True, ignore_literals=ignore_literals)
     _matches: List[InternalMatch] = matcher.match(original_graph)
 
     # Filter out matches that don't match the filter
