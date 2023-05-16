@@ -527,9 +527,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
 fi
 
 test_libtorch() {
-  # The slow test config corresponds to a default test config that should run
-  # the libtorch tests instead.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
@@ -574,7 +572,7 @@ test_libtorch() {
     # Wait for background download to finish
     wait
 
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
         TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
         mkdir -p $TEST_REPORTS_DIR
 
