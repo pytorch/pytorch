@@ -303,6 +303,7 @@ cxx_binary(
         "flatbuffers/grpc/src/compiler/swift_generator.cc",
         "flatbuffers/grpc/src/compiler/ts_generator.cc",
         "flatbuffers/src/bfbs_gen_lua.cpp",
+        "flatbuffers/src/bfbs_gen_nim.cpp",
         "flatbuffers/src/flatc_main.cpp",
         "flatbuffers/src/idl_gen_cpp.cpp",
         "flatbuffers/src/idl_gen_csharp.cpp",
