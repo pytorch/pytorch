@@ -1004,11 +1004,11 @@ run_cudnn_LLM_fprop(int64_t b,
                     int64_t s_kv,
                     int64_t d,
                     float scaling_factor,
-                    bool is_training,
+                    bool return_softmaxstats,
                     double dropout_probability,
-                    const Tensor& q, 
-                    const Tensor& k,   
-                    const Tensor& v,
+                    Tensor& q, 
+                    Tensor& k,   
+                    Tensor& v,
                     Tensor& softmaxstats,
                     Tensor& o,
                     Tensor& dropoutseed,
@@ -1017,22 +1017,31 @@ run_cudnn_LLM_fprop(int64_t b,
     if (q.scalar_type() == kBFloat16) {
       tensorType = CUDNN_DATA_BFLOAT16;
     }
-    std::cout << "LLM params " << " " <<  b << " " <<  h << " " <<  s_q << " " << s_kv << " " << d << " " <<  scaling_factor << " " <<  is_training << " " << dropout_probability;
+    //q = q.contiguous();
+    //k = k.contiguous();
+    //v = v.contiguous();
+    std::cout << q.is_nested() << " " << k.is_nested() << " " << v.is_nested() << std::endl;
+    std::cout << q.is_contiguous() << " " << k.is_contiguous() << " " << v.is_contiguous() << std::endl;
+    std::cout << q.strides() << " " << k.strides() << " " << v.strides() << " " << std::endl;
+    std::cout << q.sizes() << " " << k.sizes() << " " << v.sizes() << " " << o.sizes() << std::endl;
+    std::cout << "LLM params " << " " <<  b << " " <<  h << " " <<  s_q << " " << s_kv << " " << d << " " <<  scaling_factor << " " <<  return_softmaxstats << " " << dropout_probability;
     o = at::zeros({b, s_q, h, d}, q.options());
-    softmaxstats = at::zeros({b, h, s_q}, q.options());
+    if (return_softmaxstats) {
+      softmaxstats = at::zeros({b, h, s_q}, q.options());
+    }
     run_bf16_LLM_fprop( b, 
                    h, 
                    s_q,
                    s_kv,
                    d,
-                  MHA_Layout::QKV_INTERLEAVED,
+                  MHA_Layout::KV_INTERLEAVED,
                   scaling_factor,
-                  false,
+                  return_softmaxstats,
                   dropout_probability,
                   q.data_ptr(),
                   k.data_ptr(), 
                   v.data_ptr(),
-                  nullptr,
+                  return_softmaxstats ? softmaxstats.data_ptr() : nullptr,
                   o.data_ptr(),
                   dropoutseed.data_ptr(),
                   dropoutoffset.data_ptr(),
