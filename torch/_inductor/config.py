@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# use fx aot graph cache
+fx_graph_cache = False
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 

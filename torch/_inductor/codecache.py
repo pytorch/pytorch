@@ -266,9 +266,10 @@ class FxGraphCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, compile_fx_fn, fx_args, fx_kwargs):
+    def load(cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]):
         fx_args_for_hashing = copy(fx_args)
         fx_args_for_hashing.extend(list(fx_kwargs.values()))
+        fx_args_for_hashing.append(torch.__version__)
         key = compiled_fx_graph_hash(fx_args_for_hashing)
         if key not in cls.cache:
             from filelock import FileLock
