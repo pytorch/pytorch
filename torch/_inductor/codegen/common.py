@@ -745,7 +745,7 @@ class Kernel(CodeGen):
             def __getattr__(name):
                 def inner(*args, **kwargs):
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs), args=args, name=name
+                        self.compute, getattr(parent_handler, name)(*args, **kwargs), origin_args=args, name=name
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar
