@@ -927,6 +927,10 @@ def same(
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
 
+        if ref.shape != res.shape:
+            log_error(f"Accuracy failed: shapes did not match: {tuple(ref.shape)} != {tuple(res.shape)}")
+            return False
+
         if ref.is_sparse:
             assert res.is_sparse
             ref = ref.to_dense()
