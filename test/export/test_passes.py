@@ -4,10 +4,9 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import _export, export, dynamic_dim
+from torch._export import export, dynamic_dim, _export
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
-    AddRuntimeAssertionsForConstraintsPass,
     ConstPropPass,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -82,21 +81,18 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        gm = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).find_method("forward")
+        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).add_runtime_assertions()
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         self.assertEqual(num_assert, 3)
         self.assertEqual(num_scalar_tensor, 3)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            pass_result.graph_module(torch.zeros(2, 7, 3))
+            ep(torch.zeros(2, 7, 3))
 
-        self.assertEqual(pass_result.graph_module(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
+        self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
 
     def test_runtime_assert_multiple_dims(self) -> None:
         class M(torch.nn.Module):
@@ -116,22 +112,19 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
+        gm = export(M(), (x, y), constraints=constraints).add_runtime_assertions().find_method("forward")
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(gm.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(gm.graph, torch.ops.aten.scalar_tensor.default)
 
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+            gm(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(RuntimeError, "Input arg1"):
-            pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            gm(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
@@ -150,27 +143,24 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
+        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         # there are 3 asserts from y and 2 from dynamic x dims and 1 from static x dim
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
-            pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = pass_result.graph_module(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -191,27 +181,24 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        gm = export(M(), (x, y), constraints=constraints).find_method("forward")
+        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(pass_result.graph_module.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(pass_result.graph_module.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         # there are 4 asserts from y and 3 from x
         self.assertEqual(num_assert, 7)
         self.assertEqual(num_scalar_tensor, 7)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            pass_result.graph_module(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
         with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
-            pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = pass_result.graph_module(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
+        gm_result_for_1_size = ep(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.zeros(4, 2, 3), torch.ones(5, 5, 5))
 
         self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
@@ -265,23 +252,19 @@ class TestPasses(TestCase):
 
         x = torch.tensor([2])
         mod = M()
-        gm = _export(mod, (x,))
+        ep = export(mod, (x,)).add_runtime_assertions()
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        new_gm = pass_result.graph_module
-        self.assertTrue(pass_result.modified)
-
-        num_assert = count_call_function(new_gm.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(new_gm.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
         # 1 constraint for shape of x, 2 constraints for b
         self.assertEqual(num_assert, 3)
         self.assertEqual(num_scalar_tensor, 3)
 
         with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense_default is outside of inline constraint \[2, 5\]."):
-            new_gm(torch.tensor([6]))
+            ep(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
-        self.assertEqual(mod(new_inp), new_gm(new_inp))
+        self.assertEqual(mod(new_inp), ep(new_inp))
 
     def test_runtime_assert_inline_constraints_for_nonzero(self) -> None:
         class M(torch.nn.Module):
@@ -296,27 +279,23 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        gm = _export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
+        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2]).add_runtime_assertions()
 
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
-        new_gm = pass_result.graph_module
-        self.assertTrue(pass_result.modified)
-        num_assert = count_call_function(new_gm.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(new_gm.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         # 2 constraints for b
         self.assertEqual(num_assert, 2)
         self.assertEqual(num_scalar_tensor, 2)
 
-        new_gm.print_readable()
         with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
-            new_gm(torch.tensor([1, 1, 0, 0, 0]))
+            ep(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
-            new_gm(torch.ones(6))
+            ep(torch.ones(6))
 
         new_inp = torch.tensor([1, 1, 1, 1])
-        self.assertEqual(mod(new_inp), new_gm(new_inp))
+        self.assertEqual(mod(new_inp), ep(new_inp))
 
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
@@ -340,11 +319,9 @@ class TestPasses(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        gm = _export(mod, (torch.tensor(True), x, y))
-
-        pass_result = AddRuntimeAssertionsForConstraintsPass()(gm)
+        ep = export(mod, (torch.tensor(True), x, y)).add_runtime_assertions()
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
-            pass_result.graph_module(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
+            ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
 
 if __name__ == '__main__':
