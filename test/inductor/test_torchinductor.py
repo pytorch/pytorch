@@ -1058,6 +1058,20 @@ class CommonTemplate:
             (torch.randn(4, 4, 4, 4),),
         )
 
+    def test_views6(self):
+        def forward(x):
+            x = torch.ops.aten.relu(x)
+            s = torch.ops.aten.slice(x, 0, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 1, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 3, 0, 0)
+            y = torch.ops.aten.view(s, [4, 2, -1])
+            return y
+
+        self.common(
+            forward,
+            (torch.randn(4, 2, 4, 4),),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)
@@ -5760,8 +5774,8 @@ class CommonTemplate:
         b = torch.rand((100,))
         with profile() as prof:
             fn(a, b)
-        assert "inductor_wrapper_call" in (
-            e.name for e in prof.profiler.function_events
+        assert any(
+            "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
@@ -6084,6 +6098,12 @@ class CommonTemplate:
         x_clone = x.clone()
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         same(fn(x, y), opt_fn(x_clone, y))
+
+    def test_erfc(self):
+        def fn(x):
+            return torch.erfc(x)
+
+        self.common(fn, (torch.randn(8, 8),))
 
 
 @dataclasses.dataclass

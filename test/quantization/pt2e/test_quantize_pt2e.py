@@ -559,6 +559,51 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
+    def test_prepare_qat_conv_bn_fusion_no_conv_bias(self):
+        class M1(torch.nn.Module):
+            """
+            Single conv + BN with no conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                return x
+
+        class M2(torch.nn.Module):
+            """
+            Mixed conv + BN with and without conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3, bias=True)
+                self.bn2 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                return x
+
+        example_inputs = (torch.randn(3, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=False, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=True, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=True)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=True)
+
     def test_prepare_qat_conv_bn_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -583,6 +628,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
+        has_bias: bool = True,
         expected_conv_constant_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
@@ -625,13 +671,16 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, torch.ops.aten._native_batch_norm_legit.default)
 
-        # Verify: conv / scale_factor.reshape + bias.reshape
-        add_bias_node = bn_node.args[0]
-        (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+        # Verify: conv / scale_factor.reshape [+ bias.reshape]
+        if has_bias:
+            add_bias_node = bn_node.args[0]
+            (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+            self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
+            self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
+        else:
+            div_scale_factor_node = bn_node.args[0]
         (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
-        self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
         self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
         self.assertEqual(conv_node.target, torch.ops.aten.convolution.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
@@ -671,9 +720,11 @@ class TestQuantizePT2E(QuantizationTestCase):
         zero_bias_node = conv_node.args[2]
         mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
         (conv_weight_fq_node, scale_factor_reshape_node) = mul_weight_scale_factor_node.args
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        if has_bias:
+            self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        else:
+            self.assertTrue(zero_bias_node is None)
         self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
         # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
