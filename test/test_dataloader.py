@@ -78,6 +78,8 @@ load_tests = load_tests
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
+if TEST_CUDA:
+    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
 if not NO_MULTIPROCESSING_SPAWN:
     # We want to use `spawn` if able because some of our tests check that the

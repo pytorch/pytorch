@@ -553,7 +553,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
+                and not any(flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags)
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -1462,7 +1462,7 @@ def _jit_compile(name,
 
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
-    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
+    with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -1695,7 +1695,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
-            extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
+            extra_lib_dir = "lib64"
+            if (not os.path.exists(_join_cuda_home(extra_lib_dir)) and
+                    os.path.exists(_join_cuda_home("lib"))):
+                # 64-bit CUDA may be installed in "lib"
+                # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
+                extra_lib_dir = "lib"
+            extra_ldflags.append(f'-L{_join_cuda_home(extra_lib_dir)}')
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
@@ -2011,6 +2017,7 @@ def _write_ninja_file_to_build_library(path,
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
+            cuda_flags = cuda_flags + ['-std=c++17']
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:

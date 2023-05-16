@@ -88,6 +88,7 @@ jobs:
           { config: "default", shard: 5, num_shards: 6, runner: "linux.4xlarge" },
           { config: "default", shard: 6, num_shards: 6, runner: "linux.4xlarge" },
         ]}
+      sync-tag: asan-build
 
   linux-focal-py3_9-clang7-asan-test:
     name: linux-focal-py3.9-clang7-asan
@@ -97,6 +98,7 @@ jobs:
       build-environment: linux-focal-py3.9-clang7-asan
       docker-image: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_9-clang7-asan-build.outputs.test-matrix }}
+      sync-tag: asan-test
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
@@ -260,39 +262,12 @@ jobs:
     with:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
+      sync-tag: win-cpu-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge" },
-        ]}
-
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cpu-py3-build
-    with:
-      build-environment: win-vs2019-cpu-py3
-      cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
-
-  win-vs2019-cuda11_7-py3-build:
-    if: github.event_name == 'pull_request'
-    name: win-vs2019-cuda11.7-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2019-cuda11.7-py3
-      cuda-version: "11.7"
-      sync-tag: win-cuda-build
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 6, num_shards: 6, runner: "windows.g5.4xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
         ]}
 
   linux-bionic-cpu-py3_10-gcc7-bazel-test:

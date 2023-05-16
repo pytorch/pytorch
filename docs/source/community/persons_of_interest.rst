@@ -23,6 +23,7 @@ Core Maintainers
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
 -  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
+-  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 
 Module-level maintainers
 ------------------------
@@ -62,6 +63,7 @@ Compilers (JIT / TorchScript / FX / TorchDynamo)
 -  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 -  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 -  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
 
 
@@ -95,8 +97,8 @@ Distributed
 Multiprocessing and DataLoaders
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Simon Wang (`SsnL <https://github.com/SsnL>`__)
+-  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
 
 Linear Algebra (torch.linalg)
@@ -138,18 +140,23 @@ Fast Fourier Transform (torch.fft)
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
-CPU Performance / SIMD
-~~~~~~~~~~~~~~~~~~~~~~
+CPU Performance (Torch Inductor / MKLDNN)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
+-  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 -  (emeritus) Sam Gross (`colesbury <https://github.com/colesbury>`__)
 -  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) Ilia Cherniavskii (`ilia-cher <https://github.com/ilia-cher>`__)
+-  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
+-  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
+-  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
+-  (emeritus) Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
 
-NVIDIA / CUDA
-~~~~~~~~~~~~~
+GPU Performance (Torch Inductor / Triton / CUDA)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
@@ -166,14 +173,6 @@ NVFuser
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 
-Intel / MKLDNN
-~~~~~~~~~~~~~~
-
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
--  Jianhui Li (`Jianhui-Li <https://github.com/Jianhui-Li>`__)
--  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
--  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
--  (emeritus) Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
@@ -344,5 +343,6 @@ TorchX
 
 TorchData / TorchArrow
 ~~~~~~~~~~~~~~~~~~~~~~
--  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
+
 -  Wenlei Xie (`wenleix <https://github.com/wenleix>`__)
+-  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)

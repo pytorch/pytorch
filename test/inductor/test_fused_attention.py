@@ -9,25 +9,41 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_SDPA
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class TestSDPAPatternRewriter(TestCase):
+    def _clone_inputs(self, inputs):
+        def clone(x):
+            if not isinstance(x, torch.Tensor):
+                return x
+            return x.clone()
+
+        return tuple(clone(x) for x in inputs)
+
     @config.patch(fallback_random=True, lowmem_dropout=False)
-    def _check_common(self, dot_prod_attention, args1=None, contains=True):
-        tensor_shape = (4, 2, 16, 32)
+    def _check_common(
+        self,
+        dot_prod_attention,
+        args1=None,
+        contains=True,
+        atol=1e-5,
+        has_fuse_pattern=True,
+    ):
         if args1 is None:
+            tensor_shape = (4, 2, 16, 32)
             args1 = [
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
                 torch.randn(tensor_shape, device="cuda"),
             ]
-        args2 = [*map(torch.clone, args1)]
+        args2 = self._clone_inputs(args1)
 
         for training in [False, True]:
-            for x in itertools.chain(args1[:3], args2[:3]):
-                x.requires_grad = training
+            for x in itertools.chain(args1[:], args2[:]):
+                if isinstance(x, torch.Tensor) and x.is_floating_point():
+                    x.requires_grad = training
 
             torch.manual_seed(1234)
             result1 = dot_prod_attention(*args1)
@@ -37,21 +53,22 @@ class TestSDPAPatternRewriter(TestCase):
             result2, (source_code,) = run_and_get_code(
                 torch.compile(dot_prod_attention, fullgraph=True), *args2
             )
-            self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
+            if has_fuse_pattern:
+                self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
             if contains:
                 # many of the patterns get re-expanded in dispatcher
                 self.assertIn(
-                    "aten._scaled_dot_product_efficient_attention", source_code
+                    "aten._scaled_dot_product",
+                    source_code,
                 )
-            self.assertEqual(result1, result2)
+            self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
                 result1.sum().backward()
                 result2.sum().backward()
-
-                self.assertEqual(args1[0].grad, args2[0].grad)
-                self.assertEqual(args1[1].grad, args2[1].grad)
-                self.assertEqual(args1[2].grad, args2[2].grad)
+                for arg1, arg2 in zip(args1, args2):
+                    if isinstance(arg1, torch.Tensor) and arg1.is_floating_point():
+                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
     def test_sdpa_rewriter_1(self):
         def dot_prod_attention(
@@ -67,6 +84,7 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(dot_prod_attention)
 
+    @config.patch(fallback_random=True, lowmem_dropout=False)
     def test_pattern_fails_with_reuse(self):
         """
         This test checks that the replacement is not done
@@ -133,7 +151,7 @@ class TestSDPAPatternRewriter(TestCase):
         self._check_common(dot_prod_attention, contains=False)
 
     def test_sdpa_rewriter_5(self):
-        def sfdp_pattern_5(query, key, value):
+        def sfdp_pattern_5_v1(query, key, value):
             attn_mask = torch.ones(
                 query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
             ).tril(diagonal=0)
@@ -146,7 +164,19 @@ class TestSDPAPatternRewriter(TestCase):
             )
             return attn_weight @ value
 
-        self._check_common(sfdp_pattern_5, contains=False)
+        def sfdp_pattern_5_v2(query, key, value):
+            # https://github.com/pytorch/pytorch/issues/100318.
+            attn_mask = torch.zeros(
+                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
+            ).bool()
+            attn_weight = torch.softmax(
+                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
+                dim=-1,
+            )
+            return attn_weight @ value
+
+        self._check_common(sfdp_pattern_5_v1, contains=False)
+        self._check_common(sfdp_pattern_5_v2, contains=False)
 
     def test_sdpa_rewriter_6(self):
         def sfdp_pattern_6(query, key, value):
@@ -165,7 +195,154 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_6, contains=False)
 
+    def test_sdpa_rewriter_7(self):
+        def sfdp_pattern_7(query, key, value):
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+            div = div.to(torch.float32)
+            attn_weight = torch.softmax(div, dim=-1)
+            # very small dropout to make sure test passes
+            attn_weight = torch.dropout(attn_weight, 0.0001, True)
+            attn_weight = attn_weight.to(torch.float16)
+            return attn_weight @ v
+
+        args = (
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+
+        self._check_common(sfdp_pattern_7, args)
+
+    def test_sdpa_rewriter_8(self):
+        def sfdp_pattern_8(query, key, value):
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
+            div = div.to(torch.float32)
+            attn_weight = torch.softmax(div, dim=-1)
+            attn_weight = attn_weight.to(torch.float16)
+            return attn_weight @ v
+
+        args = (
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+
+        self._check_common(sfdp_pattern_8, args)
+
+    def test_sdpa_rewriter_9(self):
+        def sfdp_pattern_9(query, key, value):
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            q = q / math.sqrt(q.size(-1))
+            div = q @ k.transpose(-2, -1)
+            div = div.to(torch.float32)
+            attn_weight = torch.softmax(div, dim=-1)
+            # very low dropout to make test pass
+            attn_weight = torch.dropout(attn_weight, 0.0001, True)
+            attn_weight = attn_weight.to(torch.float16)
+            return attn_weight @ v
+
+        args = (
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+
+        self._check_common(sfdp_pattern_9, args)
+
+    def test_sdpa_rewriter_10(self):
+        def sfdp_pattern_10(query, key, value):
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            q = q / math.sqrt(q.size(-1))
+            div = q @ k.transpose(-2, -1)
+            div = div.to(torch.float32)
+            attn_weight = torch.softmax(div, dim=-1)
+            attn_weight = attn_weight.to(torch.float16)
+            return attn_weight @ v
+
+        args = (
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+            torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
+        )
+
+        self._check_common(sfdp_pattern_10, args)
+
+    @config.patch(fallback_random=True, lowmem_dropout=False)
+    def test_pattern_fails_with_tensor_factor(self):
+        # https://github.com/pytorch/pytorch/issues/99124
+        class Model(torch.nn.Module):
+            def __init__(self, is_inv_factor):
+                super(Model, self).__init__()
+                self.is_inv_factor = is_inv_factor
+
+            def forward(self, query, key, value, scale_factor) -> torch.Tensor:
+                y = torch.matmul(query, key.transpose(-2, -1))
+                if self.is_inv_factor:
+                    y = y.div(scale_factor)
+                else:
+                    y = y.mul(scale_factor)
+                return y.softmax(dim=-1).matmul(value)
+
+        tensor_shape = (2, 4, 4, 4)
+        for is_inv_factor in [True, False]:
+            args = [
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn((4, 1, 1), device="cuda"),
+            ]
+            model = Model(is_inv_factor).eval()
+            # The training path has an accuracy gap compared with eager mode.
+            self._check_common(
+                model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+            )
+
+    def test_pattern_fails_with_unsupported_mask(self):
+        # https://github.com/pytorch/pytorch/issues/100315
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super(Model, self).__init__()
+
+            def forward(self, query, key, value, attn_mask) -> torch.Tensor:
+                attn_weight = torch.softmax(
+                    query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))
+                    + attn_mask,
+                    dim=-1,
+                )
+                return attn_weight @ value
+
+        tensor_shape = (2, 4, 4, 4)
+
+        upsupported_masks = [
+            torch.randn((2, 4, 4, 4), device="cuda").to(dtype=torch.int),
+            2.0,
+        ]
+        for atte_mask in upsupported_masks:
+            args = [
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                torch.randn(tensor_shape, device="cuda"),
+                atte_mask,
+            ]
+            model = Model().eval()
+            # The training path has an accuracy gap compared with eager mode.
+            self._check_common(
+                model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+            )
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
+    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA and not TEST_WITH_ROCM:
         run_tests()
