@@ -229,17 +229,12 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     if cell in side_effects:
                         out = side_effects[cell]
                     else:
-                        if "trampoline_autograd" in self.fn.__name__:
-                            closure_cell_contents = self.source
-                        else:
-                            # Nothing to do here - the __closure__ is known safe because its internal,
-                            # and inlining will handle the nested __closure__.
-                            closure_cell = GetItemSource(
-                                AttrSource(self.source, "__closure__"), idx
-                            )
-                            closure_cell_contents = AttrSource(
-                                closure_cell, "cell_contents"
-                            )
+                        closure_cell = GetItemSource(
+                            AttrSource(self.source, "__closure__"), idx
+                        )
+                        closure_cell_contents = AttrSource(
+                            closure_cell, "cell_contents"
+                        )
                         contents_var = VariableBuilder(parent, closure_cell_contents)(
                             cell.cell_contents
                         )

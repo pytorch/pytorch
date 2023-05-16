@@ -735,14 +735,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-def safe_or_raise_always_restore(tx, f, sub_args):
-    # Snapshot state
-    graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
+def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
     # Will raise if not sound
     try:
         f.call_function(tx, sub_args, {})
-    except Exception as e:
-        raise
     finally:
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)

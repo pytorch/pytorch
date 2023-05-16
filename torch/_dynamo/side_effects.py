@@ -14,7 +14,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import LocalSource, Source
-from .utils import object_new
+from .utils import nn_module_new, object_new
 from .variables.base import VariableTracker
 
 
@@ -236,12 +236,10 @@ class SideEffects:
         variable_cls: Any,
         options,
     ):
-        from torch._dynamo.variables.misc import SaveSimulatingAutogradFunctionContext
-
-        if user_cls is SaveSimulatingAutogradFunctionContext:
-            obj = SaveSimulatingAutogradFunctionContext()
-        elif user_cls is torch.autograd.function.FunctionCtx:
+        if user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
+        elif issubclass(user_cls, torch.nn.Module):
+            obj = nn_module_new(user_cls)
         else:
             obj = object_new(user_cls)
         variable = variable_cls(

@@ -6,7 +6,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 unary_list = {
@@ -429,6 +429,21 @@ class TestPaternMatcher(TestCase):
                 out = torch.add(out, out)
                 return out
 
+        # https://github.com/pytorch/pytorch/issues/101374.
+        # we can't do the fusion when add's inputs are mixed dtype.
+        class Model3(torch.nn.Module):
+            def __init__(self):
+                super(Model3, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                temp = self.conv(x)
+                other = torch.ones(temp.shape, dtype=torch.double)
+                out = torch.add(temp, other)
+                return out
+
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
@@ -446,6 +461,9 @@ class TestPaternMatcher(TestCase):
             self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
         # case2:
         mod = Model2().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
+        # case3:
+        mod = Model3().to(memory_format=torch.channels_last).eval()
         self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
     def test_reproduce_99842_issue(self):
@@ -466,5 +484,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn:
+    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn and not TEST_WITH_ROCM:
         run_tests()

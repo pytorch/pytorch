@@ -2137,13 +2137,25 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        if "variables/misc.py" not in func.get_filename():
-            if skipfiles.check(
-                func.get_filename()
-            ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
-                unimplemented(
-                    f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
-                )
+        if skipfiles.check(
+            func.get_filename()
+        ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+            from torch._dynamo.variables.misc import (
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+                produce_trampoline_autograd_fwd,
+            )
+
+            if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+            ]:
+                # Known sound
+                return
+            unimplemented(
+                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+            )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
