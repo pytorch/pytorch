@@ -19,7 +19,7 @@ import sysconfig
 import sys
 
 flags = [
-    '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
+    f'-DPYTHON_EXECUTABLE:FILEPATH={sys.executable}',
     '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_path('include')),
 ]
 

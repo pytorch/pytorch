@@ -23,7 +23,7 @@ def generate_data(T, batch_size, max_seq_length):
     '''
     Fill a queue with input data
     '''
-    log.info("Generating T={} batches".format(T))
+    log.info(f"Generating T={T} batches")
 
     generate_input_init_net = core.Net('generate_input_init')
     queue = generate_input_init_net.CreateBlobsQueue(
@@ -37,7 +37,7 @@ def generate_data(T, batch_size, max_seq_length):
 
     for t in range(T):
         if (t % (max(10, T // 10)) == 0):
-            log.info("Generating data {}/{}".format(t, T))
+            log.info(f"Generating data {t}/{T}")
         X = np.tile(np.arange(max_seq_length), [batch_size, 1]).transpose()
         workspace.FeedBlob("scratch", X)
         workspace.RunNetOnce(generate_input_net.Proto())
@@ -128,7 +128,7 @@ def Caffe2EmbeddingGeneration(args):
     total_per_sec = total_per_sec / (time.time() - start_time) // 100 / 10
 
     log.info("Done. Total embeddings generated per second " +
-             "excluding 1st iteration: {}k".format(total_per_sec))
+             f"excluding 1st iteration: {total_per_sec}k")
 
     return time.time() - start_time
 

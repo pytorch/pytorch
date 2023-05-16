@@ -20,7 +20,7 @@ class NormalizerContext(ModifierContext, context.DefaultManaged):
 
     def get_normalizer(self, name):
         assert self.has_normalizer(name), (
-            "{} normalizer is not provided!".format(name))
+            f"{name} normalizer is not provided!")
         return self._get_modifier(name)
 
 

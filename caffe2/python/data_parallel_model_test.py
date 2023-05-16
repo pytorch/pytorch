@@ -1,7 +1,3 @@
-
-
-
-
 from multiprocessing import Process, Queue
 import numpy as np
 import os
@@ -9,7 +5,7 @@ import shutil
 import tempfile
 import unittest
 import time
-from mock import Mock
+from unittest.mock import Mock
 from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
@@ -70,7 +66,7 @@ class DataParallelModelTest(TestCase):
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
             order="NHWC",
-            name="test{}".format(devices),
+            name=f"test{devices}",
         )
         data_parallel_model.Parallelize(
             model,
@@ -104,10 +100,10 @@ class DataParallelModelTest(TestCase):
                 labels = full_labels[st:en].astype(np.float32)
                 with core.DeviceScope(core.DeviceOption(model._device_type, g)):
                     workspace.FeedBlob(
-                        "{}_{}/data".format(model._device_prefix, g), data
+                        f"{model._device_prefix}_{g}/data", data
                     )
                     workspace.FeedBlob(
-                        "{}_{}/label".format(model._device_prefix, g), labels
+                        f"{model._device_prefix}_{g}/label", labels
                     )
 
             if i == 0:
@@ -123,10 +119,10 @@ class DataParallelModelTest(TestCase):
             # Test AddBlobSync
             for j in model._devices:
                 sync = workspace.FetchBlob(
-                    model._device_prefix + "_{}/sync_num".format(j))[0]
+                    model._device_prefix + f"_{j}/sync_num")[0]
                 self.assertTrue(abs(sync - i * 2) < 0.01)
 
-        return workspace.FetchBlob("{}_0/fc_w".format(model._device_prefix))
+        return workspace.FetchBlob(f"{model._device_prefix}_0/fc_w")
 
     def run_test_locally(self, fn, device_option=None, **kwargs):
         # Queue for assertion errors on subprocesses
@@ -480,7 +476,7 @@ class DataParallelModelTest(TestCase):
                 x_hat = (x_i - mean) / (np.sqrt(var + epsilon))
                 expected_out = scale * x_hat + bias
                 spatial_out = workspace.FetchBlob(
-                    "{}_{}/bn_out".format(device_type, device))
+                    f"{device_type}_{device}/bn_out")
                 rel_error = np.linalg.norm(spatial_out - expected_out) \
                             / np.linalg.norm(expected_out)
                 self.assertTrue(rel_error < 0.005)
@@ -491,15 +487,15 @@ class DataParallelModelTest(TestCase):
             dGamma_arr = []
             num_devices = len(devices)
             mean = np.array(workspace.FetchBlob(
-                "{}_0/bn_out_sm".format(device_type)), dtype=np.float32)
+                f"{device_type}_0/bn_out_sm"), dtype=np.float32)
             inv_var = np.array(workspace.FetchBlob(
-                "{}_0/bn_out_siv".format(device_type)), dtype=np.float32)
+                f"{device_type}_0/bn_out_siv"), dtype=np.float32)
 
             # dBias
             # Sum dBias values over all devices to find the average gradient
             for device in devices:
                 dY_blob = workspace.FetchBlob(
-                    "{}_{}/bn_out_grad".format(device_type, device))
+                    f"{device_type}_{device}/bn_out_grad")
                 dY = np.array(dY_blob, dtype=np.float32)
                 dY_arr.append(dY)
                 dBias_arr.append(np.array(np.sum(dY, axis=0), dtype=np.float32))
@@ -520,7 +516,7 @@ class DataParallelModelTest(TestCase):
             dGamma_avg = dGamma / num_devices
             for device in devices:
                 dGammaActual = workspace.FetchBlob(
-                    "{}_{}/bn_out_s_grad".format(device_type, device))
+                    f"{device_type}_{device}/bn_out_s_grad")
                 self.assertTrue(np.isclose([dGamma], [dGammaActual], atol=tolerance))
 
             # dX
@@ -529,13 +525,13 @@ class DataParallelModelTest(TestCase):
                 dX = scale_inv_var * (dY_arr[device] * batch_size - dBias_avg
                     - (x[device] - mean) * dGamma_avg * inv_var)
                 dX_actual = workspace.FetchBlob(
-                    "{}_{}/tanh_grad".format(device_type, device))
+                    f"{device_type}_{device}/tanh_grad")
                 self.assertTrue(np.isclose([dX], [dX_actual], atol=tolerance).all())
 
         def add_input_ops(model):
             for device in devices:
                 data = np.random.rand(batch_size, 1, 1, 1).astype(np.float32)
-                workspace.FeedBlob("{}_{}/data".format(device_type, device), data)
+                workspace.FeedBlob(f"{device_type}_{device}/data", data)
 
         def add_model_ops(model, loss_scale):
             if device_type == "gpu":
@@ -569,13 +565,13 @@ class DataParallelModelTest(TestCase):
         )
 
         workspace.RunNetOnce(model.param_init_net)
-        scale = workspace.FetchBlob("{}_0/bn_out_s".format(device_type))
-        bias = workspace.FetchBlob("{}_0/bn_out_b".format(device_type))
+        scale = workspace.FetchBlob(f"{device_type}_0/bn_out_s")
+        bias = workspace.FetchBlob(f"{device_type}_0/bn_out_b")
         workspace.RunNetOnce(model.net)
 
         x = []
         for device in devices:
-            x_blob = workspace.FetchBlob("{}_{}/tanh".format(device_type, device))
+            x_blob = workspace.FetchBlob(f"{device_type}_{device}/tanh")
             x_i = np.array(x_blob, dtype=np.float32)
             x.append(x_i)
 
@@ -643,12 +639,12 @@ class DataParallelModelTest(TestCase):
 
         def _create_model(multiple_devices):
             def add_input_ops_no_combine(model):
-                workspace.FeedBlob("{}_0/data".format(device_type), data)
+                workspace.FeedBlob(f"{device_type}_0/data", data)
 
             def add_input_ops_combine(model):
                 half = int(batch_size / 2)
-                workspace.FeedBlob("{}_0/data".format(device_type), data[:half])
-                workspace.FeedBlob("{}_1/data".format(device_type), data[half:])
+                workspace.FeedBlob(f"{device_type}_0/data", data[:half])
+                workspace.FeedBlob(f"{device_type}_1/data", data[half:])
 
             def add_model_ops(model, loss_scale):
                 if device_type == "gpu":
@@ -701,14 +697,14 @@ class DataParallelModelTest(TestCase):
         model_no_combine = _create_model(multiple_devices=False)
         workspace.RunNetOnce(model_no_combine.param_init_net)
         workspace.RunNetOnce(model_no_combine.net)
-        single_device_bn_out = workspace.FetchBlob("{}_0/bn_out".format(device_type))
+        single_device_bn_out = workspace.FetchBlob(f"{device_type}_0/bn_out")
         single_device_grads = {}
         single_device_grads["bn_out_s_grad"] = workspace.FetchBlob(
-            "{}_0/bn_out_s_grad".format(device_type))
+            f"{device_type}_0/bn_out_s_grad")
         single_device_grads["bn_out_b_grad"] = workspace.FetchBlob(
-            "{}_0/bn_out_b_grad".format(device_type))
+            f"{device_type}_0/bn_out_b_grad")
         single_device_grads["tanh_grad"] = workspace.FetchBlob(
-            "{}_0/tanh_grad".format(device_type))
+            f"{device_type}_0/tanh_grad")
 
         # Get values calculated over multiple devices with combine_spatial_bn true
         workspace.ResetWorkspace()
@@ -718,15 +714,15 @@ class DataParallelModelTest(TestCase):
         two_device_bn_out_vals = []
         two_device_grads = {}
         for device in devices:
-            bn_out_blob = "{}_{}/bn_out".format(device_type, device)
+            bn_out_blob = f"{device_type}_{device}/bn_out"
             two_device_bn_out_vals.append(workspace.FetchBlob(bn_out_blob))
             two_device_grads[device] = {}
             two_device_grads[device]["bn_out_s_grad"] = workspace.FetchBlob(
-                "{}_{}/bn_out_s_grad".format(device_type, device))
+                f"{device_type}_{device}/bn_out_s_grad")
             two_device_grads[device]["bn_out_b_grad"] = workspace.FetchBlob(
-                "{}_{}/bn_out_b_grad".format(device_type, device))
+                f"{device_type}_{device}/bn_out_b_grad")
             two_device_grads[device]["tanh_grad"] = workspace.FetchBlob(
-                "{}_{}/tanh_grad".format(device_type, device))
+                f"{device_type}_{device}/tanh_grad")
 
         # Check to see if the combined values are equivalent
         _verify_bn_outputs(
@@ -804,7 +800,7 @@ class RecurrentNetworkParallelTest(TestCase):
 
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
-            name="recurrent_test{}".format(devices),
+            name=f"recurrent_test{devices}",
         )
 
         self.T = 8
@@ -844,10 +840,10 @@ class RecurrentNetworkParallelTest(TestCase):
                 targets = full_target[:, st:en, :].astype(np.float32)
                 with core.DeviceScope(core.DeviceOption(model._device_type, g)):
                     workspace.FeedBlob(
-                        "{}_{}/data".format(model._device_prefix, g), data
+                        f"{model._device_prefix}_{g}/data", data
                     )
                     workspace.FeedBlob(
-                        "{}_{}/target".format(model._device_prefix, g), targets
+                        f"{model._device_prefix}_{g}/target", targets
                     )
 
             if i == 0:
@@ -856,7 +852,7 @@ class RecurrentNetworkParallelTest(TestCase):
 
             workspace.RunNet(model.net.Proto().name)
 
-        return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
+        return workspace.FetchBlob(f"{model._device_prefix}_0/partest/i2h_w")
 
     @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/10322")
     def test_equiv_recurrent(self):
@@ -950,7 +946,7 @@ class SparseDataParallelModelTest(TestCase):
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
             order="NHWC",
-            name="sparse_test{}".format(gpu_devices),
+            name=f"sparse_test{gpu_devices}",
         )
 
         with core.NameScope("cpu"):
@@ -1015,10 +1011,10 @@ class SparseDataParallelModelTest(TestCase):
                     device_for_indices = core.DeviceOption(workspace.GpuDeviceType, g)
 
                 with core.DeviceScope(device_for_indices):
-                    workspace.FeedBlob("gpu_{}/indices".format(g), indices)
+                    workspace.FeedBlob(f"gpu_{g}/indices", indices)
 
                 with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
-                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+                    workspace.FeedBlob(f"gpu_{g}/label", labels)
 
             if i == 0:
                 workspace.RunNetOnce(model.param_init_net)
@@ -1031,7 +1027,7 @@ class SparseDataParallelModelTest(TestCase):
                 if not cpu_indices:
                     for g in gpu_devices:
                         workspace.FeedBlob(
-                            "gpu_{}/gpuvecs".format(g),
+                            f"gpu_{g}/gpuvecs",
                             orig_vecs,
                             device_option=core.DeviceOption(workspace.GpuDeviceType, g),
                         )
@@ -1132,8 +1128,8 @@ class ParallelizeBMUFTest(TestCase):
                 data = full_data[st:en, :].astype(np.float32)
                 labels = full_labels[st:en].astype(np.float32)
                 with core.DeviceScope(core.DeviceOption(device_type, g)):
-                    workspace.FeedBlob("{}_{}/data".format(device_prefix, g), data)
-                    workspace.FeedBlob("{}_{}/label".format(device_prefix, g), labels)
+                    workspace.FeedBlob(f"{device_prefix}_{g}/data", data)
+                    workspace.FeedBlob(f"{device_prefix}_{g}/label", labels)
 
     @given(
         cpu_device=st.booleans()
@@ -1176,9 +1172,9 @@ class ParallelizeBMUFTest(TestCase):
         self.assertEqual(
             list(model._device_grouped_blobs.keys()), ['fc_w', 'fc_b']
         )
-        self.assertEqual(workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix)), 0)
+        self.assertEqual(workspace.FetchBlob(f'{device_prefix}_0/fc_b_v'), 0)
         np.testing.assert_equal(
-            workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix)),
+            workspace.FetchBlob(f'{device_prefix}_0/fc_w_v'),
             np.zeros(16).astype(np.float32).reshape(1, 16)
         )
 
@@ -1186,32 +1182,32 @@ class ParallelizeBMUFTest(TestCase):
         data_parallel_model.RunNet(model, 1)
 
         # Save iteration momentum and post local update params
-        v_b_ = workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix))
-        v_w_ = workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix))
+        v_b_ = workspace.FetchBlob(f'{device_prefix}_0/fc_b_v')
+        v_w_ = workspace.FetchBlob(f'{device_prefix}_0/fc_w_v')
 
         workspace.RunNetOnce(model.net)
 
-        b_0_ = workspace.FetchBlob('{}_0/fc_b'.format(device_prefix))
-        w_0_ = workspace.FetchBlob('{}_0/fc_w'.format(device_prefix))
-        b_1_ = workspace.FetchBlob('{}_1/fc_b'.format(device_prefix))
-        w_1_ = workspace.FetchBlob('{}_1/fc_w'.format(device_prefix))
+        b_0_ = workspace.FetchBlob(f'{device_prefix}_0/fc_b')
+        w_0_ = workspace.FetchBlob(f'{device_prefix}_0/fc_w')
+        b_1_ = workspace.FetchBlob(f'{device_prefix}_1/fc_b')
+        w_1_ = workspace.FetchBlob(f'{device_prefix}_1/fc_w')
 
         # Compute block gradients.
-        b_g_ = workspace.FetchBlob('{}_0/fc_b_g'.format(device_prefix))
-        w_g_ = workspace.FetchBlob('{}_0/fc_w_g'.format(device_prefix))
+        b_g_ = workspace.FetchBlob(f'{device_prefix}_0/fc_b_g')
+        w_g_ = workspace.FetchBlob(f'{device_prefix}_0/fc_w_g')
         workspace.RunNetOnce(model._global_model_param_updates_net)
 
         g_b = (b_0_ + b_1_) / 2 - b_g_
         g_w = (w_0_ + w_1_) / 2 - w_g_
-        v_b = workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix))
-        v_w = workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix))
+        v_b = workspace.FetchBlob(f'{device_prefix}_0/fc_b_v')
+        v_w = workspace.FetchBlob(f'{device_prefix}_0/fc_w_v')
 
-        w_g = workspace.FetchBlob('{}_0/fc_w_g'.format(device_prefix))
-        b_g = workspace.FetchBlob('{}_0/fc_b_g'.format(device_prefix))
-        w_0 = workspace.FetchBlob('{}_0/fc_w'.format(device_prefix))
-        b_0 = workspace.FetchBlob('{}_0/fc_b'.format(device_prefix))
-        w_1 = workspace.FetchBlob('{}_1/fc_w'.format(device_prefix))
-        b_1 = workspace.FetchBlob('{}_1/fc_b'.format(device_prefix))
+        w_g = workspace.FetchBlob(f'{device_prefix}_0/fc_w_g')
+        b_g = workspace.FetchBlob(f'{device_prefix}_0/fc_b_g')
+        w_0 = workspace.FetchBlob(f'{device_prefix}_0/fc_w')
+        b_0 = workspace.FetchBlob(f'{device_prefix}_0/fc_b')
+        w_1 = workspace.FetchBlob(f'{device_prefix}_1/fc_w')
+        b_1 = workspace.FetchBlob(f'{device_prefix}_1/fc_b')
 
         # Check momentum update step
         np.testing.assert_equal(v_b, 0.5 * v_b_ + g_b)
@@ -1245,7 +1241,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
             gpu_vecs = []
             for num, vec in enumerate(self.vecs):
                 gpu_vec = model.param_init_net.CopyCPUToGPU(
-                    vec, 'gpuvec_{}'.format(num),
+                    vec, f'gpuvec_{num}',
                 )
                 if num != 2:
                     model.params.append(gpu_vec)
@@ -1253,7 +1249,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
             for num, gpu_vec in enumerate(gpu_vecs):
                 gpu_vec_gathered = model.net.Gather(
                     [gpu_vec, 'indices'],
-                    ['gpu_vec_gathered_{}'.format(num)]
+                    [f'gpu_vec_gathered_{num}']
                 )
                 gpu_vecs_gathered.append(gpu_vec_gathered)
 
@@ -1300,7 +1296,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         workspace.ResetWorkspace()
         model = cnn.CNNModelHelper(
             order="NHWC",
-            name="sparse_test{}".format(gpu_devices),
+            name=f"sparse_test{gpu_devices}",
         )
         batch_size = 32
         batch_per_device = batch_size // len(gpu_devices)
@@ -1322,7 +1318,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 '''
                 self.vecs = [
                     model.param_init_net.UniformFill(
-                        [], "vec_{}".format(num), shape=[V, 16])
+                        [], f"vec_{num}", shape=[V, 16])
                     for num in range(2)
                 ]
                 self.vecs.append(
@@ -1346,7 +1342,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
         # Update the vecs
         with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, 0)):
             for num, vec in enumerate(self.vecs[:-1]):
-                model.CopyGPUToCPU("gpu_0/gpuvec_{}".format(num), vec)
+                model.CopyGPUToCPU(f"gpu_0/gpuvec_{num}", vec)
 
         # Each run has same input, independent of number of gpus
         for i in range(0, 10):
@@ -1363,8 +1359,8 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 labels = full_labels[st:en].astype(np.int32)
 
                 with core.DeviceScope(core.DeviceOption(workspace.GpuDeviceType, g)):
-                    workspace.FeedBlob("gpu_{}/indices".format(g), indices)
-                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+                    workspace.FeedBlob(f"gpu_{g}/indices", indices)
+                    workspace.FeedBlob(f"gpu_{g}/label", labels)
 
             if i == 0:
                 workspace.RunNetOnce(model.param_init_net)
@@ -1382,7 +1378,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
                 for g in gpu_devices:
                     for num, orig_vec in enumerate(orig_vecs):
                         workspace.FeedBlob(
-                            "gpu_{}/gpuvec_{}".format(g, num),
+                            f"gpu_{g}/gpuvec_{num}",
                             orig_vec,
                             device_option=core.DeviceOption(
                                 workspace.GpuDeviceType, g),
@@ -1394,7 +1390,7 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
             idx = workspace.FetchBlob('gpu_0/indices')
             grad_slices = [
                 workspace.FetchBlob(
-                    'gpu_{}/gpu_vec_gathered_{}_grad'.format(g, num))
+                    f'gpu_{g}/gpu_vec_gathered_{num}_grad')
                 for g in gpu_devices for num in range(2)
             ]
             for grad_slice in grad_slices:

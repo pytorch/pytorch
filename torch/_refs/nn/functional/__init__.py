@@ -159,7 +159,7 @@ def celu(
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
+                "alpha argument of type {} cannot be safely cast to type {}!".format(
                     type(alpha), python_type
                 )
             )
@@ -428,7 +428,7 @@ def softplus(
     if beta is not None:
         python_type = utils.dtype_to_type(a.dtype)
         if not utils.is_weakly_lesser_type(type(beta), python_type):
-            msg = "beta argument of type {0} cannot be safely cast to type {1}!".format(
+            msg = "beta argument of type {} cannot be safely cast to type {}!".format(
                 type(beta), python_type
             )
             raise ValueError(msg)
@@ -570,12 +570,10 @@ def margin_ranking_loss(
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
-            (
                 "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
                 "input1: {}, input2: {}, target: {} ".format(
                     input1.shape, input2.shape, target.shape
                 )
-            )
         )
     _check_reduction_value(reduction)
     neg_target = refs.neg(target)

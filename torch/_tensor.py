@@ -1369,7 +1369,7 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLOneAPI
         else:
             raise ValueError(
-                "Unknown device type {} for Dlpack".format(torch_device_type)
+                f"Unknown device type {torch_device_type} for Dlpack"
             )
         return (device_type, idx)
 

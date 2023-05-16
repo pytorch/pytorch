@@ -1,8 +1,3 @@
-
-
-
-
-
 import hypothesis
 from hypothesis import given, settings, HealthCheck
 import hypothesis.strategies as st

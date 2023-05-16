@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import model_helper, workspace, core, rnn_cell, test_util
 from caffe2.python.attention import AttentionType
@@ -131,8 +126,8 @@ class TestRNNExecutor(test_util.TestCase):
         init_blobs = []
         for i in range(num_layers):
             hidden_init, cell_init = model.net.AddExternalInputs(
-                "hidden_init_{}".format(i),
-                "cell_init_{}".format(i)
+                f"hidden_init_{i}",
+                f"cell_init_{i}"
             )
             init_blobs.extend([hidden_init, cell_init])
 
@@ -269,7 +264,7 @@ class TestRNNExecutor(test_util.TestCase):
             rnn_exec_v = rnn_exec_ws[k]
             if type(non_exec_v) is np.ndarray:
                 if not np.allclose(non_exec_v, rnn_exec_v):
-                    print("Mismatch: {}".format(k))
+                    print(f"Mismatch: {k}")
                     nv = non_exec_v.flatten()
                     rv = rnn_exec_v.flatten()
                     c = 0

@@ -61,10 +61,8 @@ class CMake:
 
         _cmake_min_version = LooseVersion("3.13.0")
         if all(
-            (
                 ver is None or ver < _cmake_min_version
                 for ver in [cmake_version, cmake3_version]
-            )
         ):
             raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
 
@@ -108,7 +106,7 @@ class CMake:
         "Adds definitions to a cmake argument list."
         for key, value in sorted(kwargs.items()):
             if value is not None:
-                args.append("-D{}={}".format(key, value))
+                args.append(f"-D{key}={value}")
 
     def get_cmake_cache_variables(self) -> Dict[str, CMakeValue]:
         r"""Gets values in CMakeCache.txt into a dictionary.
@@ -173,7 +171,7 @@ class CMake:
                     toolset_dict["host"] = "x64"
             if toolset_dict:
                 toolset_expr = ",".join(
-                    ["{}={}".format(k, v) for k, v in toolset_dict.items()]
+                    [f"{k}={v}" for k, v in toolset_dict.items()]
                 )
                 args.append("-T" + toolset_expr)
 
@@ -321,10 +319,10 @@ class CMake:
         expected_wrapper = "/usr/local/opt/ccache/libexec"
         if IS_DARWIN and os.path.exists(expected_wrapper):
             if "CMAKE_C_COMPILER" not in build_options and "CC" not in os.environ:
-                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+                CMake.defines(args, CMAKE_C_COMPILER=f"{expected_wrapper}/gcc")
             if "CMAKE_CXX_COMPILER" not in build_options and "CXX" not in os.environ:
                 CMake.defines(
-                    args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper)
+                    args, CMAKE_CXX_COMPILER=f"{expected_wrapper}/g++"
                 )
 
         for env_var_name in my_env:
@@ -335,10 +333,10 @@ class CMake:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
                     shex = ":".join(
-                        "{:02x}".format(ord(c)) for c in my_env[env_var_name]
+                        f"{ord(c):02x}" for c in my_env[env_var_name]
                     )
                     print(
-                        "Invalid ENV[{}] = {}".format(env_var_name, shex),
+                        f"Invalid ENV[{env_var_name}] = {shex}",
                         file=sys.stderr,
                     )
                     print(e, file=sys.stderr)
@@ -395,7 +393,7 @@ class CMake:
             build_args += ["--"]
             if IS_WINDOWS and not USE_NINJA:
                 # We are likely using msbuild here
-                build_args += ["/p:CL_MPCount={}".format(max_jobs)]
+                build_args += [f"/p:CL_MPCount={max_jobs}"]
             else:
                 build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

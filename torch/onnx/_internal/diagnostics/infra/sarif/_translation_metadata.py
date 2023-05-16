@@ -13,30 +13,30 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class TranslationMetadata(object):
+class TranslationMetadata:
     """Provides additional metadata related to translation."""
 
     name: str = dataclasses.field(metadata={"schema_property_name": "name"})
-    download_uri: Optional[str] = dataclasses.field(
+    download_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "downloadUri"}
     )
-    full_description: Optional[
+    full_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullDescription"}
     )
-    full_name: Optional[str] = dataclasses.field(
+    full_name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullName"}
     )
-    information_uri: Optional[str] = dataclasses.field(
+    information_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "informationUri"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    short_description: Optional[
+    short_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "shortDescription"}
     )
 

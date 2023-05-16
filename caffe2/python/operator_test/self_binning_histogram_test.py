@@ -59,12 +59,12 @@ class TestSelfBinningHistogramBase:
     def _run_single_op_net(self, arrays, num_bins, logspacing_start=None):
         for i in range(len(arrays)):
             workspace.FeedBlob(
-                "X{}".format(i), arrays[i]
+                f"X{i}", arrays[i]
             )
         net = core.Net("test_net")
         if logspacing_start is not None:
             net.SelfBinningHistogram(
-                ["X{}".format(i) for i in range(len(arrays))],
+                [f"X{i}" for i in range(len(arrays))],
                 ["histogram_values", "histogram_counts"],
                 num_bins=num_bins,
                 bin_spacing=self.bin_spacing,
@@ -73,7 +73,7 @@ class TestSelfBinningHistogramBase:
             )
         else:
             net.SelfBinningHistogram(
-                ["X{}".format(i) for i in range(len(arrays))],
+                [f"X{i}" for i in range(len(arrays))],
                 ["histogram_values", "histogram_counts"],
                 num_bins=num_bins,
                 bin_spacing=self.bin_spacing,

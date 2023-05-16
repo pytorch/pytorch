@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace, scope
 from caffe2.python.model_helper import ModelHelper
 
@@ -43,7 +38,7 @@ def _prepare_rnn(
     states = []
     for layer_id, d in enumerate(dim_out):
         for i in range(num_states):
-            state_name = "state_{}/layer_{}".format(i, layer_id)
+            state_name = f"state_{i}/layer_{layer_id}"
             states.append(model.net.AddExternalInput(state_name))
             workspace.FeedBlob(
                 states[-1], generate_input_state(n, d).astype(np.float32))

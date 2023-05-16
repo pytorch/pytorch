@@ -10,22 +10,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import _message, _property_bag
 
 
 @dataclasses.dataclass
-class RunAutomationDetails(object):
+class RunAutomationDetails:
     """Information that describes a run's identity and role within an engineering system process."""
 
-    correlation_guid: Optional[str] = dataclasses.field(
+    correlation_guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "correlationGuid"}
     )
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    id: Optional[str] = dataclasses.field(
+    id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "id"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

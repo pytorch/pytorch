@@ -33,7 +33,7 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
 
         input_dims = input_record.field_types()[0].shape[0]
         assert input_dims > 0, (
-            "FCWithoutBias expects input dimensions > 0, got {}".format(input_dims)
+            f"FCWithoutBias expects input dimensions > 0, got {input_dims}"
         )
 
         self.output_schema = schema.Scalar(

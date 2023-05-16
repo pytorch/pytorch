@@ -20,7 +20,7 @@ class RegularizerContext(ModifierContext, context.DefaultManaged):
 
     def get_regularizer(self, name):
         assert self.has_regularizer(name), (
-            "{} regularizer is not provided!".format(name))
+            f"{name} regularizer is not provided!")
         return self._get_modifier(name)
 
 

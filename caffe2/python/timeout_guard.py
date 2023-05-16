@@ -52,7 +52,7 @@ class WatcherThread(threading.Thread):
             def forcequit():
                 time.sleep(10.0)
                 log.info("Prepared output, dumping threads. ")
-                print("Caller thread was: {}".format(self.caller_thread))
+                print(f"Caller thread was: {self.caller_thread}")
                 print("-----After force------")
                 log.info("-----After force------")
                 import sys
@@ -75,7 +75,7 @@ class WatcherThread(threading.Thread):
             forcet = threading.Thread(target=forcequit, args=())
             forcet.daemon = True
             forcet.start()
-            print("Caller thread was: {}".format(self.caller_thread))
+            print(f"Caller thread was: {self.caller_thread}")
             print("-----Before forcing------")
             import sys
             import traceback

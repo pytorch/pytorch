@@ -1,6 +1,3 @@
-
-
-
 from caffe2.proto import caffe2_pb2
 import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
@@ -272,7 +269,7 @@ class TestSmartDecayAdam(OptimizerTestBase, LRModificationTestBase, TestCase):
         self.assertTrue(optimizer.get_auxiliary_parameters().local)
         self.assertTrue(workspace.HasBlob("optimizer_iteration"))
         blob_names = workspace.Blobs()
-        self.assertTrue(any((bn.endswith('_last_seen') for bn in blob_names)))
+        self.assertTrue(any(bn.endswith('_last_seen') for bn in blob_names))
         for param in optimizer.get_auxiliary_parameters().shared:
             workspace.FetchBlob(param)
         for param in optimizer.get_auxiliary_parameters().local:
@@ -627,7 +624,7 @@ class TestMultiOptimizers(TestCase):
 
         def infer_blob_device(blob_name):
             return optimizer.get_param_device(
-                blob_name, "{}_grad".format(blob_name), param_to_device
+                blob_name, f"{blob_name}_grad", param_to_device
             )
 
         sgd_1 = optimizer.SgdOptimizer(base_learning_rate=0.1)
@@ -710,7 +707,7 @@ class TestWeightDecay(TestCase):
         self.assertEqual(
             expected_weight_grad,
             set(),
-            "Not all weights were decayed: {}".format(expected_weight_grad)
+            f"Not all weights were decayed: {expected_weight_grad}"
         )
 
 
@@ -742,10 +739,10 @@ class TestOptimizerContext(TestCase):
         build_sgd(model, 0.11)
         expected_weight_grad = {'b_w_grad', 'a_w_grad', 'cnv_w_grad'}
         expected_learning_rate = {
-            "SgdOptimizer_{}_lr_cpu".format(count): -0.15,
-            "SgdOptimizer_{}_lr_cpu".format(count + 1): -0.2,
-            "SgdOptimizer_{}_lr_cpu".format(count + 2): -0.1,
-            "SgdOptimizer_{}_lr_cpu".format(count + 3): -0.11
+            f"SgdOptimizer_{count}_lr_cpu": -0.15,
+            f"SgdOptimizer_{count + 1}_lr_cpu": -0.2,
+            f"SgdOptimizer_{count + 2}_lr_cpu": -0.1,
+            f"SgdOptimizer_{count + 3}_lr_cpu": -0.11
         }
 
         for op in model.net.Proto().op:
@@ -773,5 +770,5 @@ class TestOptimizerContext(TestCase):
         self.assertEqual(
             expected_weight_grad,
             set(),
-            "Not all weights were decayed: {}".format(expected_weight_grad)
+            f"Not all weights were decayed: {expected_weight_grad}"
         )

@@ -87,7 +87,7 @@ def MaybeAddColor(s, color):
     """Wrap the input string to the xterm green color, if color is set.
     """
     if color:
-        return '\033[92m{0}\033[0m'.format(s)
+        return f'\033[92m{s}\033[0m'
     else:
         return s
 
@@ -96,9 +96,9 @@ def ReadableSize(num):
     """Get a human-readable size."""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if abs(num) <= 1024.0:
-            return '%3.2f%s' % (num, unit)
+            return '{:3.2f}{}'.format(num, unit)
         num /= 1024.0
-    return '%.1f TB' % (num,)
+    return '{:.1f} TB'.format(num)
 
 
 # Note(jiayq): I know, I know, this is a recursive function, but it is
@@ -110,7 +110,7 @@ def PrintTrie(trie, prefix, max_depth, min_size, color):
         # If we are reaching a leaf node or the maximum depth, we will print the
         # result.
         if trie.size > min_size:
-            print('{0}{1} {2}'.format(
+            print('{}{} {}'.format(
                   prefix,
                   MaybeAddColor(trie.name, color),
                   ReadableSize(trie.size)))
@@ -120,7 +120,7 @@ def PrintTrie(trie, prefix, max_depth, min_size, color):
         PrintTrie(
             trie.dictionary.values()[0], prefix, max_depth, min_size, color)
     elif trie.size > min_size:
-        print('{0}{1} {2}'.format(
+        print('{}{} {}'.format(
               prefix,
               MaybeAddColor(trie.name, color),
               ReadableSize(trie.size)))

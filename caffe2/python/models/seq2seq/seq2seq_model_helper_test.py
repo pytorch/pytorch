@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python.models.seq2seq import seq2seq_model_helper
 from caffe2.python import scope, test_util
 

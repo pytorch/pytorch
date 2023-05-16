@@ -48,16 +48,16 @@ def _maybe_convert_to_dtype(a, dtype):
         return None
 
     raise ValueError(
-        "Received type {0} that is neither a tensor or a number!".format(type(a))
+        f"Received type {type(a)} that is neither a tensor or a number!"
     )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
     if not isinstance(a, Number):
-        msg = "Found unknown type {0} when trying to convert scalars!".format(type(a))
+        msg = f"Found unknown type {type(a)} when trying to convert scalars!"
         raise ValueError(msg)
     if not utils.is_weakly_lesser_type(type(a), typ):
-        msg = "Scalar {0} of type {1} cannot be safely cast to type {2}!".format(
+        msg = "Scalar {} of type {} cannot be safely cast to type {}!".format(
             a, type(a), typ
         )
         raise ValueError(msg)
@@ -169,7 +169,7 @@ def _safe_copy_out(
 ):
     # Checks same device
     if copy_from.device != copy_to.device:
-        msg = "Attempting to copy from device {0} to device {1}, but cross-device copies are not allowed!".format(
+        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
             copy_from.device, copy_to.device
         )
         raise RuntimeError(msg)

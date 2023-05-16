@@ -245,7 +245,7 @@ class BlobReference:
         return self._name
 
     def __repr__(self):
-        return 'BlobReference("{}")'.format(self._name)
+        return f'BlobReference("{self._name}")'
 
     def __add__(self, other):
         if not isinstance(other, str):
@@ -286,7 +286,7 @@ class BlobReference:
             net.Relu([b], ...)
         """
         if op_type.startswith('__'):
-            raise AttributeError('Attribute {} not found.'.format(op_type))
+            raise AttributeError(f'Attribute {op_type} not found.')
         if self._from_net is None:
             raise AttributeError(
                 'You cannot use a blob reference that does not have a net '
@@ -562,18 +562,18 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         def versionMismatchInfoOut(name):
             s = "DEBUG HELP:\n"
             s += "Maybe you use same output blob twice for different ops?\n"
-            s += "== Version history of blob [{}]\n".format(name)
+            s += f"== Version history of blob [{name}]\n"
             for (op, vers) in self.out_version_history[name]:
-                s += "Version (out) {} <-- {}".format(vers, op)
+                s += f"Version (out) {vers} <-- {op}"
                 s += "\n"
             return s
 
         def versionMismatchInfoIn(name):
             s = "DEBUG HELP:\n"
             s += "Maybe the blob was overwritten by another op?\n"
-            s += "== Version history of blob [{}]\n".format(name)
+            s += f"== Version history of blob [{name}]\n"
             for (op, vers) in self.in_version_history[name]:
-                s += "version (in) {} <-- {}".format(vers, op)
+                s += f"version (in) {vers} <-- {op}"
                 s += "\n"
             return s
 
@@ -755,7 +755,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # we already checked that device options are consistent so we can just
             # break after finding the first clear_info request
             for extra_info in generator.device_option.extra_info:
-                if extra_info == "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG):
+                if extra_info == f"{IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG}:1":
                     only_keep_is_auto_gen_sum_ops_tag = True
                     break
 
@@ -766,7 +766,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # IS_AUTO_GEN_SUM_OPS_TAG
             for op in sum_ops:
                 op.device_option.extra_info.extend([
-                    "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                    f"{IR.IS_AUTO_GEN_SUM_OPS_TAG}:1"
                 ])
         else:
             # we already checked that device options are consistent so we can just
@@ -775,13 +775,13 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
                 for op in sum_ops:
                     op.device_option.CopyFrom(generator.device_option)
                     op.device_option.extra_info.extend([
-                        "{}:1".format(IR.IS_AUTO_GEN_SUM_OPS_TAG)
+                        f"{IR.IS_AUTO_GEN_SUM_OPS_TAG}:1"
                     ])
                 break
 
     def _DisambiguateGradOpOutput(self, grad_op, idx, cnt):
         new_grad_output = (
-            '_' + grad_op.output[idx] + '_autosplit_{}'.format(cnt))
+            '_' + grad_op.output[idx] + f'_autosplit_{cnt}')
         if grad_op.type == "If":
             disambiguate_grad_if_op_output(grad_op, idx, new_grad_output)
         else:
@@ -885,7 +885,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
     def _MakeSumOps(self, input_name, input_version):
         generators = self.gradient_generators[input_name][input_version]
         out_base_name = self._GetSumOpOutputName(generators, input_name)
-        types = list(set(type(x) for x in generators))
+        types = list({type(x) for x in generators})
         assert(len(types) == 1)
         if types[0] is GradGenMeta:
             sum_ops, g = self._MakeDenseSumOps(generators, out_base_name)
@@ -1054,7 +1054,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
               that are None, we will auto-fill them with 1.
         """
         if isinstance(ys, list):
-            ys = dict((y, None) for y in ys)
+            ys = {y: None for y in ys}
         elif not isinstance(ys, dict):
             raise TypeError("ys should either be a list or a dict.")
 
@@ -1254,7 +1254,7 @@ def get_undefined_blobs(ssa):
     """
     undef_blobs = set()
     for inputs, _outputs in ssa:
-        undef_blobs |= set(name for (name, ver) in inputs if ver == 0)
+        undef_blobs |= {name for (name, ver) in inputs if ver == 0}
     return undef_blobs
 
 
@@ -1278,7 +1278,7 @@ def get_op_ids_in_path(ssa, blob_versions, inputs, outputs):
     `outputs`, given blobs in `inputs`.
     Consider that the `inputs` are given in their latest version.
     """
-    inputs_set = set((str(i), blob_versions[str(i)]) for i in inputs)
+    inputs_set = {(str(i), blob_versions[str(i)]) for i in inputs}
     producers = get_output_producers(ssa)
     queue = [(str(o), blob_versions[str(o)]) for o in outputs]
     used_op_ids = set()
@@ -1463,7 +1463,7 @@ class Net:
         while name in Net._net_names_used:
             name = basename + '_' + str(next_idx)
             next_idx += 1
-        Net._net_names_used |= set([name])
+        Net._net_names_used |= {name}
         return name
 
     def __init__(self, name_or_proto, inplace=False):
@@ -1820,7 +1820,7 @@ class Net:
             OrderedDict(inputs) if input_is_pair_list else
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
-            assert self.BlobIsDefined(output), "{} is not defined".format(output)
+            assert self.BlobIsDefined(output), f"{output} is not defined"
         input_names = {str(k): str(v) for k, v in inputs.items()}
         output_names = [str(o) for o in outputs]
         proto = self._net
@@ -2074,7 +2074,7 @@ class Net:
     def AddExternalOutput(self, *outputs):
         for output in outputs:
             assert isinstance(output, BlobReference)
-            assert self.BlobIsDefined(output), "{} is not defined".format(output)
+            assert self.BlobIsDefined(output), f"{output} is not defined"
         for output in outputs:
             self.Proto().external_output.extend([str(output)])
 
@@ -2165,7 +2165,7 @@ class Net:
             'Tried to append to missing output record'
         )
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
+            assert self.BlobIsDefined(blob), f"{blob} is not defined"
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = self._output_record + schema.Struct(
@@ -2192,7 +2192,7 @@ class Net:
         elif aggregator.lower() == 'mean':
             new_g = self.UnsortedSegmentMean([g.values, remapping], 1)
         else:
-            raise ValueError('{} is not supported'.format(aggregator))
+            raise ValueError(f'{aggregator} is not supported')
         return GradientSlice(indices=unique, values=new_g)
 
     @staticmethod
@@ -2264,7 +2264,7 @@ class Net:
 
     def __getattr__(self, op_type):
         if op_type.startswith('__'):
-            raise AttributeError('Attribute {} not found.'.format(op_type))
+            raise AttributeError(f'Attribute {op_type} not found.')
         if not IsOperator(op_type) and not IsOperatorWithEngine(op_type, "CUDNN"):
             raise AttributeError(
                 'Method ' + op_type + ' is not a registered operator.' +
@@ -2412,7 +2412,7 @@ def copy_func_between_devices(src, dst):
                 return net.CopyCPUToGPU(*args, **kw)
         return fun
 
-    raise ValueError('Non-supported devices: %s and %s' % (src, dst))
+    raise ValueError('Non-supported devices: {} and {}'.format(src, dst))
 
 
 def device_equal(src, dst):
@@ -2508,7 +2508,7 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
 
         for dev, input in zip(input_dev, op.input):
             assert net.BlobIsDefined(input), \
-                "input {} should be defined in the net.".format(input)
+                f"input {input} should be defined in the net."
             if input not in blob_to_device:
                 if net.is_external_input(input):
                     blob_to_device[input] = net_option
@@ -2604,9 +2604,9 @@ def InjectDeviceCopiesAmongNets(nets, blob_to_device_init=None):
       1. You MUST pass nets in execution order. e.g. [train_init, train]
     """
     assert isinstance(nets, list), \
-        "nets {} should be a list of nets.".format(str(nets))
+        f"nets {str(nets)} should be a list of nets."
     assert all(isinstance(net, Net) for net in nets), \
-        "nets {} should be a list of nets.".format(str(nets))
+        f"nets {str(nets)} should be a list of nets."
     # A holistic blob to device mapping.
     blob_to_device = blob_to_device_init or {}
     blob_remap = {}
@@ -2676,7 +2676,7 @@ class ExecutionStep:
         while name in ExecutionStep._step_names_used:
             name = basename + '_' + str(next_idx)
             next_idx += 1
-        ExecutionStep._step_names_used |= set([name])
+        ExecutionStep._step_names_used |= {name}
         return name
 
     def __init__(self, name, nets=None, num_iter=None):
@@ -2745,7 +2745,7 @@ class ExecutionStep:
 
     def SetShouldStopBlob(self, should_stop_blob):
         assert isinstance(should_stop_blob, BlobReference), (
-            "expects BlobReference here, got {}".format(type(should_stop_blob)))
+            f"expects BlobReference here, got {type(should_stop_blob)}")
         self._assert_can_mutate()
         self._step.should_stop_blob = str(should_stop_blob)
 

@@ -14,16 +14,16 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Replacement(object):
+class Replacement:
     """The replacement of a single region of an artifact."""
 
     deleted_region: _region.Region = dataclasses.field(
         metadata={"schema_property_name": "deletedRegion"}
     )
-    inserted_content: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
+    inserted_content: _artifact_content.ArtifactContent | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "insertedContent"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

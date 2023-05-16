@@ -26,47 +26,47 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Result(object):
+class Result:
     """A result produced by an analysis tool."""
 
     message: _message.Message = dataclasses.field(
         metadata={"schema_property_name": "message"}
     )
-    analysis_target: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    analysis_target: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "analysisTarget"}
     )
-    attachments: Optional[List[_attachment.Attachment]] = dataclasses.field(
+    attachments: list[_attachment.Attachment] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "attachments"}
     )
-    baseline_state: Optional[
+    baseline_state: None | (
         Literal["new", "unchanged", "updated", "absent"]
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "baselineState"}
     )
-    code_flows: Optional[List[_code_flow.CodeFlow]] = dataclasses.field(
+    code_flows: list[_code_flow.CodeFlow] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "codeFlows"}
     )
-    correlation_guid: Optional[str] = dataclasses.field(
+    correlation_guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "correlationGuid"}
     )
     fingerprints: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "fingerprints"}
     )
-    fixes: Optional[List[_fix.Fix]] = dataclasses.field(
+    fixes: list[_fix.Fix] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "fixes"}
     )
-    graph_traversals: Optional[
-        List[_graph_traversal.GraphTraversal]
-    ] = dataclasses.field(
+    graph_traversals: None | (
+        list[_graph_traversal.GraphTraversal]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "graphTraversals"}
     )
-    graphs: Optional[List[_graph.Graph]] = dataclasses.field(
+    graphs: list[_graph.Graph] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "graphs"}
     )
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    hosted_viewer_uri: Optional[str] = dataclasses.field(
+    hosted_viewer_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "hostedViewerUri"}
     )
     kind: Literal[
@@ -75,52 +75,52 @@ class Result(object):
     level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    locations: Optional[List[_location.Location]] = dataclasses.field(
+    locations: list[_location.Location] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
-    occurrence_count: Optional[int] = dataclasses.field(
+    occurrence_count: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "occurrenceCount"}
     )
     partial_fingerprints: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "partialFingerprints"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    provenance: Optional[_result_provenance.ResultProvenance] = dataclasses.field(
+    provenance: _result_provenance.ResultProvenance | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "provenance"}
     )
     rank: float = dataclasses.field(
         default=-1.0, metadata={"schema_property_name": "rank"}
     )
-    related_locations: Optional[List[_location.Location]] = dataclasses.field(
+    related_locations: list[_location.Location] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "relatedLocations"}
     )
-    rule: Optional[
+    rule: None | (
         _reporting_descriptor_reference.ReportingDescriptorReference
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rule"})
-    rule_id: Optional[str] = dataclasses.field(
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "rule"})
+    rule_id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "ruleId"}
     )
     rule_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "ruleIndex"}
     )
-    stacks: Optional[List[_stack.Stack]] = dataclasses.field(
+    stacks: list[_stack.Stack] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stacks"}
     )
-    suppressions: Optional[List[_suppression.Suppression]] = dataclasses.field(
+    suppressions: list[_suppression.Suppression] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "suppressions"}
     )
-    taxa: Optional[
-        List[_reporting_descriptor_reference.ReportingDescriptorReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
-    web_request: Optional[_web_request.WebRequest] = dataclasses.field(
+    taxa: None | (
+        list[_reporting_descriptor_reference.ReportingDescriptorReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
+    web_request: _web_request.WebRequest | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequest"}
     )
-    web_response: Optional[_web_response.WebResponse] = dataclasses.field(
+    web_response: _web_response.WebResponse | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponse"}
     )
-    work_item_uris: Optional[List[str]] = dataclasses.field(
+    work_item_uris: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "workItemUris"}
     )
 

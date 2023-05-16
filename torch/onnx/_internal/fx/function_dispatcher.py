@@ -229,10 +229,10 @@ _ATENLIB_FUNCTIONS = {
 
 
 def _create_op_overload_to_exporter_key_table() -> (
-    Mapping[Union[torch._ops.OpOverload, Callable], str]
+    Mapping[torch._ops.OpOverload | Callable, str]
 ):
     # TODO(justinchuby): Improve how the table is constructed.
-    table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
+    table: dict[torch._ops.OpOverload | Callable, str] = {}
 
     # Some ops in `torch.ops.aten` are not discoverable through `dir(torch.ops.aten)`,
     # but retrievable via explicit lookup.
@@ -283,9 +283,9 @@ _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
 
 @_beartype.beartype
 def _create_onnx_friendly_decomposition_table() -> (
-    Dict[torch._ops.OpOverload, Callable]
+    dict[torch._ops.OpOverload, Callable]
 ):
-    decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
+    decomposition_table: dict[torch._ops.OpOverload, Callable] = {}
     for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
         # Skip decomposition into "prim::*" ops (defined in 'torch._refs'), because they
         # are not generally supported by ONNX.
@@ -303,6 +303,6 @@ def _create_onnx_friendly_decomposition_table() -> (
 # This is a subset of PyTorch's built-in aten-to-aten decomposition. If an aten
 # op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
 # function in the DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE.
-DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: Dict[
+DEFAULT_ONNX_EXPORTER_DECOMPOSITION_TABLE: dict[
     torch._ops.OpOverload, Callable
 ] = _create_onnx_friendly_decomposition_table()

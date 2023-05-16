@@ -650,7 +650,7 @@ class TestDatasetOps(TestCase):
             num_to_collect=num_to_collect,
         )
 
-        print("Collect Net Proto: {}".format(collect_net.Proto()))
+        print(f"Collect Net Proto: {collect_net.Proto()}")
 
         plan = core.Plan("collect_data")
         plan.AddStep(core.execution_step("collect_init", init_net))
@@ -685,7 +685,7 @@ class TestDatasetOps(TestCase):
         hist, _ = np.histogram(
             reference_result[:, 0], bins=10, range=(1, max_example_to_cover)
         )
-        print("Sample histogram: {}".format(hist))
+        print(f"Sample histogram: {hist}")
 
         self.assertTrue(all(hist > 0.6 * (num_to_collect / 10)))
         for i in range(1, len(blobs)):

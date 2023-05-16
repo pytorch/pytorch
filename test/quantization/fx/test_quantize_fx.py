@@ -3916,7 +3916,7 @@ class TestQuantizeFx(QuantizationTestCase):
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not _is_activation_post_process(getattr(model, arg_node.target)),
-                    "Arg: {0} of node: {1} is observed but is not a float tensor".format(
+                    "Arg: {} of node: {} is observed but is not a float tensor".format(
                         arg_node, node
                     ),
                 )
@@ -8304,7 +8304,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
-                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d(1)
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
 

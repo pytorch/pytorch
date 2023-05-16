@@ -1,7 +1,3 @@
-
-
-
-
 import unittest
 
 import numpy as np
@@ -51,7 +47,7 @@ class TestMKLBasic(test_util.TestCase):
             rtol=1e-2)
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("FC CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"FC CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
     def testSpatialBNTrainingSpeed(self):
         input_channel = 10
@@ -112,7 +108,7 @@ class TestMKLBasic(test_util.TestCase):
 
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("FC CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"FC CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
 
 

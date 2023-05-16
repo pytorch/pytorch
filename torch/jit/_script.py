@@ -282,7 +282,7 @@ class ScriptMeta(type):
             # We leave built-in ScriptModule types alone, since this metaclass
             # is only for compiling user classes that inherit from
             # ScriptModule.
-            return super(ScriptMeta, cls).__init__(name, bases, attrs)
+            return super().__init__(name, bases, attrs)
 
         original_init = getattr(cls, "__init__", lambda self: None)
 
@@ -317,7 +317,7 @@ class ScriptMeta(type):
                     delattr(self, name)
 
         cls.__init__ = init_then_script  # type: ignore[misc]
-        super(ScriptMeta, cls).__init__(name, bases, attrs)
+        super().__init__(name, bases, attrs)
 
 
 class _CachedForward:
@@ -736,7 +736,7 @@ if _enabled:
             return self._c.get_debug_state()
 
         def extra_repr(self):
-            return "original_name={}".format(self.original_name)
+            return f"original_name={self.original_name}"
 
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(self, *args, **kwargs)  # type: ignore[attr-defined]

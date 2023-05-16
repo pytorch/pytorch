@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -148,7 +143,7 @@ class TestMomentumSGD(serial.SerializedTestCase):
         assume(core.IsGPUDeviceType(gc.device_type))
         gpuvers = workspace.GetDeviceProperties(0)["major"]
         if gc.device_type == caffe2_pb2.CUDA and gpuvers < 6:
-            print("No FP16 support because major version {} < 6".format(gpuvers))
+            print(f"No FP16 support because major version {gpuvers} < 6")
             return
 
         param = np.random.rand(n).astype(np.float16)

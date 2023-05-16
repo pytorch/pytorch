@@ -76,7 +76,7 @@ def AddMomentumParameterUpdate(train_model, LR):
 
 def Create(args):
     gpus = list(range(args.num_gpus))
-    log.info("Running on gpus: {}".format(gpus))
+    log.info(f"Running on gpus: {gpus}")
 
     # Create CNNModeLhelper object
     train_model = cnn.CNNModelHelper(
@@ -130,7 +130,7 @@ def Create(args):
     ct = time.time() - start_time
     train_model.net._CheckLookupTables()
 
-    log.info("Model create for {} gpus took: {} secs".format(len(gpus), ct))
+    log.info(f"Model create for {len(gpus)} gpus took: {ct} secs")
 
 
 def main():

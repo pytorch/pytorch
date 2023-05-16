@@ -1,8 +1,3 @@
-
-
-
-
-
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace

@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import time
 
@@ -74,7 +69,7 @@ def test_shared_grads(
         set(model.param_to_grad.values()),
         "gpu_0/",
         share_activations=True,
-        dont_share_blobs=set([str(param_to_grad[conv_blob])]),
+        dont_share_blobs={str(param_to_grad[conv_blob])},
         blob_shapes=shapes if with_shapes else None,
     )
     count_after = count_blobs(optim_proto)
@@ -174,10 +169,10 @@ def test_forward_only_fast_simplenet(
     t = time.time()
     optim_proto = memonger.optimize_inference_fast(
         model.net.Proto(),
-        set([data_blob, last_out_blob]).union(
+        {data_blob, last_out_blob}.union(
             set(model.net.Proto().external_input))
     )
-    print("Optimization took {} secs".format(time.time() - t))
+    print(f"Optimization took {time.time() - t} secs")
     count_after = count_blobs(optim_proto)
     num_shared_blobs = count_shared_blobs(optim_proto)
 

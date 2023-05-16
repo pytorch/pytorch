@@ -15,19 +15,19 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Graph(object):
+class Graph:
     """A network of nodes and directed edges that describes some aspect of the structure of the code (for example, a call graph)."""
 
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    edges: Optional[List[_edge.Edge]] = dataclasses.field(
+    edges: list[_edge.Edge] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "edges"}
     )
-    nodes: Optional[List[_node.Node]] = dataclasses.field(
+    nodes: list[_node.Node] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "nodes"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

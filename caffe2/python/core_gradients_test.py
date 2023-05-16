@@ -1,8 +1,3 @@
-
-
-
-
-
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import unittest
@@ -395,7 +390,7 @@ class TestGradientCalculation(test_util.TestCase):
             caffe2_pb2.CPU,
             extra_info=[
                 parallel_tag,
-                "{}:1".format(IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG),
+                f"{IR.ONLY_KEEP_IS_AUTO_GEN_SUM_OPS_TAG}:1",
             ]
         )
         split_op_device_option_no_clear_auto_gen_sum = core.DeviceOption(

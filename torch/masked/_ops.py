@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import warnings
 
 # A workaround to support both TorchScript and MyPy:

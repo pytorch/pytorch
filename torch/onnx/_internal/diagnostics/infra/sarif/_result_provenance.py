@@ -13,30 +13,30 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ResultProvenance(object):
+class ResultProvenance:
     """Contains information about how and when a result was detected."""
 
-    conversion_sources: Optional[
-        List[_physical_location.PhysicalLocation]
-    ] = dataclasses.field(
+    conversion_sources: None | (
+        list[_physical_location.PhysicalLocation]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "conversionSources"}
     )
-    first_detection_run_guid: Optional[str] = dataclasses.field(
+    first_detection_run_guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "firstDetectionRunGuid"}
     )
-    first_detection_time_utc: Optional[str] = dataclasses.field(
+    first_detection_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "firstDetectionTimeUtc"}
     )
     invocation_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "invocationIndex"}
     )
-    last_detection_run_guid: Optional[str] = dataclasses.field(
+    last_detection_run_guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "lastDetectionRunGuid"}
     )
-    last_detection_time_utc: Optional[str] = dataclasses.field(
+    last_detection_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "lastDetectionTimeUtc"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

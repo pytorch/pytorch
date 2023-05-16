@@ -443,9 +443,9 @@ def _check_dill_version(pickle_module) -> None:
 
 def _check_save_filelike(f):
     if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
-        raise AttributeError((
+        raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
-            "a 'write' attribute"))
+            "a 'write' attribute")
 
 
 def save(
@@ -941,11 +941,11 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                         if file_size == 0:
                             f.write(lines)
                         elif file_size != len(lines) or f.read() != lines:
-                            raise IOError
+                            raise OSError
                     msg = ("Saved a reverse patch to " + file_name + ". "
                            "Run `patch -p0 < " + file_name + "` to revert your "
                            "changes.")
-                except IOError:
+                except OSError:
                     msg = ("Tried to save a patch, but couldn't create a "
                            "writable file " + file_name + ". Make sure it "
                            "doesn't exist and your working directory is "

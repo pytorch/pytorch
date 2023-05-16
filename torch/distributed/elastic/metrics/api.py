@@ -162,14 +162,14 @@ def profile(group=None):
             try:
                 start_time = time.time()
                 result = func(*args, **kwargs)
-                publish_metric(group, "{}.success".format(func.__name__), 1)
+                publish_metric(group, f"{func.__name__}.success", 1)
             except Exception:
-                publish_metric(group, "{}.failure".format(func.__name__), 1)
+                publish_metric(group, f"{func.__name__}.failure", 1)
                 raise
             finally:
                 publish_metric(
                     group,
-                    "{}.duration.ms".format(func.__name__),
+                    f"{func.__name__}.duration.ms",
                     get_elapsed_time_ms(start_time),
                 )
             return result

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 from torch.testing._internal.common_utils import run_tests

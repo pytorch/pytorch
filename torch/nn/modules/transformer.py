@@ -795,4 +795,4 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
     elif activation == "gelu":
         return F.gelu
 
-    raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
+    raise RuntimeError(f"activation should be relu/gelu, not {activation}")

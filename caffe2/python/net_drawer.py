@@ -49,7 +49,7 @@ def _rectify_operator_and_name(operators_or_net, name):
         net = operators_or_net.Proto()
         if not isinstance(net, caffe2_pb2.NetDef):
             raise RuntimeError(
-                "Expecting NetDef, but got {}".format(type(net)))
+                f"Expecting NetDef, but got {type(net)}")
         operators = net.op
         if name is None:
             name = net.name
@@ -208,9 +208,9 @@ def _draw_steps(steps, g, skip_step_edges=False):  # noqa
     def get_label():
         label = [step.name + '\n']
         if step.report_net:
-            label.append('Reporter: {}'.format(step.report_net))
+            label.append(f'Reporter: {step.report_net}')
         if step.should_stop_blob:
-            label.append('Stopper: {}'.format(step.should_stop_blob))
+            label.append(f'Stopper: {step.should_stop_blob}')
         if step.concurrent_substeps:
             label.append('Concurrent')
         if step.only_once:
@@ -338,7 +338,7 @@ def GetGraphPngSafe(func, *args, **kwargs):
             raise ValueError("func is expected to return pydot.Dot")
         return graph.create_png()
     except Exception as e:
-        logger.error("Failed to draw graph: {}".format(e))
+        logger.error(f"Failed to draw graph: {e}")
         return _DummyPngImage
 
 
@@ -370,7 +370,7 @@ def main():
         help="The rank direction of the pydot graph."
     )
     args = parser.parse_args()
-    with open(args.input, 'r') as fid:
+    with open(args.input) as fid:
         content = fid.read()
         graphs = utils.GetContentFromProtoString(
             content, {

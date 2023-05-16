@@ -182,7 +182,7 @@ class CustomOp:
     """
 
     def __init__(self, lib, cpp_ns, operator_name, ophandle, *, _private_access=False):
-        super(CustomOp, self).__init__()
+        super().__init__()
         if not _private_access:
             raise RuntimeError(
                 "The CustomOp constructor is private and we do not guarantee "

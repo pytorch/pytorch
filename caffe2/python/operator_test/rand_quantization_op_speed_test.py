@@ -1,5 +1,3 @@
-
-
 import time
 
 import caffe2.python.hypothesis_test_util as hu
@@ -84,7 +82,7 @@ class TestSpeedFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             end = time.time()
             dec_time += end - start
 
-        print("Sub+Scale+Sum time: {} ms".format(sub_scale_sum_time / times * 1000))
+        print(f"Sub+Scale+Sum time: {sub_scale_sum_time / times * 1000} ms")
         print(
             "Quantizing time: {} ms ({}X)".format(
                 enc_time / times * 1000, enc_time / sub_scale_sum_time

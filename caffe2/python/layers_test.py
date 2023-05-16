@@ -1,8 +1,3 @@
-
-
-
-
-
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
@@ -712,7 +707,7 @@ class TestLayers(LayersTestCase):
         N = 5
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('all_embeddings', schema.Scalar(
-                ((np.float32, (N, embedding_dim)))
+                (np.float32, (N, embedding_dim))
             )),
         ))
         current = self.model.PairwiseSimilarity(
@@ -734,10 +729,10 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
             ('y_embeddings', schema.Scalar(
-                ((np.float32, (6, embedding_dim)))
+                (np.float32, (6, embedding_dim))
             )),
         ))
         current = self.model.PairwiseSimilarity(
@@ -771,10 +766,10 @@ class TestLayers(LayersTestCase):
 
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
             ('y_embeddings', schema.Scalar(
-                ((np.float32, (6, embedding_dim)))
+                (np.float32, (6, embedding_dim))
             )),
             ('indices_to_gather', indices_to_gather),
         ))
@@ -800,7 +795,7 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
-                ((np.float32, (5, embedding_dim)))
+                (np.float32, (5, embedding_dim))
             )),
         ))
         with self.assertRaises(AssertionError):
@@ -2269,9 +2264,9 @@ class TestLayers(LayersTestCase):
         def get_blob_weighted_sum():
             weights = []
             for i in range(num_inputs):
-                w_blob_name = 'blob_weighted_sum/w_{0}'.format(i)
+                w_blob_name = f'blob_weighted_sum/w_{i}'
                 assert workspace.HasBlob(w_blob_name), (
-                    "cannot fine blob {}".format(w_blob_name)
+                    f"cannot fine blob {w_blob_name}"
                 )
                 w = workspace.FetchBlob(w_blob_name)
                 weights.append(w)

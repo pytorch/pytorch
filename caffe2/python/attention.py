@@ -15,7 +15,7 @@ class AttentionType:
 def s(scope, name):
     # We have to manually scope due to our internal/external blob
     # relationships.
-    return "{}/{}".format(str(scope), str(name))
+    return f"{str(scope)}/{str(name)}"
 
 
 # c_i = \sum_j w_{ij}\textbf{s}_j

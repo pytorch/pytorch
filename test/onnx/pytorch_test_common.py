@@ -102,7 +102,7 @@ def skipForAllOpsetVersions():
     return skip_dec
 
 
-def skipTraceTest(skip_before_opset_version: Optional[int] = None, reason: str = ""):
+def skipTraceTest(skip_before_opset_version: int | None = None, reason: str = ""):
     """Skip tracing test for opset version less than skip_before_opset_version.
 
     Args:
@@ -130,7 +130,7 @@ def skipTraceTest(skip_before_opset_version: Optional[int] = None, reason: str =
     return skip_dec
 
 
-def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str = ""):
+def skipScriptTest(skip_before_opset_version: int | None = None, reason: str = ""):
     """Skip scripting test for opset version less than skip_before_opset_version.
 
     Args:

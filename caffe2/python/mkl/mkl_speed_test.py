@@ -1,7 +1,3 @@
-
-
-
-
 import unittest
 
 import numpy as np
@@ -40,7 +36,7 @@ class TestMKLBasic(test_util.TestCase):
         # version, so I am turning this assertion off.
         #self.assertTrue(runtime[1] >= runtime[2])
 
-        print("Relu CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"Relu CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
 
     def testConvSpeed(self):
@@ -73,7 +69,7 @@ class TestMKLBasic(test_util.TestCase):
             rtol=1e-2)
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("Conv CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"Conv CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
 
 if __name__ == '__main__':

@@ -185,14 +185,14 @@ def parallel_num_threads():
     return threads
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def stride_at(var: sympy.Symbol, index: sympy.Expr):
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)
     return sympy.simplify(new_index - index)
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:

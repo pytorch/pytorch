@@ -23,9 +23,9 @@ parser.add_argument('diff', help='diff json file')
 parser.add_argument('--format', default='md', type=str, help='output format (csv, md, json, table)')
 args = parser.parse_args()
 
-with open(args.base, "r") as base:
+with open(args.base) as base:
     base_times = get_times(json.load(base))
-with open(args.diff, "r") as diff:
+with open(args.diff) as diff:
     diff_times = get_times(json.load(diff))
 
 all_keys = set(base_times.keys()).union(diff_times.keys())

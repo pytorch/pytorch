@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python.schema import Struct, ConstRecord
 from caffe2.python import core, workspace, model_helper
 from caffe2.python.session import LocalSession

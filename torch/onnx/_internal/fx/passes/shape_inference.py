@@ -73,7 +73,7 @@ class FakeTensorPropGetStaticShapes(torch.fx.Interpreter):
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        mode: Optional[fake_tensor.FakeTensorMode] = None,
+        mode: fake_tensor.FakeTensorMode | None = None,
     ):
         super().__init__(module)
         if mode is None:

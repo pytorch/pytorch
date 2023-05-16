@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import workspace, core, lstm_benchmark, utils
 from copy import copy
 
@@ -28,7 +24,7 @@ def Compare(args):
                     workspace.ResetWorkspace()
                     results.append((copy(args), float(t_own), float(t_cudnn)))
                     print(args)
-                    print("t_cudnn / t_own: {}".format(t_cudnn / t_own))
+                    print(f"t_cudnn / t_own: {t_cudnn / t_own}")
 
     for args, t_own, t_cudnn in results:
         print("{}: cudnn time: {}, own time: {}, ratio: {}".format(
@@ -43,7 +39,7 @@ def Compare(args):
                   args.hidden_dim, args.seq_length, args.batch_size,
                   args.num_layers, t_cudnn, t_own, ratio))
 
-    print("Ratio average: {}".format(ratio_sum / len(results)))
+    print(f"Ratio average: {ratio_sum / len(results)}")
 
 
 if __name__ == '__main__':

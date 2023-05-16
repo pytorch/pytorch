@@ -14,16 +14,16 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class CodeFlow(object):
+class CodeFlow:
     """A set of threadFlows which together describe a pattern of code execution relevant to detecting a result."""
 
-    thread_flows: List[_thread_flow.ThreadFlow] = dataclasses.field(
+    thread_flows: list[_thread_flow.ThreadFlow] = dataclasses.field(
         metadata={"schema_property_name": "threadFlows"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

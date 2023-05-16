@@ -101,7 +101,7 @@ class DBFileReader(Reader):
 
         if self.db_type == "log_file_db":
             assert os.path.exists(self.db_path), \
-                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+                f'db_path [{self.db_path}] does not exist'
         with core.NameScope(self.name):
             # blob_prefix is for avoiding name conflict in workspace
             blob_prefix = scope.CurrentNameScope()
@@ -159,7 +159,7 @@ class DBFileReader(Reader):
         """Load from the DB file at db_path and feed dataset field blobs"""
         if self.db_type == "log_file_db":
             assert os.path.exists(self.db_path), \
-                'db_path [{db_path}] does not exist'.format(db_path=self.db_path)
+                f'db_path [{self.db_path}] does not exist'
         net.Load(
             [],
             self.ds.get_blobs(),

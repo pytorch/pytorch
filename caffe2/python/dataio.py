@@ -137,7 +137,7 @@ class Reader:
         if external_should_stop is not None:
             should_stop = reader_net.Or([external_should_stop, should_stop])
         read_step = core.execution_step(
-            '{}_step'.format(reader_net_name),
+            f'{reader_net_name}_step',
             reader_net,
             should_stop_blob=should_stop)
         return (read_step, fields)
@@ -562,7 +562,7 @@ class CompositeReader(Reader):
                 # Skip adding stop net because Or([A, A], A) doesn't pass operator
                 # schema check
                 continue
-            stop_net = core.Net("{}_stop".format(name))
+            stop_net = core.Net(f"{name}_stop")
             stop_net.Or([local_should_stop, stop_blob], local_should_stop)
             read_nets.append(stop_net)
 
@@ -612,8 +612,8 @@ class CompositeReaderBuilder(ReaderBuilder):
             sub_reader_data_finished_blobs = reader_builder.setup(**kwargs)
             overlapping_keys = set(data_finished_blobs.keys()) & set(sub_reader_data_finished_blobs.keys())
             overlapping_values = set(data_finished_blobs.values()) & set(sub_reader_data_finished_blobs.values())
-            assert overlapping_keys == set(), "Overlapping keys: {}".format(overlapping_keys)
-            assert overlapping_values == set(), "Overlapping values: {}".format(overlapping_values)
+            assert overlapping_keys == set(), f"Overlapping keys: {overlapping_keys}"
+            assert overlapping_values == set(), f"Overlapping values: {overlapping_values}"
             data_finished_blobs.update(sub_reader_data_finished_blobs)
 
         return data_finished_blobs

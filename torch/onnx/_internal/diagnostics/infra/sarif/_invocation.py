@@ -15,101 +15,101 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Invocation(object):
+class Invocation:
     """The runtime environment of the analysis tool run."""
 
     execution_successful: bool = dataclasses.field(
         metadata={"schema_property_name": "executionSuccessful"}
     )
-    account: Optional[str] = dataclasses.field(
+    account: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "account"}
     )
-    arguments: Optional[List[str]] = dataclasses.field(
+    arguments: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "arguments"}
     )
-    command_line: Optional[str] = dataclasses.field(
+    command_line: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "commandLine"}
     )
-    end_time_utc: Optional[str] = dataclasses.field(
+    end_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "endTimeUtc"}
     )
     environment_variables: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "environmentVariables"}
     )
-    executable_location: Optional[
+    executable_location: None | (
         _artifact_location.ArtifactLocation
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "executableLocation"}
     )
-    exit_code: Optional[int] = dataclasses.field(
+    exit_code: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "exitCode"}
     )
-    exit_code_description: Optional[str] = dataclasses.field(
+    exit_code_description: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "exitCodeDescription"}
     )
-    exit_signal_name: Optional[str] = dataclasses.field(
+    exit_signal_name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "exitSignalName"}
     )
-    exit_signal_number: Optional[int] = dataclasses.field(
+    exit_signal_number: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "exitSignalNumber"}
     )
-    machine: Optional[str] = dataclasses.field(
+    machine: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "machine"}
     )
-    notification_configuration_overrides: Optional[
-        List[_configuration_override.ConfigurationOverride]
-    ] = dataclasses.field(
+    notification_configuration_overrides: None | (
+        list[_configuration_override.ConfigurationOverride]
+    ) = dataclasses.field(
         default=None,
         metadata={"schema_property_name": "notificationConfigurationOverrides"},
     )
-    process_id: Optional[int] = dataclasses.field(
+    process_id: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "processId"}
     )
-    process_start_failure_message: Optional[str] = dataclasses.field(
+    process_start_failure_message: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "processStartFailureMessage"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    response_files: Optional[
-        List[_artifact_location.ArtifactLocation]
-    ] = dataclasses.field(
+    response_files: None | (
+        list[_artifact_location.ArtifactLocation]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "responseFiles"}
     )
-    rule_configuration_overrides: Optional[
-        List[_configuration_override.ConfigurationOverride]
-    ] = dataclasses.field(
+    rule_configuration_overrides: None | (
+        list[_configuration_override.ConfigurationOverride]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "ruleConfigurationOverrides"}
     )
-    start_time_utc: Optional[str] = dataclasses.field(
+    start_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "startTimeUtc"}
     )
-    stderr: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    stderr: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stderr"}
     )
-    stdin: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    stdin: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stdin"}
     )
-    stdout: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    stdout: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stdout"}
     )
-    stdout_stderr: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    stdout_stderr: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stdoutStderr"}
     )
-    tool_configuration_notifications: Optional[
-        List[_notification.Notification]
-    ] = dataclasses.field(
+    tool_configuration_notifications: None | (
+        list[_notification.Notification]
+    ) = dataclasses.field(
         default=None,
         metadata={"schema_property_name": "toolConfigurationNotifications"},
     )
-    tool_execution_notifications: Optional[
-        List[_notification.Notification]
-    ] = dataclasses.field(
+    tool_execution_notifications: None | (
+        list[_notification.Notification]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "toolExecutionNotifications"}
     )
-    working_directory: Optional[
+    working_directory: None | (
         _artifact_location.ArtifactLocation
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "workingDirectory"}
     )
 

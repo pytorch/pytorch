@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -472,7 +471,7 @@ class EtcdRendezvous:
 
         # Create directory node for participant data
         self.client.write(
-            key=self.get_path("/rdzv/v_{}".format(version_counter.value)),
+            key=self.get_path(f"/rdzv/v_{version_counter.value}"),
             value=None,
             dir=True,
             prevExist=False,
@@ -588,7 +587,7 @@ class EtcdRendezvous:
                 )
 
             this_lease_key = self.get_path(
-                "/rdzv/v_{}/rank_{}".format(expected_version, this_rank)
+                f"/rdzv/v_{expected_version}/rank_{this_rank}"
             )
             self.client.set(this_lease_key, value=None, ttl=CONST_WORKER_KEEPALIVE_TTL)
 
@@ -687,7 +686,7 @@ class EtcdRendezvous:
             # its members are alive (renewing their lease).
             # If not, try destroy this rendezvous, so a new one can be created.
             alive_members = self.client.get(
-                self.get_path("/rdzv/v_{version}".format(version=expected_version))
+                self.get_path(f"/rdzv/v_{expected_version}")
             )
             keep_alive_keys = [ch.key for ch in alive_members.children]
 
@@ -905,7 +904,7 @@ class EtcdRendezvous:
         return lease_stop_event
 
     def store_extra_data(self, rdzv_version, key, value):
-        node = self.get_path("/rdzv/v_{}/extra_data".format(rdzv_version))
+        node = self.get_path(f"/rdzv/v_{rdzv_version}/extra_data")
         try:
             # If first time we are storing anything:
             extra_data = self.client.write(
@@ -936,8 +935,8 @@ class EtcdRendezvous:
 
     def load_extra_data(self, rdzv_version, key, timeout=None):
         # 'extra_data' node itself, and the directory it is located in:
-        node = self.get_path("/rdzv/v_{}/extra_data".format(rdzv_version))
-        node_dir = self.get_path("/rdzv/v_{}".format(rdzv_version))
+        node = self.get_path(f"/rdzv/v_{rdzv_version}/extra_data")
+        node_dir = self.get_path(f"/rdzv/v_{rdzv_version}")
 
         # TODO: implement timeout
         # https://github.com/pytorch/elastic/issues/12

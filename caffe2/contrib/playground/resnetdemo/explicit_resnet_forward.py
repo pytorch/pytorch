@@ -1,8 +1,3 @@
-
-
-
-
-
 import logging
 logging.basicConfig()
 log = logging.getLogger("AnyExp")
@@ -42,7 +37,7 @@ def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
     model_helper = ResNetModelHelper(model, split, opts)
     opts_depth = opts['model_param']['num_layer']
     engine = opts['model_param']['engine']
-    log.info(' | ResNet-{} Imagenet'.format(opts_depth))
+    log.info(f' | ResNet-{opts_depth} Imagenet')
     assert opts_depth in BLOCK_CONFIG.keys(), \
         'Block config is not defined for specified model depth. Please check.'
     (n1, n2, n3, n4) = BLOCK_CONFIG[opts_depth]
@@ -303,7 +298,7 @@ class ResNetModelHelper():
         # prefix is something like: res2, res3, etc.
         # each res layer has num_blocks stacked
         for idx in range(num_blocks):
-            block_prefix = "{}_{}".format(prefix, idx)
+            block_prefix = f"{prefix}_{idx}"
             block_stride = 2 if (idx == 0 and stride == 2) else 1
             blob_in = block_fn(
                 blob_in, dim_in, dim_out, block_stride, block_prefix, dim_inner,

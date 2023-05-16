@@ -23,7 +23,7 @@ class TestCase(unittest.TestCase):
 
     def add_test_case(self, name, test_func):
         if not name.startswith('test_'):
-            raise ValueError('Test name must start with test_: {}'.format(name))
+            raise ValueError(f'Test name must start with test_: {name}')
         if hasattr(self, name):
-            raise ValueError('Duplicated test name: {}'.format(name))
+            raise ValueError(f'Duplicated test name: {name}')
         setattr(self, name, test_func)

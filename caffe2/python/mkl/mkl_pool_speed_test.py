@@ -1,7 +1,3 @@
-
-
-
-
 import unittest
 
 import numpy as np
@@ -35,7 +31,7 @@ class TestMKLBasic(test_util.TestCase):
             rtol=1e-2)
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("Maxpooling CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"Maxpooling CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
     def testAveragePoolingSpeed(self):
         # We randomly select a shape to test the speed. Intentionally we
@@ -61,7 +57,7 @@ class TestMKLBasic(test_util.TestCase):
             rtol=1e-2)
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("Averagepooling CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"Averagepooling CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
     def testConvReluMaxPoolSpeed(self):
         # We randomly select a shape to test the speed. Intentionally we

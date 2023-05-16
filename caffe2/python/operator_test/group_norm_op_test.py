@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -22,7 +18,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
         D = int(C / G)
         X = X.reshape(N, G, D, -1)
         mu = np.mean(X, axis=(2, 3), keepdims=True)
-        std = np.sqrt((np.var(X, axis=(2, 3), keepdims=True) + epsilon))
+        std = np.sqrt(np.var(X, axis=(2, 3), keepdims=True) + epsilon)
         gamma = gamma.reshape(G, D, 1)
         beta = beta.reshape(G, D, 1)
         Y = gamma * (X - mu) / std + beta
@@ -36,7 +32,7 @@ class TestGroupNormOp(serial.SerializedTestCase):
         D = int(C / G)
         X = X.reshape(N, -1, G, D)
         mu = np.mean(X, axis=(1, 3), keepdims=True)
-        std = np.sqrt((np.var(X, axis=(1, 3), keepdims=True) + epsilon))
+        std = np.sqrt(np.var(X, axis=(1, 3), keepdims=True) + epsilon)
         gamma = gamma.reshape(G, D)
         beta = beta.reshape(G, D)
         Y = gamma * (X - mu) / std + beta

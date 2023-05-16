@@ -23,7 +23,7 @@ from torch.testing._internal import common_utils
 class TestExportModes(pytorch_test_common.ExportTestCase):
     class MyModel(nn.Module):
         def __init__(self):
-            super(TestExportModes.MyModel, self).__init__()
+            super().__init__()
 
         def forward(self, x):
             return x.transpose(0, 1)

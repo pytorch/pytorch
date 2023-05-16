@@ -1,5 +1,3 @@
-
-
 import struct
 import unittest
 
@@ -200,7 +198,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         rois, deltas, im_info = create_bbox_transform_inputs(
             roi_counts, num_classes, rotated
         )
-        pred_bbox, batch_splits = [
+        pred_bbox, batch_splits = (
             t.detach().numpy()
             for t in torch.ops._caffe2.BBoxTransform(
                 torch.tensor(rois),
@@ -215,7 +213,7 @@ class TorchIntegration(hu.HypothesisTestCase):
                 clip_angle_thresh,
                 legacy_plus_one=True,
             )
-        ]
+        )
         class_prob = np.random.randn(sum(roi_counts), num_classes).astype(np.float32)
         score_thresh = 0.5
         nms_thresh = 0.5
@@ -431,8 +429,8 @@ class TorchIntegration(hu.HypothesisTestCase):
             workspace.FeedBlob("hidden_0", hx)
             workspace.FeedBlob("hidden_1", hx)
             for i, param in enumerate(torch_lstm._flat_weights):
-                input_names.append("param_{}".format(i))
-                workspace.FeedBlob("param_{}".format(i), param.detach().numpy())
+                input_names.append(f"param_{i}")
+                workspace.FeedBlob(f"param_{i}", param.detach().numpy())
 
             ref_op = core.CreateOperator(
                 "InferenceLSTM",
@@ -960,7 +958,7 @@ class TorchIntegration(hu.HypothesisTestCase):
         max_mismatched_ratio = 0.5
         max_empty_ratio = 1.0
 
-        outputs_name = ["X_{}".format(i) for i in range(len(lengths))]
+        outputs_name = [f"X_{i}" for i in range(len(lengths))]
         ref_op = core.CreateOperator(
             "GatherRangesToDense",
             ["data", "ranges", "key"],

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import os
@@ -105,12 +100,12 @@ def gen_covered_ops(source_dir):
         covered.add(op_proto.type)
 
         index = 0
-        grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(index))
+        grad_path = os.path.join(temp_dir, f'grad_{index}.pb')
         while os.path.isfile(grad_path):
             with open(grad_path, 'rb') as f:
                 loaded_grad = f.read()
             grad_proto = parse_proto(loaded_grad)
             covered.add(grad_proto.type)
             index += 1
-            grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(index))
+            grad_path = os.path.join(temp_dir, f'grad_{index}.pb')
     return covered

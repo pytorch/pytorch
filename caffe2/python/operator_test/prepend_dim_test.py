@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 
 from caffe2.python import core, workspace

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, test_util
 from caffe2.proto import caffe2_pb2
 import caffe2.python.nomnigraph as ng
@@ -49,11 +44,11 @@ class TestBindings(test_util.TestCase):
         tensors = set()
         for t in nn.tensors:
             tensors.add(t.name)
-        assert tensors == set(["X", "W", "Y", "Z"])
+        assert tensors == {"X", "W", "Y", "Z"}
         ops = set()
         for op in nn.operators:
             ops.add(op.name)
-        assert ops == set(["FC", "Relu"])
+        assert ops == {"FC", "Relu"}
         nodes = set()
         for node in nn.nodes:
             nodes.add(node.name)

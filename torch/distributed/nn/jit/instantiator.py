@@ -43,7 +43,7 @@ def get_arg_return_types_from_interface(module_interface):
         arg_str_list.append(argument.name)
 
         if argument.has_default_value():
-            default_value_str = " = {}".format(argument.default_value)
+            default_value_str = f" = {argument.default_value}"
         else:
             default_value_str = ""
         arg_type_str = "{name}: {type}{default_value}".format(
@@ -67,9 +67,9 @@ def get_arg_return_types_from_interface(module_interface):
 def _write(out_path, text):
     old_text: Optional[str]
     try:
-        with open(out_path, "r") as f:
+        with open(out_path) as f:
             old_text = f.read()
-    except IOError:
+    except OSError:
         old_text = None
     if old_text != text:
         with open(out_path, "w") as f:

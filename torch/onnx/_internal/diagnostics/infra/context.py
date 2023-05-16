@@ -28,15 +28,15 @@ _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
 class Diagnostic:
     rule: infra.Rule
     level: infra.Level
-    message: Optional[str] = None
-    locations: List[infra.Location] = dataclasses.field(default_factory=list)
-    stacks: List[infra.Stack] = dataclasses.field(default_factory=list)
-    graphs: List[infra.Graph] = dataclasses.field(default_factory=list)
-    thread_flow_locations: List[infra.ThreadFlowLocation] = dataclasses.field(
+    message: str | None = None
+    locations: list[infra.Location] = dataclasses.field(default_factory=list)
+    stacks: list[infra.Stack] = dataclasses.field(default_factory=list)
+    graphs: list[infra.Graph] = dataclasses.field(default_factory=list)
+    thread_flow_locations: list[infra.ThreadFlowLocation] = dataclasses.field(
         default_factory=list
     )
-    additional_message: Optional[str] = None
-    tags: List[infra.Tag] = dataclasses.field(default_factory=list)
+    additional_message: str | None = None
+    tags: list[infra.Tag] = dataclasses.field(default_factory=list)
 
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
@@ -118,7 +118,7 @@ class Diagnostic:
         self,
         fn: Callable,
         state: Mapping[str, str],
-        message: Optional[str] = None,
+        message: str | None = None,
         frames_to_skip: int = 0,
     ) -> infra.ThreadFlowLocation:
         """Records a python call as one thread flow step."""
@@ -180,14 +180,14 @@ class DiagnosticContext:
     options: infra.DiagnosticOptions = dataclasses.field(
         default_factory=infra.DiagnosticOptions
     )
-    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
-    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostic_type: type[Diagnostic] = dataclasses.field(default=Diagnostic)
+    diagnostics: list[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     logger: logging.Logger = dataclasses.field(
         init=True, default_factory=lambda: logging.getLogger().getChild("diagnostics")
     )
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
-    _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
+    _inflight_diagnostics: list[Diagnostic] = dataclasses.field(
         init=False, default_factory=list
     )
 
@@ -264,7 +264,7 @@ class DiagnosticContext:
         self,
         rule: infra.Rule,
         level: infra.Level,
-        message: Optional[str] = None,
+        message: str | None = None,
         **kwargs,
     ) -> Diagnostic:
         """Creates a diagnostic for the given arguments.
@@ -304,7 +304,7 @@ class DiagnosticContext:
         """
         return self._inflight_diagnostics.pop()
 
-    def inflight_diagnostic(self, rule: Optional[infra.Rule] = None) -> Diagnostic:
+    def inflight_diagnostic(self, rule: infra.Rule | None = None) -> Diagnostic:
         if rule is None:
             # TODO(bowbao): Create builtin-rules and create diagnostic using that.
             if len(self._inflight_diagnostics) <= 0:
@@ -319,7 +319,7 @@ class DiagnosticContext:
             raise DiagnosticError(f"No inflight diagnostic for rule {rule.name}")
 
     def pretty_print(
-        self, verbose: Optional[bool] = None, log_level: Optional[infra.Level] = None
+        self, verbose: bool | None = None, log_level: infra.Level | None = None
     ) -> None:
         """Prints the diagnostics in a human-readable format.
 

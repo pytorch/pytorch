@@ -576,7 +576,7 @@ def run_test(
         and test_module.time is not None
         else None
     )
-    print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+    print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with open(log_path, "w") as f:
         ret_code = retry_shell(
@@ -894,7 +894,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, "rb"))
     test = str(test)
     n = 100
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         print_to_stderr("")
         if failed:
             if n < num_lines:
@@ -1226,7 +1226,7 @@ def exclude_tests(
                 not exact_match and test.startswith(exclude_test)
             ) or test == exclude_test:
                 if exclude_message is not None:
-                    print_to_stderr("Excluding {} {}".format(test, exclude_message))
+                    print_to_stderr(f"Excluding {test} {exclude_message}")
                 selected_tests.remove(test)
     return selected_tests
 
@@ -1379,7 +1379,7 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), TEST_TIMES_FILE)
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             test_file_times = cast(Dict[str, Any], json.load(f))
     else:
         test_file_times = {}
@@ -1406,7 +1406,7 @@ def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional
     maybe_set_hip_visible_devies()
 
     # Printing the date here can help diagnose which tests are slow
-    print_to_stderr("Running {} ... [{}]".format(str(test), datetime.now()))
+    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
     handler = CUSTOM_HANDLERS.get(test.name, run_test)
     return_code = handler(test, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(

@@ -55,7 +55,7 @@ def recurrent_net(
         # We have to manually scope due to our internal/external blob
         # relationships.
         scope_name = op_name if scope is None else scope
-        return "{}/{}".format(str(scope_name), str(name))
+        return f"{str(scope_name)}/{str(name)}"
 
     # determine inputs that are considered to be references
     # it is those that are not referred to in inputs or initial_cell_inputs

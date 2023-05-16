@@ -327,7 +327,7 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
     else:
         assert torch.all(
             min_val <= max_val
-        ), "min {} should be less than max {}".format(min_val, max_val)
+        ), f"min {min_val} should be less than max {max_val}"
 
     return True
 

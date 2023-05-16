@@ -329,7 +329,7 @@ class TestPaternMatcher(TestCase):
     def test_conv2d_add_scalar(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1
                 )
@@ -419,7 +419,7 @@ class TestPaternMatcher(TestCase):
         # we can't do the fusion when add's inputs are same tensor.
         class Model2(torch.nn.Module):
             def __init__(self):
-                super(Model2, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
                 )
@@ -451,7 +451,7 @@ class TestPaternMatcher(TestCase):
     def test_reproduce_99842_issue(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
 
             def forward(self, input_tensor):

@@ -139,8 +139,8 @@ class GradScaler:
 
     def _check_scale_growth_tracker(self, funcname) -> Tuple[torch.Tensor, torch.Tensor]:
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
-        assert self._scale is not None, "Attempted {} but _scale is None.  ".format(funcname) + fix
-        assert self._growth_tracker is not None, "Attempted {} but _growth_tracker is None.  ".format(funcname) + fix
+        assert self._scale is not None, f"Attempted {funcname} but _scale is None.  " + fix
+        assert self._growth_tracker is not None, f"Attempted {funcname} but _growth_tracker is None.  " + fix
         return (self._scale, self._growth_tracker)
 
     def _lazy_init_scale_growth_tracker(self, dev):

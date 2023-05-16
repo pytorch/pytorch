@@ -10,7 +10,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import _property_bag
 
 
 @dataclasses.dataclass
-class ReportingConfiguration(object):
+class ReportingConfiguration:
     """Information about a rule or notification that can be configured at runtime."""
 
     enabled: bool = dataclasses.field(
@@ -19,10 +19,10 @@ class ReportingConfiguration(object):
     level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    parameters: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    parameters: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
     rank: float = dataclasses.field(

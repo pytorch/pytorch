@@ -41,7 +41,7 @@ def get_act_obs_or_fq_ctr(quantization_config: QuantizationConfig):
     if quantization_spec.is_dynamic:
         # TODO: extend this helper function to support dynamic quantization
         raise Exception(
-            "Unsupported quantization_spec for activation: {}".format(quantization_spec)
+            f"Unsupported quantization_spec for activation: {quantization_spec}"
         )
     if quantization_config.is_qat:
         return create_observer(

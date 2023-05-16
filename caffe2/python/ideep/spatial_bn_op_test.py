@@ -1,8 +1,3 @@
-
-
-
-
-
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
@@ -67,7 +62,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
     def test_spatialbn_train_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
-        print("dc0: {}, dc1: {}".format(dc[0], dc[1]))
+        print(f"dc0: {dc[0]}, dc1: {dc[1]}")
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "running_mean", "running_var"],

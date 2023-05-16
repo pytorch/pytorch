@@ -48,8 +48,8 @@ class ExportDiagnostic(infra.Diagnostic):
     diagnostic.
     """
 
-    python_call_stack: Optional[infra.Stack] = None
-    cpp_call_stack: Optional[infra.Stack] = None
+    python_call_stack: infra.Stack | None = None
+    cpp_call_stack: infra.Stack | None = None
 
     def __init__(
         self,
@@ -97,7 +97,7 @@ class ExportDiagnosticEngine:
     established.
     """
 
-    contexts: List[infra.DiagnosticContext]
+    contexts: list[infra.DiagnosticContext]
     _background_context: infra.DiagnosticContext
 
     def __init__(self) -> None:
@@ -116,8 +116,8 @@ class ExportDiagnosticEngine:
         self,
         name: str,
         version: str,
-        options: Optional[infra.DiagnosticOptions] = None,
-        diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
+        options: infra.DiagnosticOptions | None = None,
+        diagnostic_type: type[infra.Diagnostic] = infra.Diagnostic,
     ) -> infra.DiagnosticContext:
         """Creates a new diagnostic context.
 
@@ -195,7 +195,7 @@ def create_export_diagnostic_context() -> (
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
-    message: Optional[str] = None,
+    message: str | None = None,
     frames_to_skip: int = 2,
     **kwargs,
 ) -> ExportDiagnostic:

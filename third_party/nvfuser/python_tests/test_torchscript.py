@@ -639,7 +639,7 @@ class TestCudaFuser(JitTestCase):
         else:
             o = t(x, y)
 
-        self.assertTrue(self._compare("failing case {}\n{}\n{}\n{}".format(dtype, operation, x, y), o, jit_o, 1e-2))
+        self.assertTrue(self._compare(f"failing case {dtype}\n{operation}\n{x}\n{y}", o, jit_o, 1e-2))
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2767,7 +2767,7 @@ class TestCudaFuser(JitTestCase):
             for i in range(2):
                 inp = torch.rand((3, 3, 32, 32)).cuda()
                 weight = torch.rand((x + i, 3, 7, 7)).cuda()
-                bias = torch.rand((x + i)).cuda()
+                bias = torch.rand(x + i).cuda()
                 res = torch.nn.functional.conv2d(inp, weight, bias, padding=3)
                 responses.append(res)
             return responses

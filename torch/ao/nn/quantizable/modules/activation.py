@@ -317,7 +317,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             raise AssertionError("causal mask not supported by AO MHA module")
 
         if self.batch_first:
-            query, key, value = [x.transpose(0, 1) for x in (query, key, value)]
+            query, key, value = (x.transpose(0, 1) for x in (query, key, value))
 
         tgt_len, bsz, embed_dim_to_check = query.size()
         assert self.embed_dim == embed_dim_to_check
@@ -339,7 +339,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
                 attn_mask = attn_mask.to(torch.bool)
             assert attn_mask.is_floating_point() or attn_mask.dtype == torch.bool, \
-                'Only float and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
+                f'Only float and bool types are supported for attn_mask, not {attn_mask.dtype}'
 
             if attn_mask.dim() == 2:
                 attn_mask = attn_mask.unsqueeze(0)
@@ -349,7 +349,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                 if list(attn_mask.size()) != [bsz * self.num_heads, query.size(0), key.size(0)]:
                     raise RuntimeError('The size of the 3D attn_mask is not correct.')
             else:
-                raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
+                raise RuntimeError(f"attn_mask's dimension {attn_mask.dim()} is not supported")
             # attn_mask's dim is 3 now.
 
         # convert ByteTensor key_padding_mask to bool

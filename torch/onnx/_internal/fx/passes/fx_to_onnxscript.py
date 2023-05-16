@@ -38,7 +38,7 @@ def _fx_node_to_onnx_message_formatter(
 
 def _location_from_fx_stack_trace(
     node_stack_trace: str,
-) -> Optional[diagnostics.infra.Location]:
+) -> diagnostics.infra.Location | None:
     """Extract location from FX node stack trace.
 
     TODO(bowbao): Create fx utils module and move this function there.
@@ -77,12 +77,12 @@ def _location_from_fx_stack_trace(
 @_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
     fx_node_arg: _type_utils.Argument,
-    fx_name_to_onnxscript_value: Dict[
+    fx_name_to_onnxscript_value: dict[
         str,
-        Union[
-            graph_building.TorchScriptTensor,
-            Tuple[graph_building.TorchScriptTensor, ...],
-        ],
+        (
+            graph_building.TorchScriptTensor |
+            tuple[graph_building.TorchScriptTensor, ...]
+        ),
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
 ):
@@ -108,8 +108,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
         # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
         # calculated by other operators.
-        sequence_mixed_elements: List[
-            Union[graph_building.TorchScriptTensor, List[int]]
+        sequence_mixed_elements: list[
+            graph_building.TorchScriptTensor | list[int]
         ] = []
         for tensor in onnx_tensor:
             if isinstance(tensor, torch.fx.Node) and isinstance(
@@ -135,11 +135,11 @@ def _retrieve_or_adapt_input_to_graph_set(
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
-        sequence_elements: List[
-            Union[
-                graph_building.TorchScriptTensor,
-                Tuple[graph_building.TorchScriptTensor, ...],
-            ]
+        sequence_elements: list[
+            (
+                graph_building.TorchScriptTensor |
+                tuple[graph_building.TorchScriptTensor, ...]
+            )
         ] = []
         for tensor in onnx_tensor:
             sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
@@ -180,17 +180,17 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
 
 @_beartype.beartype
 def _fill_tensor_meta(
-    onnxscript_values: Union[
-        graph_building.TorchScriptTensor, Tuple[graph_building.TorchScriptTensor, ...]
-    ],
+    onnxscript_values: (
+        graph_building.TorchScriptTensor | tuple[graph_building.TorchScriptTensor, ...]
+    ),
     name: str,
-    expected_values: Union[
-        fake_tensor.FakeTensor,
-        torch.SymInt,
-        torch.SymFloat,
-        List[fake_tensor.FakeTensor],
-        Tuple[fake_tensor.FakeTensor, ...],
-    ],
+    expected_values: (
+        fake_tensor.FakeTensor |
+        torch.SymInt |
+        torch.SymFloat |
+        list[fake_tensor.FakeTensor] |
+        tuple[fake_tensor.FakeTensor, ...]
+    ),
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
@@ -227,7 +227,7 @@ def _fill_tensor_meta(
 @_beartype.beartype
 def _fill_in_default_kwargs(
     node: torch.fx.Node,
-) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
+) -> tuple[list[_type_utils.Argument], dict[str, _type_utils.Argument]]:
     """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
@@ -241,8 +241,8 @@ def _fill_in_default_kwargs(
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
-    complete_args: List[_type_utils.Argument] = []
-    complete_kwargs: Dict[str, _type_utils.Argument] = {}
+    complete_args: list[_type_utils.Argument] = []
+    complete_kwargs: dict[str, _type_utils.Argument] = {}
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
@@ -261,17 +261,17 @@ def _fill_in_default_kwargs(
 
 @_beartype.beartype
 def _wrap_fx_args_as_onnxscript_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
-    fx_name_to_onnxscript_value: Dict[
+    complete_args: list[_type_utils.Argument],
+    complete_kwargs: dict[str, _type_utils.Argument],
+    fx_name_to_onnxscript_value: dict[
         str,
-        Union[
-            graph_building.TorchScriptTensor,
-            Tuple[graph_building.TorchScriptTensor, ...],
-        ],
+        (
+            graph_building.TorchScriptTensor |
+            tuple[graph_building.TorchScriptTensor, ...]
+        ),
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
-) -> Tuple[tuple, dict]:
+) -> tuple[tuple, dict]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     onnxscript_args = tuple(
@@ -293,12 +293,12 @@ def _export_fx_node_to_onnxscript(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
     onnxscript_graph: graph_building.TorchScriptGraph,
-    fx_name_to_onnxscript_value: Dict[
+    fx_name_to_onnxscript_value: dict[
         str,
-        Union[
-            graph_building.TorchScriptTensor,
-            Tuple[graph_building.TorchScriptTensor, ...],
-        ],
+        (
+            graph_building.TorchScriptTensor |
+            tuple[graph_building.TorchScriptTensor, ...]
+        ),
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
@@ -414,10 +414,10 @@ def _export_fx_node_to_onnxscript(
             complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
         with evaluator.default_as(tracer):
-            output: Union[  # type: ignore[no-redef]
-                graph_building.TorchScriptTensor,
-                Tuple[graph_building.TorchScriptTensor, ...],
-            ] = symbolic_fn(*onnx_args, **onnx_kwargs)
+            output: (  # type: ignore[no-redef]
+                graph_building.TorchScriptTensor |
+                tuple[graph_building.TorchScriptTensor, ...]
+            ) = symbolic_fn(*onnx_args, **onnx_kwargs)
         assert (
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
@@ -535,12 +535,12 @@ def export_fx_to_onnxscript(
     #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
     # to
     #   fx_name_to_onnxscript_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscript_value[fx_tensor_y.name]
-    fx_name_to_onnxscript_value: Dict[
+    fx_name_to_onnxscript_value: dict[
         str,
-        Union[
-            graph_building.TorchScriptTensor,
-            Tuple[graph_building.TorchScriptTensor, ...],
-        ],
+        (
+            graph_building.TorchScriptTensor |
+            tuple[graph_building.TorchScriptTensor, ...]
+        ),
     ] = {}
     # node_fixed_shape is only used on op_level_debug purpose.
     for node in fx_module_with_metadata.graph.nodes:

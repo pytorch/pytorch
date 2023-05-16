@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -86,7 +81,7 @@ class PreConvertTest(hu.HypothesisTestCase):
 
             for blob in output_dict.keys():
                 if not np.allclose(output_dict[blob], output_dict_cosim[blob], atol=0.001, rtol=0.0001):
-                    print("blob {} error".format(blob))
+                    print(f"blob {blob} error")
                     print(np.max(np.abs(output_dict[blob] - output_dict_cosim[blob])))
                     self.assertTrue(False)
 

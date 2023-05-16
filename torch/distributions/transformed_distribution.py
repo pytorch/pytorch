@@ -51,7 +51,7 @@ class TransformedDistribution(Distribution):
                 raise ValueError("transforms must be a Transform or a list of Transforms")
             self.transforms = transforms
         else:
-            raise ValueError("transforms must be a Transform or list, but was {}".format(transforms))
+            raise ValueError(f"transforms must be a Transform or list, but was {transforms}")
 
         # Reshape base_distribution according to transforms.
         base_shape = base_distribution.batch_shape + base_distribution.event_shape

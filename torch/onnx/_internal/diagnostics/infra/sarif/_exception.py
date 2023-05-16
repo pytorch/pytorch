@@ -14,22 +14,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Exception(object):
+class Exception:
     """Describes a runtime exception encountered during the execution of an analysis tool."""
 
-    inner_exceptions: Optional[List[_exception.Exception]] = dataclasses.field(
+    inner_exceptions: list[_exception.Exception] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "innerExceptions"}
     )
-    kind: Optional[str] = dataclasses.field(
+    kind: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "kind"}
     )
-    message: Optional[str] = dataclasses.field(
+    message: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    stack: Optional[_stack.Stack] = dataclasses.field(
+    stack: _stack.Stack | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stack"}
     )
 

@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 
 import unittest
@@ -184,5 +179,5 @@ class CopyOpsTest(test_util.TestCase):
             actual = updated_params[p]
             self.assertTrue(
                 np.array_equal(expected, updated_params[p]),
-                "Mismatch: {}: {}, {}".format(p, expected, actual),
+                f"Mismatch: {p}: {expected}, {actual}",
             )

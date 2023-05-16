@@ -144,7 +144,7 @@ class _DatasetWriter(Writer):
         assert self.mutex is not None, 'setup not called.'
         field_blobs = self._content.field_blobs()
         assert len(fields) == len(field_blobs), (
-            'Expected %s fields, got %s.' % (len(field_blobs), len(fields)))
+            'Expected {} fields, got {}.'.format(len(field_blobs), len(fields)))
         writer_net.CheckDatasetConsistency(
             fields, [], fields=self._content.field_names())
         writer_net.AtomicAppend(

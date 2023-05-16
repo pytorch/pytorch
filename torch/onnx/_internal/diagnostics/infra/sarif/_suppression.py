@@ -10,25 +10,25 @@ from torch.onnx._internal.diagnostics.infra.sarif import _location, _property_ba
 
 
 @dataclasses.dataclass
-class Suppression(object):
+class Suppression:
     """A suppression that is relevant to a result."""
 
     kind: Literal["inSource", "external"] = dataclasses.field(
         metadata={"schema_property_name": "kind"}
     )
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    justification: Optional[str] = dataclasses.field(
+    justification: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "justification"}
     )
-    location: Optional[_location.Location] = dataclasses.field(
+    location: _location.Location | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    state: Optional[Literal["accepted", "underReview", "rejected"]] = dataclasses.field(
+    state: Literal["accepted", "underReview", "rejected"] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "state"}
     )
 

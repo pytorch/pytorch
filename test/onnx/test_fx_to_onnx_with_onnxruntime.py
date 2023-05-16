@@ -51,7 +51,7 @@ def _parameterized_class_attrs_and_values():
     }
 
 
-def _parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+def _parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
     This function is passed to `parameterized.parameterized_class` as the
@@ -187,9 +187,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     )
     def test_func_with_nested_input_structure(self):
         def func(
-            x_dict: Dict[str, torch.Tensor],
-            y_tuple: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]],
-            z_list: List[List[torch.Tensor]],
+            x_dict: dict[str, torch.Tensor],
+            y_tuple: tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]],
+            z_list: list[list[torch.Tensor]],
         ):
             if "a" in x_dict:
                 x = x_dict["a"]
@@ -620,7 +620,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def test_none_input(self):
         class NoneInputModel(torch.nn.Module):
             def forward(
-                self, x: torch.Tensor, y: Optional[torch.Tensor], z: torch.Tensor
+                self, x: torch.Tensor, y: torch.Tensor | None, z: torch.Tensor
             ):
                 if y is None:
                     return x + z

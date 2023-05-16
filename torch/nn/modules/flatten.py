@@ -122,22 +122,22 @@ class Unflatten(Module):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
                     raise TypeError("unflattened_size must be tuple of tuples, " +
-                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
+                                    f"but found element of type {type(elem).__name__} at pos {idx}")
             return
         raise TypeError("unflattened_size must be a tuple of tuples, " +
-                        "but found type {}".format(type(input).__name__))
+                        f"but found type {type(input).__name__}")
 
     def _require_tuple_int(self, input):
         if (isinstance(input, (tuple, list))):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
                     raise TypeError("unflattened_size must be tuple of ints, " +
-                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
+                                    f"but found element of type {type(elem).__name__} at pos {idx}")
             return
-        raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
+        raise TypeError(f"unflattened_size must be a tuple of ints, but found type {type(input).__name__}")
 
     def forward(self, input: Tensor) -> Tensor:
         return input.unflatten(self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
-        return 'dim={}, unflattened_size={}'.format(self.dim, self.unflattened_size)
+        return f'dim={self.dim}, unflattened_size={self.unflattened_size}'

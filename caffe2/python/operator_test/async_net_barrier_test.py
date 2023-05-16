@@ -15,7 +15,7 @@ class TestAsyncNetBarrierOp(hu.HypothesisTestCase):
     )
     def test_async_net_barrier_op(self, n, shape, dc, gc):
         test_inputs = [(100 * np.random.random(shape)).astype(np.float32) for _ in range(n)]
-        test_input_blobs = ["x_{}".format(i) for i in range(n)]
+        test_input_blobs = [f"x_{i}" for i in range(n)]
 
         barrier_op = core.CreateOperator(
             "AsyncNetBarrier",

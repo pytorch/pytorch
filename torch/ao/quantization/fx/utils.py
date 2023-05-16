@@ -149,7 +149,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op, None)
-    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
+    assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
 # Returns a function that can get a new attribute name for module with given
@@ -823,7 +823,7 @@ def _qconfig_satisfies_dtype_config_constraints(
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
-                warnings.warn("QConfig %s must specify 'eps', ignoring %s" % (debug_string, qconfig))
+                warnings.warn("QConfig {} must specify 'eps', ignoring {}".format(debug_string, qconfig))
                 return False
             elif app_scale_min < backend_scale_min:
                 warnings.warn(("QConfig %s eps (%s) must be greater than or equal to "

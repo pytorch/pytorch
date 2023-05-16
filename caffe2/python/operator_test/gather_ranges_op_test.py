@@ -1,5 +1,3 @@
-
-
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
@@ -196,7 +194,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             op=core.CreateOperator(
                 "GatherRangesToDense",
                 ["data", "ranges"],
-                ["X_{}".format(i) for i in range(len(lengths))],
+                [f"X_{i}" for i in range(len(lengths))],
                 lengths=lengths,
             ),
             inputs=[data, ranges, lengths],
@@ -212,7 +210,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             op=core.CreateOperator(
                 "GatherRangesToDense",
                 ["data", "ranges", "key"],
-                ["X_{}".format(i) for i in range(len(lengths))],
+                [f"X_{i}" for i in range(len(lengths))],
                 lengths=lengths,
             ),
             inputs=[data, ranges, key, lengths],
@@ -247,7 +245,7 @@ class TestGatherRanges(serial.SerializedTestCase):
             return core.CreateOperator(
                 "GatherRangesToDense",
                 ["data", "ranges", "key"],
-                ["X_{}".format(i) for i in range(len(lengths))],
+                [f"X_{i}" for i in range(len(lengths))],
                 lengths=lengths,
                 min_observation=min_observation,
                 max_mismatched_ratio=max_mismatched_ratio,

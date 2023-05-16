@@ -14,16 +14,16 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Fix(object):
+class Fix:
     """A proposed fix for the problem represented by a result object. A fix specifies a set of artifacts to modify. For each artifact, it specifies a set of bytes to remove, and provides a set of new bytes to replace them."""
 
-    artifact_changes: List[_artifact_change.ArtifactChange] = dataclasses.field(
+    artifact_changes: list[_artifact_change.ArtifactChange] = dataclasses.field(
         metadata={"schema_property_name": "artifactChanges"}
     )
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

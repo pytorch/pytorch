@@ -39,8 +39,8 @@ def kebab_case_to_snake_case(s: str) -> str:
 
 @_beartype.beartype
 def _convert_key(
-    object: Union[Dict[str, Any], Any], convert: Callable[[str], str]
-) -> Union[Dict[str, Any], Any]:
+    object: dict[str, Any] | Any, convert: Callable[[str], str]
+) -> dict[str, Any] | Any:
     """Convert and update keys in a dictionary with "convert".
 
     Any value that is a dictionary will be recursively updated.
@@ -77,7 +77,7 @@ def _convert_key(
 
 
 @_beartype.beartype
-def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str:
+def sarif_to_json(attr_cls_obj: _SarifClass, indent: str | None = " ") -> str:
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))

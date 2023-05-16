@@ -202,13 +202,13 @@ def compute_stats(stats):
     unsupported_calls = {cuda_call for (cuda_call, _filepath) in stats["unsupported_calls"]}
 
     # Print the number of unsupported calls
-    print("Total number of unsupported CUDA function calls: {0:d}".format(len(unsupported_calls)))
+    print(f"Total number of unsupported CUDA function calls: {len(unsupported_calls):d}")
 
     # Print the list of unsupported calls
     print(", ".join(unsupported_calls))
 
     # Print the number of kernel launches
-    print("\nTotal number of replaced kernel launches: {0:d}".format(len(stats["kernel_launches"])))
+    print("\nTotal number of replaced kernel launches: {:d}".format(len(stats["kernel_launches"])))
 
 
 def add_dim3(kernel_string, cuda_kernel):
@@ -237,8 +237,8 @@ def add_dim3(kernel_string, cuda_kernel):
     first_arg_clean = kernel_string[arg_locs[0]['start']:arg_locs[0]['end']].replace("\n", "").strip(" ")
     second_arg_clean = kernel_string[arg_locs[1]['start']:arg_locs[1]['end']].replace("\n", "").strip(" ")
 
-    first_arg_dim3 = "dim3({})".format(first_arg_clean)
-    second_arg_dim3 = "dim3({})".format(second_arg_clean)
+    first_arg_dim3 = f"dim3({first_arg_clean})"
+    second_arg_dim3 = f"dim3({second_arg_clean})"
 
     first_arg_raw_dim3 = first_arg_raw.replace(first_arg_clean, first_arg_dim3)
     second_arg_raw_dim3 = second_arg_raw.replace(second_arg_clean, second_arg_dim3)
@@ -252,7 +252,7 @@ RE_KERNEL_LAUNCH = re.compile(r'([ ]+)(detail?)::[ ]+\\\n[ ]+')
 def processKernelLaunches(string, stats):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
-    string = RE_KERNEL_LAUNCH.sub(lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
+    string = RE_KERNEL_LAUNCH.sub(lambda inp: f"{inp.group(1)}{inp.group(2)}::", string)
 
     def grab_method_and_template(in_kernel):
         # The positions for relevant kernel components.
@@ -465,7 +465,7 @@ def replace_math_functions(input_string):
     """
     output_string = input_string
     for func in MATH_TRANSPILATIONS:
-        output_string = output_string.replace(r'{}('.format(func), '{}('.format(MATH_TRANSPILATIONS[func]))
+        output_string = output_string.replace(fr'{func}(', f'{MATH_TRANSPILATIONS[func]}(')
 
     return output_string
 
@@ -514,7 +514,7 @@ def replace_extern_shared(input_string):
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
-        lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
+        lambda inp: "HIP_DYNAMIC_SHARED({} {}, {})".format(
             inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
 
     return output_string
@@ -727,7 +727,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
-RE_PYTORCH_PREPROCESSOR = re.compile(r'(?<=\W)({0})(?=\W)'.format(PYTORCH_TRIE.pattern()))
+RE_PYTORCH_PREPROCESSOR = re.compile(fr'(?<=\W)({PYTORCH_TRIE.pattern()})(?=\W)')
 
 RE_QUOTE_HEADER = re.compile(r'#include "([^"]+)"')
 RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
@@ -760,7 +760,7 @@ def preprocessor(
     fin_path = os.path.abspath(os.path.join(output_directory, filepath))
     rel_filepath = os.path.relpath(filepath, output_directory)
 
-    with open(fin_path, 'r', encoding='utf-8') as fin:
+    with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
             return {"hipified_path": None, "status": "[ignored, input is hipified output]"}
         fin.seek(0)
@@ -882,7 +882,7 @@ def preprocessor(
 
     do_write = True
     if os.path.exists(fout_path):
-        with open(fout_path, 'r', encoding='utf-8') as fout_old:
+        with open(fout_path, encoding='utf-8') as fout_old:
             do_write = fout_old.read() != output_source
     if do_write:
         try:
@@ -901,7 +901,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
-            contents = re.sub(r'\b({0})\b'.format(re.escape(search_string)), lambda x: replace_string, contents)
+            contents = re.sub(fr'\b({re.escape(search_string)})\b', lambda x: replace_string, contents)
         else:
             contents = contents.replace(search_string, replace_string)
         f.seek(0)
@@ -913,8 +913,8 @@ def file_add_header(filepath, header):
     with openf(filepath, "r+") as f:
         contents = f.read()
         if header[0] != "<" and header[-1] != ">":
-            header = '"{0}"'.format(header)
-        contents = ('#include {0} \n'.format(header)) + contents
+            header = f'"{header}"'
+        contents = (f'#include {header} \n') + contents
         f.seek(0)
         f.write(contents)
         f.truncate()

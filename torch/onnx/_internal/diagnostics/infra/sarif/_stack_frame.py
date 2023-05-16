@@ -10,22 +10,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import _location, _property_ba
 
 
 @dataclasses.dataclass
-class StackFrame(object):
+class StackFrame:
     """A function call within a stack trace."""
 
-    location: Optional[_location.Location] = dataclasses.field(
+    location: _location.Location | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    module: Optional[str] = dataclasses.field(
+    module: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "module"}
     )
-    parameters: Optional[List[str]] = dataclasses.field(
+    parameters: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    thread_id: Optional[int] = dataclasses.field(
+    thread_id: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "threadId"}
     )
 

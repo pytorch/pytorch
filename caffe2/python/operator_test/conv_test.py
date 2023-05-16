@@ -1,5 +1,3 @@
-
-
 import collections
 import functools
 import unittest
@@ -778,11 +776,11 @@ class TestConvolution(serial.SerializedTestCase):
         # Build a binary tree of conv layers, summing at each node.
         for i in reversed(range(depth)):
             for j in range(2 ** i):
-                bottom_1 = "{}_{}".format(i + 1, 2 * j)
-                bottom_2 = "{}_{}".format(i + 1, 2 * j + 1)
-                mid_1 = "{}_{}_m".format(i + 1, 2 * j)
-                mid_2 = "{}_{}_m".format(i + 1, 2 * j + 1)
-                top = "{}_{}".format(i, j)
+                bottom_1 = f"{i + 1}_{2 * j}"
+                bottom_2 = f"{i + 1}_{2 * j + 1}"
+                mid_1 = f"{i + 1}_{2 * j}_m"
+                mid_2 = f"{i + 1}_{2 * j + 1}_m"
+                top = f"{i}_{j}"
                 w1, b1, w2, b2 = np.random.randn(4).tolist()
                 brew.conv(
                     m,
@@ -832,7 +830,7 @@ class TestConvolution(serial.SerializedTestCase):
             import numpy as np
 
             np.random.seed(1701)
-            input_blobs = ["{}_{}".format(depth, j) for j in range(2 ** depth)]
+            input_blobs = [f"{depth}_{j}" for j in range(2 ** depth)]
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d, h, w).astype(np.float32), device_option=gc

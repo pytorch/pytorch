@@ -558,7 +558,7 @@ class MultiNodeCheckpointManager:
         all_stats = {}
         for _, manager in self._node_managers:
             manager.collect_checkpoint_stats(all_stats)
-        logger.debug("checkpoint stats: {}".format(all_stats))
+        logger.debug(f"checkpoint stats: {all_stats}")
         if self._metadata_handler:
             self._metadata_handler.report(action_name, all_stats)
 
@@ -700,7 +700,7 @@ class JobRunner:
             self.resume_from_epoch = self.checkpoint_manager.\
                 get_resume_from_epoch_id(self.resume_from_epoch)
             if self.resume_from_epoch is not None:
-                logger.info('Resuming from epoch {}'.format(self.resume_from_epoch))
+                logger.info(f'Resuming from epoch {self.resume_from_epoch}')
 
         # Initialize all the nodes.
         from_scratch = self.resume_from_epoch is None
@@ -780,7 +780,7 @@ class JobRunner:
         """
         if not self.checkpoint_manager:
             raise ValueError('Checkpoint manager is None')
-        logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
+        logger.info(f'Loading checkpoint for epoch {epoch} ...')
         result = self.checkpoint_manager.load_blobs_locally(
             self.job.nodes_to_checkpoint(), blob_names, epoch, session)
         self.checkpoint_manager.report_checkpoint_stats('checkpoint_partial_load')
@@ -804,7 +804,7 @@ class JobRunner:
         try:
             is_accessible = self.checkpoint_manager.cp_accessible(epoch=None)
             if is_accessible:
-                logger.info('Saving checkpoints for epoch {}'.format(epoch))
+                logger.info(f'Saving checkpoints for epoch {epoch}')
                 session.run(self.checkpoint_manager.save(epoch))
                 self.checkpoint_manager.write_checkpoint_metadata(epoch)
                 logger.info('Checkpoints saved')

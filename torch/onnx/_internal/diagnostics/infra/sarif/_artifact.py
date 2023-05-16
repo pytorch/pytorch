@@ -15,44 +15,44 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Artifact(object):
+class Artifact:
     """A single artifact. In some cases, this artifact might be nested within another artifact."""
 
-    contents: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
+    contents: _artifact_content.ArtifactContent | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "contents"}
     )
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    encoding: Optional[str] = dataclasses.field(
+    encoding: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "encoding"}
     )
     hashes: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "hashes"}
     )
-    last_modified_time_utc: Optional[str] = dataclasses.field(
+    last_modified_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "lastModifiedTimeUtc"}
     )
     length: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "length"}
     )
-    location: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    location: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    mime_type: Optional[str] = dataclasses.field(
+    mime_type: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "mimeType"}
     )
-    offset: Optional[int] = dataclasses.field(
+    offset: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "offset"}
     )
     parent_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "parentIndex"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    roles: Optional[
-        List[
+    roles: None | (
+        list[
             Literal[
                 "analysisTarget",
                 "attachment",
@@ -79,8 +79,8 @@ class Artifact(object):
                 "debugOutputFile",
             ]
         ]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "roles"})
-    source_language: Optional[str] = dataclasses.field(
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "roles"})
+    source_language: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "sourceLanguage"}
     )
 

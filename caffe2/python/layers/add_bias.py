@@ -21,7 +21,7 @@ class AddBias(ModelLayer):
 
         input_dims = input_record.field_type().shape[0]
         assert input_dims > 0, (
-            "AddBias expects input dimensions > 0, got {}".format(input_dims))
+            f"AddBias expects input dimensions > 0, got {input_dims}")
 
         scale = math.sqrt(1.0 / input_dims)
         bias_init = bias_init if bias_init else (

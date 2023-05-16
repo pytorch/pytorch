@@ -368,7 +368,7 @@ class TestPythonRegistration(TestCase):
 
         out = torch.ops.tlib.sqsum.default(s0, s1)
         out_val = shape_env.evaluate_expr(out.node.expr)
-        self.assertEquals(out_val, 13)
+        self.assertEqual(out_val, 13)
 
 
 class TestCustomOp(TestCase):

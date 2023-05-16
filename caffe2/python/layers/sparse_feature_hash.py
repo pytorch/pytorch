@@ -27,7 +27,7 @@ class SparseFeatureHash(ModelLayer):
         assert use_hashing + use_divide_mod < 2, "use_hashing and use_divide_mod cannot be set true at the same time."
 
         if use_divide_mod:
-            assert divisor >= 1, 'Unexpected divisor: {}'.format(divisor)
+            assert divisor >= 1, f'Unexpected divisor: {divisor}'
 
             self.divisor = self.create_param(param_name='divisor',
                                              shape=[1],
@@ -63,7 +63,7 @@ class SparseFeatureHash(ModelLayer):
         else:
             assert False, "Input type must be one of (IdList, IdScoreList)"
 
-        assert self.modulo >= 1, 'Unexpected modulo: {}'.format(self.modulo)
+        assert self.modulo >= 1, f'Unexpected modulo: {self.modulo}'
         if input_record.lengths.metadata:
             self.output_schema.lengths.set_metadata(input_record.lengths.metadata)
 

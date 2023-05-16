@@ -1,5 +1,3 @@
-
-
 import argparse
 import datetime
 
@@ -38,7 +36,7 @@ def benchmark_sparse_lengths_sum(
         scale_bias = np.random.randint(255, size=(categorical_limit, 8))
         data = np.concatenate([data, scale_bias], axis=1)
 
-    print("Data has shape {} {}".format(data.shape, datetime.datetime.now()))
+    print(f"Data has shape {data.shape} {datetime.datetime.now()}")
     workspace.FeedBlob("X", data.astype(DTYPES[dtype_str]))
 
     # In order to produce truly random lengths and indices, we will embed a

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import (
     core, gradient_checker, rnn_cell, workspace, scope, utils
 )
@@ -761,7 +756,7 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
                           final_dropout=False):
     if dim_out is None:
         dim_out = [dim_in]
-    print("Dims: t={} n={} dim_in={} dim_out={}".format(t, n, dim_in, dim_out))
+    print(f"Dims: t={t} n={n} dim_in={dim_in} dim_out={dim_out}")
 
     model = ModelHelper(name='external')
 
@@ -771,8 +766,8 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
     initial_states = []
     for layer_id, d in enumerate(dim_out):
         h, c = model.net.AddExternalInputs(
-            "hidden_init_{}".format(layer_id),
-            "cell_init_{}".format(layer_id),
+            f"hidden_init_{layer_id}",
+            f"cell_init_{layer_id}",
         )
         initial_states.extend([h, c])
         workspace.FeedBlob(h, generate_input_state((1, n, d)))
@@ -807,7 +802,7 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
         for layer_id, d in enumerate(dim_out):
 
             cell = rnn_cell.MILSTMCell(
-                name='decoder_{}'.format(layer_id),
+                name=f'decoder_{layer_id}',
                 forward_only=forward_only,
                 input_size=layer_input_dim,
                 hidden_size=d,
@@ -895,13 +890,13 @@ class MulCell(rnn_cell.RNNCell):
 def prepare_mul_rnn(model, input_blob, shape, T, outputs_with_grad, num_layers):
     print("Shape: ", shape)
     t, n, d = shape
-    cells = [MulCell(name="layer_{}".format(i)) for i in range(num_layers)]
+    cells = [MulCell(name=f"layer_{i}") for i in range(num_layers)]
     cell = rnn_cell.MultiRNNCell(name="multi_mul_rnn", cells=cells)
     if T is not None:
         cell = rnn_cell.UnrolledCell(cell, T=T)
     states = [
         model.param_init_net.ConstantFill(
-            [], "initial_state_{}".format(i), value=1.0, shape=[1, n, d])
+            [], f"initial_state_{i}", value=1.0, shape=[1, n, d])
         for i in range(num_layers)]
     _, results = cell.apply_over_sequence(
         model=model,
@@ -1001,14 +996,14 @@ class RNNCellTest(hu.HypothesisTestCase):
             (encoder_length, input_tensor.shape[1], encoder_dim),
         ).astype('float32')
 
-        print('Decoder input shape: {}'.format(input_tensor.shape))
-        print('Encoder output shape: {}'.format(encoder_tensor.shape))
+        print(f'Decoder input shape: {input_tensor.shape}')
+        print(f'Encoder output shape: {encoder_tensor.shape}')
 
         # Necessary because otherwise test fails for networks with fewer
         # layers than previous test. TODO: investigate why.
         workspace.ResetWorkspace()
 
-        net, unrolled = [
+        net, unrolled = (
             _prepare_attention(
                 t=input_tensor.shape[0],
                 n=input_tensor.shape[1],
@@ -1019,7 +1014,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                 residual=residual,
                 final_dropout=final_dropout,
             ) for T in [input_tensor.shape[0], None]
-        ]
+        )
 
         workspace.FeedBlob(net['input_blob'], input_tensor)
         workspace.FeedBlob(net['encoder_outputs'], encoder_tensor)
@@ -1690,26 +1685,26 @@ class RNNCellTest(hu.HypothesisTestCase):
         for i in range(num_layers):
             hidden_input_list.append(
                 workspace.FetchBlob(
-                    'layer_{}/initial_hidden_state'.format(i)),
+                    f'layer_{i}/initial_hidden_state'),
             )
             cell_input_list.append(
                 workspace.FetchBlob(
-                    'layer_{}/initial_cell_state'.format(i)),
+                    f'layer_{i}/initial_cell_state'),
             )
             # Input projection for the first layer is produced outside
             # of the cell ans thus not scoped
-            prefix = 'layer_{}/'.format(i) if i > 0 else ''
+            prefix = f'layer_{i}/' if i > 0 else ''
             i2h_w_list.append(
-                workspace.FetchBlob('{}i2h_w'.format(prefix)),
+                workspace.FetchBlob(f'{prefix}i2h_w'),
             )
             i2h_b_list.append(
-                workspace.FetchBlob('{}i2h_b'.format(prefix)),
+                workspace.FetchBlob(f'{prefix}i2h_b'),
             )
             gates_w_list.append(
-                workspace.FetchBlob('layer_{}/gates_t_w'.format(i)),
+                workspace.FetchBlob(f'layer_{i}/gates_t_w'),
             )
             gates_b_list.append(
-                workspace.FetchBlob('layer_{}/gates_t_b'.format(i)),
+                workspace.FetchBlob(f'layer_{i}/gates_t_b'),
             )
 
         workspace.RunNetOnce(model.net)

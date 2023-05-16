@@ -199,15 +199,15 @@ def sig_for_ops(opname: str) -> List[str]:
 
     name = opname[2:-2]
     if name in binary_ops:
-        return ["def {}(self, other: Any) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
     elif name in comparison_ops:
-        sig = "def {}(self, other: Any) -> Tensor: ...".format(opname)
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
         if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
             sig += "  # type: ignore[override]"
         return [sig]
     elif name in unary_ops:
-        return ["def {}(self) -> Tensor: ...".format(opname)]
+        return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
         if name in {"bool", "float", "complex"}:
             tname = name
@@ -217,7 +217,7 @@ def sig_for_ops(opname: str) -> List[str]:
             tname = "int"
         if tname in {"float", "int", "bool", "complex"}:
             tname = "builtins." + tname
-        return ["def {}(self) -> {}: ...".format(opname, tname)]
+        return [f"def {opname}(self) -> {tname}: ..."]
     else:
         raise Exception("unknown op", opname)
 
@@ -302,7 +302,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     ]
     import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
     # TODO make these types more precise
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    dispatch_code = [f"{_}: Callable" for _ in (dispatches + from_c)]
     fm.write_with_template(
         "torch/nn/functional.pyi",
         "torch/nn/functional.pyi.in",
@@ -315,7 +315,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     # functional.pyi already contains the definitions for those functions
     # so, we don't export then to it
     from_c.extend(["hardtanh", "leaky_relu", "hardsigmoid"])
-    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    dispatch_code = [f"{_}: Callable" for _ in (dispatches + from_c)]
     fm.write_with_template(
         "torch/_C/_nn.pyi",
         "torch/_C/_nn.pyi.in",
@@ -988,7 +988,7 @@ def gen_pyi(
     ]
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append(
-            "def {}(self) -> Tensor: ...".format(name)
+            f"def {name}(self) -> Tensor: ..."
         )
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
@@ -1018,7 +1018,7 @@ def gen_pyi(
                 namedtuples[tuple_name] = tuple_def
 
     for op in all_ops:
-        name = "__{}__".format(op)
+        name = f"__{op}__"
         unsorted_tensor_method_hints[name] += sig_for_ops(name)
 
     tensor_method_hints = []
@@ -1032,7 +1032,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
+    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1051,7 +1051,7 @@ def gen_pyi(
         "ByteTensor",
         "BoolTensor",
     ):
-        legacy_class_hints.append("class {}(Tensor): ...".format(c))
+        legacy_class_hints.append(f"class {c}(Tensor): ...")
 
     # Generate type signatures for dtype classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1059,7 +1059,7 @@ def gen_pyi(
     # TODO: don't explicitly list dtypes here; get it from canonical
     # source
     dtype_class_hints = [
-        "{}: dtype = ...".format(n)
+        f"{n}: dtype = ..."
         for n in [
             "float32",
             "float",
@@ -1100,7 +1100,7 @@ def gen_pyi(
     ]
     all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
-    all_directive[0] = "__all__ = {}".format(all_directive[0])
+    all_directive[0] = f"__all__ = {all_directive[0]}"
 
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~

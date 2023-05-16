@@ -545,11 +545,11 @@ class TestBottleneck(TestCase):
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = '{}/{}'.format(curdir, test_file)
+        filepath = f'{curdir}/{test_file}'
         if scriptargs != '':
-            scriptargs = ' {}'.format(scriptargs)
+            scriptargs = f' {scriptargs}'
         rc, out, err = self._run(
-            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
+            f'{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}')
         return rc, out, err
 
     def _check_run_args(self):
@@ -562,7 +562,7 @@ class TestBottleneck(TestCase):
         self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
-        return '{}, output was:\n{}'.format(msg, output)
+        return f'{msg}, output was:\n{output}'
 
     def _check_environment_summary(self, output):
         results = re.search('Environment Summary', output)
@@ -603,7 +603,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
-        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg=f'Run failed with\n{err}')
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -614,7 +614,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
-        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg=f'Run failed with\n{err}')
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -740,7 +740,7 @@ class TestStandaloneCPPJIT(TestCase):
                     std::cout << x << std::endl;
                 }
             """)
-            with open(src_path, "wt") as f:
+            with open(src_path, "w") as f:
                 f.write(src)
 
             exec_path = torch.utils.cpp_extension.load(

@@ -1,5 +1,3 @@
-# coding=utf-8
-
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor

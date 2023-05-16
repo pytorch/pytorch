@@ -190,7 +190,7 @@ class TestJit(JitCommonTestCase):
     _alias_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=(torch.float,))
 
-    @_alias_ops((op for op in op_db if op.aliases))
+    @_alias_ops(op for op in op_db if op.aliases)
     def test_jit_alias_remapping(self, device, dtype, op):
         # NOTE: only tests on first sample
         samples = op.sample_inputs(device, dtype, requires_grad=True)

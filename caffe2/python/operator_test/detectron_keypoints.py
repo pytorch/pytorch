@@ -1,8 +1,3 @@
-
-
-
-
-
 try:
     import cv2
 except ImportError:

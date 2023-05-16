@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
@@ -509,7 +504,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
                             total_xent += \
                                 -np.log(max(probs[i, l, y, x], 1e-20)) * w
                             total_weight += w
-            print("Total weight {}".format(total_weight))
+            print(f"Total weight {total_weight}")
 
             return (probs, total_xent / total_weight)
 
@@ -599,7 +594,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
 
         def label_softmax_crossent(X, label, weights=None):
             probs = np.zeros((n, D))
-            rowmax = np.zeros((n))
+            rowmax = np.zeros(n)
             for i in range(n):
                 rowmax[i] = max(X[i, ])
                 # We need to subtract the max to avoid numerical issues
@@ -652,7 +647,7 @@ class TestSoftmaxOps(serial.SerializedTestCase):
             W = 64 + int(np.random.rand(1) * 1024)
             H = 64 + int(np.random.rand(1) * 1024)
 
-            print("W: {} H: {}".format(W, H))
+            print(f"W: {W} H: {H}")
 
             X = np.random.rand(n, D, H, W).astype(np.float32)
             X = X + 1e-2

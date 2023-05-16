@@ -43,17 +43,17 @@ def deleteDirectory(top_dir):
 def progressBar(percentage):
     full = int(DOWNLOAD_COLUMNS * percentage / 100)
     bar = full * "#" + (DOWNLOAD_COLUMNS - full) * " "
-    sys.stdout.write(u"\u001b[1000D[" + bar + "] " + str(percentage) + "%")
+    sys.stdout.write("\u001b[1000D[" + bar + "] " + str(percentage) + "%")
     sys.stdout.flush()
 
 
 def downloadFromURLToFile(url, filename, show_progress=True):
     try:
-        print("Downloading from {url}".format(url=url))
+        print(f"Downloading from {url}")
         response = urllib.urlopen(url)
         size = int(response.info().get('Content-Length').strip())
         chunk = min(size, 8192)
-        print("Writing to {filename}".format(filename=filename))
+        print(f"Writing to {filename}")
         if show_progress:
             downloaded_size = 0
             progressBar(0)
@@ -82,7 +82,7 @@ def getURLFromName(name, filename):
 
 def downloadModel(model, args):
     # Figure out where to store the model
-    model_folder = '{folder}'.format(folder=model)
+    model_folder = f'{model}'
     dir_path = os.path.dirname(os.path.realpath(__file__))
     if args.install:
         model_folder = '{dir_path}/{folder}'.format(dir_path=dir_path,
@@ -108,7 +108,7 @@ def downloadModel(model, args):
             if response.upper() == 'N' or not response:
                 print("Cancelling download...")
                 exit(0)
-        print("Overwriting existing folder! ({filename})".format(filename=model_folder))
+        print(f"Overwriting existing folder! ({model_folder})")
         deleteDirectory(model_folder)
 
     # Now we can safely create the folder and download the model
@@ -119,14 +119,14 @@ def downloadModel(model, args):
                                   '{folder}/{f}'.format(folder=model_folder,
                                                         f=f))
         except Exception as e:
-            print("Abort: {reason}".format(reason=str(e)))
+            print(f"Abort: {str(e)}")
             print("Cleaning up...")
             deleteDirectory(model_folder)
             exit(0)
 
     if args.install:
-        os.symlink("{folder}/__sym_init__.py".format(folder=dir_path),
-                   "{folder}/__init__.py".format(folder=model_folder))
+        os.symlink(f"{dir_path}/__sym_init__.py",
+                   f"{model_folder}/__init__.py")
 
 
 def validModelName(name):
@@ -212,4 +212,4 @@ if __name__ == "__main__":
         if validModelName(model):
             downloadModel(model, args)
         else:
-            print("'{}' is not a valid model name.".format(model))
+            print(f"'{model}' is not a valid model name.")

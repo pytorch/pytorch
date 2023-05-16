@@ -33,7 +33,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-class DummyModule(object):
+class DummyModule:
 
     @staticmethod
     def device_count() -> int:

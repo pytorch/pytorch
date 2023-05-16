@@ -1,8 +1,3 @@
-
-
-
-
-
 import logging
 
 from caffe2.python import schema

@@ -123,7 +123,7 @@ class TestQuantizePT2E(QuantizationTestCase):
     def test_max_pool2d_quantizer(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 1)
                 self.pool = torch.nn.MaxPool2d(1, 1)
 

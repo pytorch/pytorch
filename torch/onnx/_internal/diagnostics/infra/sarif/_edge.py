@@ -10,7 +10,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import _message, _property_bag
 
 
 @dataclasses.dataclass
-class Edge(object):
+class Edge:
     """Represents a directed edge in a graph."""
 
     id: str = dataclasses.field(metadata={"schema_property_name": "id"})
@@ -20,10 +20,10 @@ class Edge(object):
     target_node_id: str = dataclasses.field(
         metadata={"schema_property_name": "targetNodeId"}
     )
-    label: Optional[_message.Message] = dataclasses.field(
+    label: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "label"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

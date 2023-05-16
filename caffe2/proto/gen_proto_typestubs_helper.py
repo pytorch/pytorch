@@ -1,6 +1,6 @@
 import ast
 
-with open("../python/__init__.py", "r") as f:
+with open("../python/__init__.py") as f:
     tree = ast.parse(f.read())
 
 print("\nDeviceType = int\n")

@@ -234,7 +234,7 @@ class _DataPipeType:
             return issubtype(self.param, other.param)
         if isinstance(other, type):
             return issubtype(self.param, other)
-        raise TypeError("Expected '_DataPipeType' or 'type', but found {}".format(type(other)))
+        raise TypeError(f"Expected '_DataPipeType' or 'type', but found {type(other)}")
 
     def issubtype_of_instance(self, other):
         return issubinstance(other, self.param)
@@ -279,13 +279,13 @@ class _DataPipeMeta(GenericMeta):
     @_tp_cache
     def _getitem_(self, params):
         if params is None:
-            raise TypeError('{}[t]: t can not be None'.format(self.__name__))
+            raise TypeError(f'{self.__name__}[t]: t can not be None')
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
             params = (params, )
 
-        msg = "{}[t]: t must be a type".format(self.__name__)
+        msg = f"{self.__name__}[t]: t must be a type"
         params = tuple(_type_check(p, msg) for p in params)
 
         if isinstance(self.type.param, _GenericAlias):
@@ -303,7 +303,7 @@ class _DataPipeMeta(GenericMeta):
                                        '__type_class__': True})
 
         if len(params) > 1:
-            raise TypeError('Too many parameters for {} actual {}, expected 1'.format(self, len(params)))
+            raise TypeError(f'Too many parameters for {self} actual {len(params)}, expected 1')
 
         t = _DataPipeType(params[0])
 

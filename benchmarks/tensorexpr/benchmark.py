@@ -66,7 +66,7 @@ class Benchmark:
         if "NNC_NUM_THREADS" in os.environ:
             num_threads_str = os.environ["NNC_NUM_THREADS"]
             device += num_threads_str
-        return "%s: %s_%s_%s_%s" % (
+        return "{}: {}_{}_{}_{}".format(
             self.engine.mode,
             self.module(),
             self.mode,
@@ -203,7 +203,7 @@ class Benchmark:
         if self.output_type == "json":
             print(json.dumps(result_dict))
         elif self.output_type == "stdout":
-            msg = "%s: %.2f us, SOL %.2f GB/s, algorithmic %.2f GB/s" % (
+            msg = "{}: {:.2f} us, SOL {:.2f} GB/s, algorithmic {:.2f} GB/s".format(
                 result_dict["desc"],
                 result_dict["us"],
                 result_dict["sol"],

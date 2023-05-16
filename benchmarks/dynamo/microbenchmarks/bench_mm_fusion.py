@@ -15,7 +15,7 @@ torch.manual_seed(0)
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-class Func(object):
+class Func:
     # mm
     @torch._dynamo.optimize("inductor")
     def mm(a, b, bias):

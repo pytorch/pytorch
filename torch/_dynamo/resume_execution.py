@@ -381,7 +381,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
-            (target,) = [i for i in instructions if i.offset == offset]
+            (target,) = (i for i in instructions if i.offset == offset)
 
             prefix = []
             if sys.version_info >= (3, 11):
@@ -488,13 +488,13 @@ class ContinueExecutionCache:
             instructions: List[Instruction], code_options: Dict[str, Any]
         ):
             nonlocal new_offset
-            (target,) = [i for i in instructions if i.offset == offset]
+            (target,) = (i for i in instructions if i.offset == offset)
             # match the functions starting at the last instruction as we have added a prefix
-            (new_target,) = [
+            (new_target,) = (
                 i2
                 for i1, i2 in zip(reversed(instructions), reversed(meta.instructions))
                 if i1 is target
-            ]
+            )
             assert target.opcode == new_target.opcode
             new_offset = new_target.offset
 

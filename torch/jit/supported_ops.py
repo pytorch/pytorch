@@ -13,10 +13,10 @@ def _emit_type(type):
     return str(type)
 
 def _emit_arg(indent, i, arg):
-    v = "{} : {}".format(arg.name, _emit_type(arg.type))
+    v = f"{arg.name} : {_emit_type(arg.type)}"
     default = arg.default_value
     if default is not None:
-        v = "{}={}".format(v, str(default))
+        v = f"{v}={str(default)}"
     if i > 0:
         v = "\n{}{}".format(" " * indent, v)
     return v
@@ -36,7 +36,7 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
     if mod is None:
         qualified_name = name
     else:
-        qualified_name = "{}.{}".format(mod, name)
+        qualified_name = f"{mod}.{name}"
     schema_str = "{}({}) -> {}".format(qualified_name,
                                        _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
                                        _emit_rets(schema.returns))
@@ -246,13 +246,13 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
-        magic_methods_rows.append('"{}", "``{}``"'.format(fn, magic_method))
+        magic_methods_rows.append(f'"{fn}", "``{magic_method}``"')
 
     schematized_ops = []
     schemaless_ops = []
 
     for fn in supported_builtins:
-        op_name = 'aten::{}'.format(fn)
+        op_name = f'aten::{fn}'
         if fn in op_renames:
             op_name = op_renames[fn]
         schemas = torch._C._jit_get_schemas_for_operator(op_name)
@@ -261,7 +261,7 @@ def _get_global_builtins():
         if len(schemas) > 0:
             schematized_ops.append('')
         else:
-            table_row = '":any:`{}`", "{}"'.format(fn, schemaless_op_explanations[fn])
+            table_row = f'":any:`{fn}`", "{schemaless_op_explanations[fn]}"'
             schemaless_ops.append(table_row)
 
     schematized_ops_str = '\n'.join(schematized_ops)
@@ -299,7 +299,7 @@ These built-in functions use the schema
 
 def _list_supported_ops():
     def emit_block(decls):
-        return '\n.. rst-class:: codeblock-height-limiter\n\n::\n\n{}\n'.format(''.join('    {}\n\n'.format(d) for d in decls))
+        return '\n.. rst-class:: codeblock-height-limiter\n\n::\n\n{}\n'.format(''.join(f'    {d}\n\n' for d in decls))
 
     body = ''
     op_gathering_fns = (
@@ -316,7 +316,7 @@ def _list_supported_ops():
             section = "{}\n{}\n{}\n".format(header, '~' * len(header), items)
         else:
             section = "{}\n{}\n{}".format(header, '~' * len(header), emit_block(items))
-        section = '.. _{}:'.format(link_target) + '\n\n' + section
+        section = f'.. _{link_target}:' + '\n\n' + section
         body += section
 
     return body

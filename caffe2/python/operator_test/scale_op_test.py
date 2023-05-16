@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 
 import caffe2.python.hypothesis_test_util as hu
@@ -26,11 +21,11 @@ class TestScaleOps(serial.SerializedTestCase):
         out_ref_tensors = []
         # initialize tensors
         for i in range(num_tensors):
-            tensor = "X_{}".format(i)
+            tensor = f"X_{i}"
             X = np.random.rand(*dim).astype(np.float32) - 0.5
             in_tensors.append(tensor)
             in_tensor_ps.append(X)
-            out_tensor = "O_{}".format(i)
+            out_tensor = f"O_{i}"
             out_tensors.append(out_tensor)
             workspace.FeedBlob(tensor, X, device_option=gc)
 
@@ -46,8 +41,8 @@ class TestScaleOps(serial.SerializedTestCase):
 
         # run Scale op for each tensor and compare with ScaleBlobs
         for i in range(num_tensors):
-            tensor = "X_{}".format(i)
-            out_ref_tensor = "O_ref_{}".format(i)
+            tensor = f"X_{i}"
+            out_ref_tensor = f"O_ref_{i}"
             scale_op = core.CreateOperator(
                 "Scale",
                 [tensor],

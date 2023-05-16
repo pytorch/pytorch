@@ -280,11 +280,11 @@ class TestSparse(TestSparseBase):
         for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
             indices_shape = torch.Size((sparse_dim, nnz))
             values_shape = torch.Size((nnz,) + shape[sparse_dim:])
-            printed.append("# shape: {}".format(torch.Size(shape)))
-            printed.append("# nnz: {}".format(nnz))
-            printed.append("# sparse_dim: {}".format(sparse_dim))
-            printed.append("# indices shape: {}".format(indices_shape))
-            printed.append("# values shape: {}".format(values_shape))
+            printed.append(f"# shape: {torch.Size(shape)}")
+            printed.append(f"# nnz: {nnz}")
+            printed.append(f"# sparse_dim: {sparse_dim}")
+            printed.append(f"# indices shape: {indices_shape}")
+            printed.append(f"# values shape: {values_shape}")
 
             indices = torch.arange(indices_shape.numel(), dtype=self.index_tensor(0).dtype,
                                    device=device).view(indices_shape)
@@ -303,7 +303,7 @@ class TestSparse(TestSparseBase):
             else:
                 dtypes.append(torch.double)
             for dtype in dtypes:
-                printed.append("########## {} ##########".format(dtype))
+                printed.append(f"########## {dtype} ##########")
                 x = sp_tensor.detach().to(dtype)
                 printed.append("# sparse tensor")
                 printed.append(str(x))

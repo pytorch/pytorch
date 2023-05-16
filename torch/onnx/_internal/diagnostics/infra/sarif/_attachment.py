@@ -16,22 +16,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Attachment(object):
+class Attachment:
     """An artifact relevant to a result."""
 
     artifact_location: _artifact_location.ArtifactLocation = dataclasses.field(
         metadata={"schema_property_name": "artifactLocation"}
     )
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rectangles: Optional[List[_rectangle.Rectangle]] = dataclasses.field(
+    rectangles: list[_rectangle.Rectangle] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "rectangles"}
     )
-    regions: Optional[List[_region.Region]] = dataclasses.field(
+    regions: list[_region.Region] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "regions"}
     )
 

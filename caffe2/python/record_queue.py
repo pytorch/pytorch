@@ -74,7 +74,7 @@ class RecordQueue:
         exit_net = core.Net(self.name + '/exit_net')
         exit_net.CloseBlobsQueue(self.blobs_queue, 0)
         self.exit_step = core.execution_step(
-            '{}_close_step'.format(str(exit_net)),
+            f'{str(exit_net)}_close_step',
             exit_net)
 
     def build(self, reader, process=None):

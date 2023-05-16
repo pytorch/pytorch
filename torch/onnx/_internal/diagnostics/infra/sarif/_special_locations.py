@@ -13,13 +13,13 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class SpecialLocations(object):
+class SpecialLocations:
     """Defines locations of special significance to SARIF consumers."""
 
-    display_base: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    display_base: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "displayBase"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

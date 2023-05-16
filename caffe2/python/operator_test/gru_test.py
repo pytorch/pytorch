@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace, core, scope, gru_cell
 from caffe2.python.model_helper import ModelHelper
 from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
@@ -175,7 +170,7 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
                          forward_only=False, drop_states=False,
                          sequence_lengths=False,
                          two_d_initial_states=None):
-    print("Dims: (n,d) = ({},{})".format(n, d))
+    print(f"Dims: (n,d) = ({n},{d})")
 
     def generate_input_state(n, d):
         if two_d_initial_states:
@@ -241,7 +236,7 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
             np.random.randint(1, 10, size=(1,)).astype(np.int32),
             device_option=core.DeviceOption(caffe2_pb2.CPU),
         )
-        print("Feed {}".format(timestep))
+        print(f"Feed {timestep}")
 
     return hidden_t, model.net
 
@@ -297,7 +292,7 @@ class GRUCellTest(serial.SerializedTestCase):
         # Checking for hidden_prev and gates gradients
         if not fwd_only:
             for param in range(2):
-                print("Check param {}".format(param))
+                print(f"Check param {param}")
                 self.assertGradientChecks(
                     device_option=gc,
                     op=op,
@@ -367,7 +362,7 @@ class GRUCellTest(serial.SerializedTestCase):
         # Checking for input, gates_t_w and gates_t_b gradients
         if not fwd_only:
             for param in range(2):
-                print("Check param {}".format(param))
+                print(f"Check param {param}")
                 self.assertGradientChecks(
                     device_option=gc,
                     op=op,

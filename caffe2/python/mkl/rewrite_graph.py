@@ -1,8 +1,3 @@
-
-
-
-
-
 import copy
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
@@ -29,7 +24,7 @@ def fix_BoxWithNMSLimit(net):
     for op in net.op:
         if op.type == 'CopyIDEEPToCPU':
             if op.input[0] in outputs:
-                print("Chaning CopyIDEEPToCPU to Copy for {}".format(op.input[0]))
+                print(f"Chaning CopyIDEEPToCPU to Copy for {op.input[0]}")
                 op.type = 'Copy'
                 op.device_option.device_type = caffe2_pb2.CPU
 
@@ -39,7 +34,7 @@ def rewrite_run_net_simple(net):
     # with MKL, so just insert copy ops for external_input[0] and
     # external_output[0]
     def mkl_tmp(name):
-        return "{}__MKL__".format(name)
+        return f"{name}__MKL__"
 
     input_blob = net.external_input[0]
     if input_blob != net.op[0].input[0]:
@@ -93,10 +88,10 @@ def rewrite_run_net_simple_xrayocr_lstm(net):
     # directly so there's no need to copy back to ideep/mkl
 
     def mkl_tmp(name):
-        return "{}__MKL__".format(name)
+        return f"{name}__MKL__"
 
     def cpu_tmp(name):
-        return "{}__CPU__".format(name)
+        return f"{name}__CPU__"
 
     input_blob = net.external_input[0]
     if input_blob != net.op[0].input[0]:

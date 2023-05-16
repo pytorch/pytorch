@@ -15,19 +15,19 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Conversion(object):
+class Conversion:
     """Describes how a converter transformed the output of a static analysis tool from the analysis tool's native output format into the SARIF format."""
 
     tool: _tool.Tool = dataclasses.field(metadata={"schema_property_name": "tool"})
-    analysis_tool_log_files: Optional[
-        List[_artifact_location.ArtifactLocation]
-    ] = dataclasses.field(
+    analysis_tool_log_files: None | (
+        list[_artifact_location.ArtifactLocation]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "analysisToolLogFiles"}
     )
-    invocation: Optional[_invocation.Invocation] = dataclasses.field(
+    invocation: _invocation.Invocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "invocation"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

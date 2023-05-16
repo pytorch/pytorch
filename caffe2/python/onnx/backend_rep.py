@@ -24,7 +24,7 @@ class Caffe2Rep(BackendRep):
     @property
     def _name_scope(self):
         if self.predict_net.device_option.device_type == caffe2_pb2.CUDA:
-            return 'gpu_{}'.format(self.predict_net.device_option.device_id)
+            return f'gpu_{self.predict_net.device_option.device_id}'
         return ''
 
     def run(self, inputs, **kwargs):

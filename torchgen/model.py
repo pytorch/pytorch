@@ -40,7 +40,7 @@ class Location:
     line: int
 
     def __str__(self) -> str:
-        return "{}:{}".format(self.file, self.line)
+        return f"{self.file}:{self.line}"
 
 
 # Valid values of the 'variants' field in native_functions.yaml

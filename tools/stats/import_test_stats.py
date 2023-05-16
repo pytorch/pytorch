@@ -54,7 +54,7 @@ def fetch_and_cache(
 
     if os.path.exists(path) and is_cached_file_valid():
         # Another test process already download the file, so don't re-do it
-        with open(path, "r") as f:
+        with open(path) as f:
             return cast(Dict[str, Any], json.load(f))
 
     for _ in range(3):

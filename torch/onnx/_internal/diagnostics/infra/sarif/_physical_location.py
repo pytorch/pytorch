@@ -15,24 +15,24 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class PhysicalLocation(object):
+class PhysicalLocation:
     """A physical location relevant to a result. Specifies a reference to a programming artifact together with a range of bytes or characters within that artifact."""
 
-    address: Optional[_address.Address] = dataclasses.field(
+    address: _address.Address | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "address"}
     )
-    artifact_location: Optional[
+    artifact_location: None | (
         _artifact_location.ArtifactLocation
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "artifactLocation"}
     )
-    context_region: Optional[_region.Region] = dataclasses.field(
+    context_region: _region.Region | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "contextRegion"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    region: Optional[_region.Region] = dataclasses.field(
+    region: _region.Region | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "region"}
     )
 

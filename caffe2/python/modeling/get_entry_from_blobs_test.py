@@ -47,7 +47,7 @@ class GetEntryFromBlobsTest(unittest.TestCase):
         workspace.RunNetOnce(model.net)
 
         fc1_w = workspace.FetchBlob('fc1_w')
-        fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_{1}'.format(i1, i2))
+        fc1_w_entry = workspace.FetchBlob(f'fc1_w_{i1}_{i2}')
 
         self.assertEqual(fc1_w_entry.size, 1)
         self.assertEqual(fc1_w_entry[0], fc1_w[i1][i2])
@@ -75,9 +75,9 @@ class GetEntryFromBlobsTest(unittest.TestCase):
 
         fc1_w = workspace.FetchBlob('fc1_w')
         if i2 < 0:
-            fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_all'.format(i1))
+            fc1_w_entry = workspace.FetchBlob(f'fc1_w_{i1}_all')
         else:
-            fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_{1}'.format(i1, i2))
+            fc1_w_entry = workspace.FetchBlob(f'fc1_w_{i1}_{i2}')
 
         if i2 < 0:
             self.assertEqual(fc1_w_entry.size, 4)

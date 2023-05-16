@@ -1,8 +1,3 @@
-
-
-
-
-
 import functools
 
 from hypothesis import given, settings, HealthCheck

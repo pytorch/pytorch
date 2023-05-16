@@ -51,11 +51,11 @@ class Benchmark(metaclass=BenchmarkMeta):
         self.results = []
 
     def display(self):
-        print('Results ({}):'.format(type(self).__name__))
+        print(f'Results ({type(self).__name__}):')
         print('input size                      ms/iter')
         print('------------------------------  -----------')
         for size, ms in self.results:
-            print('{!s:<30}  {:.4f}'.format(size, ms))
+            print(f'{size!s:<30}  {ms:.4f}')
 
 
 class SumElements(Benchmark):
@@ -68,7 +68,7 @@ class SumElements(Benchmark):
 
         for n in itertools.imap(pow, itertools.cycle([10]), range(10)):
             X = np.random.rand(n).astype(np.float32)
-            logger.info('Running benchmark for n = {}'.format(n))
+            logger.info(f'Running benchmark for n = {n}')
             ret = runOpBenchmark(gpu_do, op, inputs=[X])
             self.results.append((n, ret[1]))
 
@@ -83,7 +83,7 @@ class SumSqrElements(Benchmark):
 
         for n in itertools.imap(pow, itertools.cycle([10]), range(10)):
             X = np.random.rand(n).astype(np.float32)
-            logger.info('Running benchmark for n = {}'.format(n))
+            logger.info(f'Running benchmark for n = {n}')
             ret = runOpBenchmark(gpu_do, op, inputs=[X])
             self.results.append((n, ret[1]))
 
@@ -100,7 +100,7 @@ class SoftMaxWithLoss(Benchmark):
             for D in itertools.imap(pow, itertools.cycle([10]), range(3)):
                 X = np.random.rand(n, D).astype(np.float32)
                 label = (np.random.rand(n) * D).astype(np.int32)
-                logger.info('Running benchmark for n = {}, D= {}'.format(n, D))
+                logger.info(f'Running benchmark for n = {n}, D= {D}')
                 ret = runOpBenchmark(gpu_do, op, inputs=[X, label])
                 self.results.append(((n, D), ret[1]))
 

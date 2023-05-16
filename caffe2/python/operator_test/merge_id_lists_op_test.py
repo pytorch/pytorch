@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -72,7 +67,7 @@ class TestMergeIdListsOp(serial.SerializedTestCase):
         num_inputs = int(len(inputs) / 2)
         op = core.CreateOperator(
             "MergeIdLists",
-            ["{prefix}_{i}".format(prefix=p, i=i)
+            [f"{p}_{i}"
                 for i in range(num_inputs)
                 for p in ["lengths", "values"]],
             ["merged_lengths", "merged_values"]

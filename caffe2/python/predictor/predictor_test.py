@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import numpy as np
 from caffe2.python import workspace, core

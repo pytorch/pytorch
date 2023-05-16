@@ -143,7 +143,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 ['X'],
                 ['Y'])
         )
-        print("REF NET = {}".format(ref_net))
+        print(f"REF NET = {ref_net}")
 
         shape_hints = {"X": X.shape}
         pred_net_onnxified = onnxifi_caffe2_net(pred_net,
@@ -187,7 +187,7 @@ class UnaryOpTest(serial.SerializedTestCase):
             region_err = compute_ulp_error(opname, X, Y_glow)
             ulp_err = max(np.max(np.abs(region_err)), ulp_err)
         if (ulp_err > err_threshold):
-            print(r'{} Op detected ulp_err={}'.format(opname, ulp_err))
+            print(fr'{opname} Op detected ulp_err={ulp_err}')
             assert(0)
 
     # These tests doesn't need to run multiple times given that it is a
@@ -269,7 +269,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 ['Y'],
                 eps=1e-6)
         )
-        print("REF NET = {}".format(ref_net))
+        print(f"REF NET = {ref_net}")
 
         shape_hints = {"X": (n, m)}
         pred_net_onnxified = onnxifi_caffe2_net(pred_net,

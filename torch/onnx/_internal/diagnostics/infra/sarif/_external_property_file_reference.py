@@ -13,19 +13,19 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ExternalPropertyFileReference(object):
+class ExternalPropertyFileReference:
     """Contains information that enables a SARIF consumer to locate the external property file that contains the value of an externalized property associated with the run."""
 
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
     item_count: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "itemCount"}
     )
-    location: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    location: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

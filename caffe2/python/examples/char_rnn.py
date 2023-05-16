@@ -209,7 +209,7 @@ class CharRNN:
 
                 log.debug("Loss since last report: {}"
                           .format(last_n_loss / last_n_iter))
-                log.debug("Smooth loss: {}".format(smooth_loss))
+                log.debug(f"Smooth loss: {smooth_loss}")
 
                 last_n_loss = 0.0
                 last_n_iter = 0

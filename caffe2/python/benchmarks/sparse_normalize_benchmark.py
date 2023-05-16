@@ -42,7 +42,7 @@ def benchmark_sparse_normalize(
     workspace.FeedBlob("X", data)
     workspace.FeedBlob("huge_blob", np.random.randn(l3_cache_size).astype(np.float32))
 
-    print("Data has shape {} {}".format(data.shape, datetime.datetime.now()))
+    print(f"Data has shape {data.shape} {datetime.datetime.now()}")
 
     init_net.Python(f)([], ["indices"])
     workspace.RunNetOnce(init_net)
@@ -70,7 +70,7 @@ def benchmark_sparse_normalize(
 
     runtimes = workspace.BenchmarkNet(net.Name(), 1, iterations, True)
 
-    print("{} ms".format(runtimes[2 if flush_cache else 1]))
+    print(f"{runtimes[2 if flush_cache else 1]} ms")
     print("indice_size: " + str(workspace.FetchBlob("indices").size))
     print(
         "{} GB/sec".format(

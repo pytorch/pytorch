@@ -14,16 +14,16 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Stack(object):
+class Stack:
     """A call stack that is relevant to a result."""
 
-    frames: List[_stack_frame.StackFrame] = dataclasses.field(
+    frames: list[_stack_frame.StackFrame] = dataclasses.field(
         metadata={"schema_property_name": "frames"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

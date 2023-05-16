@@ -13,10 +13,10 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class WebRequest(object):
+class WebRequest:
     """Describes an HTTP request."""
 
-    body: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
+    body: _artifact_content.ArtifactContent | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "body"}
     )
     headers: Any = dataclasses.field(
@@ -25,22 +25,22 @@ class WebRequest(object):
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    method: Optional[str] = dataclasses.field(
+    method: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "method"}
     )
     parameters: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    protocol: Optional[str] = dataclasses.field(
+    protocol: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "protocol"}
     )
-    target: Optional[str] = dataclasses.field(
+    target: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "target"}
     )
-    version: Optional[str] = dataclasses.field(
+    version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}
     )
 

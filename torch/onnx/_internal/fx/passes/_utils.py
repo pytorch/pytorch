@@ -32,7 +32,7 @@ def wrap_graph_module_for_node_meta_preservation(
     return wrapped
 
 
-def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
+def _get_node_base_name(node_name: str) -> tuple[str, int | None]:
     pattern = r"(.*)\.(\d+)"
     match = re.match(pattern, node_name)
     if match is not None:
@@ -45,7 +45,7 @@ def _get_node_base_name(node_name: str) -> Tuple[str, Optional[int]]:
 def set_node_name(
     node: torch.fx.Node,
     new_name: str,
-    name_to_node_cache: Dict[str, torch.fx.Node],
+    name_to_node_cache: dict[str, torch.fx.Node],
 ):
     """Safely set the unique name of a node.
 
@@ -108,7 +108,7 @@ def replace_placeholder_name_and_target(
             f"module: {len(placeholders)}, reference_module: {len(reference_placeholders)}"
         )
 
-    name_to_node: Dict[str, torch.fx.Node] = {}
+    name_to_node: dict[str, torch.fx.Node] = {}
     for node in module.graph.nodes:
         name_to_node[node.name] = node
 

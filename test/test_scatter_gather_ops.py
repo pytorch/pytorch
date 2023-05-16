@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: scatter & gather ops"]
 
 import random

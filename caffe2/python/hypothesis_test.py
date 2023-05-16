@@ -1320,7 +1320,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         def enqueue(t):
             while True:
-                feed_blobs = ["x_{}_{}".format(i, t) for i in range(num_blobs)]
+                feed_blobs = [f"x_{i}_{t}" for i in range(num_blobs)]
                 op = core.CreateOperator(
                     "EnqueueBlobs",
                     ["queue"] + feed_blobs,
@@ -1339,7 +1339,7 @@ class TestOperators(hu.HypothesisTestCase):
         # (blob creation is not threadsafe)
         for t in range(num_threads):
             for i in range(num_blobs):
-                self.ws.create_blob("x_{}_{}".format(i, t))
+                self.ws.create_blob(f"x_{i}_{t}")
 
         threads = [threading.Thread(target=enqueue, args=(t,))
                    for t in range(num_threads)]
@@ -1347,7 +1347,7 @@ class TestOperators(hu.HypothesisTestCase):
             thread.start()
 
         for n in range(num_elements):
-            dequeue_blobs = ["y_{}_{}".format(i, n) for i in range(num_blobs)]
+            dequeue_blobs = [f"y_{i}_{n}" for i in range(num_blobs)]
             op = core.CreateOperator(
                 "DequeueBlobs",
                 ["queue"],
@@ -1358,7 +1358,7 @@ class TestOperators(hu.HypothesisTestCase):
             thread.join()
         op = core.CreateOperator("CloseBlobsQueue", ["queue"], [])
         self.ws.run(op)
-        ys = [np.vstack([self.ws.blobs["y_{}_{}".format(i, n)].fetch()
+        ys = [np.vstack([self.ws.blobs[f"y_{i}_{n}"].fetch()
                          for n in range(num_elements)])
               for i in range(num_blobs)]
         for i in range(num_blobs):
@@ -1855,11 +1855,11 @@ class TestOperators(hu.HypothesisTestCase):
         # Build a binary tree of FC layers, summing at each node.
         for i in reversed(range(depth)):
             for j in range(2 ** i):
-                bottom_1 = "{}_{}".format(i + 1, 2 * j)
-                bottom_2 = "{}_{}".format(i + 1, 2 * j + 1)
-                mid_1 = "{}_{}_m".format(i + 1, 2 * j)
-                mid_2 = "{}_{}_m".format(i + 1, 2 * j + 1)
-                top = "{}_{}".format(i, j)
+                bottom_1 = f"{i + 1}_{2 * j}"
+                bottom_2 = f"{i + 1}_{2 * j + 1}"
+                mid_1 = f"{i + 1}_{2 * j}_m"
+                mid_2 = f"{i + 1}_{2 * j + 1}_m"
+                top = f"{i}_{j}"
                 brew.fc(
                     m,
                     bottom_1, mid_1,
@@ -1889,7 +1889,7 @@ class TestOperators(hu.HypothesisTestCase):
         def run():
             import numpy as np
             np.random.seed(1701)
-            input_blobs = ["{}_{}".format(depth, j) for j in range(2 ** depth)]
+            input_blobs = [f"{depth}_{j}" for j in range(2 ** depth)]
             for input_blob in input_blobs:
                 self.ws.create_blob(input_blob).feed(
                     np.random.randn(n, d).astype(np.float32),
@@ -1993,11 +1993,11 @@ class TestOperators(hu.HypothesisTestCase):
 
     def test_disabled_execution_step(self):
         def createNets(i, disabled):
-            should_stop = 'should_stop_{}'.format(i)
-            output = 'output_{}'.format(i)
+            should_stop = f'should_stop_{i}'
+            output = f'output_{i}'
 
             # init content and stop signal
-            init = core.Net("init_{}".format(i))
+            init = core.Net(f"init_{i}")
             init.ConstantFill(
                 [],
                 [output],
@@ -2007,7 +2007,7 @@ class TestOperators(hu.HypothesisTestCase):
             init.Cast([output], [should_stop], to='bool')
 
             # decide if disabled or not
-            criterion = core.Net("criterion_{}".format(i))
+            criterion = core.Net(f"criterion_{i}")
             tmp = criterion.ConstantFill(
                 [],
                 shape=[1],
@@ -2017,7 +2017,7 @@ class TestOperators(hu.HypothesisTestCase):
             criterion.Proto().external_output.extend([should_stop])
 
             # the body net is just to turn a 0 blob to 1
-            net = core.Net("net_{}".format(i))
+            net = core.Net(f"net_{i}")
             net.ConstantFill(
                 [],
                 [output],
@@ -2026,7 +2026,7 @@ class TestOperators(hu.HypothesisTestCase):
             )
 
             # always end the loop
-            ender = core.Net("ender_{}".format(i))
+            ender = core.Net(f"ender_{i}")
             tmp = ender.ConstantFill(
                 [],
                 shape=[1],
@@ -2057,7 +2057,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         for i, _ in enumerate(nets):
             self.assertEqual(
-                self.ws.blobs['output_{}'.format(i + 1)].fetch()[0],
+                self.ws.blobs[f'output_{i + 1}'].fetch()[0],
                 expected[i])
 
     @given(initial_iters=st.integers(0, 100),
@@ -2093,7 +2093,7 @@ class TestOperators(hu.HypothesisTestCase):
         concurrent_steps = core.ExecutionStep("concurrent_steps",
                                               num_iter=num_iters)
         for i in range(num_nets):
-            net = core.Net("net_{}".format(i))
+            net = core.Net(f"net_{i}")
             net.AtomicIter([iter_mutex, "iter"], ["iter"])
             step = core.ExecutionStep("step", [net])
             concurrent_steps.AddSubstep(step)
@@ -2591,7 +2591,7 @@ class TestOperators(hu.HypothesisTestCase):
         first_dim, X, I = inp
         if X.dtype != np.dtype('float32') and gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} :
             # Cuda only support 32 bit float
-            print("Bailout {}".format(X.dtype))
+            print(f"Bailout {X.dtype}")
             return
         if gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}:
             # Cuda version only support int32

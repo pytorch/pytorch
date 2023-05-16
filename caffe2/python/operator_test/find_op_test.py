@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -30,8 +25,8 @@ class TestFindOperator(serial.SerializedTestCase):
                 else:
                     res.append(i[-1])
 
-            print("Idx: {} X: {}".format(idx, X))
-            print("Res: {}".format(res))
+            print(f"Idx: {idx} X: {X}")
+            print(f"Res: {res}")
             return [np.array(res).astype(np.int32)]
 
         X = (np.random.rand(n) * maxval).astype(np.int32)

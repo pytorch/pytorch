@@ -31,15 +31,15 @@ class FC(SamplingTrainableMixin, ModelLayer):
                  **kwargs):
         super().__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), (
-            "Incorrect input type {}".format(input_record))
+            f"Incorrect input type {input_record}")
         assert len(input_record.field_types()[0].shape) > 0, (
             "FC expects limited dimensions of the input tensor")
-        assert axis >= 1, "axis {} should >= 1.".format(axis)
+        assert axis >= 1, f"axis {axis} should >= 1."
         self.axis = axis
         input_dims = np.prod(input_record.field_types()[0].shape[axis - 1:])
 
         assert input_dims > 0, (
-            "FC expects input dimensions > 0, got {}".format(input_dims))
+            f"FC expects input dimensions > 0, got {input_dims}")
 
         self.clip_args = None
         if (clip_param is not None):
@@ -94,13 +94,13 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
             for idx, output_dim in enumerate(self.output_dim_vec):
                 weight_shape = [input_dims, output_dim] if transposed else [output_dim, input_dims]
-                self.w_vec.append(self.create_param(param_name='w_sub_{}'.format(idx),
+                self.w_vec.append(self.create_param(param_name=f'w_sub_{idx}',
                                              shape=weight_shape,
                                              initializer=weight_init,
                                              optimizer=weight_optim,
                                              regularizer=weight_reg))
 
-                self.b_vec.append(self.create_param(param_name='b_sub_{}'.format(idx),
+                self.b_vec.append(self.create_param(param_name=f'b_sub_{idx}',
                                              shape=[output_dim, ],
                                              initializer=weight_init,
                                              optimizer=weight_optim,
@@ -166,7 +166,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
                 **self.kwargs
             )
         else:
-            raise Exception("unsupported FC type version {}".format(version))
+            raise Exception(f"unsupported FC type version {version}")
 
     def _add_ops(self, net, params, version):
         """
@@ -194,7 +194,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
             for i in range(len(self.output_dim_vec)):
                 output_blob = net.NextScopedBlob(
-                    'output_sub_{}'.format(i))
+                    f'output_sub_{i}')
                 insert_ret = self._insert_fc_ops(
                     net, [w_vec[i], b_vec[i]], [output_blob], version
                 )

@@ -98,7 +98,7 @@ def _validate_v(v, other, is_other_tuple):
     # Both are assumed to be tuples of Tensors
     if len(other) != len(v):
         if is_other_tuple:
-            raise RuntimeError("v is a tuple of invalid length: should be {} but got {}.".format(len(other), len(v)))
+            raise RuntimeError(f"v is a tuple of invalid length: should be {len(other)} but got {len(v)}.")
         else:
             raise RuntimeError("The given v should contain a single Tensor.")
 
@@ -106,7 +106,7 @@ def _validate_v(v, other, is_other_tuple):
         if el_v.size() != el_other.size():
             prepend = ""
             if is_other_tuple:
-                prepend = "Entry {} in ".format(idx)
+                prepend = f"Entry {idx} in "
             raise RuntimeError("{}v has invalid size: should be {} but got {}.".format(
                                prepend, el_other.size(), el_v.size()))
 
@@ -175,7 +175,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     # strict and create graph allow us to detect when it is appropriate to raise an error
     # stage gives us information of which backward call we consider to give good error message
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
-        raise RuntimeError("Invalid stage argument '{}' to _fill_in_zeros".format(stage))
+        raise RuntimeError(f"Invalid stage argument '{stage}' to _fill_in_zeros")
 
     res: Tuple[torch.Tensor, ...] = tuple()
     for i, grads_i in enumerate(grads):

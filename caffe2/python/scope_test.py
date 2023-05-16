@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import scope, core, workspace
 
 import unittest
@@ -16,7 +11,7 @@ def thread_runner(idx, testobj):
     global SUCCESS_COUNT
     testobj.assertEquals(scope.CurrentNameScope(), "")
     testobj.assertEquals(scope.CurrentDeviceScope(), None)
-    namescope = "namescope_{}".format(idx)
+    namescope = f"namescope_{idx}"
     dsc = core.DeviceOption(workspace.GpuDeviceType, idx)
     with scope.DeviceScope(dsc):
         with scope.NameScope(namescope):

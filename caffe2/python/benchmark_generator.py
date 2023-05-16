@@ -52,7 +52,7 @@ def main(args):
 
     def make_blob_on_context(blob_name, blob_data, context):
         if context.upper() != "CPU":
-            blob_name_modified = "{}_CPU".format(blob_name)
+            blob_name_modified = f"{blob_name}_CPU"
         else:  # CPU case is simple
             blob_name_modified = blob_name
 
@@ -88,7 +88,7 @@ def main(args):
         old_ops = [op for op in predict_net.op]
         del predict_net.op[:]
         for op in old_ops:
-            op.type = 'OpenGL{}'.format(op.type)
+            op.type = f'OpenGL{op.type}'
         predict_net.op.extend(old_ops)
 
     if args.debug:

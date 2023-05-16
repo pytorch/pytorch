@@ -1,8 +1,3 @@
-
-
-
-
-
 import math
 
 from caffe2.python import core

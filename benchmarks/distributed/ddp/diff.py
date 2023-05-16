@@ -10,7 +10,7 @@ import numpy as np
 
 
 def load(path):
-    with open(path, 'r') as f:
+    with open(path) as f:
         return json.load(f)
 
 
@@ -44,8 +44,8 @@ def main():
 
         model = ra["model"]
         batch_size = int(ra["batch_size"])
-        name = "{} with batch size {}".format(model, batch_size)
-        print("Benchmark: {}".format(name))
+        name = f"{model} with batch size {batch_size}"
+        print(f"Benchmark: {name}")
 
         # Print header
         print("")
@@ -66,13 +66,13 @@ def main():
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print("{:>4d} GPUs:".format(ngpus), end='')  # noqa: E999
+            print(f"{ngpus:>4d} GPUs:", end='')  # noqa: E999
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
                 # We're measuring time, so lower is better (hence the negation)
                 delta = -100 * ((vb - va) / va)
-                print("  p{:02d}: {:8.3f}s {:7d}/s {:+8.1f}%".format(p, vb, int(batch_size / vb), delta), end='')  # noqa: E999
+                print(f"  p{p:02d}: {vb:8.3f}s {int(batch_size / vb):7d}/s {delta:+8.1f}%", end='')  # noqa: E999
             print("")
         print("")
 

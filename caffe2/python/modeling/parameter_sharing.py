@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import scope
 
 import contextlib
@@ -57,7 +52,7 @@ class ParameterSharingContext:
         candidate_scope = scope.CurrentNameScope()
         best_scope = self._resolve_scope_overrides(candidate_scope)
         if best_scope != candidate_scope:
-            logger.info("Overwriting scope {0} with scope {1}".format(
+            logger.info("Overwriting scope {} with scope {}".format(
                 candidate_scope, best_scope))
 
         return best_scope + name

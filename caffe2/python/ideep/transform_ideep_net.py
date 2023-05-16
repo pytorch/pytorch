@@ -1,8 +1,3 @@
-
-
-
-
-
 import argparse
 import copy
 import json
@@ -77,7 +72,7 @@ def fuse_first_bn(net, params, removed_tensors):
 
         # Fix fused_conv to ensure we have a bias passed.
         if len(fused_conv.input) != 3:
-            bias_name = "{}_bias".format(conv.input[1])
+            bias_name = f"{conv.input[1]}_bias"
             net.external_input.extend([bias_name])
             fused_conv.input.extend([bias_name])
             for arg in fused_conv.arg:
@@ -197,7 +192,7 @@ def fuse_first_mul_add(net, params, removed_tensors):
         batch_norm.arg.extend([utils.MakeArgument("epsilon", float(1e-9))])
 
         def s(x):
-            return "{}{}".format(add_.output[0], x)
+            return f"{add_.output[0]}{x}"
         fake_mean = s("_mean")
         fake_var = s("_var")
 
@@ -295,7 +290,7 @@ def Optimize(args):
     if args.verify_input:
         value_info = json.load(args.verify_input)
         input_shapes = {k : v[-1] for (k, v) in value_info.items()}
-        print("input info: {}".format(input_shapes))
+        print(f"input info: {input_shapes}")
         for k, v in input_shapes.items():
             external_inputs[k] = np.random.randn(*v).astype(np.float32)
             workspace.FeedBlob(k, external_inputs[k])
@@ -328,7 +323,7 @@ def Optimize(args):
                                    rtol=1e-3)
 
     for i, o in enumerate(predict_net.op):
-        print("op[{}]: {}".format(i, o.type))
+        print(f"op[{i}]: {o.type}")
     init_net = gen_init_net_from_blobs(param_dict)
     with open('init_net.pb', 'wb') as f:
         f.write(init_net.SerializeToString())

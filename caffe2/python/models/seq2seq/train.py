@@ -317,11 +317,11 @@ class Seq2SeqModelCaffe2:
                 )
                 grad_squared = model.net.Sqr(
                     [grad],
-                    'grad_{}_squared'.format(i),
+                    f'grad_{i}_squared',
                 )
                 grad_squared_sum = model.net.SumElements(
                     grad_squared,
-                    'grad_{}_squared_sum'.format(i),
+                    f'grad_{i}_squared_sum',
                 )
                 grad_squared_sums.append(grad_squared_sum)
 
@@ -447,7 +447,7 @@ class Seq2SeqModelCaffe2:
         else:
             total_loss = 0
             for i in range(self.num_gpus):
-                name = 'gpu_{}/total_loss_scalar'.format(i)
+                name = f'gpu_{i}/total_loss_scalar'
                 gpu_loss = workspace.FetchBlob(name)
                 total_loss += gpu_loss
             return total_loss
@@ -533,7 +533,7 @@ class Seq2SeqModelCaffe2:
                     Batch._fields,
                     batch_obj,
                 ):
-                    name = 'gpu_{}/{}'.format(i, batch_obj_name)
+                    name = f'gpu_{i}/{batch_obj_name}'
                     if batch_obj_name in ['encoder_inputs', 'decoder_inputs']:
                         dev = core.DeviceOption(caffe2_pb2.CPU)
                     else:
@@ -549,7 +549,7 @@ class Seq2SeqModelCaffe2:
         return self.total_loss_scalar()
 
     def save(self, checkpoint_path_prefix, current_step):
-        checkpoint_path = '{0}-{1}'.format(
+        checkpoint_path = '{}-{}'.format(
             checkpoint_path_prefix,
             current_step,
         )
@@ -629,18 +629,18 @@ def run_seq2seq_model(args, model_params=None):
         args.target_corpus,
         args.unk_threshold,
     )
-    logger.info('Source vocab size {}'.format(len(source_vocab)))
-    logger.info('Target vocab size {}'.format(len(target_vocab)))
+    logger.info(f'Source vocab size {len(source_vocab)}')
+    logger.info(f'Target vocab size {len(target_vocab)}')
 
     batches = gen_batches(args.source_corpus, args.target_corpus, source_vocab,
                           target_vocab, model_params['batch_size'],
                           args.max_length)
-    logger.info('Number of training batches {}'.format(len(batches)))
+    logger.info(f'Number of training batches {len(batches)}')
 
     batches_eval = gen_batches(args.source_corpus_eval, args.target_corpus_eval,
                                source_vocab, target_vocab,
                                model_params['batch_size'], args.max_length)
-    logger.info('Number of eval batches {}'.format(len(batches_eval)))
+    logger.info(f'Number of eval batches {len(batches_eval)}')
 
     with Seq2SeqModelCaffe2(
         model_params=model_params,
@@ -651,21 +651,21 @@ def run_seq2seq_model(args, model_params=None):
     ) as model_obj:
         model_obj.initialize_from_scratch()
         for i in range(args.epochs):
-            logger.info('Epoch {}'.format(i))
+            logger.info(f'Epoch {i}')
             total_loss = 0
             for batch in batches:
                 total_loss += model_obj.step(
                     batch=batch,
                     forward_only=False,
                 )
-            logger.info('\ttraining loss {}'.format(total_loss))
+            logger.info(f'\ttraining loss {total_loss}')
             total_loss = 0
             for batch in batches_eval:
                 total_loss += model_obj.step(
                     batch=batch,
                     forward_only=True,
                 )
-            logger.info('\teval loss {}'.format(total_loss))
+            logger.info(f'\teval loss {total_loss}')
             if args.checkpoint is not None:
                 model_obj.save(args.checkpoint, i)
 

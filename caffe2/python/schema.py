@@ -36,7 +36,7 @@ FIELD_SEPARATOR = ':'
 
 def _join_field_name(prefix, suffix):
     if prefix and suffix:
-        return '{}{}{}'.format(prefix, FIELD_SEPARATOR, suffix)
+        return f'{prefix}{FIELD_SEPARATOR}{suffix}'
     elif prefix:
         return prefix
     elif suffix:
@@ -495,7 +495,7 @@ class Struct(Field):
     def _pprint_impl(self, indent, str_buffer):
         str_buffer.write('  ' * indent + "Struct( \n")
         for name, field in self.fields.items():
-            str_buffer.write('  ' * (indent + 1) + "{}=".format(name) + "\n")
+            str_buffer.write('  ' * (indent + 1) + f"{name}=" + "\n")
             field._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
         str_buffer.write('  ' * indent + ") \n")
 
@@ -771,7 +771,7 @@ class Scalar(Field):
 
     def set_metadata(self, value):
         assert isinstance(value, Metadata), \
-            'metadata must be Metadata, got {}'.format(type(value))
+            f'metadata must be Metadata, got {type(value)}'
         self._metadata = value
         self._validate_metadata()
 
@@ -782,14 +782,14 @@ class Scalar(Field):
                 self.dtype is not None):
             assert np.issubdtype(self.dtype, np.integer), \
                 "`categorical_limit` can be specified only in integral " + \
-                "fields but got {}".format(self.dtype)
+                f"fields but got {self.dtype}"
 
     def set_value(self, blob, throw_on_type_mismatch=False, unsafe=False):
         """Sets only the blob field still validating the existing dtype"""
         if self.dtype.base != np.void and throw_on_type_mismatch:
-            assert isinstance(blob, np.ndarray), "Got {!r}".format(blob)
+            assert isinstance(blob, np.ndarray), f"Got {blob!r}"
             assert blob.dtype.base == self.dtype.base, (
-                "Expected {}, got {}".format(self.dtype.base, blob.dtype.base))
+                f"Expected {self.dtype.base}, got {blob.dtype.base}")
         self.set(dtype=self._original_dtype, blob=blob, unsafe=unsafe)
 
     def set(self, dtype=None, blob=None, metadata=None, unsafe=False):
@@ -1235,7 +1235,7 @@ def InitEmptyRecord(net, schema_or_record, enforce_types=False):
             shape = [0] + list(blob_type.shape)
             net.ConstantFill([], blob, shape=shape, dtype=data_type)
         except TypeError:
-            logger.warning("Blob {} has type error".format(blob))
+            logger.warning(f"Blob {blob} has type error")
             # If data_type_for_dtype doesn't know how to resolve given numpy
             # type to core.DataType, that function can throw type error (for
             # example that would happen for cases of unknown types such as

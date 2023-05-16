@@ -35,7 +35,7 @@ if TYPE_CHECKING:
         )
 
 
-class _MeshEnv(object):
+class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
 
@@ -48,7 +48,7 @@ class _MeshEnv(object):
 mesh_resources: _MeshEnv = _MeshEnv()
 
 
-class DeviceMesh(object):
+class DeviceMesh:
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional

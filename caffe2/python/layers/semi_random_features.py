@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.arc_cosine_feature_map import ArcCosineFeatureMap
 import numpy as np

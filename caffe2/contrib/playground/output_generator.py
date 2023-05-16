@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import timeout_guard
 
 def fun_conclude_operator(self):

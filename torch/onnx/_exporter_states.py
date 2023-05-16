@@ -26,13 +26,13 @@ class SymbolicContext:
 
     def __init__(
         self,
-        params_dict: Dict[str, _C.IValue],
+        params_dict: dict[str, _C.IValue],
         env: dict,
         cur_node: _C.Node,
         onnx_block: _C.Block,
     ):
-        self.params_dict: Dict[str, _C.IValue] = params_dict
-        self.env: Dict[_C.Value, _C.Value] = env
+        self.params_dict: dict[str, _C.IValue] = params_dict
+        self.env: dict[_C.Value, _C.Value] = env
         # Current node that is being converted.
         self.cur_node: _C.Node = cur_node
         # Current onnx block that converted nodes are being appended to.

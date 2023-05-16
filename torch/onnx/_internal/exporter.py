@@ -47,23 +47,23 @@ _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter."""
 
-    opset_version: Optional[int] = None
+    opset_version: int | None = None
     """The ONNX opset version the exporter should target. Defaults to the latest
     supported ONNX opset version. The default version will increment over time as
     ONNX continues to evolve."""
 
-    dynamic_shapes: Optional[bool] = None
+    dynamic_shapes: bool | None = None
     """Shape information hint for input/output tensors.
 
     - ``None``: the exporter determines the most compatible setting.
     - ``True``: all input shapes are considered dynamic.
     - ``False``: all input shapes are considered static."""
 
-    op_level_debug: Optional[bool] = None
+    op_level_debug: bool | None = None
     """Whether to export the model with op-level debug information by evaluating
     ops through ONNX Runtime."""
 
-    logger: Optional[logging.Logger] = None
+    logger: logging.Logger | None = None
     """The logger for the ONNX exporter to use. Defaults to creating a child
     logger named "torch.onnx" under the current logger (as returned by
     :py:meth:`logging.getLogger`)."""
@@ -72,10 +72,10 @@ class ExportOptions:
     def __init__(
         self,
         *,
-        opset_version: Optional[int] = None,
-        dynamic_shapes: Optional[bool] = None,
-        op_level_debug: Optional[bool] = None,
-        logger: Optional[logging.Logger] = None,
+        opset_version: int | None = None,
+        dynamic_shapes: bool | None = None,
+        op_level_debug: bool | None = None,
+        logger: logging.Logger | None = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
@@ -96,7 +96,7 @@ class ResolvedExportOptions(ExportOptions):
     logger: logging.Logger
 
     # Private only attributes
-    decomposition_table: Dict[torch._ops.OpOverload, Callable]
+    decomposition_table: dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
     fx_tracer: FXGraphExtractor
@@ -108,7 +108,7 @@ class ResolvedExportOptions(ExportOptions):
 
     @_beartype.beartype
     def __init__(
-        self, options: Optional[Union[ExportOptions, "ResolvedExportOptions"]]
+        self, options: ExportOptions | ResolvedExportOptions | None
     ):
         if options is None:
             options = ExportOptions()
@@ -124,7 +124,7 @@ class ResolvedExportOptions(ExportOptions):
             T = TypeVar("T")
 
             @_beartype.beartype
-            def resolve(value: Optional[T], fallback: Union[T, Callable[[], T]]) -> T:
+            def resolve(value: T | None, fallback: T | Callable[[], T]) -> T:
                 if value is not None:
                     return value
                 if callable(fallback):
@@ -247,7 +247,7 @@ class ExportOutput:
     @_beartype.beartype
     def adapt_torch_inputs_to_onnx(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -306,7 +306,7 @@ class ExportOutput:
     @_beartype.beartype
     def adapt_torch_outputs_to_onnx(
         self, model_outputs: Any
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -355,9 +355,9 @@ class ExportOutput:
     @_beartype.beartype
     def save(
         self,
-        destination: Union[str, io.BufferedIOBase],
+        destination: str | io.BufferedIOBase,
         *,
-        serializer: Optional[ExportOutputSerializer] = None,
+        serializer: ExportOutputSerializer | None = None,
     ) -> None:
         """Saves the in-memory ONNX model to ``destination`` using specified ``serializer``.
         If no ``serializer`` is specified, the model will be serialized as Protobuf."""
@@ -454,7 +454,7 @@ class FXGraphExtractor(abc.ABC):
     def generate_fx(
         self,
         options: ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -474,8 +474,8 @@ class Exporter:
     @_beartype.beartype
     def __init__(
         self,
-        options: Union[ExportOptions, ResolvedExportOptions],
-        model: Union[torch.nn.Module, Callable],
+        options: ExportOptions | ResolvedExportOptions,
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ):
@@ -563,10 +563,10 @@ def _assert_dependencies(export_options: ResolvedExportOptions):
 
 @_beartype.beartype
 def dynamo_export(
-    model: Union[torch.nn.Module, Callable],
+    model: torch.nn.Module | Callable,
     /,
     *model_args,
-    export_options: Optional[ExportOptions] = None,
+    export_options: ExportOptions | None = None,
     **model_kwargs,
 ) -> ExportOutput:
     """Export a torch.nn.Module to an ONNX graph.

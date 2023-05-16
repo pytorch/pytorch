@@ -103,8 +103,8 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {0} outside lower domain boundary"
-                        " {1} produced {2}, not nan!"
+                        "input of {} outside lower domain boundary"
+                        " {} produced {}, not nan!"
                     ).format(lower_tensor.item(), low, result.item()),
                 )
 
@@ -122,8 +122,8 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {0} outside upper domain boundary"
-                        " {1} produced {2}, not nan!"
+                        "input of {} outside upper domain boundary"
+                        " {} produced {}, not nan!"
                     ).format(higher_tensor.item(), high, result.item()),
                 )
 
@@ -163,7 +163,7 @@ class TestUnaryUfuncs(TestCase):
                         )
                     else:
                         self.fail(
-                            "Expected dtype {0} but got {1}!".format(
+                            "Expected dtype {} but got {}!".format(
                                 expected.dtype, actual.dtype
                             )
                         )
@@ -240,8 +240,8 @@ class TestUnaryUfuncs(TestCase):
             if t.numel() < 10:
                 msg = (
                     "Failed to produce expected results! Input tensor was"
-                    " {0}, torch result is {1}, and reference result is"
-                    " {2}."
+                    " {}, torch result is {}, and reference result is"
+                    " {}."
                 ).format(t, actual, expected)
             else:
                 msg = None
@@ -1142,7 +1142,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertEqual(res.imag, out.imag, atol=0.0, rtol=1e-6)
 
         # test the log1p in tensor
-        inp_lst, out_lst = [list(elmt) for elmt in zip(*inouts)]
+        inp_lst, out_lst = (list(elmt) for elmt in zip(*inouts))
         inp_tens = torch.tensor(inp_lst, dtype=dtype, device=device)
         out_tens = torch.tensor(out_lst, dtype=dtype, device=device)
         res_tens = torch.log1p(inp_tens)

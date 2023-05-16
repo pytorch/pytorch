@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace
 
 import os
@@ -16,8 +11,8 @@ class TestDB(unittest.TestCase):
         os.close(handle)
         self.data = [
             (
-                "key{}".format(i).encode("ascii"),
-                "value{}".format(i).encode("ascii")
+                f"key{i}".encode("ascii"),
+                f"value{i}".encode("ascii")
             )
             for i in range(1, 10)
         ]

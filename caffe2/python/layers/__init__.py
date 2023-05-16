@@ -1,8 +1,3 @@
-
-
-
-
-
 from importlib import import_module
 import pkgutil
 import sys
@@ -17,7 +12,7 @@ def import_recursive(package):
     pkg_dir = package.__path__
     module_location = package.__name__
     for (_module_loader, name, ispkg) in pkgutil.iter_modules(pkg_dir):
-        module_name = "{}.{}".format(module_location, name)  # Module/package
+        module_name = f"{module_location}.{name}"  # Module/package
         module = import_module(module_name)
         if ispkg:
             import_recursive(module)

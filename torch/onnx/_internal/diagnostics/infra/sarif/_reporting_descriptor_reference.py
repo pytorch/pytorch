@@ -13,24 +13,24 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ReportingDescriptorReference(object):
+class ReportingDescriptorReference:
     """Information about how to locate a relevant reporting descriptor."""
 
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    id: Optional[str] = dataclasses.field(
+    id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "id"}
     )
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    tool_component: Optional[
+    tool_component: None | (
         _tool_component_reference.ToolComponentReference
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "toolComponent"}
     )
 

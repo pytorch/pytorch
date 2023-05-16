@@ -83,7 +83,7 @@ class Node(context.DefaultManaged):
         return self._name
 
     def __repr__(self):
-        return "Node(name={}, kwargs={})".format(self._name, self._kwargs)
+        return f"Node(name={self._name}, kwargs={self._kwargs})"
 
     def kwargs(self):
         return self._kwargs
@@ -395,7 +395,7 @@ class TaskOutput:
             return fetched_vals
 
     def __repr__(self):
-        return "TaskOutput(names={}, values={})".format(self.names, self._values)
+        return f"TaskOutput(names={self.names}, values={self._values})"
 
 
 def final_output(blob_or_record):
@@ -433,7 +433,7 @@ class TaskOutputList:
         assert offset == len(values), 'Wrong number of output values.'
 
     def __repr__(self):
-        return "TaskOutputList(outputs={})".format(self.outputs)
+        return f"TaskOutputList(outputs={self.outputs})"
 
 
 class Task(context.Managed):
@@ -480,7 +480,7 @@ class Task(context.Managed):
         names_used = (
             Task._global_names_used
             if group is None else
-            set(t.name for t in group._tasks_to_add))
+            {t.name for t in group._tasks_to_add})
         cur_name = basename
         i = 0
         while cur_name in names_used:

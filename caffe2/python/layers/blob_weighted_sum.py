@@ -53,7 +53,7 @@ class BlobWeightedSum(ModelLayer):
 
         self.weights = [
             self.create_param(
-                param_name="w_{}".format(idx),
+                param_name=f"w_{idx}",
                 shape=[1],
                 initializer=('ConstantFill', {'value': float(init_weights[idx])}),
                 optimizer=weight_optim

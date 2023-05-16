@@ -135,7 +135,7 @@ class Transform:
             return self
         if type(self).__init__ is Transform.__init__:
             return type(self)(cache_size=cache_size)
-        raise NotImplementedError("{}.with_cache is not implemented".format(type(self)))
+        raise NotImplementedError(f"{type(self)}.with_cache is not implemented")
 
     def __eq__(self, other):
         return self is other
@@ -506,7 +506,7 @@ class ReshapeTransform(Transform):
             raise ValueError("Too few dimensions on input")
         cut = len(shape) - len(self.in_shape)
         if shape[cut:] != self.in_shape:
-            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.in_shape))
+            raise ValueError(f"Shape mismatch: expected {shape[cut:]} but got {self.in_shape}")
         return shape[:cut] + self.out_shape
 
     def inverse_shape(self, shape):
@@ -514,7 +514,7 @@ class ReshapeTransform(Transform):
             raise ValueError("Too few dimensions on input")
         cut = len(shape) - len(self.out_shape)
         if shape[cut:] != self.out_shape:
-            raise ValueError("Shape mismatch: expected {} but got {}".format(shape[cut:], self.out_shape))
+            raise ValueError(f"Shape mismatch: expected {shape[cut:]} but got {self.out_shape}")
         return shape[:cut] + self.in_shape
 
 

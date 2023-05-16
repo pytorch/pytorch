@@ -29,7 +29,7 @@ from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.train import *
 
 
-class HelperWrapper(object):
+class HelperWrapper:
     _registry = {
         'arg_scope': arg_scope,
         'fc': fc,

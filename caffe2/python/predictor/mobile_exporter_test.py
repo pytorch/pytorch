@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python.test_util import TestCase
 from caffe2.python import workspace, brew
 from caffe2.python.model_helper import ModelHelper

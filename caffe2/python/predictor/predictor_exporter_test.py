@@ -1,8 +1,3 @@
-
-
-
-
-
 import tempfile
 import unittest
 import numpy as np
@@ -139,7 +134,7 @@ class PredictorExporterTest(unittest.TestCase):
 
         db_type = 'minidb'
         db_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".{}".format(db_type))
+            delete=False, suffix=f".{db_type}")
         pe.save_to_db(
             db_type=db_type,
             db_destination=db_file.name,
@@ -206,7 +201,7 @@ class PredictorExporterTest(unittest.TestCase):
 
         db_type = 'minidb'
         db_file = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".{}".format(db_type))
+            delete=False, suffix=f".{db_type}")
         pe.save_to_db(
             db_type=db_type,
             db_destination=db_file.name,
@@ -233,7 +228,7 @@ class PredictorExporterTest(unittest.TestCase):
         with self.assertRaises(Exception):
             for db_type in ["minidb"]:
                 db_file = tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".{}".format(db_type))
+                    delete=False, suffix=f".{db_type}")
                 pe.save_to_db(
                     db_type=db_type,
                     db_destination=db_file.name,

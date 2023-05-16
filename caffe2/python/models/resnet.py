@@ -308,7 +308,7 @@ def create_resnext(
     bn_momentum=0.9,
 ):
     if num_layers not in RESNEXT_BLOCK_CONFIG:
-        log.error("{}-layer is invalid for resnext config".format(num_layers))
+        log.error(f"{num_layers}-layer is invalid for resnext config")
 
     num_blocks = RESNEXT_BLOCK_CONFIG[num_layers]
     strides = RESNEXT_STRIDES
@@ -381,7 +381,7 @@ def create_resnext(
 
     # Final dimension of the "image" is reduced to 7x7
     last_out = brew.fc(
-        model, final_avg, 'last_out_L{}'.format(num_labels), num_features, num_labels
+        model, final_avg, f'last_out_L{num_labels}', num_features, num_labels
     )
 
     if no_loss:

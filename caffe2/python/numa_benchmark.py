@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
 import time
@@ -53,15 +49,15 @@ def main():
         dt = time.time() - t
         print("Single socket time:", dt)
         single_bw = 4 * SHAPE_LEN * SHAPE_LEN * NUM_REPLICAS * NUM_ITER / dt / GB
-        print("Single socket BW: {} GB/s".format(single_bw))
+        print(f"Single socket BW: {single_bw} GB/s")
 
         t = time.time()
         workspace.RunNet(cross_net.Name(), NUM_ITER)
         dt = time.time() - t
         print("Cross socket time:", dt)
         cross_bw = 4 * SHAPE_LEN * SHAPE_LEN * NUM_REPLICAS * NUM_ITER / dt / GB
-        print("Cross socket BW: {} GB/s".format(cross_bw))
-        print("Single BW / Cross BW: {}".format(single_bw / cross_bw))
+        print(f"Cross socket BW: {cross_bw} GB/s")
+        print(f"Single BW / Cross BW: {single_bw / cross_bw}")
 
 
 if __name__ == '__main__':

@@ -14,13 +14,13 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class GraphTraversal(object):
+class GraphTraversal:
     """Represents a path through a graph."""
 
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    edge_traversals: Optional[List[_edge_traversal.EdgeTraversal]] = dataclasses.field(
+    edge_traversals: list[_edge_traversal.EdgeTraversal] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "edgeTraversals"}
     )
     immutable_state: Any = dataclasses.field(
@@ -29,7 +29,7 @@ class GraphTraversal(object):
     initial_state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "initialState"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
     result_graph_index: int = dataclasses.field(

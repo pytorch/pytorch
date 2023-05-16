@@ -1,8 +1,3 @@
-
-
-
-
-
 import functools
 from caffe2.python import brew, rnn_cell
 

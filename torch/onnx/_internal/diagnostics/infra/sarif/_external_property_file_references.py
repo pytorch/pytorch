@@ -13,72 +13,72 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ExternalPropertyFileReferences(object):
+class ExternalPropertyFileReferences:
     """References to external property files that should be inlined with the content of a root log file."""
 
-    addresses: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "addresses"})
-    artifacts: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "artifacts"})
-    conversion: Optional[
+    addresses: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "addresses"})
+    artifacts: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "artifacts"})
+    conversion: None | (
         _external_property_file_reference.ExternalPropertyFileReference
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "conversion"})
-    driver: Optional[
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "conversion"})
+    driver: None | (
         _external_property_file_reference.ExternalPropertyFileReference
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "driver"})
-    extensions: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "extensions"})
-    externalized_properties: Optional[
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "driver"})
+    extensions: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "extensions"})
+    externalized_properties: None | (
         _external_property_file_reference.ExternalPropertyFileReference
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "externalizedProperties"}
     )
-    graphs: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "graphs"})
-    invocations: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    graphs: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "graphs"})
+    invocations: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "invocations"}
     )
-    logical_locations: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    logical_locations: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "logicalLocations"}
     )
-    policies: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "policies"})
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    policies: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "policies"})
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    results: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "results"})
-    taxonomies: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxonomies"})
-    thread_flow_locations: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    results: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "results"})
+    taxonomies: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "taxonomies"})
+    thread_flow_locations: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "threadFlowLocations"}
     )
-    translations: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    translations: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "translations"}
     )
-    web_requests: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    web_requests: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequests"}
     )
-    web_responses: Optional[
-        List[_external_property_file_reference.ExternalPropertyFileReference]
-    ] = dataclasses.field(
+    web_responses: None | (
+        list[_external_property_file_reference.ExternalPropertyFileReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponses"}
     )
 

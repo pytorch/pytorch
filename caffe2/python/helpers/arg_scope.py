@@ -1,6 +1,3 @@
-
-
-
 import contextlib
 import copy
 import threading

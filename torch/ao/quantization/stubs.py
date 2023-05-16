@@ -1,4 +1,3 @@
-
 from torch import nn
 
 class QuantStub(nn.Module):

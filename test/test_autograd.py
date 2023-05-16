@@ -9066,7 +9066,7 @@ class TestAutogradDeviceType(TestCase):
             if dtype.is_floating_point:
                 f()
             else:
-                with self.assertRaisesRegex(RuntimeError, 'floating point', msg="dt: {} device: {}".format(a.dtype, a.device)):
+                with self.assertRaisesRegex(RuntimeError, 'floating point', msg=f"dt: {a.dtype} device: {a.device}"):
                     f()
 
     @onlyCUDA

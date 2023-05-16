@@ -26,7 +26,7 @@ class TestMuji(test_util.TestCase):
         all_blobs = workspace.Blobs()
         all_blobs.sort()
         for blob in all_blobs:
-            print('{} {}'.format(blob, workspace.FetchBlob(blob)))
+            print(f'{blob} {workspace.FetchBlob(blob)}')
 
         for idx in gpu_ids:
             blob = workspace.FetchBlob("testblob_gpu_" + str(idx) + "_reduced")

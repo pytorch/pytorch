@@ -812,7 +812,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -827,7 +827,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -2821,7 +2821,7 @@ def fn():
                     memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
                 ):
                     for pn, p in self.named_parameters():
-                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        fpn = "{}.{}".format(mn, pn) if mn else pn
                         self.names.append(fpn)
 
         # Test plain recurse
@@ -4685,11 +4685,11 @@ def fn():
             (15, 16, 7),
             (17, 17, 6),
         ]
-        self.assertEquals(len(tab), len(expected))
+        self.assertEqual(len(tab), len(expected))
         for entry, exp in zip(tab, expected):
-            self.assertEquals(entry.start, exp[0] * 2)
-            self.assertEquals(entry.end, exp[1] * 2)
-            self.assertEquals(entry.target, exp[2] * 2)
+            self.assertEqual(entry.start, exp[0] * 2)
+            self.assertEqual(entry.end, exp[1] * 2)
+            self.assertEqual(entry.target, exp[2] * 2)
 
     @skipIfNotPy311
     def test_remove_dead_code_with_exn_table_entries(self):
@@ -4713,17 +4713,17 @@ def fn():
         )
         bytecode_transformation.propagate_inst_exn_table_entries(insts)
         insts = bytecode_analysis.remove_dead_code(insts)
-        self.assertEquals(len(insts), 5)
+        self.assertEqual(len(insts), 5)
         self.assertNotIn(exn_start, insts)
         self.assertNotIn(exn_end, insts)
         self.assertIn(target2, insts)
         self.assertIn(target3, insts)
         bytecode_transformation.update_offsets(insts)
         tab = bytecode_transformation.compute_exception_table(insts)
-        self.assertEquals(len(tab), 1)
-        self.assertEquals(tab[0].start, 2)
-        self.assertEquals(tab[0].end, 4)
-        self.assertEquals(tab[0].target, 6)
+        self.assertEqual(len(tab), 1)
+        self.assertEqual(tab[0].start, 2)
+        self.assertEqual(tab[0].end, 4)
+        self.assertEqual(tab[0].target, 6)
 
     def test_unhandled_exception_in_dynamo(self):
         # traceback.format_exc() approximates an unhandled exception

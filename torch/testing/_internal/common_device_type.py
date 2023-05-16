@@ -275,9 +275,9 @@ def _dtype_test_suffix(dtypes):
     if isinstance(dtypes, (list, tuple)):
         if len(dtypes) == 0:
             return ''
-        return '_' + '_'.join((dtype_name(d) for d in dtypes))
+        return '_' + '_'.join(dtype_name(d) for d in dtypes)
     elif dtypes:
-        return '_{}'.format(dtype_name(dtypes))
+        return f'_{dtype_name(dtypes)}'
     else:
         return ''
 
@@ -285,7 +285,7 @@ def _dtype_test_suffix(dtypes):
 def _update_param_kwargs(param_kwargs, name, value):
     """ Adds a kwarg with the specified name and value to the param_kwargs dict. """
     # Make name plural (e.g. devices / dtypes) if the value is composite.
-    plural_name = '{}s'.format(name)
+    plural_name = f'{name}s'
 
     # Clear out old entries of the arg if any.
     if name in param_kwargs:
@@ -431,7 +431,7 @@ class DeviceTypeTestBase(TestCase):
 
                 return result
 
-            assert not hasattr(cls, name), "Redefinition of test {0}".format(name)
+            assert not hasattr(cls, name), f"Redefinition of test {name}"
             setattr(cls, name, instantiated_test)
 
         def default_parametrize_fn(test, generic_cls, device_cls):
@@ -466,7 +466,7 @@ class DeviceTypeTestBase(TestCase):
             dtype_kwarg = None
             if 'dtype' in param_kwargs or 'dtypes' in param_kwargs:
                 dtype_kwarg = param_kwargs['dtypes'] if 'dtypes' in param_kwargs else param_kwargs['dtype']
-            test_name = '{}{}{}{}'.format(name, test_suffix, device_suffix, _dtype_test_suffix(dtype_kwarg))
+            test_name = f'{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}'
 
             instantiate_test_helper(cls=cls, name=test_name, test=test, param_kwargs=param_kwargs,
                                     decorator_fn=decorator_fn)
@@ -522,7 +522,7 @@ class CUDATestBase(DeviceTypeTestBase):
         cls.cudnn_version = None if cls.no_cudnn else torch.backends.cudnn.version()
 
         # Acquires the current device as the primary (test) device
-        cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
+        cls.primary_device = f'cuda:{torch.cuda.current_device()}'
 
 # See Note [Lazy Tensor tests in device agnostic testing]
 lazy_ts_backend_init = False
@@ -588,7 +588,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
         cls.divice_mod = getattr(torch, device_type, None)
         assert cls.device_mod is not None, f'''torch has no module of `{cls.device_type}`, you should register
                                             a module by `torch._register_device_module`.'''
-        cls.primary_device = '{device_type}:{id}'.format(device_type=cls.device_type, id=cls.device_mod.current_device())
+        cls.primary_device = f'{cls.device_type}:{cls.device_mod.current_device()}'
 
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
@@ -740,7 +740,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
-                assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
+                assert name not in device_type_test_class.__dict__, f"Redefinition of directly defined member {name}"
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
@@ -909,7 +909,7 @@ class ops(_TestParametrizer):
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
-                    print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
+                    print(f"Failed to instantiate {test_name} for op {op.name}!")
                     raise ex
         if op is check_exhausted_iterator:
             raise ValueError('An empty op_list was passed to @ops. '
@@ -1025,7 +1025,7 @@ def largeTensorTest(size, device=None):
             size_bytes = size(self, *args, **kwargs) if callable(size) else size
             _device = device if device is not None else self.get_primary_device()
             if not _has_sufficient_memory(_device, size_bytes):
-                raise unittest.SkipTest('Insufficient {} memory'.format(_device))
+                raise unittest.SkipTest(f'Insufficient {_device} memory')
 
             return fn(self, *args, **kwargs)
         return dep_fn
@@ -1063,7 +1063,7 @@ class onlyOn:
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
             if self.device_type != slf.device_type:
-                reason = "Only runs on {0}".format(self.device_type)
+                reason = f"Only runs on {self.device_type}"
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1081,13 +1081,13 @@ class deviceCountAtLeast:
         self.num_required_devices = num_required_devices
 
     def __call__(self, fn):
-        assert not hasattr(fn, 'num_required_devices'), "deviceCountAtLeast redefinition for {0}".format(fn.__name__)
+        assert not hasattr(fn, 'num_required_devices'), f"deviceCountAtLeast redefinition for {fn.__name__}"
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
         def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
-                reason = "fewer than {0} devices detected".format(self.num_required_devices)
+                reason = f"fewer than {self.num_required_devices} devices detected"
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
@@ -1099,7 +1099,7 @@ def onlyNativeDeviceTypes(fn):
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
         if self.device_type not in NATIVE_DEVICES:
-            reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
+            reason = f"onlyNativeDeviceTypes: doesn't run on {self.device_type}"
             raise unittest.SkipTest(reason)
 
         return fn(self, *args, **kwargs)
@@ -1128,7 +1128,7 @@ class precisionOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
         for dtype, prec in d.items():
-            assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
+            assert isinstance(dtype, torch.dtype), f"precisionOverride given unknown dtype {dtype}"
 
         self.d = d
 
@@ -1159,7 +1159,7 @@ class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
-            assert isinstance(dtype, torch.dtype), "toleranceOverride given unknown dtype {0}".format(dtype)
+            assert isinstance(dtype, torch.dtype), f"toleranceOverride given unknown dtype {dtype}"
             assert isinstance(prec, tol), "toleranceOverride not given a dtype : tol dict!"
 
         self.d = d
@@ -1186,17 +1186,17 @@ class dtypes:
                 assert isinstance(arg, (list, tuple)), \
                     "When one dtype variant is a tuple or list, " \
                     "all dtype variants must be. " \
-                    "Received non-list non-tuple dtype {0}".format(str(arg))
-                assert all(isinstance(dtype, torch.dtype) for dtype in arg), "Unknown dtype in {0}".format(str(arg))
+                    "Received non-list non-tuple dtype {}".format(str(arg))
+                assert all(isinstance(dtype, torch.dtype) for dtype in arg), f"Unknown dtype in {str(arg)}"
         else:
-            assert all(isinstance(arg, torch.dtype) for arg in args), "Unknown dtype in {0}".format(str(args))
+            assert all(isinstance(arg, torch.dtype) for arg in args), f"Unknown dtype in {str(args)}"
 
         self.args = args
         self.device_type = device_type
 
     def __call__(self, fn):
         d = getattr(fn, 'dtypes', {})
-        assert self.device_type not in d, "dtypes redefinition for {0}".format(self.device_type)
+        assert self.device_type not in d, f"dtypes redefinition for {self.device_type}"
         d[self.device_type] = self.args
         fn.dtypes = d
         return fn
@@ -1330,7 +1330,7 @@ def skipCUDAIfRocmVersionLessThan(version=None):
                 rocm_version = rocm_version.split("-")[0]    # ignore git sha
                 rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
-                    reason = "ROCm {0} is available but {1} required".format(rocm_version_tuple, version)
+                    reason = f"ROCm {rocm_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
 
             return fn(self, *args, **kwargs)
@@ -1347,7 +1347,7 @@ def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):
             if version == (0, 0):  # cpu or rocm
                 return fn(self, *args, **kwargs)
             if version in (versions or []):
-                reason = "test skipped for CUDA version {0}".format(version)
+                reason = f"test skipped for CUDA version {version}"
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 
@@ -1363,7 +1363,7 @@ def skipCUDAIfVersionLessThan(versions : Tuple[int, int] = None):
             if version == (0, 0):  # cpu or rocm
                 return fn(self, *args, **kwargs)
             if version < versions:
-                reason = "test skipped for CUDA versions < {0}".format(version)
+                reason = f"test skipped for CUDA versions < {version}"
                 raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
 
@@ -1381,7 +1381,7 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
                     reason = "cuDNN not available"
                     raise unittest.SkipTest(reason)
                 if self.cudnn_version is None or self.cudnn_version < version:
-                    reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
+                    reason = f"cuDNN version {self.cudnn_version} is available but {version} required"
                     raise unittest.SkipTest(reason)
 
             return fn(self, *args, **kwargs)

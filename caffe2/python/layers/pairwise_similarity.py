@@ -36,17 +36,17 @@ class PairwiseSimilarity(ModelLayer):
 
         assert isinstance(x_embeddings, schema.Scalar), (
             "Incorrect input type for x. Expected Scalar, " +
-            "but received: {0}".format(x_embeddings))
+            f"but received: {x_embeddings}")
         assert isinstance(y_embeddings, schema.Scalar), (
             "Incorrect input type for y. Expected Scalar, " +
-            "but received: {0}".format(y_embeddings)
+            f"but received: {y_embeddings}"
         )
 
         if 'indices_to_gather' in input_record:
             indices_to_gather = input_record['indices_to_gather']
             assert isinstance(indices_to_gather, schema.Scalar), (
                 "Incorrect type of indices_to_gather. "
-                "Expected Scalar, but received: {0}".format(indices_to_gather)
+                "Expected Scalar, but received: {}".format(indices_to_gather)
             )
             self.indices_to_gather = indices_to_gather
         else:

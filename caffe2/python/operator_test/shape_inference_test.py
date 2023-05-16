@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 
@@ -340,7 +335,7 @@ class TestShapeInference(test_util.TestCase):
         # Testing with axes undefined
         for i in range(0, 4):
             m.net.Tile(
-                "tensor", "tiled_tensor_{}".format(i), tiles=5, axis=i)
+                "tensor", f"tiled_tensor_{i}", tiles=5, axis=i)
         self.InferTensorRunAndCompare(m)
 
     def testShapeInferenceFlatten(self):
@@ -492,7 +487,7 @@ class TestShapeInference(test_util.TestCase):
             xname = 'X%s' % xstr
             workspace.FeedBlob(xname, np.random.rand(1).astype(xnp))
             for (ystr, _, yc2) in types:
-                yname = 'Y%s_to_%s' % (xstr, ystr)
+                yname = 'Y{}_to_{}'.format(xstr, ystr)
                 model.Cast(xname, yname, to=yc2)
 
         self.InferTensorRunAndCompare(model)
@@ -636,7 +631,7 @@ class TestShapeInference(test_util.TestCase):
                 elif arr.dtype == np.dtype('float64'):
                     correct_types[b] = caffe2_pb2.TensorProto.DOUBLE
                 else:
-                    correct_types[b] = "unknown {}".format(arr.dtype)
+                    correct_types[b] = f"unknown {arr.dtype}"
             else:
                 correct_types[b] = str(type(arr))
 
@@ -657,7 +652,7 @@ class TestShapeInference(test_util.TestCase):
             )
             self.assertFalse(
                 b not in types and b in correct_types,
-                "Type for {} not defined".format(b),
+                f"Type for {b} not defined",
             )
             self.assertEqual(
                 types[b],

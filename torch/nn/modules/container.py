@@ -108,7 +108,7 @@ class Sequential(Module):
         size = len(self)
         idx = operator.index(idx)
         if not -size <= idx < size:
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         idx %= size
         return next(islice(iterator, idx, None))
 
@@ -229,11 +229,11 @@ class Sequential(Module):
     def insert(self, index: int, module: Module) -> 'Sequential':
         if not isinstance(module, Module):
             raise AssertionError(
-                'module should be of type: {}'.format(Module))
+                f'module should be of type: {Module}')
         n = len(self._modules)
         if not (-n <= index <= n):
             raise IndexError(
-                'Index out of range: {}'.format(index))
+                f'Index out of range: {index}')
         if index < 0:
             index += n
         for i in range(n, index, -1):
@@ -282,7 +282,7 @@ class ModuleList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -587,7 +587,7 @@ class ParameterList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -666,7 +666,7 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                device_str = '' if not p.is_cuda else f' (GPU {p.get_device()})'
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     p.dtype, size_str, device_str)
@@ -831,7 +831,7 @@ class ParameterDict(Module):
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict(((k, default) for k in keys))
+        return ParameterDict((k, default) for k in keys)
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
@@ -890,7 +890,7 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                device_str = '' if not p.is_cuda else f' (GPU {p.get_device()})'
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     torch.typename(p), size_str, device_str)

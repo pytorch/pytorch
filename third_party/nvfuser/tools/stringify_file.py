@@ -1,4 +1,3 @@
-
 # Generates a C++ header files embedding the original input as a string literal
 
 import argparse
@@ -22,7 +21,7 @@ MAX_STRING_LITERAL = 16000
 # https://docs.microsoft.com/en-us/cpp/c-language/maximum-string-length?view=msvc-170
 MAX_STRING_CONCATENATED = 65535
 
-with open(args.input, 'r') as fin:
+with open(args.input) as fin:
     with open(args.output, 'w') as fout:
         literal_name = f'{pathlib.Path(args.input).stem}_cu'
         fout.write(f'// Generated from "{args.input}"\n')

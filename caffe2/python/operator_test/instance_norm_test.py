@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 from hypothesis import given, assume, settings
 import hypothesis.strategies as st
@@ -22,7 +18,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
             # the inputs are identical on freshly-seeded calls.
             input_data = utils.NCHW2NHWC(input_data)
         elif order != "NCHW":
-            raise Exception('unknown order type ({})'.format(order))
+            raise Exception(f'unknown order type ({order})')
 
         scale_data = np.random.rand(C).astype(np.float32)
         bias_data = np.random.rand(C).astype(np.float32)

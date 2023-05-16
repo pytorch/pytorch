@@ -71,7 +71,7 @@ def test_vl_py(**test_args):
     control_creator = varlen_pytorch_lstm_creator
     name, experim_creator, context = get_nn_runners('vl_py')[0]
     with context():
-        print('testing {}...'.format(name))
+        print(f'testing {name}...')
         creator_keys = [
             'seqLength', 'numLayers', 'inputSize',
             'hiddenSize', 'miniBatch', 'device', 'seed'
@@ -154,5 +154,5 @@ if __name__ == '__main__':
 
     for name, creator, context in rnn_runners:
         with context():
-            print('testing {}...'.format(name))
+            print(f'testing {name}...')
             test_rnns(creator, pytorch_lstm_creator, **test_args)

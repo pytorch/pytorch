@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 from caffe2.python.optimizer import get_param_device
@@ -80,7 +75,7 @@ class GradientClipping(NetModifier):
             for blob in self.blobs_to_include:
                 param = core.BlobReference(blob)
                 if not net.BlobIsDefined(param):
-                    raise Exception('param {0} is not defined in net {1}'.format(
+                    raise Exception('param {} is not defined in net {}'.format(
                         param, net.Name()))
                 final_param_map[param] = grad_map[param]
 
@@ -110,7 +105,7 @@ class GradientClipping(NetModifier):
 
                     grad_norm = net.LpNorm(
                         [grad],
-                        net.NextScopedBlob(prefix=str(grad) + '_l{}_norm'.format(p)),
+                        net.NextScopedBlob(prefix=str(grad) + f'_l{p}_norm'),
                         p=p,
                     )
 
@@ -123,7 +118,7 @@ class GradientClipping(NetModifier):
                         param_norm = net.LpNorm(
                             [param],
                             net.NextScopedBlob(
-                                prefix=str(param) + '_l{}_norm'.format(p)),
+                                prefix=str(param) + f'_l{p}_norm'),
                             p=p,
                         )
 

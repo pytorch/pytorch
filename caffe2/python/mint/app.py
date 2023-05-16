@@ -41,7 +41,7 @@ def visualize_summary(filename):
     try:
         data = np.loadtxt(filename)
     except Exception as e:
-        return 'Cannot load file {}: {}'.format(filename, str(e))
+        return f'Cannot load file {filename}: {str(e)}'
     chart_name = os.path.splitext(os.path.basename(filename))[0]
     chart = nvd3.lineChart(
         name=chart_name + '_summary_chart',
@@ -68,7 +68,7 @@ def visualize_print_log(filename):
         if data.ndim == 1:
             data = data[:, np.newaxis]
     except Exception as e:
-        return 'Cannot load file {}: {}'.format(filename, str(e))
+        return f'Cannot load file {filename}: {str(e)}'
     chart_name = os.path.splitext(os.path.basename(filename))[0]
     chart = nvd3.lineChart(
         name=chart_name + '_log_chart',
@@ -102,7 +102,7 @@ def visualize_print_log(filename):
             chart.add_serie(
                 x=xdata,
                 y=data[xdata, i],
-                name='{}[{}]'.format(chart_name, i)
+                name=f'{chart_name}[{i}]'
             )
 
     return jsonify_nvd3(chart)
@@ -116,7 +116,7 @@ def visualize_file(filename):
         return visualize_print_log(fullname)
     else:
         return flask.jsonify(
-            result='Unsupport file: {}'.format(filename),
+            result=f'Unsupport file: {filename}',
             script=''
         )
 
@@ -181,7 +181,7 @@ def main(argv):
     args = parser.parse_args(argv)
     server = tornado.httpserver.HTTPServer(tornado.wsgi.WSGIContainer(app))
     server.listen(args.port)
-    print("Tornado server starting on port {}.".format(args.port))
+    print(f"Tornado server starting on port {args.port}.")
     tornado.ioloop.IOLoop.instance().start()
 
 

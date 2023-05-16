@@ -1,7 +1,3 @@
-
-
-
-
 import unittest
 
 import numpy as np
@@ -35,7 +31,7 @@ class TestMKLBasic(test_util.TestCase):
             rtol=1e-2)
         runtime = workspace.BenchmarkNet(net.Proto().name, 1, 100, True)
 
-        print("LRN CPU runtime {}, MKL runtime {}.".format(runtime[1], runtime[2]))
+        print(f"LRN CPU runtime {runtime[1]}, MKL runtime {runtime[2]}.")
 
     def testConvReluLRNSpeed(self):
         # We randomly select a shape to test the speed. Intentionally we

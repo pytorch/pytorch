@@ -111,10 +111,10 @@ class TestMiniAlexNet(test_util.TestCase):
         model = self._MiniAlexNetNoDropout(order)
         workspace.ResetWorkspace()
         workspace.RunNetOnce(model.param_init_net)
-        inputs = dict(
-            [(str(name), workspace.FetchBlob(str(name))) for name in
-             model.params]
-        )
+        inputs = {
+            str(name): workspace.FetchBlob(str(name)) for name in
+             model.params
+        }
         if order == "NCHW":
             inputs["data"] = np.random.rand(4, 3, 227, 227).astype(np.float32)
         else:

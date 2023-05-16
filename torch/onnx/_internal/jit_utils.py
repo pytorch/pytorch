@@ -40,8 +40,8 @@ class GraphContext:
     block: _C.Block
     opset: int
     original_node: _C.Node
-    params_dict: Dict[str, "_C.IValue"]
-    env: Dict[_C.Value, _C.Value]
+    params_dict: dict[str, _C.IValue]
+    env: dict[_C.Value, _C.Value]
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
@@ -52,7 +52,7 @@ class GraphContext:
     def op(
         self,
         opname: str,
-        *raw_args: Union[torch.Tensor, _C.Value],
+        *raw_args: torch.Tensor | _C.Value,
         outputs: int = 1,
         **kwargs,
     ):
@@ -108,7 +108,7 @@ class GraphContext:
     def onnxscript_op(
         self,
         onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
-        *raw_args: Union[torch.Tensor, _C.Value],
+        *raw_args: torch.Tensor | _C.Value,
         outputs: int = 1,
         **kwargs,
     ):
@@ -156,7 +156,7 @@ def add_op_with_blocks(
     outputs: int = 1,
     n_blocks: int = 1,
     **attributes,
-) -> Tuple[Any, Tuple[GraphContext, ...], _C.Node]:
+) -> tuple[Any, tuple[GraphContext, ...], _C.Node]:
     """Creates an ONNX operator "opname", taking inputs and attributes.
 
     Args:
@@ -200,7 +200,7 @@ def add_op_with_blocks(
 def _add_op(
     graph_context: GraphContext,
     opname: str,
-    *args: Union[torch.Tensor, _C.Value],
+    *args: torch.Tensor | _C.Value,
     outputs: int = 1,
     **kwargs,
 ):
@@ -270,7 +270,7 @@ def _const_if_tensor(graph_context: GraphContext, arg):
 
 
 def _create_node(
-    graph_or_block: Union[_C.Graph, _C.Block],
+    graph_or_block: _C.Graph | _C.Block,
     domain_op: str,
     inputs: Sequence,
     attributes: dict,
@@ -363,7 +363,7 @@ def _is_tensor(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
-def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
+def get_device_from_value(value: _C.Value) -> torch.device | None:
     if not _is_tensor(value):
         return None
     tensor_type = typing.cast(_C.TensorType, value.type())
@@ -371,7 +371,7 @@ def get_device_from_value(value: _C.Value) -> Optional[torch.device]:
 
 
 @_beartype.beartype
-def parse_node_kind(kind: str) -> Tuple[str, str]:
+def parse_node_kind(kind: str) -> tuple[str, str]:
     """Parse node kind into domain and Op name."""
     if "::" not in kind:
         raise ValueError(f"Node kind: {kind} is invalid. '::' is not in node kind.")

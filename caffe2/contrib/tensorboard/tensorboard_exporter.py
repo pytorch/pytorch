@@ -1,8 +1,3 @@
-
-
-
-
-
 import copy
 import logging
 import os
@@ -140,7 +135,7 @@ def _add_gradient_scope(shapes, track_blob_names, ops):
     """
     def f(name):
         if '_grad' in name:
-            return 'GRADIENTS/{}'.format(name)
+            return f'GRADIENTS/{name}'
         else:
             return name
     _rename_all(shapes, track_blob_names, ops, f)
@@ -186,7 +181,7 @@ def _tf_device(device_option):
     if device_option.device_type == caffe2_pb2.CPU:
         return "/cpu:*"
     if device_option.device_type == caffe2_pb2.CUDA:
-        return "/gpu:{}".format(device_option.device_id)
+        return f"/gpu:{device_option.device_id}"
     raise Exception("Unhandled device", device_option)
 
 

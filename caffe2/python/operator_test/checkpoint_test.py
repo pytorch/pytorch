@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace, test_util
 import os
 import shutil

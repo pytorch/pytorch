@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 
 import torch
@@ -15,7 +10,7 @@ from caffe2.python import core, workspace
 class TestGPUInit(unittest.TestCase):
     def testTHCAllocator(self):
         cuda_or_hip = 'hip' if workspace.has_hip_support else 'cuda'
-        flag = '--caffe2_{}_memory_pool=thc'.format(cuda_or_hip)
+        flag = f'--caffe2_{cuda_or_hip}_memory_pool=thc'
         core.GlobalInit(['caffe2', flag])
         # just run one operator
         # it's importantant to not call anything here from Torch API

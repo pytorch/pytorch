@@ -31,7 +31,7 @@ def parse_op_args(op):
 def print_results(result):
     print("===================================")
     for key, value in result.items():
-        print("{}, latency per iter (us):{}".format(key, ms_to_us(value)))
+        print(f"{key}, latency per iter (us):{ms_to_us(value)}")
     print("===================================")
 
 def benchmark_simple_fn(args, config, module_config, module_type, result):
@@ -46,7 +46,7 @@ def benchmark_simple_fn(args, config, module_config, module_type, result):
         result:         dictionary instance to be populated with the benchmark result (latency per iter).
     """
     benchmark_c2_net = args.benchmark_c2_net
-    print("Benchmarking {}".format(module_type.__name__))
+    print(f"Benchmarking {module_type.__name__}")
     if benchmark_c2_net:
         op_name = module_config.c2_op
         num_inputs = module_config.num_params
@@ -86,7 +86,7 @@ def main():
     args = parser.parse_args()
 
     if args.op not in SUPPORTED_OPS:
-        print("Op {} is not supported: Supported ops are:{}".format(args.op, SUPPORTED_OPS))
+        print(f"Op {args.op} is not supported: Supported ops are:{SUPPORTED_OPS}")
         return
     assert not (args.benchmark_c2_net and args.use_throughput_benchmark), \
         "Benchmarking of C2 net via throughput benchmarking is not yet supported"

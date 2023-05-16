@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, schema, muji
 from caffe2.python.modeling.net_modifier import NetModifier
 
@@ -28,12 +23,12 @@ class ComputeNormForBlobs(NetModifier):
         self._logging_frequency = logging_frequency
         self._p = p
         self._compute_averaged_norm = compute_averaged_norm
-        self._field_name_suffix = '_l{}_norm'.format(p)
+        self._field_name_suffix = f'_l{p}_norm'
         if compute_averaged_norm:
             self._field_name_suffix = '_averaged' + self._field_name_suffix
 
         if row_index and row_index < 0:
-            raise Exception('{0} is not a valid row index, row_index should be >= 0'.format(
+            raise Exception('{} is not a valid row index, row_index should be >= 0'.format(
                 row_index))
         self.row_index = row_index
 
@@ -49,7 +44,7 @@ class ComputeNormForBlobs(NetModifier):
         blob_to_device = blob_to_device or {}
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
+            assert net.BlobIsDefined(blob), f'blob {blob} is not defined in net {net.Name()} whose proto is {net.Proto()}'
             if blob in blob_to_device:
                 device = blob_to_device[blob]
             else:
@@ -59,7 +54,7 @@ class ComputeNormForBlobs(NetModifier):
                 if row_index and row_index >= 0:
                     blob = net.Slice(
                         [blob],
-                        net.NextScopedBlob(prefix=blob + '_row_{0}'.format(row_index)),
+                        net.NextScopedBlob(prefix=blob + f'_row_{row_index}'),
                         starts=[row_index, 0],
                         ends=[row_index + 1, -1]
                     )

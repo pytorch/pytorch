@@ -115,7 +115,7 @@ class PersistentCache:
     def get_local_cache(self):
         if not os.path.isfile(self.local_cache_path):
             return {}
-        with open(self.local_cache_path, "r") as local_cache_fp:
+        with open(self.local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         if local_cache["system"]["hash"] != self.system["hash"]:
             os.remove(self.local_cache_path)
@@ -132,7 +132,7 @@ class PersistentCache:
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
             return {}
-        with open(self.global_cache_path, "r") as global_cache_fp:
+        with open(self.global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 

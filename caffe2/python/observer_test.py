@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 from hypothesis import given, settings
@@ -76,8 +71,8 @@ class TestObservers(unittest.TestCase):
             init_blobs = []
             for i in range(num_layers):
                 hidden_init, cell_init = model.net.AddExternalInputs(
-                    "hidden_init_{}".format(i),
-                    "cell_init_{}".format(i)
+                    f"hidden_init_{i}",
+                    f"cell_init_{i}"
                 )
                 init_blobs.extend([hidden_init, cell_init])
 

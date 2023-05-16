@@ -1,4 +1,3 @@
-
 from torch.ao.pruning import BaseSparsifier
 
 from functools import wraps
@@ -106,8 +105,8 @@ class BaseScheduler:
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
-        format_string += 'Sparsifier {0}\n'.format(self.sparsifier)
-        format_string += '    {0}: {1}\n'.format('base_sl', self.base_sl)
+        format_string += f'Sparsifier {self.sparsifier}\n'
+        format_string += '    {}: {}\n'.format('base_sl', self.base_sl)
         format_string += ')'
         return format_string
 

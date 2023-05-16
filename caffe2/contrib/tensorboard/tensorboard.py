@@ -1,8 +1,3 @@
-
-
-
-
-
 import click
 import collections
 import logging
@@ -186,13 +181,13 @@ def tensorboard_events(c2_dir, tf_dir):
             s = Summary()
             scalar = [
                 Summary.Value(
-                    tag="{}/{}".format(name, field),
+                    tag=f"{name}/{field}",
                     simple_value=v)
                 for name, value in zip(names, values)
                 for field, v in value._asdict().items()]
             hist = [
                 Summary.Value(
-                    tag="{}/inferred_normal_hist".format(name),
+                    tag=f"{name}/inferred_normal_hist",
                     histo=inferred_histo(value))
                 for name, value in zip(names, values)
             ]

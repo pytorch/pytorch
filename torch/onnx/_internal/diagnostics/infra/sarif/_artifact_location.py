@@ -10,22 +10,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import _message, _property_bag
 
 
 @dataclasses.dataclass
-class ArtifactLocation(object):
+class ArtifactLocation:
     """Specifies the location of an artifact."""
 
-    description: Optional[_message.Message] = dataclasses.field(
+    description: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    uri: Optional[str] = dataclasses.field(
+    uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "uri"}
     )
-    uri_base_id: Optional[str] = dataclasses.field(
+    uri_base_id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "uriBaseId"}
     )
 

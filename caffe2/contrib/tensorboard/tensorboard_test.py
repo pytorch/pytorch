@@ -1,8 +1,3 @@
-
-
-
-
-
 import click.testing
 import numpy as np
 import os

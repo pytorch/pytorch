@@ -10,25 +10,25 @@ from torch.onnx._internal.diagnostics.infra.sarif import _message, _property_bag
 
 
 @dataclasses.dataclass
-class Rectangle(object):
+class Rectangle:
     """An area within an image."""
 
-    bottom: Optional[float] = dataclasses.field(
+    bottom: float | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "bottom"}
     )
-    left: Optional[float] = dataclasses.field(
+    left: float | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "left"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    right: Optional[float] = dataclasses.field(
+    right: float | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "right"}
     )
-    top: Optional[float] = dataclasses.field(
+    top: float | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "top"}
     )
 

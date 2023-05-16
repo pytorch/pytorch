@@ -1,5 +1,3 @@
-
-
 import copy
 import logging
 from collections import defaultdict
@@ -46,7 +44,7 @@ def fuse_first_bn(net, params, removed_tensors, begin_op_index):
         bn = net.op[j]
         if bn.type != "SpatialBN" or (len(uses) > 1 and conv.output[0] != bn.output[0]):
             if bn.type == "SpatialBN":
-                logger.debug("Can't fuse if more than one user {}".format(uses))
+                logger.debug(f"Can't fuse if more than one user {uses}")
             # Can't fuse if more than one user unless SpatialBN is inplace
             # An example of inplace SpatialBN where we want to allow multiple uses:
             # x = Conv(...)
@@ -258,7 +256,7 @@ def fuse_first_relu(net, begin_op_index, ignore_op_with_output=None):
         if relu.type != "Relu" or len(uses) > 1 and conv.output[0] != relu.output[0]:
             # Can't fuse if more than one user unless Relu is inplace
             if relu.type == "Relu":
-                logger.debug("Can't fuse if more than one user {}".format(uses))
+                logger.debug(f"Can't fuse if more than one user {uses}")
             continue
 
         # There shouldn't be any def of conv.output[0] and any use or def of relu.output[0] between conv and relu

@@ -17,32 +17,32 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Location(object):
+class Location:
     """A location within a programming artifact."""
 
-    annotations: Optional[List[_region.Region]] = dataclasses.field(
+    annotations: list[_region.Region] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "annotations"}
     )
     id: int = dataclasses.field(default=-1, metadata={"schema_property_name": "id"})
-    logical_locations: Optional[
-        List[_logical_location.LogicalLocation]
-    ] = dataclasses.field(
+    logical_locations: None | (
+        list[_logical_location.LogicalLocation]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "logicalLocations"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    physical_location: Optional[
+    physical_location: None | (
         _physical_location.PhysicalLocation
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "physicalLocation"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    relationships: Optional[
-        List[_location_relationship.LocationRelationship]
-    ] = dataclasses.field(
+    relationships: None | (
+        list[_location_relationship.LocationRelationship]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "relationships"}
     )
 

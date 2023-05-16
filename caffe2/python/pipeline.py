@@ -181,7 +181,7 @@ def processor_name(processor):
         if processor.func_name == '<lambda>':
             return processor.__module__
         if hasattr(processor, 'im_class'):
-            return '%s.%s' % (processor.im_class.__name__, processor.func_name)
+            return '{}.{}'.format(processor.im_class.__name__, processor.func_name)
         return processor.func_name
     return processor.__class__.__name__
 
@@ -189,7 +189,7 @@ def processor_name(processor):
 def _runtime_threads_task(name, group, final_outputs, reader, num_threads,
                           output, capacity):
     node_name = str(Node.current())
-    profiler_name = "{0}/{1}/{2}/{3}/{4}".format(
+    profiler_name = "{}/{}/{}/{}/{}".format(
         node_name,
         "pipe",
         name,
@@ -249,7 +249,7 @@ def _runtime_threads_task(name, group, final_outputs, reader, num_threads,
 def _static_threads_task(name, group, final_outputs, reader, num_threads,
                          output, capacity):
     node_name = str(Node.current())
-    profiler_name = "{0}/{1}/{2}/{3}/{4}".format(
+    profiler_name = "{}/{}/{}/{}/{}".format(
         node_name,
         "pipe",
         name,
@@ -325,7 +325,7 @@ def _pipe_step(
         reader = input.reader()
     else:
         raise ValueError(
-            'Input must be a reader, queue or stream. Got {}'.format(type(input)))
+            f'Input must be a reader, queue or stream. Got {type(input)}')
 
     if processor is not None:
         reader = ProcessingReader(reader, processor)

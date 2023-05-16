@@ -51,7 +51,7 @@ class Split(ModelLayer):
             output_scalars = [
                 schema.Scalar(
                     (data_type, output_shape),
-                    self.get_next_blob_reference('output_{}'.format(i)),
+                    self.get_next_blob_reference(f'output_{i}'),
                 )
                 for i in range(num_splits)
             ]
@@ -59,7 +59,7 @@ class Split(ModelLayer):
             output_scalars = [
                 schema.Scalar(
                     (data_type, output_shape[i]),
-                    self.get_next_blob_reference('output_{}'.format(i)),
+                    self.get_next_blob_reference(f'output_{i}'),
                 )
                 for i in range(num_splits)
             ]

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase
 import numpy as np
@@ -11,9 +6,9 @@ import numpy as np
 class TestPutOps(TestCase):
     def test_default_value(self):
         magnitude_expand = int(1e12)
-        stat_name = "stat".encode('ascii')
-        sum_postfix = "/stat_value/sum".encode("ascii")
-        count_postfix = "/stat_value/count".encode("ascii")
+        stat_name = b"stat"
+        sum_postfix = b"/stat_value/sum"
+        count_postfix = b"/stat_value/count"
         default_value = 16.0
 
         workspace.FeedBlob("value", np.array([], dtype=np.float))
@@ -44,9 +39,9 @@ class TestPutOps(TestCase):
     def test_clamp(self):
         put_value = 10
         magnitude_expand = int(1e18)
-        stat_name = "stat".encode('ascii')
-        sum_postfix = "/stat_value/sum".encode("ascii")
-        count_postfix = "/stat_value/count".encode("ascii")
+        stat_name = b"stat"
+        sum_postfix = b"/stat_value/sum"
+        count_postfix = b"/stat_value/count"
 
         workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
 
@@ -75,9 +70,9 @@ class TestPutOps(TestCase):
     def test_clamp_with_out_of_bounds(self):
         put_value = float(1e20)
         magnitude_expand = 1000000000000
-        stat_name = "stat".encode('ascii')
-        sum_postfix = "/stat_value/sum".encode("ascii")
-        count_postfix = "/stat_value/count".encode("ascii")
+        stat_name = b"stat"
+        sum_postfix = b"/stat_value/sum"
+        count_postfix = b"/stat_value/count"
 
         workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
 
@@ -106,9 +101,9 @@ class TestPutOps(TestCase):
     def test_avg_put_ops(self):
         put_value = 15.1111
         magnitude_expand = 10000
-        stat_name = "a1".encode('ascii')
-        sum_postfix = "/stat_value/sum".encode("ascii")
-        count_postfix = "/stat_value/count".encode("ascii")
+        stat_name = b"a1"
+        sum_postfix = b"/stat_value/sum"
+        count_postfix = b"/stat_value/count"
 
         workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
 
@@ -136,8 +131,8 @@ class TestPutOps(TestCase):
     def test_increment_put_ops(self):
         put_value = 15.1111
         magnitude_expand = 10000
-        stat_name = "i1".encode('ascii')
-        member_postfix = "/stat_value".encode("ascii")
+        stat_name = b"i1"
+        member_postfix = b"/stat_value"
 
         workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
 
@@ -163,11 +158,11 @@ class TestPutOps(TestCase):
     def test_stddev_put_ops(self):
         put_value = 15.1111
         magnitude_expand = 10000
-        stat_name = "s1".encode('ascii')
-        sum_postfix = "/stat_value/sum".encode("ascii")
-        count_postfix = "/stat_value/count".encode("ascii")
-        sumoffset_postfix = "/stat_value/sumoffset".encode("ascii")
-        sumsqoffset_postfix = "/stat_value/sumsqoffset".encode("ascii")
+        stat_name = b"s1"
+        sum_postfix = b"/stat_value/sum"
+        count_postfix = b"/stat_value/count"
+        sumoffset_postfix = b"/stat_value/sumoffset"
+        sumsqoffset_postfix = b"/stat_value/sumsqoffset"
 
         workspace.FeedBlob("value", np.array([put_value], dtype=np.float))
 

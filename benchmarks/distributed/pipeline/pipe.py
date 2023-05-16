@@ -16,7 +16,7 @@ from torch.optim import Adam
 def sizeof_fmt(num, suffix='B'):
     for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:
         if abs(num) < 1024.0:
-            return "%3.2f%sB" % (num, unit)
+            return "{:3.2f}{}B".format(num, unit)
         num /= 1024.0
 
 
@@ -146,7 +146,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
             return torch.cuda.current_device()
 
 
-    print('Number of parameters for model: {}'.format(sum(p.numel() for p in model.parameters())))
+    print(f'Number of parameters for model: {sum(p.numel() for p in model.parameters())}')
     for i, batch in enumerate(lm_dataloader):
         bi = batch["input"]
         if args.max_batch and i > args.max_batch:

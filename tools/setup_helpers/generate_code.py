@@ -75,7 +75,7 @@ def generate_code(
 def get_selector_from_legacy_operator_selection_list(
     selected_op_list_path: str,
 ) -> Any:
-    with open(selected_op_list_path, "r") as f:
+    with open(selected_op_list_path) as f:
         # strip out the overload part
         # It's only for legacy config - do NOT copy this code!
         selected_op_list = {

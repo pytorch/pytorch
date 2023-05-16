@@ -36,7 +36,7 @@ __all__ = [
 _QUANT_CONFIG_TO_ANNOTATOR = {}
 
 
-def _mark_nodes_as_annotated(nodes: List[Node]):
+def _mark_nodes_as_annotated(nodes: list[Node]):
     for node in nodes:
         if node is not None:
             if "target_dtype_info" not in node.meta:
@@ -56,7 +56,7 @@ def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
     return gm.graph
 
 
-def _get_linear_patterns(input_size: List[int]):
+def _get_linear_patterns(input_size: list[int]):
     in_channels = input_size[-1]
     out_channels = 8  # hard coding but this should not matter
     weight = torch.ones((out_channels, in_channels))
@@ -71,7 +71,7 @@ def _get_linear_patterns(input_size: List[int]):
     return [pattern_w_bias, pattern_wo_bias]
 
 
-def register_annotator(quantization_configs: List[QuantizationConfig]):
+def register_annotator(quantization_configs: list[QuantizationConfig]):
     def decorator(fn: Callable):
         for quantization_config in quantization_configs:
             if quantization_config in _QUANT_CONFIG_TO_ANNOTATOR:
@@ -85,8 +85,8 @@ def register_annotator(quantization_configs: List[QuantizationConfig]):
     return decorator
 
 
-def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
-    supported_operators: Dict[str, List[OperatorPatternType]] = {
+def supported_symmetric_quantized_operators() -> dict[str, list[OperatorPatternType]]:
+    supported_operators: dict[str, list[OperatorPatternType]] = {
         # Both conv and linear should be able to handle relu + hardtanh fusion since
         # those are clamp ops
         "conv2d": [
@@ -108,8 +108,8 @@ def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternT
     return copy.deepcopy(supported_operators)
 
 
-def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
-    supported_config_and_operators: List[OperatorConfig] = []
+def get_supported_symmetric_config_and_operators() -> list[OperatorConfig]:
+    supported_config_and_operators: list[OperatorConfig] = []
     for quantization_config in [
         get_symmetric_quantization_config(),
         get_symmetric_quantization_config(is_qat=True),
@@ -154,7 +154,7 @@ def get_symmetric_quantization_config(
     return quantization_config
 
 
-def get_supported_config_and_operators() -> List[OperatorConfig]:
+def get_supported_config_and_operators() -> list[OperatorConfig]:
     return get_supported_symmetric_config_and_operators()
 
 
@@ -162,7 +162,7 @@ def _get_default_obs_or_fq_ctr():
     return PlaceholderObserver.with_args(dtype=torch.float)
 
 
-def _is_annotated(nodes: List[Node]):
+def _is_annotated(nodes: list[Node]):
     """
     Given a list of nodes (that represents an operator pattern),
     check if any of the node is annotated, return True if any of the node
@@ -183,19 +183,19 @@ class QNNPackQuantizer(Quantizer):
     def __init__(self):
         super().__init__()
         self.global_config: QuantizationConfig = None  # type: ignore[assignment]
-        self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.operator_type_config: dict[str, QuantizationConfig | None] = {}
 
     @classmethod
-    def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = set({})
+    def get_supported_quantization_configs(cls) -> list[QuantizationConfig]:
+        op_configs: set[QuantizationConfig] = set({})
         for spec, _ in cls.supported_config_and_operators:
             op_configs.add(spec)
         return list(op_configs)
 
     @classmethod
     def get_supported_operator_for_quantization_config(
-        cls, quantization_config: Optional[QuantizationConfig]
-    ) -> List[OperatorPatternType]:
+        cls, quantization_config: QuantizationConfig | None
+    ) -> list[OperatorPatternType]:
         if quantization_config is None:
             all_ops = []
             for _, ops in cls.supported_config_and_operators:
@@ -465,7 +465,7 @@ class QNNPackQuantizer(Quantizer):
         patterns.extend(_get_linear_patterns([8, 8, 8, 8]))
         patterns.extend(_get_linear_patterns([8, 8, 8]))
         patterns.extend(_get_linear_patterns([8, 8]))
-        matches: List[InternalMatch] = []
+        matches: list[InternalMatch] = []
         for pattern in patterns:
             subgraph_matcher = SubgraphMatcher(pattern, ignore_literals=True)
             matches.extend(subgraph_matcher.match(graph))
@@ -660,5 +660,5 @@ class QNNPackQuantizer(Quantizer):
         pass
 
     @classmethod
-    def get_supported_operators(cls) -> List[OperatorConfig]:
+    def get_supported_operators(cls) -> list[OperatorConfig]:
         return cls.supported_config_and_operators

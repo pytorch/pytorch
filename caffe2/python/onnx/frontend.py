@@ -101,7 +101,7 @@ class Caffe2Frontend:
         elif arg.strings:
             value = arg.strings
         else:
-            raise ValueError('Could not find data field in arg: {}'.format(arg))
+            raise ValueError(f'Could not find data field in arg: {arg}')
 
         if name in cls._blocklist_caffe2_args:
             assert value in cls._blocklist_caffe2_args[arg.name]
@@ -262,7 +262,7 @@ class Caffe2Frontend:
 
         all_output = set(sum((list(node.output) for node in graph_def.node),
                              [init.name for init in graph_def.initializer]))
-        redundant_output = set(vi.name for vi in graph_def.output) - all_output
+        redundant_output = {vi.name for vi in graph_def.output} - all_output
         if redundant_output:
             logger.warning(
                 'There are graph output not produced by any node or initializer: {}'
@@ -309,11 +309,11 @@ class Caffe2Frontend:
                 return name
             if version_cnt and len(version_cnt.get(name, {})) <= 1:
                 return name
-            return '{}_{}'.format(name, version)
+            return f'{name}_{version}'
 
         if init_net:
             for op in init_net.op:
-                assert re.match('GivenTensor.*Fill', op.type), "type is {}, \n{}".format(op.type, op)
+                assert re.match('GivenTensor.*Fill', op.type), f"type is {op.type}, \n{op}"
                 assert len(op.output) == 1
 
         ssa, blob_versions = caffe2_core.get_ssa(net)

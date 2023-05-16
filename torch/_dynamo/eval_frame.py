@@ -80,7 +80,7 @@ class Unset(Enum):
 unset = Unset.token
 
 compile_lock = threading.RLock()
-most_recent_backend: Optional[CompilerFn] = None
+most_recent_backend: CompilerFn | None = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -202,7 +202,7 @@ class _TorchDynamoContext:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
-        self.prior: Union[Unset, DynamoCallback] = unset
+        self.prior: Unset | DynamoCallback = unset
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
@@ -654,7 +654,7 @@ class Constraint(ConstraintTarget):
     constraint_range: StrictMinMaxConstraint
     # Represent that `constraint_range` is shared with another ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[ConstraintTarget] = None
+    shared: ConstraintTarget | None = None
 
     def _clone_with_range(self, lower=2, upper=sympy.oo):
         constraint_range = StrictMinMaxConstraint(
@@ -723,15 +723,15 @@ def export(
     *args,
     aten_graph: bool = False,
     pre_autograd: bool = False,
-    decomposition_table: Optional[
-        Dict[torch._ops.OpOverload, Callable[..., Any]]
-    ] = None,
+    decomposition_table: None | (
+        dict[torch._ops.OpOverload, Callable[..., Any]]
+    ) = None,
     tracing_mode: str = "symbolic",
-    constraints: Optional[List[Constraint]] = None,
+    constraints: list[Constraint] | None = None,
     assume_static_by_default: bool = False,
     functionalize: bool = False,
     **kwargs,
-) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
+) -> tuple[torch.fx.GraphModule, set[_guards.Guard]]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -791,7 +791,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
-    graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    graph_captured_result: tuple[torch.Tensor, ...] | None = None
 
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
@@ -822,7 +822,7 @@ def export(
 
         return matched_elements_positions
 
-    def guard_export_print(guards: Set[_guards.Guard]):
+    def guard_export_print(guards: set[_guards.Guard]):
         nonlocal out_guards
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
@@ -920,7 +920,7 @@ def export(
             arg_len = len(flat_args)
             self.new_args = []
             for i in range(0, arg_len):
-                arg = super(ChangeInputOutputSignature, self).placeholder(
+                arg = super().placeholder(
                     f"arg{i}", (), {}
                 )
                 # Fill node.mata["val"] with faketensolintrunner from the input,
@@ -962,7 +962,7 @@ def export(
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
-        memo: Dict[torch.Tensor, torch.Tensor] = {}
+        memo: dict[torch.Tensor, torch.Tensor] = {}
 
         def to_fun(t):
             if isinstance(t, torch.Tensor):
@@ -1078,7 +1078,7 @@ def export(
         )
 
     # Make dynamo graph to have same input/output spec as user code
-    def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
+    def argument_names(f: Callable[..., Any], *args, **kwargs) -> list[str]:
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
 
         sig = inspect.signature(call_to_inspect)

@@ -85,7 +85,7 @@ def share_grad_blobs(
         netproto.SerializeToString(),
         [str(s).encode('utf-8') for s in losses],
         grad_op_indices,
-        set(str(s).encode('utf-8') for s in shared_blobs),
+        {str(s).encode('utf-8') for s in shared_blobs},
         namescope.encode('utf-8'),
         set() if dont_share_blobs is None else dont_share_blobs,
         {} if blob_shapes is None else blob_shapes
@@ -124,7 +124,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
             if is_activation_blob(b):
                 activation_blobs.add(b)
                 if b not in seen_as_output:
-                    raise AssertionError("{} not in external input".format(b))
+                    raise AssertionError(f"{b} not in external input")
         for b in op.output:
             if is_activation_blob(b):
                 activation_blobs.add(b)
@@ -136,7 +136,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
         netproto.SerializeToString(),
         [str(s).encode('utf-8') for s in input_blobs],
         op_indices,
-        set(str(s).encode('utf-8') for s in activation_blobs),
+        {str(s).encode('utf-8') for s in activation_blobs},
         namescope.encode('utf-8'),
         set(),
         {}
@@ -191,7 +191,7 @@ def estimate_memory_usage(protos, shapes, types, devicescope):
 
     def num_bytes(blob):
         if blob not in shapes or blob not in types:
-            log.warning("Unknown blob encountered: {}".format(blob))
+            log.warning(f"Unknown blob encountered: {blob}")
             return 0
         sizeof = sizeofs[types[blob]]
         return sizeof * np.prod(shapes[blob])
@@ -453,7 +453,7 @@ def topological_sort_traversal_longest_path(g):
                 if d not in seen_nodes:
                     seen_nodes.add(d)
                     dependency_order.append(d)
-        sort_key = dict((v, len(dependency_order) - i) for i, v in enumerate(dependency_order))
+        sort_key = {v: len(dependency_order) - i for i, v in enumerate(dependency_order)}
         ret = nx.algorithms.dag.lexicographical_topological_sort(
             g, key=lambda x: sort_key[x])
         ret = list(ret)
@@ -738,7 +738,7 @@ def compute_assignments(ranges, static_blobs, algo):
     # Static blobs, not sharable
     ranges_static = [x for x in ranges if x[0] in static_blobs]
 
-    log.info("Total sharable blobs {}".format(len(ranges_sharable)))
+    log.info(f"Total sharable blobs {len(ranges_sharable)}")
 
     best_assignment = []
     if algo == AssignmentAlgorithm.DYNAMIC_PROGRAMMING:
@@ -746,7 +746,7 @@ def compute_assignments(ranges, static_blobs, algo):
     elif algo == AssignmentAlgorithm.GREEDY:
         best_assignment = compute_assignments_greedy(ranges_sharable, [])
     else:
-        assert "Invalid algo name {}".format(algo)
+        assert f"Invalid algo name {algo}"
     best_assignment += [[x] for x in ranges_static]
 
     # verify_assignments(best_assignment)
@@ -797,7 +797,7 @@ def apply_assignments(net, blob_assignments):
 
 
 def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
-    log.debug("Applying assignments to recurrent op: {}".format(op.type))
+    log.debug(f"Applying assignments to recurrent op: {op.type}")
 
     # Apply on alias_dst
     alias_dst_args = [a for a in op.arg if a.name.endswith("alias_dst")]
@@ -956,7 +956,7 @@ def verify_graph_equality(net_a, net_b):
             if a != b:
                 print("Difference {} vs {} \n {}".format(
                     j, net_a.op[j], net_b.op[j]))
-                print("Parents: {} vs {}".format(a, b))
+                print(f"Parents: {a} vs {b}")
 
             j += 1
 
@@ -973,7 +973,7 @@ def blob_nbytes(blob):
     try:
         sz = workspace.FetchBlob(blob).nbytes
     except Exception:
-        log.warning('Error when fetching blob {}'.format(blob))
+        log.warning(f'Error when fetching blob {blob}')
     return sz
 
 

@@ -130,7 +130,7 @@ def init_data_input_workers(
     workers = [
         threading.Thread(
             target=run_worker,
-            name="data_workers fetcher id {}".format(worker_id),
+            name=f"data_workers fetcher id {worker_id}",
             args=[coordinator,
                   DataWorker(coordinator, worker_id, fetch_fun, metrics,
                              batch_size, batch_feeder)],
@@ -139,7 +139,7 @@ def init_data_input_workers(
 
     workers.append(threading.Thread(
         target=enqueuer,
-        name="Enqueuer {} {}".format(input_source_name, scope.CurrentNameScope()),
+        name=f"Enqueuer {input_source_name} {scope.CurrentNameScope()}",
         args=[coordinator, batch_feeder]))
     coordinator._workers = workers
     global_coordinator.add(coordinator)
@@ -238,7 +238,7 @@ class BatchFeeder(State):
                 qsize = self._internal_queue.qsize()
                 if qsize < 2 and (time.time() - self._last_warning) > LOG_INT_SECS:
                     log.warning("Warning, data loading lagging behind: " +
-                                "queue size={}, name={}".format(qsize, self._input_source_name))
+                                f"queue size={qsize}, name={self._input_source_name}")
                     self._last_warning = time.time()
                 self._counter += 1
                 self._internal_queue.put(chunk, block=True, timeout=0.5)
@@ -396,7 +396,7 @@ class BatchFeeder(State):
                 self._namescope,
                 inputs_per_sec,
             ))
-            log.info("-- queue: {} batches".format(qsize))
+            log.info(f"-- queue: {qsize} batches")
             # log and reset perf metrics
             self._metrics.put_metric(
                 'inputs_per_sec', inputs_per_sec, False)
@@ -421,7 +421,7 @@ class GlobalCoordinator(GlobalWorkerCoordinator):
         return self._queues[queue_name]
 
     def reset_data_input(self, namescope, name, net, batch_size):
-        log.info("Reset data input {}, batch size {}: ".format(name, batch_size))
+        log.info(f"Reset data input {name}, batch size {batch_size}: ")
         for c in self._coordinators:
             if c._worker_name == name and c._state._namescope == namescope:
                 c._state._batch_size = batch_size

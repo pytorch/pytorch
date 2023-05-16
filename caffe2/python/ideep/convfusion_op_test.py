@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -326,7 +321,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
         net = core.Net("net")
         net.Proto().CopyFrom(old_net)
         optimizeForMKLDNN(net)
-        print("net={}\n".format(net.Proto()))
+        print(f"net={net.Proto()}\n")
         self.assertTrue(len(net.Proto().op) == 4)
         workspace.RunNetOnce(net.Proto())
         S2 = workspace.FetchBlob(net.Proto().op[-2].output[0])

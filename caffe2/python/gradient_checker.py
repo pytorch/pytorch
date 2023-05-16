@@ -115,7 +115,7 @@ class NetGradientChecker:
             for blob, blob_grad_value in net_grads.items():
                 _assert_close(
                     first_net_grads[blob], blob_grad_value, threshold,
-                    err_msg="Different gradients for input {}".format(blob))
+                    err_msg=f"Different gradients for input {blob}")
 
     @staticmethod
     def Check(net, outputs_with_grad, input_values,
@@ -148,7 +148,7 @@ class NetGradientChecker:
         err_msg = "Error in gradient check for net_copy {}".format(
             net.Name())
         if print_net:
-            err_msg += ": {}".format(net.Proto())
+            err_msg += f": {net.Proto()}"
 
         return _assert_close(analytic_grad, grad_estimate, threshold, err_msg)
 
@@ -358,7 +358,7 @@ class GradientChecker:
         for output in outputs:
             if output not in inferred_shapes:
                 raise Exception(
-                    "expected output {} to be inferred".format(output))
+                    f"expected output {output} to be inferred")
             blob = workspace.FetchBlob(output)
             correct_shape = list(blob.shape)
             inferred_shape = list(inferred_shapes[output])
@@ -377,7 +377,7 @@ class GradientChecker:
                 elif blob.dtype == np.dtype('int64'):
                     correct_type = caffe2_pb2.TensorProto.INT64
                 else:
-                    correct_type = "unknown {}".format(np.dtype)
+                    correct_type = f"unknown {np.dtype}"
             else:
                 correct_type = str(type(blob))
             inferred_type = inferred_types[output]

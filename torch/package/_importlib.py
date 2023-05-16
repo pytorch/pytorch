@@ -31,13 +31,13 @@ def _resolve_name(name, package, level):
     if len(bits) < level:
         raise ValueError("attempted relative import beyond top-level package")
     base = bits[0]
-    return "{}.{}".format(base, name) if name else base
+    return f"{base}.{name}" if name else base
 
 
 def _sanity_check(name, package, level):
     """Verify arguments are "sane"."""
     if not isinstance(name, str):
-        raise TypeError("module name must be str, not {}".format(type(name)))
+        raise TypeError(f"module name must be str, not {type(name)}")
     if level < 0:
         raise ValueError("level must be >= 0")
     if level > 0:
@@ -90,6 +90,6 @@ def _normalize_path(path):
     """
     parent, file_name = os.path.split(path)
     if parent:
-        raise ValueError("{!r} must be only a file name".format(path))
+        raise ValueError(f"{path!r} must be only a file name")
     else:
         return file_name

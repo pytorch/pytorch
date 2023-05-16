@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: linear algebra"]
 
 import unittest
@@ -133,7 +132,7 @@ class TestMatmulCuda(TestCase):
          (2, 1000, 1000, 1000),
          (1, 10000, 1000, 10000),
          (1, 10000, 10000, 10000)],
-        name_fn=lambda batch_size, N, M, P: "{}_{}_{}_{}".format(batch_size, N, M, P),
+        name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
     def test_cublas_baddbmm_large_input(self, device, batch_size, N, M, P, dtype):
         cpu_dtype = dtype

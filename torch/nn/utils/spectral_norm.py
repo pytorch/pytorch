@@ -212,7 +212,7 @@ class SpectralNormStateDictHook:
             local_metadata['spectral_norm'] = {}
         key = self.fn.name + '.version'
         if key in local_metadata['spectral_norm']:
-            raise RuntimeError("Unexpected key in metadata['spectral_norm']: {}".format(key))
+            raise RuntimeError(f"Unexpected key in metadata['spectral_norm']: {key}")
         local_metadata['spectral_norm'][key] = self.fn._version
 
 

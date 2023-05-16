@@ -1,5 +1,3 @@
-
-
 import os
 import shutil
 import sys
@@ -37,7 +35,7 @@ class VideoInputOpTest(unittest.TestCase):
         index = 0
 
         with env.begin(write=True) as txn:
-            with open(list_file, "r") as data:
+            with open(list_file) as data:
                 for line in data:
                     p = line.split()
                     file_name = p[0]
@@ -64,7 +62,7 @@ class VideoInputOpTest(unittest.TestCase):
                     start_frame_tensor.int32_data.append(start_frame)
 
                     txn.put(
-                        "{}".format(index).encode("ascii"),
+                        f"{index}".encode("ascii"),
                         tensor_protos.SerializeToString(),
                     )
                     index = index + 1
@@ -78,7 +76,7 @@ class VideoInputOpTest(unittest.TestCase):
         if not os.path.exists(VIDEO):
             raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = "{} 0 {}\n".format(VIDEO, random_label)
+        line_str = f"{VIDEO} 0 {random_label}\n"
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -120,7 +118,7 @@ class VideoInputOpTest(unittest.TestCase):
         if not os.path.exists(VIDEO):
             raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = "{} 0 {}\n".format(VIDEO, random_label)
+        line_str = f"{VIDEO} 0 {random_label}\n"
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -161,7 +159,7 @@ class VideoInputOpTest(unittest.TestCase):
         if not os.path.exists(VIDEO):
             raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = "{} 0 {}\n".format(VIDEO, random_label)
+        line_str = f"{VIDEO} 0 {random_label}\n"
         self.create_a_list(temp_list, line_str, 16)
         video_db_dir = tempfile.mkdtemp()
 
@@ -205,7 +203,7 @@ class VideoInputOpTest(unittest.TestCase):
         if not os.path.exists(VIDEO):
             raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = "{} 0 {}\n".format(VIDEO, random_label)
+        line_str = f"{VIDEO} 0 {random_label}\n"
         self.create_a_list(temp_list, line_str, batch_size)
         video_db_dir = tempfile.mkdtemp()
 
@@ -251,7 +249,7 @@ class VideoInputOpTest(unittest.TestCase):
         if not os.path.exists(VIDEO):
             raise unittest.SkipTest("Missing data")
         temp_list = tempfile.NamedTemporaryFile(delete=False).name
-        line_str = "{} 0 {}\n".format(VIDEO, random_label)
+        line_str = f"{VIDEO} 0 {random_label}\n"
         self.create_a_list(temp_list, line_str, batch_size)
         video_db_dir = tempfile.mkdtemp()
 

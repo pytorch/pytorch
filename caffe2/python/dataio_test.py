@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python.dataio import (
     CompositeReader,
     CompositeReaderBuilder,
@@ -32,7 +27,7 @@ import tempfile
 
 def make_source_dataset(ws, size=100, offset=0, name=None):
     name = name or "src"
-    src_init = core.Net("{}_init".format(name))
+    src_init = core.Net(f"{name}_init")
     with core.NameScope(name):
         src_values = Struct(('label', np.array(range(offset, offset + size))))
         src_blobs = NewRecord(src_init, src_values)
@@ -44,7 +39,7 @@ def make_source_dataset(ws, size=100, offset=0, name=None):
 
 def make_destination_dataset(ws, schema, name=None):
     name = name or 'dst'
-    dst_init = core.Net('{}_init'.format(name))
+    dst_init = core.Net(f'{name}_init')
     with core.NameScope(name):
         dst_ds = Dataset(schema, name=name)
         dst_ds.init_empty(dst_init)
@@ -80,7 +75,7 @@ class TestCompositeReader(TestCase):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         num_srcs = 3
-        names = ["src_{}".format(i) for i in range(num_srcs)]
+        names = [f"src_{i}" for i in range(num_srcs)]
         size = 100
         offsets = [i * size for i in range(num_srcs)]
         src_dses = [make_source_dataset(ws, offset=offset, size=size, name=name)
@@ -109,14 +104,14 @@ class TestCompositeReader(TestCase):
         for i in range(num_srcs):
             written_data = sorted(
                 ws.fetch_blob(str(dst_ds.content()[names[i]].label())))
-            npt.assert_array_equal(data[i], written_data, "i: {}".format(i))
+            npt.assert_array_equal(data[i], written_data, f"i: {i}")
 
     @unittest.skipIf(os.environ.get('JENKINS_URL'), 'Flaky test on Jenkins')
     def test_composite_reader_builder(self):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         num_srcs = 3
-        names = ["src_{}".format(i) for i in range(num_srcs)]
+        names = [f"src_{i}" for i in range(num_srcs)]
         size = 100
         offsets = [i * size for i in range(num_srcs)]
         src_ds_builders = [
@@ -145,7 +140,7 @@ class TestCompositeReader(TestCase):
             written_data = sorted(
                 ws.fetch_blob(str(dst_ds.content()[name].label())))
             npt.assert_array_equal(range(offset, offset + size), written_data,
-                                   "name: {}".format(name))
+                                   f"name: {name}")
 
 
 class TestReaderWithLimit(TestCase):

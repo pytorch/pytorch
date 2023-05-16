@@ -65,7 +65,7 @@ class Seq2SeqModelCaffe2EnsembleDecoderBase(metaclass=ABCMeta):
                 [], [db_reader],
                 db=self.get_model_file(model),
                 db_type=self.get_db_type())
-            ), 'Failed to create db {}'.format(self.get_model_file(model))
+            ), f'Failed to create db {self.get_model_file(model)}'
             assert workspace.RunOperatorOnce(core.CreateOperator(
                 'Load',
                 [db_reader],
@@ -193,7 +193,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
                     if final_encoder_hidden_states[i] is not None:
                         final_encoder_hidden_states[i] = model.net.Tile(
                             final_encoder_hidden_states[i],
-                            'final_encoder_hidden_tiled_{}'.format(i),
+                            f'final_encoder_hidden_tiled_{i}',
                             tiles=self.beam_size,
                             axis=1,
                         )
@@ -202,7 +202,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
                     if final_encoder_cell_states[i] is not None:
                         final_encoder_cell_states[i] = model.net.Tile(
                             final_encoder_cell_states[i],
-                            'final_encoder_cell_tiled_{}'.format(i),
+                            f'final_encoder_cell_tiled_{i}',
                             tiles=self.beam_size,
                             axis=1,
                         )
@@ -229,7 +229,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
             name=scope,
         )
         states_prev = step_model.net.AddExternalInputs(*[
-            '{}/{}_prev'.format(scope, s)
+            f'{scope}/{s}_prev'
             for s in attention_decoder.get_state_names()
         ])
         decoder_outputs, states = attention_decoder.apply(
@@ -330,7 +330,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
         self.target_vocab_size = len(target_vocab)
 
         self.decoder_scope_names = [
-            'model{}'.format(i) for i in range(len(self.models))
+            f'model{i}' for i in range(len(self.models))
         ]
 
         self.model = Seq2SeqModelHelper(init_params=True)
@@ -532,13 +532,13 @@ def run_seq2seq_beam_decoder(args, model_params, decoding_params):
         args.source_corpus,
         args.unk_threshold,
     )
-    logger.info('Source vocab size {}'.format(len(source_vocab)))
+    logger.info(f'Source vocab size {len(source_vocab)}')
     target_vocab = seq2seq_util.gen_vocab(
         args.target_corpus,
         args.unk_threshold,
     )
     inversed_target_vocab = {v: k for (k, v) in target_vocab.items()}
-    logger.info('Target vocab size {}'.format(len(target_vocab)))
+    logger.info(f'Target vocab size {len(target_vocab)}')
 
     decoder = Seq2SeqModelCaffe2EnsembleDecoder(
         translate_params=dict(

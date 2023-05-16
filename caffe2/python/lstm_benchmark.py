@@ -24,7 +24,7 @@ def generate_data(T, shape, num_labels, fixed_shape):
     '''
     Fill a queue with input data
     '''
-    log.info("Generating T={} sequence batches".format(T))
+    log.info(f"Generating T={T} sequence batches")
 
     generate_input_init_net = core.Net('generate_input_init')
     queue = generate_input_init_net.CreateBlobsQueue(
@@ -44,7 +44,7 @@ def generate_data(T, shape, num_labels, fixed_shape):
     entry_counts = []
     for t in range(T):
         if (t % (max(10, T // 10)) == 0):
-            print("Generating data {}/{}".format(t, T))
+            print(f"Generating data {t}/{T}")
         # Randomize the seqlength
         random_shape = (
             [np.random.randint(1, shape[0])] + shape[1:]
@@ -82,12 +82,12 @@ def create_model(args, queue, label_queue, input_shape):
             assert args.fixed_shape, \
                 "Random input length is not static RNN compatible"
             T = args.seq_length
-            print("Using static RNN of size {}".format(T))
+            print(f"Using static RNN of size {T}")
 
         for i in range(args.num_layers):
             hidden_init, cell_init = model.net.AddExternalInputs(
-                "hidden_init_{}".format(i),
-                "cell_init_{}".format(i)
+                f"hidden_init_{i}",
+                f"cell_init_{i}"
             )
             init_blobs.extend([hidden_init, cell_init])
 
@@ -337,7 +337,7 @@ if __name__ == '__main__':
         'caffe2',
         '--caffe2_log_level=0',
         '--caffe2_print_blob_sizes_at_exit=0',
-        '--caffe2_rnn_executor={}'.format(rnn_executor_opt),
+        f'--caffe2_rnn_executor={rnn_executor_opt}',
         '--caffe2_gpu_memory_tracking=1'] + extra_args)
 
     device = core.DeviceOption(

@@ -16,36 +16,36 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Notification(object):
+class Notification:
     """Describes a condition relevant to the tool itself, as opposed to being relevant to a target being analyzed by the tool."""
 
     message: _message.Message = dataclasses.field(
         metadata={"schema_property_name": "message"}
     )
-    associated_rule: Optional[
+    associated_rule: None | (
         _reporting_descriptor_reference.ReportingDescriptorReference
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "associatedRule"}
     )
-    descriptor: Optional[
+    descriptor: None | (
         _reporting_descriptor_reference.ReportingDescriptorReference
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "descriptor"})
-    exception: Optional[_exception.Exception] = dataclasses.field(
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "descriptor"})
+    exception: _exception.Exception | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "exception"}
     )
     level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    locations: Optional[List[_location.Location]] = dataclasses.field(
+    locations: list[_location.Location] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    thread_id: Optional[int] = dataclasses.field(
+    thread_id: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "threadId"}
     )
-    time_utc: Optional[str] = dataclasses.field(
+    time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "timeUtc"}
     )
 

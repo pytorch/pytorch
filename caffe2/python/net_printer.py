@@ -22,7 +22,7 @@ class Visitor:
             cls.visitors = {}
         else:
             assert Type not in cls.visitors, \
-                '{} already registered!'.format(Type)
+                f'{Type} already registered!'
 
         def _register(func):
             cls.visitors[Type] = func
@@ -36,7 +36,7 @@ class Visitor:
 
         Type = type(obj)
         if Type not in self.__class__.visitors:
-            raise TypeError('%s: unsupported object type: %s' % (
+            raise TypeError('{}: unsupported object type: {}'.format(
                 self.__class__.__name__, Type))
 
         func = self.__class__.visitors[Type]
@@ -246,7 +246,7 @@ def factor_prefix(vals, do_it):
     vals = [format_value(v) for v in vals]
     prefix = commonprefix(vals) if len(vals) > 1 and do_it else ''
     joined = ', '.join(v[len(prefix):] for v in vals)
-    return '%s[%s]' % (prefix, joined) if prefix else joined
+    return '{}[{}]'.format(prefix, joined) if prefix else joined
 
 
 def call(op, inputs=None, outputs=None, factor_prefixes=False):
@@ -263,8 +263,8 @@ def call(op, inputs=None, outputs=None, factor_prefixes=False):
             )
             if x
         )
-    call = '%s(%s)' % (op, inputs)
-    return call if not outputs else '%s = %s' % (
+    call = '{}({})'.format(op, inputs)
+    return call if not outputs else '{} = {}'.format(
         factor_prefix(outputs, factor_prefixes), call)
 
 

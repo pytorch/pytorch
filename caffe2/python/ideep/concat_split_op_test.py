@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import hypothesis.strategies as st
 import unittest
@@ -55,7 +50,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
 
         op = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result', 'split_info'],
             axis=axis
         )
@@ -84,7 +79,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "Split",
             input_names,
-            ['X_{}'.format(i) for i in range(len(split_info))],
+            [f'X_{i}' for i in range(len(split_info))],
             **kwargs
         )
 
@@ -104,7 +99,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         axis, _, splits = tensor_splits
         op = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result', 'split_info'],
             axis=axis,
             add_axis=1
@@ -121,7 +116,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         axis, _, splits = tensor_splits
         op0 = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result0', 'split_info0'],
             axis=axis,
             add_axis=1,
@@ -129,7 +124,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         )
         op1 = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result1', 'split_info1'],
             axis=axis,
             add_axis=1,
@@ -137,7 +132,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         )
 
         for i, X in enumerate(splits):
-            workspace.FeedBlob('X_{}'.format(i), X, dc[0])
+            workspace.FeedBlob(f'X_{i}', X, dc[0])
 
         workspace.RunOperatorOnce(op0)
         res0 = workspace.FetchBlob('concat_result0')

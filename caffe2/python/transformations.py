@@ -33,7 +33,7 @@ class Transformer:
         elif C.workspace_transform_exists(transform_name):
             output = C.run_workspace_transform(transform_name, pb)
         else:
-            raise AttributeError('Transformation {} not found.'.format(transform_name))
+            raise AttributeError(f'Transformation {transform_name} not found.')
         net.Proto().ParseFromString(output)
 
     def __getattr__(self, transform_name):

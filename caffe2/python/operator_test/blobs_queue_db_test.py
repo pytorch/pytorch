@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 
 import caffe2.proto.caffe2_pb2 as caffe2_pb2
@@ -56,7 +51,7 @@ class BlobsQueueDBTest(test_util.TestCase):
         close_net.CloseBlobsQueue([queue], [])
 
         for i in range(int(num_samples / batch_size)):
-            print("Running net, iteration {}".format(i))
+            print(f"Running net, iteration {i}")
             with timeout_guard.CompleteInTimeOrDie(2.0):
                 workspace.RunNet(net)
 
@@ -66,7 +61,7 @@ class BlobsQueueDBTest(test_util.TestCase):
             self.assertEqual(batch_size, len(labels))
             for idx, item in enumerate(images):
                 self.assertEqual(
-                    "foo{}".format(i * batch_size + idx).encode('utf-8'), item
+                    f"foo{i * batch_size + idx}".encode('utf-8'), item
                 )
             for item in labels:
                 self.assertEqual(1, item)
@@ -85,7 +80,7 @@ class BlobsQueueDBTest(test_util.TestCase):
         item = caffe2_pb2.TensorProtos()
         data = item.protos.add()
         data.data_type = core.DataType.STRING
-        data.string_data.append("foo{}".format(idx).encode('utf-8'))
+        data.string_data.append(f"foo{idx}".encode('utf-8'))
         label = item.protos.add()
         label.data_type = core.DataType.INT32
         label.int32_data.append(1)

@@ -146,7 +146,7 @@ class TestStringFormatting(JitTestCase):
     def test_string_interpolation_with_too_many_arguments(self):
         @torch.jit.script
         def fn(arg1: str, arg2: str) -> str:
-            return "%s in template" % (arg1, arg2)    # noqa: F507
+            return "{} in template".format(arg1, arg2)    # noqa: F507
 
         with self.assertRaisesRegexWithHighlight(RuntimeError,
                                                  "Too many arguments for format string",

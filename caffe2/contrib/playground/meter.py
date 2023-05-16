@@ -1,8 +1,3 @@
-
-
-
-
-
 from abc import abstractmethod
 
 

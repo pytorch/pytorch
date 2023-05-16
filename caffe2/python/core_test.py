@@ -1,8 +1,3 @@
-
-
-
-
-
 from inspect import currentframe, getframeinfo
 import unittest
 
@@ -470,14 +465,14 @@ class TestExtractPredictorNet(test_util.TestCase):
         # Check export blobs
         self.assertTrue("image" not in export_blobs)
         self.assertTrue("xx/data" not in export_blobs)
-        self.assertEqual(set([str(p) for p in model.params]), export_blobs)
+        self.assertEqual({str(p) for p in model.params}, export_blobs)
 
         # Check external inputs/outputs
         self.assertTrue("image" in predict_net.Proto().external_input)
-        self.assertEqual(set(["pred"]), set(predict_net.Proto().external_output))
+        self.assertEqual({"pred"}, set(predict_net.Proto().external_output))
         self.assertEqual(
             set(predict_net.Proto().external_input) -
-            set([str(p) for p in model.params]), set(["image"])
+            {str(p) for p in model.params}, {"image"}
         )
 
 
@@ -775,7 +770,7 @@ class TestInferDevice(test_util.TestCase):
         with core.DeviceScope(op_option):
             op = core.CreateOperator(
                 'Concat',
-                ['X_{}'.format(i) for i in range(4)],
+                [f'X_{i}' for i in range(4)],
                 ['concat_result', 'split_info'],
                 axis=1)
         input_dev, output_dev = core.InferOpBlobDevices(op)
@@ -788,7 +783,7 @@ class TestInferDevice(test_util.TestCase):
             op = core.CreateOperator(
                 'Split',
                 ['input', 'split'],
-                ['X_{}'.format(i) for i in range(4)],
+                [f'X_{i}' for i in range(4)],
                 axis=0)
         input_dev, output_dev = core.InferOpBlobDevices(op)
         # 2nd input's type is CPU irrespective of Split op's device option.

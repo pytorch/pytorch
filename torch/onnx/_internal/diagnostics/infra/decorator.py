@@ -30,8 +30,8 @@ def format_exception_in_markdown(exception: Exception) -> str:
 @_beartype.beartype
 def format_function_signature_in_markdown(
     fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     format_argument: Callable[[Any], str] = formatter.format_argument,
 ) -> str:
     msg_list = [f"### Function Signature {formatter.display_name(fn)}"]
@@ -61,8 +61,8 @@ ModifierCallableType = Callable[
 def modify_diagnostic(
     diag: infra.Diagnostic,
     fn: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
     return_values: Any,
 ) -> None:
     return
@@ -74,12 +74,12 @@ def diagnose_call(
     *,
     level: infra.Level = infra.Level.NONE,
     exception_report_level: infra.Level = infra.Level.WARNING,
-    diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
+    diagnostic_type: type[infra.Diagnostic] = infra.Diagnostic,
     format_argument: Callable[[Any], str] = formatter.format_argument,
     diagnostic_message_formatter: MessageFormatterType = format_message_in_text,
     diagnostic_modifier: ModifierCallableType = modify_diagnostic,
     report_criterion: Callable[
-        [Callable, Tuple[Any, ...], Dict[str, Any], Any], bool
+        [Callable, tuple[Any, ...], dict[str, Any], Any], bool
     ] = lambda _1, _2, _3, _4: True,
 ) -> Callable:
     def decorator(fn):
@@ -119,7 +119,7 @@ def diagnose_call(
             # TODO(bowbao): by default diagnostic doesn't have stack.
             # So need to check before doing this. Make the code cleaner.
             # Option: do not capture stack by default in diagnostic initialization.
-            stack: Optional[infra.Stack] = None
+            stack: infra.Stack | None = None
             if len(diag.stacks) > 0:
                 stack = diag.stacks[0]
                 stack.frames.pop(0)

@@ -50,7 +50,7 @@ def caffe2_to_onnx(caffe2_net,
     if caffe2_init_net:
         c2_init_net_proto = caffe2_pb2.NetDef()
         c2_init_net_proto.ParseFromString(caffe2_init_net.read())
-        c2_init_net_proto.name = '{}_init'.format(caffe2_net_name)
+        c2_init_net_proto.name = f'{caffe2_net_name}_init'
     else:
         c2_init_net_proto = None
 

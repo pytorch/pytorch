@@ -1,5 +1,3 @@
-
-
 from collections import defaultdict
 
 import caffe2.python.nomnigraph as ng

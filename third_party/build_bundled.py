@@ -64,7 +64,7 @@ def create_bundled(d, outstream, include_files=False):
         outstream.write('\n\n')
         outstream.write(fname)
         outstream.write('\n' + '-' * len(fname) + '\n')
-        with open(fname, 'r') as fid:
+        with open(fname) as fid:
             outstream.write(fid.read())
 
 

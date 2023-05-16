@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 def get_trainer_version_based_on_optim(optim_def):
     if isinstance(optim_def, Optimizer) and hasattr(optim_def, "engine"):
         logger.info(
-            "Attempting to set trainer version for engine {}".format(optim_def.engine)
+            f"Attempting to set trainer version for engine {optim_def.engine}"
         )
         if optim_def.engine in FP16_ENGINES:
-            logger.info("Setting FP16 trainer for engine {}".format(optim_def.engine))
+            logger.info(f"Setting FP16 trainer for engine {optim_def.engine}")
             return "fp16"
         else:
-            logger.info("Setting FP32 trainer for engine {}".format(optim_def.engine))
+            logger.info(f"Setting FP32 trainer for engine {optim_def.engine}")
             return "fp32"
     else:
         return "fp32"
@@ -53,7 +53,7 @@ def get_sparse_lookup_predictor_version(
 ):
     assert version in {
         'fp32', 'fp16', 'uint8rowwise', 'fused_uint8rowwise', 'fused_uint4rowwise'
-    }, "Unexpected version of sparse_lookup layer {0}".format(version)
+    }, f"Unexpected version of sparse_lookup layer {version}"
     if version == 'fused_uint4rowwise':
         if (
             blob_size is not None
@@ -97,7 +97,7 @@ def get_sparse_lookup_predictor_version(
 
 def get_sparse_lookup_trainer_version(version):
     assert version in {'fp32', 'fp16'},\
-        "Unexpected version of sparse_lookup layer {0}".format(version)
+        f"Unexpected version of sparse_lookup layer {version}"
     return version
 
 def _is_id_list(input_record):
@@ -330,7 +330,7 @@ class SparseLookup(ModelLayer):
 
         else:
             raise "Unsupported version of operators in SparseLookup " +\
-                "layer: {0} for sparse feature {1}".format(
+                "layer: {} for sparse feature {}".format(
                     version, self.sparse_key
                 )
 
@@ -382,7 +382,7 @@ class SparseLookup(ModelLayer):
                 op_input, self.output_schema.field_blobs())
         else:
             raise "Unsupported version of operator in SparseLookUp " +\
-                "layer: {0} for sparse feature {1}".format(
+                "layer: {} for sparse feature {}".format(
                     version, self.sparse_key
                 )
 
@@ -426,7 +426,7 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
-                    "layer: {0} for sparse feature {1}".format(
+                    "layer: {} for sparse feature {}".format(
                         version, self.sparse_key
                     )
 
@@ -501,7 +501,7 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
-                    "layer: {0} for sparse feature {1}".format(
+                    "layer: {} for sparse feature {}".format(
                         version, self.sparse_key
                     )
 
@@ -525,7 +525,7 @@ class SparseLookup(ModelLayer):
         elif _is_id_score_list(self.input_record):
             self._add_ops_id_score_list(net, version=version)
         else:
-            raise "Unsupported input type {0}".format(self.input_record)
+            raise f"Unsupported input type {self.input_record}"
 
     def add_train_ops(self, net):
         self._add_ops(net, self.trainer_version, is_train=True)

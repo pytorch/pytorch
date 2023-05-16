@@ -14,13 +14,13 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ThreadFlow(object):
+class ThreadFlow:
     """Describes a sequence of code locations that specify a path through a single thread of execution such as an operating system or fiber."""
 
-    locations: List[_thread_flow_location.ThreadFlowLocation] = dataclasses.field(
+    locations: list[_thread_flow_location.ThreadFlowLocation] = dataclasses.field(
         metadata={"schema_property_name": "locations"}
     )
-    id: Optional[str] = dataclasses.field(
+    id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "id"}
     )
     immutable_state: Any = dataclasses.field(
@@ -29,10 +29,10 @@ class ThreadFlow(object):
     initial_state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "initialState"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

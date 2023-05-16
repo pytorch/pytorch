@@ -33,7 +33,7 @@ class TestCaffe2Basic(TestCase):
         g = C.DummyName()
         n1 = g.new_dummy_name()
         n2 = g.new_dummy_name()
-        assert n1 != n2, "Got same names in different calls: {}".format(n1)
+        assert n1 != n2, f"Got same names in different calls: {n1}"
 
     def test_check_arguments(self):
         b2 = C.Caffe2Backend()
@@ -623,7 +623,7 @@ class TestCaffe2Basic(TestCase):
             vals = vals.astype(
                 mapping.TENSOR_TYPE_TO_NP_TYPE[dtype])
             tensor = make_tensor(
-                name='test-tensor-{}'.format(dtype),
+                name=f'test-tensor-{dtype}',
                 data_type=dtype,
                 dims=[1, 2, 3],
                 vals=vals.flatten().tolist(),
@@ -656,7 +656,7 @@ class TestCaffe2Basic(TestCase):
             vals = vals.astype(
                 mapping.TENSOR_TYPE_TO_NP_TYPE[dtype])
             tensor = make_tensor(
-                name='test-tensor-{}'.format(dtype),
+                name=f'test-tensor-{dtype}',
                 data_type=dtype,
                 dims=[1, 2, 3],
                 vals=vals.flatten().tolist(),

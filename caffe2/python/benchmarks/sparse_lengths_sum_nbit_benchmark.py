@@ -1,5 +1,3 @@
-
-
 import argparse
 import datetime
 
@@ -31,7 +29,7 @@ def benchmark_sparse_lengths_sum(
     init_net.Proto().op.extend([op])
     workspace.FeedBlob("X", data)
 
-    print("Data has shape {} {}".format(data.shape, datetime.datetime.now()))
+    print(f"Data has shape {data.shape} {datetime.datetime.now()}")
 
     # In order to produce truly random lengths and indices, we will embed a
     # Python operator in the net to generate them.

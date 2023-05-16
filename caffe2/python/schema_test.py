@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, schema
 import numpy as np
 

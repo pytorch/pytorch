@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 try:
     import cv2
@@ -226,7 +221,7 @@ def create_test(output_dir, width, height, default_bound, minsize, crop, means,
                 bounding_tensor.int32_data.extend(bounding_box)
 
             txn.put(
-                '{}'.format(index).encode('ascii'),
+                f'{index}'.encode('ascii'),
                 tensor_protos.SerializeToString()
             )
             index = index + 1

@@ -35,7 +35,7 @@ def RegisterOpsLibrary(name):
         # Note(jiayq): if the name does not exist, instead of immediately
         # failing we will simply print a warning, deferring failure to the
         # time when an actual call is made.
-        print('Ignoring {} as it is not a valid file.'.format(name))
+        print(f'Ignoring {name} as it is not a valid file.')
         return
     global _LAZY_IMPORTED_DYNDEPS
     _LAZY_IMPORTED_DYNDEPS.add(name)

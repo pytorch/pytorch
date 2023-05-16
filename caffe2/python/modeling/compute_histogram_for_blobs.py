@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, schema
 from caffe2.python.modeling.net_modifier import NetModifier
 
@@ -35,7 +30,7 @@ class ComputeHistogramForBlobs(NetModifier):
 
         self._num_buckets = int(num_buckets)
         assert self._num_buckets > 0, (
-            "num_buckets need to be greater than 0, got {}".format(num_buckets))
+            f"num_buckets need to be greater than 0, got {num_buckets}")
         self._lower_bound = float(lower_bound)
         self._upper_bound = float(upper_bound)
 
@@ -43,7 +38,7 @@ class ComputeHistogramForBlobs(NetModifier):
                    modify_output_record=False):
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
+            assert net.BlobIsDefined(blob), f'blob {blob} is not defined in net {net.Name()} whose proto is {net.Proto()}'
 
             blob_float = net.Cast(blob, net.NextScopedBlob(prefix=blob +
                 '_float'), to=core.DataType.FLOAT)

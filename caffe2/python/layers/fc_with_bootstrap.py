@@ -40,11 +40,11 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
         super().__init__(model, name, input_record, **kwargs)
         assert isinstance(
             input_record, schema.Scalar
-        ), "Incorrect input type {}".format(input_record)
+        ), f"Incorrect input type {input_record}"
         assert (
             len(input_record.field_types()[0].shape) > 0
         ), "FC expects limited dimensions of the input tensor"
-        assert axis >= 1, "axis {} should >= 1.".format(axis)
+        assert axis >= 1, f"axis {axis} should >= 1."
         self.axis = axis
         input_dims = np.prod(input_record.field_types()[0].shape[axis - 1 :])
 
@@ -130,29 +130,29 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
         for i in range(num_bootstrap):
             output_schema += schema.Struct(
                 (
-                    "bootstrap_iteration_{}/indices".format(i),
+                    f"bootstrap_iteration_{i}/indices",
                     self.get_next_blob_reference(
-                        "bootstrap_iteration_{}/indices".format(i)
+                        f"bootstrap_iteration_{i}/indices"
                     ),
                 ),
                 (
-                    "bootstrap_iteration_{}/preds".format(i),
+                    f"bootstrap_iteration_{i}/preds",
                     self.get_next_blob_reference(
-                        "bootstrap_iteration_{}/preds".format(i)
+                        f"bootstrap_iteration_{i}/preds"
                     ),
                 ),
             )
             self.bootstrapped_FCs.extend(
                 [
                     self.create_param(
-                        param_name="bootstrap_iteration_{}/w".format(i),
+                        param_name=f"bootstrap_iteration_{i}/w",
                         shape=[output_dims, input_dims],
                         initializer=weight_init,
                         optimizer=weight_optim,
                         regularizer=weight_reg,
                     ),
                     self.create_param(
-                        param_name="bootstrap_iteration_{}/b".format(i),
+                        param_name=f"bootstrap_iteration_{i}/b",
                         shape=[output_dims],
                         initializer=bias_init,
                         optimizer=bias_optim,
@@ -183,7 +183,7 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
         Return:
             A blob containing the generated indices of shape: (batch_size,)
         """
-        with core.NameScope("bootstrap_iteration_{}".format(iteration)):
+        with core.NameScope(f"bootstrap_iteration_{iteration}"):
             if iteration == 0:
                 # capture batch_size once for efficiency
                 input_shape = net.Shape(copied_cur_layer, "input_shape")
@@ -228,7 +228,7 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
         # draw features based upon the bootstrapped indices
         bootstrapped_features = net.Gather(
             [copied_cur_layer, indices],
-            net.NextScopedBlob("bootstrapped_features_{}".format(iteration)),
+            net.NextScopedBlob(f"bootstrapped_features_{iteration}"),
         )
 
         bootstrapped_features = schema.Scalar(
@@ -258,7 +258,7 @@ class FCWithBootstrap(SamplingTrainableMixin, ModelLayer):
             )
             return pred_blob
         else:
-            raise Exception("unsupported FC type version {}".format(version))
+            raise Exception(f"unsupported FC type version {version}")
 
     def _add_ops(self, net, features, iteration, params, version):
         """

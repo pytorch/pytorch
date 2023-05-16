@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from functools import partial

@@ -79,7 +79,7 @@ SupportedMobileModelCheckerRegistry register_model_versions;
 
     supported_hashes = ""
     for md5 in md5_hashes:
-        supported_hashes += '"{}",\n'.format(md5)
+        supported_hashes += f'"{md5}",\n'
     with open(
         os.path.join(output_dir, "SupportedMobileModelsRegistration.cpp"), "wb"
     ) as out_file:

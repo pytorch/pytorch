@@ -17,7 +17,7 @@ class TestUnsafeCoalesceOp(hu.HypothesisTestCase):
     def test_unsafe_coalesce_op(self, n, shape, dc, gc):
         workspace.ResetWorkspace()
         test_inputs = [(100 * np.random.random(shape)).astype(np.float32) for _ in range(n)]
-        test_input_blobs = ["x_{}".format(i) for i in range(n)]
+        test_input_blobs = [f"x_{i}" for i in range(n)]
 
         coalesce_op = core.CreateOperator(
             "UnsafeCoalesce",
@@ -43,7 +43,7 @@ class TestUnsafeCoalesceOp(hu.HypothesisTestCase):
         # Can make debugging of the test more predictable
         np.random.seed(seed)
         test_inputs = [(np.random.random(shape)).astype(np.float32) for _ in range(n)]
-        test_input_blobs = ["x_{}".format(i) for i in range(n)]
+        test_input_blobs = [f"x_{i}" for i in range(n)]
 
         coalesce_op = core.CreateOperator(
             "UnsafeCoalesce",

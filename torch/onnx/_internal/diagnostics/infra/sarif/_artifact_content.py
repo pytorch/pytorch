@@ -13,19 +13,19 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ArtifactContent(object):
+class ArtifactContent:
     """Represents the contents of an artifact."""
 
-    binary: Optional[str] = dataclasses.field(
+    binary: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "binary"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rendered: Optional[
+    rendered: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rendered"})
-    text: Optional[str] = dataclasses.field(
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "rendered"})
+    text: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "text"}
     )
 

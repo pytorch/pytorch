@@ -80,7 +80,7 @@ class non_deterministic:
         elif isinstance(arg, Callable):  # type:ignore[arg-type]
             self.deterministic_fn = arg  # type: ignore[assignment, misc]
         else:
-            raise TypeError("{} can not be decorated by non_deterministic".format(arg))
+            raise TypeError(f"{arg} can not be decorated by non_deterministic")
 
     def __call__(self, *args, **kwargs):
         global _determinism

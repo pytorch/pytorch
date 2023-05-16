@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from hypothesis import given, settings
 from hypothesis import strategies as st

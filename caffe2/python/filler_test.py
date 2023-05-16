@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import core, test_util, workspace
 
 

@@ -68,7 +68,7 @@ def get_key(record):
     ):
         key = "values:keys"
     else:
-        raise NotImplementedError("Not implemented for {}".format(record))
+        raise NotImplementedError(f"Not implemented for {record}")
     assert record[key].metadata is not None, "Blob {} doesn't have metadata".format(
         str(record[key]())
     )
@@ -138,7 +138,7 @@ _LAYER_REGISTRY = {}
 
 
 def register_layer(name, layer):
-    assert name not in _LAYER_REGISTRY, "{0} already exists".format(name)
+    assert name not in _LAYER_REGISTRY, f"{name} already exists"
     _LAYER_REGISTRY[name] = layer
 
 
@@ -168,7 +168,7 @@ class LayerParameter:
     ):
         assert isinstance(
             parameter, core.BlobReference
-        ), "expect {0} to be a blob reference".format(str(parameter))
+        ), f"expect {str(parameter)} to be a blob reference"
         # need to put the following line (shape) before initialier
         # shape will be updated once initializer is (re)set
         self._shape = None
@@ -186,7 +186,7 @@ class LayerParameter:
     def initializer(self, op):
         assert op is None or core.IsOperator(
             getattr(op, "type", None)
-        ), "initializer expects an operator, got type: {}".format(type(op))
+        ), f"initializer expects an operator, got type: {type(op)}"
         self._initializer = op
         if op is not None:
             self.shape = self._infer_shape_from_initializer()

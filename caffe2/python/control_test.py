@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import control, core, test_util, workspace
 
 import logging

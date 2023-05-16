@@ -109,4 +109,4 @@ class Independent(Distribution):
         return self.base_dist.enumerate_support(expand=expand)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, {})'.format(self.base_dist, self.reinterpreted_batch_ndims)
+        return self.__class__.__name__ + f'({self.base_dist}, {self.reinterpreted_batch_ndims})'

@@ -53,7 +53,7 @@ class ModelTrainerLog():
         now = datetime.datetime.fromtimestamp(time.time())
         self.experiment_id = \
             "{}_{}".format(expname, now.strftime('%Y%m%d_%H%M%S'))
-        self.filename = "{}.log".format(self.experiment_id)
+        self.filename = f"{self.experiment_id}.log"
         self.logstr("# %s" % str(runtime_args))
         self.headers = None
         self.start_time = time.time()
@@ -110,4 +110,4 @@ class ModelTrainerLog():
                 logger.log(logdict)
             except Exception as e:
                 logging.warning(
-                    "Failed to call ExternalLogger: {}".format(e), e)
+                    f"Failed to call ExternalLogger: {e}", e)

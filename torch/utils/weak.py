@@ -83,7 +83,7 @@ class WeakIdRef(weakref.ref):
 
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    data: Dict[WeakIdRef, object]
+    data: dict[WeakIdRef, object]
 
     def __init__(self, dict=None):
         self.data = {}
@@ -144,7 +144,7 @@ class WeakIdKeyDictionary(MutableMapping):
         return len(self.data) - len(self._pending_removals)
 
     def __repr__(self):
-        return "<%s at %#x>" % (self.__class__.__name__, id(self))
+        return "<{} at {:#x}>".format(self.__class__.__name__, id(self))
 
     def __setitem__(self, key, value):
         self.data[WeakIdRef(key, self._remove)] = value  # CHANGED

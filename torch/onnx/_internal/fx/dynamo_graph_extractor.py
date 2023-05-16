@@ -26,7 +26,7 @@ from torch.utils import _pytree as pytree
 class _PyTreeExtensionContext:
     """Context manager to register PyTree extension."""
 
-    _extensions: Dict[Type, Tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
+    _extensions: dict[type, tuple[pytree.FlattenFunc, pytree.UnflattenFunc]]
 
     def __init__(self):
         self._extensions = {}
@@ -45,7 +45,7 @@ class _PyTreeExtensionContext:
     @_beartype.beartype
     def register_pytree_node(
         self,
-        class_type: Type,
+        class_type: type,
         flatten_func: pytree.FlattenFunc,
         unflatten_func: pytree.UnflattenFunc,
     ):
@@ -74,12 +74,12 @@ class _PyTreeExtensionContext:
         @_beartype.beartype
         def model_output_flatten(
             output: modeling_outputs.ModelOutput,
-        ) -> Tuple[List[Any], pytree.Context]:
+        ) -> tuple[list[Any], pytree.Context]:
             return list(output.values()), (type(output), list(output.keys()))
 
         @_beartype.beartype
         def model_output_unflatten(
-            values: List[Any], context: pytree.Context
+            values: list[Any], context: pytree.Context
         ) -> modeling_outputs.ModelOutput:
             output_type, keys = context
             return output_type(**dict(zip(keys, values)))
@@ -109,7 +109,7 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     """
 
     def __init__(
-        self, pytree_extension_context: Optional[_PyTreeExtensionContext] = None
+        self, pytree_extension_context: _PyTreeExtensionContext | None = None
     ):
         super().__init__()
         self._pytree_extension_context = (
@@ -123,7 +123,7 @@ class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
 
 
 def _wrap_model_with_output_adapter(
-    model: Union[torch.nn.Module, Callable],
+    model: torch.nn.Module | Callable,
     output_adapter: DynamoFlattenOutputStep,
 ) -> Callable:
     """Wrap model with output adapter.
@@ -159,7 +159,7 @@ class DynamoExport(exporter.FXGraphExtractor):
 
     def __init__(
         self,
-        aten_graph: Optional[bool] = None,
+        aten_graph: bool | None = None,
     ):
         super().__init__()
         self.aten_graph = aten_graph or True
@@ -167,7 +167,7 @@ class DynamoExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:

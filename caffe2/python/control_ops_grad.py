@@ -397,8 +397,8 @@ def gen_if_gradient(op, g_output):
     # by the selected if's branch are initialized with zeros
     then_other_output_names = \
         then_output_names - (then_output_names & else_output_names)
-    then_other_grad_output_names = set(
-        [o for o in then_other_output_names if o in then_grad_map.values()])
+    then_other_grad_output_names = {
+        o for o in then_other_output_names if o in then_grad_map.values()}
     zero_then = _gen_grad_zero_init_ops(
         init_grad_map, then_grad_map, then_other_grad_output_names)
     if else_grad_net:
@@ -415,8 +415,8 @@ def gen_if_gradient(op, g_output):
 
     else_other_output_names = \
         else_output_names - (then_output_names & else_output_names)
-    else_other_grad_output_names = set(
-        [o for o in else_other_output_names if o in else_grad_map.values()])
+    else_other_grad_output_names = {
+        o for o in else_other_output_names if o in else_grad_map.values()}
     zero_else = _gen_grad_zero_init_ops(
         init_grad_map, else_grad_map, else_other_grad_output_names)
     then_grad_net.op.extend(zero_else)

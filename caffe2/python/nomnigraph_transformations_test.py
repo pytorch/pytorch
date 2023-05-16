@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python import test_util as tu
 import caffe2.python.nomnigraph as ng

@@ -17,13 +17,13 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ThreadFlowLocation(object):
+class ThreadFlowLocation:
     """A location visited by an analysis tool while simulating or monitoring the execution of a program."""
 
     execution_order: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "executionOrder"}
     )
-    execution_time_utc: Optional[str] = dataclasses.field(
+    execution_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "executionTimeUtc"}
     )
     importance: Literal["important", "essential", "unimportant"] = dataclasses.field(
@@ -32,34 +32,34 @@ class ThreadFlowLocation(object):
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    kinds: Optional[List[str]] = dataclasses.field(
+    kinds: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "kinds"}
     )
-    location: Optional[_location.Location] = dataclasses.field(
+    location: _location.Location | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    module: Optional[str] = dataclasses.field(
+    module: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "module"}
     )
-    nesting_level: Optional[int] = dataclasses.field(
+    nesting_level: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "nestingLevel"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    stack: Optional[_stack.Stack] = dataclasses.field(
+    stack: _stack.Stack | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stack"}
     )
     state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "state"}
     )
-    taxa: Optional[
-        List[_reporting_descriptor_reference.ReportingDescriptorReference]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
-    web_request: Optional[_web_request.WebRequest] = dataclasses.field(
+    taxa: None | (
+        list[_reporting_descriptor_reference.ReportingDescriptorReference]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
+    web_request: _web_request.WebRequest | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequest"}
     )
-    web_response: Optional[_web_response.WebResponse] = dataclasses.field(
+    web_response: _web_response.WebResponse | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponse"}
     )
 

@@ -37,7 +37,7 @@ except ImportError:
     _torch_dtype_to_nvfuser_dtype_map = {}
 
 
-def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
+def getnvFuserDtype(dtype: torch.dtype | NumberTypeType):
     """
     Translates from torch.dtype to nvFuser's DataType enum
     """
@@ -118,11 +118,11 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(b, TensorLike)
 
     if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
     if a.dtype != b.dtype:
-        msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
+        msg = f"Dtypes {a.dtype} and {b.dtype} are not equal!"
         raise AssertionError(msg)
 
     if a.device != b.device:
@@ -133,7 +133,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         ):
             pass
         else:
-            msg = "Devices {0} and {1} are not equal!".format(a.device, b.device)
+            msg = f"Devices {a.device} and {b.device} are not equal!"
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
@@ -141,7 +141,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
             msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                "Stride mismatch! Strides are {} and {} (mismatched at {})!".format(
                     a.stride(), b.stride(), idx
                 )
             )
@@ -149,7 +149,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
 
         if a.storage_offset() != b.storage_offset():
             msg = (
-                "Storage offset mismatch! Storage offsets are {0} and {1}!".format(
+                "Storage offset mismatch! Storage offsets are {} and {}!".format(
                     a.storage_offset(), b.storage_offset()
                 )
             )
@@ -168,7 +168,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
 
 def _check_strides_helper(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, int | None]:
     # NOTE: only on CUDA because CPU elementwise strides are incorrect in PyTorch
     # See https://github.com/pytorch/pytorch/issues/77553
     # Only compares strides that are "meaningful" -- strides for dimensions with length > 1
@@ -183,12 +183,12 @@ def _check_strides_helper(
 
 def check_significant_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, int | None]:
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=True)
 
 def check_all_strides(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True
-) -> Tuple[bool, Optional[int]]:
+) -> tuple[bool, int | None]:
     return _check_strides_helper(a, b, only_cuda=only_cuda, significant_only=False)
 
 
@@ -359,7 +359,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 # non overlapping and dense strides.
 # This is also INCORRECT because it does not model TensorIterator's
 # short-circuit, which can cause different strides.
-def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> List[int]:
+def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=False) -> list[int]:
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -440,7 +440,7 @@ def compute_elementwise_output_logical_to_physical_perm(*tensors, _skip_checks=F
     return list(reversed(perm))
 
 
-def compute_elementwise_output_strides(*tensors) -> Tuple[int, ...]:
+def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
     """
     Computes the output strides for elementwise operations.
     """
@@ -582,7 +582,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 
     if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
-        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
+        msg = "Dimension out of range (expected to be in range of [{}, {}], but got {})".format(
             -rank, rank - 1, idx
         )
         raise IndexError(msg)
@@ -593,7 +593,7 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
 @overload
-def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> Tuple[int, ...]:
+def canonicalize_dims(rank: int, indices: Sequence[int], wrap_scalar: bool = True) -> tuple[int, ...]:
     pass
 
 
@@ -708,7 +708,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
                 shape = arg.shape
 
             if not is_same_shape(shape, arg.shape):
-                msg = "Shape {0} is not the expected shape {1}!".format(
+                msg = "Shape {} is not the expected shape {}!".format(
                     arg.shape, shape
                 )
                 raise RuntimeError(msg)
@@ -721,7 +721,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
 
 # Acquires a common shape, if it exists, from one or more tensor arguments,
 # filtering number arguments
-def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
+def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> ShapeType | None:
     shape = None
     scalar_shape = None
 
@@ -746,7 +746,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
 
 # Extracts dimensions that might be passed either as a list/tuple or as varargs.
 # A typical case is Tensor.permute .
-def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+def extract_dims_from_varargs(dims: DimsSequenceType | tuple[DimsSequenceType, ...]) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
         dims = cast(Tuple[DimsSequenceType], dims)
@@ -756,9 +756,9 @@ def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceTy
 
 
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]],
+    shape: ShapeType | tuple[ShapeType],
     validate=True,
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     """
     Returns a shape from varargs.
 
@@ -786,7 +786,7 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
-def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
+def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
     """
     Infers the size of a dim with size -1, if it exists.
     Also checks that new shape is compatible with the number of elements.
@@ -937,7 +937,7 @@ def type_to_dtype(typ: type) -> torch.dtype:
     raise ValueError("Invalid type!")
 
 
-def get_dtype(x: Union[torch.Tensor, NumberType]):
+def get_dtype(x: torch.Tensor | NumberType):
     if isinstance(x, torch.Tensor):
         return x.dtype
     else:
@@ -997,9 +997,9 @@ def get_higher_type(a: type, b: type) -> type:
 #   are not ordered relative to each other, the next
 #   higher datatype
 def get_higher_dtype(
-    a: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
-    b: Optional[Union[torch.dtype, TensorLikeType, NumberType]],
-) -> Optional[torch.dtype]:
+    a: torch.dtype | TensorLikeType | NumberType | None,
+    b: torch.dtype | TensorLikeType | NumberType | None,
+) -> torch.dtype | None:
     """
     Computes the "lowest" datatype that is weakly
     "higher" than both a and b.
@@ -1010,8 +1010,8 @@ def get_higher_dtype(
     assert b is None or isinstance(b, (torch.dtype, TensorLike, Number))
 
     def _extract_dtype(
-        x: Optional[Union[torch.dtype, TensorLikeType, NumberType]]
-    ) -> Optional[torch.dtype]:
+        x: torch.dtype | TensorLikeType | NumberType | None
+    ) -> torch.dtype | None:
         if x is None:
             return None
         if isinstance(x, torch.dtype):
@@ -1100,7 +1100,7 @@ def can_safe_cast_to(*, cast_to: torch.dtype, cast_from: torch.dtype) -> bool:
         if fn(cast_from):
             return False
 
-    raise ValueError("Received unknown dtypes {0}, {1}!".format(cast_to, cast_from))
+    raise ValueError(f"Received unknown dtypes {cast_to}, {cast_from}!")
 
 
 def check_same_dtype(*args):
@@ -1224,7 +1224,7 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+def number_type(x: NumberType | torch.SymInt | torch.SymFloat) -> type:
     if isinstance(x, torch.SymInt):
         return int
     elif isinstance(x, torch.SymFloat):
@@ -1233,7 +1233,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def symbol_type(x: sympy.Symbol) -> type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1245,7 +1245,7 @@ def symbol_type(x: sympy.Symbol) -> Type:
 def elementwise_dtypes(
     *_args,
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
-) -> Tuple[torch.dtype, torch.dtype]:
+) -> tuple[torch.dtype, torch.dtype]:
     """
     Computes the computation and result dtypes for elementwise type promotion
     on the given arguments and with the given elementwise type promotion kind.
@@ -1338,7 +1338,7 @@ def elementwise_dtypes(
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
-                "Unexpected type {0} when computing elementwise type promotion!".format(
+                "Unexpected type {} when computing elementwise type promotion!".format(
                     str(type(x))
                 )
             )
@@ -1356,7 +1356,7 @@ def elementwise_dtypes(
 
     def _find_highest_dtype_filtered(
         args, filter, *, float_as_complex=False
-    ) -> Optional[torch.dtype]:
+    ) -> torch.dtype | None:
         zero_dim_tensor_dtype = None
         one_plus_dim_tensor_dtype = None
         for x in args:
@@ -1422,15 +1422,15 @@ def elementwise_dtypes(
         return get_computation_dtype(result_dtype), torch.bool
     else:
         raise ValueError(
-            "Unknown type promotion kind {0}".format(str(type_promotion_kind))
+            f"Unknown type promotion kind {str(type_promotion_kind)}"
         )
 
 
 def reduction_dtypes(
     arg,
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
-    dtype: Optional[torch.dtype] = None,
-) -> Tuple[torch.dtype, Optional[torch.dtype]]:
+    dtype: torch.dtype | None = None,
+) -> tuple[torch.dtype, torch.dtype | None]:
     # even though some reductions, like amin or amax, don't strictly require type promotion,
     # all the math ops (including comparisons) are still defined only for a computation type,
     # so promotion will still happen. We are doing it explicitly here
@@ -1456,7 +1456,7 @@ def reduction_dtypes(
 # batched_matrix_contiguous_strides and contiguous_strides
 def make_contiguous_strides_for(
     shape: ShapeType, row_major: bool = True
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     """
     Returns the strides of a contiguous tensor if row_major
     If row_major=True, it returns the strides of a contiguous batch of Fortran-contiguous matrices
@@ -1484,7 +1484,7 @@ def make_contiguous_strides_for(
         return result[:-2] + (1, max(shape[-2], 1))
 
 
-def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+def make_channels_last_2d_strides_for(shape: ShapeType) -> tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
     check(
         len(shape) == 4,
@@ -1502,7 +1502,7 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
-def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+def make_channels_last_3d_strides_for(shape: ShapeType) -> tuple[int, ...]:
     check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
@@ -1519,7 +1519,7 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     return tuple(strides)
 
 
-def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+def make_channels_last_strides_for(shape: ShapeType) -> tuple[int, ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
     if ndim == 4:
         return make_channels_last_2d_strides_for(shape)
@@ -1533,7 +1533,7 @@ def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     for idx in dimensions:
         validate_idx(len(shape), idx)
 
@@ -1552,7 +1552,7 @@ def validate_no_repeating_dims(dims: Sequence):
         raise RuntimeError("duplicate value in the list of dims")
 
 
-def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...]:
+def reduction_dims(shape: ShapeType, dims: Sequence | None) -> tuple[int, ...]:
     if dims is None:
         return tuple(range(len(shape)))
     dims = tuple(canonicalize_dim(len(shape), idx) for idx in dims)
@@ -1561,8 +1561,8 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
 
 
 def set_correction(
-    unbiased: Optional[bool] = None,
-    correction: Optional[NumberType] = None,
+    unbiased: bool | None = None,
+    correction: NumberType | None = None,
 ) -> float:
     if correction is not None and unbiased is not None:
         raise RuntimeError("cannot specify both correction and unbiased arguments")
@@ -1627,8 +1627,8 @@ def check_in_bounds_for_storage(
     required_length = compute_required_storage_length(shape, strides, storage_offset)
     if a.size() < required_length:
         msg = (
-            "Can't view a storage of size {0} with an offset of {1}, shape of {2}, and strides of {3}, "
-            "which requires a storage of size {4}".format(
+            "Can't view a storage of size {} with an offset of {}, shape of {}, and strides of {}, "
+            "which requires a storage of size {}".format(
                 a.size(), storage_offset, str(shape), str(strides), required_length
             )
         )
@@ -1636,7 +1636,7 @@ def check_in_bounds_for_storage(
 
 
 def check(
-    b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
+    b: bool, s: Callable[[], str], exc_type: type[Exception] = RuntimeError
 ) -> None:
     """
     Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
@@ -1744,15 +1744,15 @@ def get_aten_op(fn: Callable, name: str):
     return getattr(torch._ops.ops.aten, f"{module}{name}")
 
 
-def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
+def dtype_or_default(dtype: torch.dtype | None) -> torch.dtype:
     return dtype if dtype is not None else torch.get_default_dtype()
 
 
-def device_or_default(device: Optional[torch.device]) -> torch.device:
+def device_or_default(device: torch.device | None) -> torch.device:
     return device if device is not None else torch.device("cpu")
 
 
-def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
+def layout_or_default(layout: torch.layout | None) -> torch.layout:
     return layout if layout is not None else torch.strided
 
 

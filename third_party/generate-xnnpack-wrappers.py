@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-from __future__ import print_function
 import collections
 import os
 import sys
@@ -68,7 +67,7 @@ WRAPPER_SRC_NAMES = {
 
 }
 
-SRC_NAMES = set([
+SRC_NAMES = {
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
     "LOGGING_SRCS",
@@ -143,7 +142,7 @@ SRC_NAMES = set([
     'ALL_XOP_MICROKERNEL_SRCS',
     'AARCH32_ASM_MICROKERNEL_SRCS',
     'AARCH64_ASM_MICROKERNEL_SRCS',
-])
+}
 
 def handle_singleline_parse(line):
     start_index = line.find("(")
@@ -202,7 +201,7 @@ def gen_wrappers(xnnpack_path):
             if not os.path.isdir(os.path.dirname(filepath)):
                 os.makedirs(os.path.dirname(filepath))
             with open(filepath, "w") as wrapper:
-                print("/* {} */".format(BANNER), file=wrapper)
+                print(f"/* {BANNER} */", file=wrapper)
                 print(file=wrapper)
 
                 # Architecture- or platform-dependent preprocessor flags can be
@@ -225,7 +224,7 @@ def gen_wrappers(xnnpack_path):
         for name in WRAPPER_SRC_NAMES:
             print('\n' + name + ' = [', file=wrapper_defs)
             for file_name in sources[name]:
-                print('    "xnnpack_wrappers/{}",'.format(file_name), file=wrapper_defs)
+                print(f'    "xnnpack_wrappers/{file_name}",', file=wrapper_defs)
             print(']', file=wrapper_defs)
 
     # update xnnpack_src_defs.bzl file under the same folder
@@ -236,7 +235,7 @@ def gen_wrappers(xnnpack_path):
         for name in SRC_NAMES:
             print('\n' + name + ' = [', file=src_defs)
             for file_name in sources[name]:
-                print('    "XNNPACK/src/{}",'.format(file_name), file=src_defs)
+                print(f'    "XNNPACK/src/{file_name}",', file=src_defs)
             print(']', file=src_defs)
 
 

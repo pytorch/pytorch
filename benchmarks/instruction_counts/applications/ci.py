@@ -70,7 +70,7 @@ def main(argv: List[str]) -> None:
     }
 
     if args.destination:
-        with open(args.destination, "wt") as f:
+        with open(args.destination, "w") as f:
             json.dump(final_results, f)
 
     if in_debug_mode:

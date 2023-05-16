@@ -55,7 +55,7 @@ class Optimizer:
         if grad is None:
             assert isinstance(
                 param, parameter_info.ParameterInfo
-            ), "Expected parameter to be of type ParameterInfo, got {}".format(param)
+            ), f"Expected parameter to be of type ParameterInfo, got {param}"
             assert param.grad is not None
         else:
             if isinstance(param, basestring):
@@ -241,7 +241,7 @@ class Optimizer:
     def dedup(net, sparse_dedup_aggregator, grad):
         assert isinstance(
             grad, core.GradientSlice
-        ), "Dedup only works for sparse gradient, got {}".format(grad)
+        ), f"Dedup only works for sparse gradient, got {grad}"
         if sparse_dedup_aggregator:
             return net.DeduplicateGradientSlices(
                 grad, aggregator=sparse_dedup_aggregator
@@ -318,7 +318,7 @@ class SgdOptimizer(Optimizer):
             return
         assert (
             self.base_learning_rate > 0
-        ), "Expect positive base learning rate, got {}".format(self.base_learning_rate)
+        ), f"Expect positive base learning rate, got {self.base_learning_rate}"
 
         self._clear_local_lr_multiplier()
 
@@ -364,7 +364,7 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}{}".format(dev.device_type, dev.device_id, dev.node_name),
+            f"ONE_{dev.device_type}_{dev.device_id}{dev.node_name}",
             shape=[1],
             value=1.0,
         )
@@ -444,7 +444,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
             return
         assert (
             self.base_learning_rate > 0
-        ), "Expect positive base learning rate, got {}".format(self.base_learning_rate)
+        ), f"Expect positive base learning rate, got {self.base_learning_rate}"
 
         lr, _ = self.build_lr(
             net,
@@ -543,7 +543,7 @@ class FP16SgdOptimizer(SgdOptimizer):
             return
         assert (
             self.base_learning_rate > 0
-        ), "Expect positive base learning rate, got {}".format(self.base_learning_rate)
+        ), f"Expect positive base learning rate, got {self.base_learning_rate}"
 
         lr, _ = self.build_lr(
             net,
@@ -596,11 +596,11 @@ class WeightDecayBuilder(Optimizer):
             dev = core.DeviceOption(caffe2_pb2.CPU)
 
         ONE = param_init_net.ConstantFill(
-            [], "ONE_{}_{}".format(dev.device_type, dev.device_id), shape=[1], value=1.0
+            [], f"ONE_{dev.device_type}_{dev.device_id}", shape=[1], value=1.0
         )
         WD = param_init_net.ConstantFill(
             [],
-            "wd_{}_{}".format(dev.device_type, dev.device_id),
+            f"wd_{dev.device_type}_{dev.device_id}",
             shape=[1],
             value=self.weight_decay,
         )
@@ -836,7 +836,7 @@ class AdagradOptimizer(Optimizer):
             if self.engine in FP16_ENGINES:
                 assert (
                     self.weight_decay == 0
-                ), "weight decay is not tested for engine: {}".format(self.engine)
+                ), f"weight decay is not tested for engine: {self.engine}"
 
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes
@@ -1019,7 +1019,7 @@ class AdagradOptimizer(Optimizer):
                     op = "MaskedRowWiseSparseAdagrad"
                     assert (
                         weight_decay == 0
-                    ), "weight decay is not implemented for {} yet".format(op)
+                    ), f"weight decay is not implemented for {op} yet"
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     if self.counter_halflife > 0:
@@ -1030,11 +1030,11 @@ class AdagradOptimizer(Optimizer):
                     op = "MaskedSparseAdagrad"
                     assert (
                         weight_decay == 0
-                    ), "weight decay is not implemented for {} yet".format(op)
+                    ), f"weight decay is not implemented for {op} yet"
                     input_args += [mask_blob, mask_changed_blob]
                 else:
                     op = "SparseAdagrad"
-            logger.debug("using {} for {}".format(op, str(param)))
+            logger.debug(f"using {op} for {str(param)}")
 
             if self.prune_delays:
                 input_args += [iteration, last_mask_updated_iter]
@@ -1613,14 +1613,14 @@ class AdamOptimizer(Optimizer):
         self.enableRAdam = enableRAdam
         if use_smart_decay:
             if rowWise:
-                raise NotImplementedError(('Smart decay is not implemented for rowWise Adam.  '
-                                           'Set rowWise or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented for rowWise Adam.  '
+                                           'Set rowWise or use_smart_decay to False.')
             if enableRAdam:
-                raise NotImplementedError(('Smart decay is not implemented for RAdam.  '
-                                           'Set enableRAdam or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented for RAdam.  '
+                                           'Set enableRAdam or use_smart_decay to False.')
             if use_lr_adaption:
-                raise NotImplementedError(('Smart decay is not implemented with lr_adaption.  '
-                                           'Set use_lr_adaption or use_smart_decay to False.'))
+                raise NotImplementedError('Smart decay is not implemented with lr_adaption.  '
+                                           'Set use_lr_adaption or use_smart_decay to False.')
 
         self.use_smart_decay = use_smart_decay
         self.init_kwargs = kwargs
@@ -1996,7 +1996,7 @@ class RmsPropOptimizer(Optimizer):
             dev = core.DeviceOption(caffe2_pb2.CPU)
 
         ONE = param_init_net.ConstantFill(
-            [], "ONE_{}_{}".format(dev.device_type, dev.device_id), shape=[1], value=1.0
+            [], f"ONE_{dev.device_type}_{dev.device_id}", shape=[1], value=1.0
         )
 
         lr, _ = self.build_lr(
@@ -2105,7 +2105,7 @@ def _calc_norm_ratio(model, params, name_scope, param_to_device, max_gradient_no
                     else param.grad.values
                 )
 
-                grad_squared_sum_name = "grad_{}_squared_sum".format(i)
+                grad_squared_sum_name = f"grad_{i}_squared_sum"
                 grad_squared_sum = model.net.SumSqrElements(grad, grad_squared_sum_name)
                 grad_squared_sum_cpu = model.net.EnsureCPUOutput(grad_squared_sum)
                 grad_squared_sums.append(grad_squared_sum_cpu)

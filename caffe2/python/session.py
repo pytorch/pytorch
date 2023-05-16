@@ -86,7 +86,7 @@ class Session:
         if isinstance(runnable, CompiledRunnable):
             assert cls == runnable.session_class, (
                 'Runnable was compiled for different session type. ' +
-                'Need: %s, got: %s' % (
+                'Need: {}, got: {}'.format(
                     cls.__name__, runnable.session_class.__name__))
             return runnable
 

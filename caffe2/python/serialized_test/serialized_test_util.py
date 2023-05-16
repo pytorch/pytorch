@@ -1,6 +1,3 @@
-
-
-
 import inspect
 import os
 import shutil
@@ -114,7 +111,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
         with open(op_path, 'wb') as f:
             f.write(op.SerializeToString())
         for (i, grad) in enumerate(grad_ops):
-            grad_path = os.path.join(full_dir, 'grad_{}.pb'.format(i))
+            grad_path = os.path.join(full_dir, f'grad_{i}.pb')
             grad_paths.append(grad_path)
             with open(grad_path, 'wb') as f:
                 f.write(grad.SerializeToString())
@@ -178,7 +175,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
 
         # assert gradient op is equal
         for i in range(len(grad_ops)):
-            grad_path = os.path.join(temp_dir, 'grad_{}.pb'.format(i))
+            grad_path = os.path.join(temp_dir, f'grad_{i}.pb')
             with open(grad_path, 'rb') as f:
                 loaded_grad = f.read()
             grad_proto = parse_proto(loaded_grad)

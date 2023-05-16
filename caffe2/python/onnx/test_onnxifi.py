@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import time
 import unittest
@@ -22,15 +17,15 @@ ONNXIFI_DATATYPE_FLOAT32 = 1
 
 def _print_net(net):
     for i in net.external_input:
-        print("Input: {}".format(i))
+        print(f"Input: {i}")
     for i in net.external_output:
-        print("Output: {}".format(i))
+        print(f"Output: {i}")
     for op in net.op:
-        print("Op {}".format(op.type))
+        print(f"Op {op.type}")
         for x in op.input:
-            print("  input: {}".format(x))
+            print(f"  input: {x}")
         for y in op.output:
-            print("  output: {}".format(y))
+            print(f"  output: {y}")
 
 
 class OnnxifiTest(TestCase):
@@ -138,7 +133,7 @@ class OnnxifiTransformTest(TestCase):
     def test_resnet50_core(self):
         N = 1
         repeat = 1
-        print("Batch size: {}, repeat inference {} times".format(N, repeat))
+        print(f"Batch size: {N}, repeat inference {repeat} times")
         init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
@@ -181,19 +176,19 @@ class OnnxifiTransformTest(TestCase):
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
-        print("C2 runtime: {}s".format(c2_time))
+        print(f"C2 runtime: {c2_time}s")
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
-            print("Conversion time: {:.2f}s".format(end - start))
+            print(f"Conversion time: {end - start:.2f}s")
 
             start = time.time()
             for _ in range(repeat):
                 workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
-            print("Onnxifi runtime: {}s, improvement: {}%".format(trt_time, (c2_time - trt_time) / c2_time * 100))
+            print(f"Onnxifi runtime: {trt_time}s, improvement: {(c2_time - trt_time) / c2_time * 100}%")
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)

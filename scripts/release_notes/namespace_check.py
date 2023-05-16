@@ -65,10 +65,10 @@ def run(args, submod):
         if not path.exists(new_filename):
             raise RuntimeError("New version data not collected")
 
-        with open(prev_filename, "r") as f:
+        with open(prev_filename) as f:
             prev_content = set(json.load(f))
 
-        with open(new_filename, "r") as f:
+        with open(new_filename) as f:
             new_content = set(json.load(f))
 
         if not args.show_all:

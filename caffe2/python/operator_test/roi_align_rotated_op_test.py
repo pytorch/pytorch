@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
@@ -125,7 +120,7 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             if (axes[0] >= m.ndim or axes[0] < -m.ndim or
                     axes[1] >= m.ndim or axes[1] < -m.ndim):
                 raise ValueError(
-                    "Axes={} out of range for array of ndim={}.".format(axes, m.ndim))
+                    f"Axes={axes} out of range for array of ndim={m.ndim}.")
 
             k %= 4
 

@@ -161,7 +161,7 @@ class FeatureSparseToDense(ModelLayer):
                 )
             else:
                 raise TypeError(
-                    "Unsupported input type: {0}".format(feature_specs.feature_type)
+                    f"Unsupported input type: {feature_specs.feature_type}"
                 )
 
         # TODO(amalevich): This schema is producing ranges. And thus if there is

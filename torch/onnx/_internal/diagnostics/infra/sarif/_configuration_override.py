@@ -14,7 +14,7 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ConfigurationOverride(object):
+class ConfigurationOverride:
     """Information about how a specific rule or notification was reconfigured at runtime."""
 
     configuration: _reporting_configuration.ReportingConfiguration = dataclasses.field(
@@ -23,7 +23,7 @@ class ConfigurationOverride(object):
     descriptor: _reporting_descriptor_reference.ReportingDescriptorReference = (
         dataclasses.field(metadata={"schema_property_name": "descriptor"})
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

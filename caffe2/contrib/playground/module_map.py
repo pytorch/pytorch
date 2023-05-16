@@ -1,8 +1,3 @@
-
-
-
-
-
 # Input
 import caffe2.contrib.playground.resnetdemo.\
     gfs_IN1k as gfs_IN1k  # noqa

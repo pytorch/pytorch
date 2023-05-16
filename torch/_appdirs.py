@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Copyright (c) 2005-2010 ActiveState Software Inc.
 # Copyright (c) 2013 Eddy Petrișor
 
@@ -445,7 +444,7 @@ def user_log_dir(appname=None, appauthor=None, version=None, opinion=True):
     return path
 
 
-class AppDirs(object):
+class AppDirs:
     """Convenience wrapper for getting application dirs."""
 
     def __init__(
@@ -648,19 +647,19 @@ if __name__ == "__main__":
     print("-- app dirs (with optional 'version')")
     dirs = AppDirs(appname, appauthor, version="1.0")
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print("{}: {}".format(prop, getattr(dirs, prop)))
 
     print("\n-- app dirs (without optional 'version')")
     dirs = AppDirs(appname, appauthor)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print("{}: {}".format(prop, getattr(dirs, prop)))
 
     print("\n-- app dirs (without optional 'appauthor')")
     dirs = AppDirs(appname)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print("{}: {}".format(prop, getattr(dirs, prop)))
 
     print("\n-- app dirs (with disabled 'appauthor')")
     dirs = AppDirs(appname, appauthor=False)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print("{}: {}".format(prop, getattr(dirs, prop)))

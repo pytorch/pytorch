@@ -58,7 +58,7 @@ def write(filename, s):
 
 
 def read(filename):
-    with open(filename, "r") as f:
+    with open(filename) as f:
         return f.read()
 
 
@@ -194,7 +194,7 @@ def get_output(o, i):
     if len(o['returns']) == 1:
         return 'the_result'
     else:
-        return '::std::get<{}>(the_result)'.format(i)
+        return f'::std::get<{i}>(the_result)'
 
 
 def attribute_names(o):
@@ -266,7 +266,7 @@ if __name__ == '__main__':
 
         # map from descriptor string to the integer key in the switch statements
         # that initializes the operators
-        top_env['mappings'].append('{{ "{}", {} }},'.format(descriptor, key))
+        top_env['mappings'].append(f'{{ "{descriptor}", {key} }},')
         env = {
             'name': o['name'],
             'statements': [],

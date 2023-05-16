@@ -21,14 +21,14 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        x, y = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
 
         with torch.profiler.profile() as prof:
             fn(x, y)
 
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
-            with open(fname, "r") as f:
+            with open(fname) as f:
                 trace_json = json.load(f)
 
         self.assertTrue("traceEvents" in trace_json)

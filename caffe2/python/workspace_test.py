@@ -608,7 +608,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         self.assertIn(name, ws.blobs)
         blob = ws.blobs[name]
         np.testing.assert_equal(value, ws.blobs[name].fetch())
-        serde_blob = ws.create_blob("{}_serde".format(name))
+        serde_blob = ws.create_blob(f"{name}_serde")
         serde_blob.deserialize(blob.serialize(name))
         np.testing.assert_equal(value, serde_blob.fetch())
 
@@ -620,7 +620,7 @@ class TestCWorkspace(htu.HypothesisTestCase):
         self.assertIn(name, ws.blobs)
         blob = ws.blobs[name]
         self.assertEqual(value, ws.blobs[name].fetch())
-        serde_blob = ws.create_blob("{}_serde".format(name))
+        serde_blob = ws.create_blob(f"{name}_serde")
         serde_blob.deserialize(blob.serialize(name))
         self.assertEqual(value, serde_blob.fetch())
 

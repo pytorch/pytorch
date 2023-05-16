@@ -58,7 +58,7 @@ class ShuffleNetV2Builder():
         for idx, (out_channels, n_repeats) in enumerate(zip(
             self.output_channels[1:4], self.stage_repeats
         )):
-            prefix = 'stage{}_stride{}'.format(idx + 2, 2)
+            prefix = f'stage{idx + 2}_stride{2}'
             self.add_spatial_ds_unit(prefix, in_channels, out_channels)
             in_channels = out_channels
             for i in range(n_repeats):
@@ -74,7 +74,7 @@ class ShuffleNetV2Builder():
                                                kernel=7)
         self.last_out = brew.fc(self.model,
                                 self.avg_pool,
-                                'last_out_L{}'.format(self.num_labels),
+                                f'last_out_L{self.num_labels}',
                                 self.output_channels[4],
                                 self.num_labels)
 

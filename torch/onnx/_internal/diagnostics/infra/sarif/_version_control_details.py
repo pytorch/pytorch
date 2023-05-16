@@ -13,28 +13,28 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class VersionControlDetails(object):
+class VersionControlDetails:
     """Specifies the information necessary to retrieve a desired revision from a version control system."""
 
     repository_uri: str = dataclasses.field(
         metadata={"schema_property_name": "repositoryUri"}
     )
-    as_of_time_utc: Optional[str] = dataclasses.field(
+    as_of_time_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "asOfTimeUtc"}
     )
-    branch: Optional[str] = dataclasses.field(
+    branch: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "branch"}
     )
-    mapped_to: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
+    mapped_to: _artifact_location.ArtifactLocation | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "mappedTo"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    revision_id: Optional[str] = dataclasses.field(
+    revision_id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "revisionId"}
     )
-    revision_tag: Optional[str] = dataclasses.field(
+    revision_tag: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "revisionTag"}
     )
 

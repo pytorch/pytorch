@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import model_helper, workspace, core, rnn_cell
 import numpy as np
 

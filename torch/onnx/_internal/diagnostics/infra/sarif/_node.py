@@ -15,20 +15,20 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Node(object):
+class Node:
     """Represents a node in a graph."""
 
     id: str = dataclasses.field(metadata={"schema_property_name": "id"})
-    children: Optional[List[_node.Node]] = dataclasses.field(
+    children: list[_node.Node] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "children"}
     )
-    label: Optional[_message.Message] = dataclasses.field(
+    label: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "label"}
     )
-    location: Optional[_location.Location] = dataclasses.field(
+    location: _location.Location | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

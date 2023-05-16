@@ -25,7 +25,7 @@ import numpy as np
 class OpSpec(namedtuple("OpSpec", "type input output arg")):
 
     def __new__(cls, op_type, op_input, op_output, op_arg=None):
-        return super(OpSpec, cls).__new__(cls, op_type, op_input,
+        return super().__new__(cls, op_type, op_input,
                                           op_output, op_arg)
 
 

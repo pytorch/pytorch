@@ -257,7 +257,7 @@ def broadcast_shapes(shape1, shape2):
         elif d1 == d2:
             ret.append(d1)
         else:
-            raise Exception("Cannot broadcast shapes: {} and {}".format(shape1, shape2))
+            raise Exception(f"Cannot broadcast shapes: {shape1} and {shape2}")
     return tuple(ret)
 
 
@@ -867,7 +867,7 @@ class _NnapiSerializer:
     def add_node(self, node):
         adder = self.ADDER_MAP.get(node.kind())
         if not adder:
-            raise Exception("Unsupported node kind (%r) in node %r" % (node.kind(), node))
+            raise Exception("Unsupported node kind ({!r}) in node {!r}".format(node.kind(), node))
         adder(self, node)
 
     def _identity(self, node):

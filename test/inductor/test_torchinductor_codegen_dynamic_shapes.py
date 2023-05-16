@@ -124,14 +124,14 @@ test_failures = {
     "test_expand_dynamic_shapes": TestFailure(("cpu",)),
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
-    "test_layer_norm_dynamic_shapes": TestFailure(("cuda")),
+    "test_layer_norm_dynamic_shapes": TestFailure("cuda"),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
-    "test_to_device_constant_dynamic_shapes": TestFailure(("cpu")),
+    "test_to_device_constant_dynamic_shapes": TestFailure("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
@@ -185,7 +185,7 @@ test_failures = {
     "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
+    "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #

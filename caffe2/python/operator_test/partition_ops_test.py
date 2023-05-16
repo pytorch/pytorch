@@ -1,7 +1,3 @@
-
-
-
-
 import numpy as np
 from caffe2.python import core, workspace
 from caffe2.python.test_util import TestCase, rand_array
@@ -36,7 +32,7 @@ class TestPartitionOps(TestCase):
         for main_dims, parts, main_type, extra_ins, pack in self.test_configs():
             ins = ['in' + str(i) for i in range(1 + len(extra_ins))]
             outs = [
-                'in{}_p{}'.format(j, i)
+                f'in{j}_p{i}'
                 for i in range(parts) for j in range(1 + len(extra_ins))
             ]
             op = core.CreateOperator(
@@ -108,7 +104,7 @@ class TestPartitionOps(TestCase):
                 continue
             ins = ['in' + str(i) for i in range(2 + len(extra_ins))]
             outs = [
-                'in{}_p{}'.format(j, i)
+                f'in{j}_p{i}'
                 for i in range(parts) for j in range(2 + len(extra_ins))
             ]
             op = core.CreateOperator(

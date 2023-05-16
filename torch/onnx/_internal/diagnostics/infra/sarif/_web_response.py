@@ -13,10 +13,10 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class WebResponse(object):
+class WebResponse:
     """Describes the response to an HTTP request."""
 
-    body: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
+    body: _artifact_content.ArtifactContent | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "body"}
     )
     headers: Any = dataclasses.field(
@@ -25,22 +25,22 @@ class WebResponse(object):
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    no_response_received: Optional[bool] = dataclasses.field(
+    no_response_received: bool | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "noResponseReceived"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    protocol: Optional[str] = dataclasses.field(
+    protocol: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "protocol"}
     )
-    reason_phrase: Optional[str] = dataclasses.field(
+    reason_phrase: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "reasonPhrase"}
     )
-    status_code: Optional[int] = dataclasses.field(
+    status_code: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "statusCode"}
     )
-    version: Optional[str] = dataclasses.field(
+    version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}
     )
 

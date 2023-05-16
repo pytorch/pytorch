@@ -30,7 +30,7 @@ def OpAlmostEqual(op_a, op_b, ignore_fields=None):
         ignore_fields = [ignore_fields]
 
     assert all(isinstance(f, str) for f in ignore_fields), (
-        'Expect each field is text type, but got {}'.format(ignore_fields))
+        f'Expect each field is text type, but got {ignore_fields}')
 
     def clean_op(op):
         op = copy.deepcopy(op)
@@ -182,7 +182,7 @@ def MakeArgument(key, value):
             raise ValueError(
                 "Unknown iterable argument type: key={} value={}, value "
                 "type={}[{}]".format(
-                    key, value, type(value), set(type(v) for v in value)
+                    key, value, type(value), {type(v) for v in value}
                 )
             )
         else:
@@ -314,7 +314,7 @@ class DebugMode:
 
 def raiseIfNotEqual(a, b, msg):
     if a != b:
-        raise Exception("{}. {} != {}".format(msg, a, b))
+        raise Exception(f"{msg}. {a} != {b}")
 
 
 def debug(f):

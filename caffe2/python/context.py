@@ -41,7 +41,7 @@ class _ContextRegistry:
 
     def get(self, cls):
         if cls not in self._ctxs:
-            assert issubclass(cls, Managed), "must be a context managed class, got {}".format(cls)
+            assert issubclass(cls, Managed), f"must be a context managed class, got {cls}"
             self._ctxs[cls] = _ContextInfo(cls, allow_default=issubclass(cls, DefaultManaged))
         return self._ctxs[cls]
 
@@ -77,7 +77,7 @@ class Managed:
         ctx_info = _context_registry().get(cls)
         if value is not None:
             assert isinstance(value, cls), (
-                'Wrong context type. Expected: %s, got %s.' % (cls, type(value)))
+                'Wrong context type. Expected: {}, got {}.'.format(cls, type(value)))
             return value
         return ctx_info.get_active(required=required)
 

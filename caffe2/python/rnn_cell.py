@@ -877,7 +877,7 @@ class DropoutCell(RNNCell):
                 output = brew.dropout(
                     model,
                     output,
-                    str(output) + '_with_dropout_mask{}'.format(self.mask),
+                    str(output) + f'_with_dropout_mask{self.mask}',
                     ratio=float(self.dropout_ratio),
                     is_test=self.is_test,
                     use_cudnn=self.use_cudnn,
@@ -897,7 +897,7 @@ class MultiRNNCellInitializer:
                 raise Exception("Either initial states "
                                 "or initializer have to be set")
 
-            with core.NameScope("layer_{}".format(i)),\
+            with core.NameScope(f"layer_{i}"),\
                     core.NameScope(cell.name):
                 states.extend(cell.initializer.create_states(model))
         return states
@@ -968,7 +968,7 @@ class MultiRNNCell(RNNCell):
 
     def layer_scoper(self, layer_id):
         def helper(name):
-            return "{}/layer_{}/{}".format(self.name, layer_id, name)
+            return f"{self.name}/layer_{layer_id}/{name}"
         return helper
 
     def prepare_input(self, model, input_blob):
@@ -1005,7 +1005,7 @@ class MultiRNNCell(RNNCell):
         for i, layer_cell in enumerate(self.cells):
             # # If cells don't have different names we still
             # take care of scoping
-            with core.NameScope(self.name), core.NameScope("layer_{}".format(i)):
+            with core.NameScope(self.name), core.NameScope(f"layer_{i}"):
                 num_states = states_per_layer[i]
                 layer_states = states[states_index:(states_index + num_states)]
                 states_index += num_states
@@ -1036,7 +1036,7 @@ class MultiRNNCell(RNNCell):
                         layer_input = brew.sum(
                             model,
                             [layer_output, layer_input],
-                            self.scope('residual_output_{}'.format(i)),
+                            self.scope(f'residual_output_{i}'),
                         )
                     else:
                         layer_input = layer_output
@@ -1408,7 +1408,7 @@ class LSTMWithAttentionCell(AttentionCell):
             hidden_size=decoder_state_dim,
             forget_bias=forget_bias,
             memory_optimization=lstm_memory_optimization,
-            name='{}/decoder'.format(name),
+            name=f'{name}/decoder',
             forward_only=False,
             drop_states=False,
         )
@@ -1447,7 +1447,7 @@ class MILSTMWithAttentionCell(AttentionCell):
             hidden_size=decoder_state_dim,
             forget_bias=forget_bias,
             memory_optimization=lstm_memory_optimization,
-            name='{}/decoder'.format(name),
+            name=f'{name}/decoder',
             forward_only=False,
             drop_states=False,
         )
@@ -1601,7 +1601,7 @@ class UnrolledCell(RNNCell):
         # Now they are blob references - outputs of splitting the input sequence
         split_inputs = model.net.Split(
             inputs,
-            [str(inputs) + "_timestep_{}".format(i)
+            [str(inputs) + f"_timestep_{i}"
              for i in range(self.T)],
             axis=0)
         if self.T == 1:
@@ -1610,7 +1610,7 @@ class UnrolledCell(RNNCell):
         states = initial_states
         all_states = []
         for t in range(0, self.T):
-            scope_name = "timestep_{}".format(t)
+            scope_name = f"timestep_{t}"
             # Parameters of all timesteps are shared
             with ParameterSharing({scope_name: ''}),\
                     scope.NameScope(scope_name):
@@ -1750,10 +1750,10 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
                 sz = input_bias_size if input_type == 'input' \
                     else recurrent_bias_size
             else:
-                assert False, "unknown parameter type {}".format(pname)
+                assert False, f"unknown parameter type {pname}"
             return model.param_init_net.UniformFill(
                 [],
-                "lstm_init_{}_{}_{}".format(input_type, pname, layer),
+                f"lstm_init_{input_type}_{pname}_{layer}",
                 shape=[sz])
 
         # Multiply by 4 since we have 4 gates per LSTM unit
@@ -1810,7 +1810,7 @@ def cudnn_LSTM(model, input_blob, initial_states, dim_in, dim_out,
                         param_extract_mapping[input_type][pname] = {}
                     b = param_extract_net.RecurrentParamGet(
                         [input_blob, weights],
-                        ["lstm_{}_{}_{}".format(input_type, pname, j)],
+                        [f"lstm_{input_type}_{pname}_{j}"],
                         layer=j,
                         input_type=input_type,
                         param_type=pname,
@@ -1970,7 +1970,7 @@ def _layered_LSTM(
             'input_blob': output,
             'dim_in': output_dim,
             'initial_states': (last_output, last_state),
-            'scope': scope + '_layer_{}'.format(i + 1)
+            'scope': scope + f'_layer_{i + 1}'
         })
     return output, last_output, all_states, last_state
 

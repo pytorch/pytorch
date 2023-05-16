@@ -1,8 +1,3 @@
-
-
-
-
-
 import functools
 
 import hypothesis

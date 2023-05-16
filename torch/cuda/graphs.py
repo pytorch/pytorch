@@ -45,7 +45,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         This API is in beta and may change in future releases.
     """
     def __new__(cls):
-        return super(CUDAGraph, cls).__new__(cls)
+        return super().__new__(cls)
 
     def capture_begin(self, pool=None):
         r"""

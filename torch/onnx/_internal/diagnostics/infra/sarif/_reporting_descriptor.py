@@ -15,55 +15,55 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ReportingDescriptor(object):
+class ReportingDescriptor:
     """Metadata that describes a specific report produced by the tool, as part of the analysis it provides or its runtime reporting."""
 
     id: str = dataclasses.field(metadata={"schema_property_name": "id"})
-    default_configuration: Optional[
+    default_configuration: None | (
         _reporting_configuration.ReportingConfiguration
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "defaultConfiguration"}
     )
-    deprecated_guids: Optional[List[str]] = dataclasses.field(
+    deprecated_guids: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedGuids"}
     )
-    deprecated_ids: Optional[List[str]] = dataclasses.field(
+    deprecated_ids: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedIds"}
     )
-    deprecated_names: Optional[List[str]] = dataclasses.field(
+    deprecated_names: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "deprecatedNames"}
     )
-    full_description: Optional[
+    full_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullDescription"}
     )
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    help: Optional[
+    help: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "help"})
-    help_uri: Optional[str] = dataclasses.field(
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "help"})
+    help_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "helpUri"}
     )
     message_strings: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "messageStrings"}
     )
-    name: Optional[str] = dataclasses.field(
+    name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "name"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    relationships: Optional[
-        List[_reporting_descriptor_relationship.ReportingDescriptorRelationship]
-    ] = dataclasses.field(
+    relationships: None | (
+        list[_reporting_descriptor_relationship.ReportingDescriptorRelationship]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "relationships"}
     )
-    short_description: Optional[
+    short_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "shortDescription"}
     )
 

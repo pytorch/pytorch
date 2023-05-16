@@ -246,7 +246,7 @@ class TranslatorRegistry:
                 log.info('Current net state does not need layer {}'
                             .format(layer.name))
                 continue
-            log.info('Translate layer {}'.format(layer.name))
+            log.info(f'Translate layer {layer.name}')
             # Get pretrained one
             pretrained_layers = (
                 [l for l in pretrained_net.layer
@@ -823,7 +823,7 @@ def TranslateFlatten(layer, pretrained_blobs, is_test, **kwargs):
     else:
         # This could be a Reshape op, but dim size is not known here.
         raise NotImplementedError(
-            "Not supported yet for flatten_param.axis {}.".format(param.axis))
+            f"Not supported yet for flatten_param.axis {param.axis}.")
 
     return caffe_op, []
 

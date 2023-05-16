@@ -159,7 +159,7 @@ class _CPUinfo():
             # ...
             if test_input == "":
                 lscpu_cmd = ["lscpu", "--parse=CPU,Core,Socket,Node"]
-                lscpu_info = subprocess.check_output(lscpu_cmd, universal_newlines=True).split("\n")
+                lscpu_info = subprocess.check_output(lscpu_cmd, text=True).split("\n")
             else:
                 lscpu_info = test_input.split("\n")
 

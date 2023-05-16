@@ -82,7 +82,7 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
     This function is passed to `parameterized.parameterized_class` as the
@@ -176,20 +176,20 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         self,
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
-        input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
-        rtol: Optional[float] = 1e-3,
-        atol: Optional[float] = 1e-7,
+        input_kwargs: Mapping[str, _InputArgsType] | None = None,
+        rtol: float | None = 1e-3,
+        atol: float | None = 1e-7,
         opset_version: int = 18,
         has_mutation: bool = False,
         verbose: bool = False,
-        additional_test_inputs: Optional[
-            List[
-                Union[
-                    Tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]],
-                    Tuple[Sequence[_InputArgsType]],
-                ]
+        additional_test_inputs: None | (
+            list[
+                (
+                    tuple[Sequence[_InputArgsType], Mapping[str, _InputArgsType]] |
+                    tuple[Sequence[_InputArgsType]]
+                )
             ]
-        ] = None,
+        ) = None,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -288,7 +288,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
 @_beartype.beartype
 def run_ort(
-    onnx_model: Union[str, torch.onnx.ExportOutput],
+    onnx_model: str | torch.onnx.ExportOutput,
     pytorch_inputs: Sequence[_InputArgsType],
 ) -> _OutputsType:
     """Run ORT on the given ONNX model and inputs
@@ -351,8 +351,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: Optional[float] = None,
-    rtol: Optional[float] = None,
+    atol: float | None = None,
+    rtol: float | None = None,
     has_mutation: bool = False,
 ):
     if has_mutation:
@@ -453,11 +453,11 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
-    dtypes: Optional[Collection[torch.dtype]]
+    opsets: Collection[int | Callable[[int], bool]] | None
+    dtypes: Collection[torch.dtype] | None
     reason: str
     test_behavior: str
-    matcher: Optional[Callable[[Any], bool]] = None
+    matcher: Callable[[Any], bool] | None = None
     enabled_if: bool = True
 
     def contains_opset(self, opset: int) -> bool:
@@ -474,9 +474,9 @@ def xfail(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], bool]] = None,
+    opsets: Collection[int | Callable[[int], bool]] | None = None,
+    dtypes: Collection[torch.dtype] | None = None,
+    matcher: Callable[[Any], bool] | None = None,
     enabled_if: bool = True,
 ):
     """Expects a OpInfo test to fail.
@@ -509,9 +509,9 @@ def skip(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
+    opsets: Collection[int | Callable[[int], bool]] | None = None,
+    dtypes: Collection[torch.dtype] | None = None,
+    matcher: Callable[[Any], Any] | None = None,
     enabled_if: bool = True,
 ):
     """Skips a test case in OpInfo that we don't care about.
@@ -603,28 +603,28 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
 
 
 def reason_onnx_script_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
+    operator: str, dtypes: Sequence[str] | None = None
 ) -> str:
     """Formats the reason: ONNX script doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
 
 
 def reason_onnx_runtime_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
+    operator: str, dtypes: Sequence[str] | None = None
 ) -> str:
     """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
 
 
 def reason_onnx_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
+    operator: str, dtypes: Sequence[str] | None = None
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
 
 
 def reason_dynamo_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
+    operator: str, dtypes: Sequence[str] | None = None
 ) -> str:
     """Formats the reason: Dynamo doesn't support the given dtypes."""
     return (
@@ -644,7 +644,7 @@ def reason_flaky() -> str:
 
 @contextlib.contextmanager
 def normal_xfail_skip_test_behaviors(
-    test_behavior: Optional[str] = None, reason: Optional[str] = None
+    test_behavior: str | None = None, reason: str | None = None
 ):
     """This context manager is used to handle the different behaviors of xfail and skip.
 

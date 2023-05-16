@@ -107,14 +107,14 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def add_metric_field(self, name, value):
         assert name not in self._metrics_schema.fields, (
-            "Try to add metric field twice: {}".format(name))
+            f"Try to add metric field twice: {name}")
         self._metrics_schema = self._metrics_schema + schema.Struct(
             (name, value)
         )
 
     # an empty white_set will skip everything
     def filter_metrics_schema(self, white_set):
-        logger.info("Filter metric schema with white_set {}".format(white_set))
+        logger.info(f"Filter metric schema with white_set {white_set}")
         field_names = self._metrics_schema.field_names()
         for name in field_names:
             if name not in white_set:
@@ -123,7 +123,7 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_ad_hoc_plot_blob(self, blob, dtype=None):
         assert isinstance(
             blob, (str, core.BlobReference)
-        ), "expect type str or BlobReference, but got {}".format(type(blob))
+        ), f"expect type str or BlobReference, but got {type(blob)}"
         dtype = dtype or (np.float, (1, ))
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
         self.ad_hoc_plot_blobs.append(blob)
@@ -238,8 +238,8 @@ class LayerModelHelper(model_helper.ModelHelper):
         if shape != ref_shape:
             raise ValueError(
                 "Got inconsistent shapes between shared parameters "
-                "when trying to map a blob in scope {0} to {1}. ref_shape : "
-                " {2}, shape : {3}".format(
+                "when trying to map a blob in scope {} to {}. ref_shape : "
+                " {}, shape : {}".format(
                     scope.CurrentNameScope(), param_name, ref_shape, shape)
             )
 
@@ -301,7 +301,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 )
             )
         else:
-            raise ValueError("optim should be either None, NoOptim, or an instance of Optimizer, Got {} ".format(optim))
+            raise ValueError(f"optim should be either None, NoOptim, or an instance of Optimizer, Got {optim} ")
 
     def create_param(self, param_name, shape, initializer, optimizer=None,
                      ps_param=None, regularizer=None):
@@ -372,7 +372,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
             self.params.append(param.parameter)
             if isinstance(param, layers.LayerParameter):
-                logger.info("Add parameter regularizer {0}".format(param.parameter))
+                logger.info(f"Add parameter regularizer {param.parameter}")
                 self.param_to_reg[param.parameter] = param.regularizer
             elif isinstance(param, ParameterInfo):
                 # TODO:
@@ -404,16 +404,16 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def add_post_grad_net_modifiers(self, modifier):
         assert modifier not in self._post_grad_net_modifiers,\
-            "{0} is already in {1}".format(modifier, self._post_grad_net_modifiers)
+            f"{modifier} is already in {self._post_grad_net_modifiers}"
         assert isinstance(modifier, NetModifier),\
-            "{} has to be a NetModifier instance".format(modifier)
+            f"{modifier} has to be a NetModifier instance"
         self._post_grad_net_modifiers.append(modifier)
 
     def add_final_net_modifiers(self, modifier):
         assert modifier not in self._final_net_modifiers,\
-            "{0} is already in {1}".format(modifier, self._final_net_modifiers)
+            f"{modifier} is already in {self._final_net_modifiers}"
         assert isinstance(modifier, NetModifier),\
-            "{} has to be a NetModifier instance".format(modifier)
+            f"{modifier} has to be a NetModifier instance"
         self._final_net_modifiers.append(modifier)
 
     @property
@@ -536,7 +536,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def add_output_schema(self, name, value):
         assert value is not None, \
-            'Added output schema {} should not be None'.format(name)
+            f'Added output schema {name} should not be None'
         assert isinstance(value, schema.Scalar) or \
             isinstance(value, schema.Struct), \
             'Added output schema {} should be a scalar or a struct.\n\
@@ -545,7 +545,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             self._output_schema = schema.Struct((name, value))
         else:  # merge with other fields
             assert name not in self._output_schema.fields, \
-                'Output Schema Field {} already exists'.format(name)
+                f'Output Schema Field {name} already exists'
             self._output_schema = \
                 self._output_schema + schema.Struct((name, value))
 
@@ -618,7 +618,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         else:
             # this needs to be an AttributeError to fit hasattr semantics
             raise AttributeError(
-                "Trying to create non-registered layer: {}".format(layer))
+                f"Trying to create non-registered layer: {layer}")
 
     @property
     def layers(self):
@@ -634,7 +634,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         for param, regularizer in self.param_to_reg.items():
             if regularizer is None:
                 continue
-            logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
+            logger.info(f"add regularizer {regularizer} for param {param} to loss")
             assert isinstance(regularizer, Regularizer)
             added_loss_blob = regularizer(train_net, train_init_net, param, grad=None,
                                           by=RegularizationBy.ON_LOSS)
@@ -660,7 +660,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
-            logger.info("add regularizer {0} for param {1} to optimizer".format(regularizer, param))
+            logger.info(f"add regularizer {regularizer} for param {param} to optimizer")
             device = get_param_device(
                 param,
                 grad_map.get(str(param)),

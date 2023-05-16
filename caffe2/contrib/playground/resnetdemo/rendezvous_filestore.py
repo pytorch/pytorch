@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python import dyndep
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
@@ -24,7 +19,7 @@ def gen_rendezvous_ctx(self, model, dataset, is_train):
         core.CreateOperator(
             "FileStoreHandlerCreate", [], ["store_handler"],
             path="/tmp",
-            prefix="epoch.{}".format(self.epoch),
+            prefix=f"epoch.{self.epoch}",
         )
     )
 

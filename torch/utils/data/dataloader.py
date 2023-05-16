@@ -604,7 +604,7 @@ class _BaseDataLoaderIter:
         self._base_seed = torch.empty((), dtype=torch.int64).random_(generator=loader.generator).item()
         self._persistent_workers = loader.persistent_workers
         self._num_yielded = 0
-        self._profile_name = "enumerate(DataLoader)#{}.__next__".format(self.__class__.__name__)
+        self._profile_name = f"enumerate(DataLoader)#{self.__class__.__name__}.__next__"
 
     def __iter__(self) -> '_BaseDataLoaderIter':
         return self
@@ -1145,7 +1145,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._mark_worker_as_unavailable(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
-                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
+                raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
             if isinstance(e, queue.Empty):
                 return (False, None)
             import tempfile
@@ -1281,7 +1281,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if success:
                 return data
             else:
-                raise RuntimeError('DataLoader timed out after {} seconds'.format(self._timeout))
+                raise RuntimeError(f'DataLoader timed out after {self._timeout} seconds')
         elif self._pin_memory:
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()

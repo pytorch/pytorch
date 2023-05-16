@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -33,7 +28,7 @@ class MKLConcatTest(hu.HypothesisTestCase):
         ]
         op = core.CreateOperator(
             "Concat",
-            ["X_{}".format(i) for i in range(len(Xs))],
+            [f"X_{i}" for i in range(len(Xs))],
             ["concat_result", "split_info"],
             order="NCHW",
         )

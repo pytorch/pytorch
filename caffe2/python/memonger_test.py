@@ -127,7 +127,7 @@ class MemongerTest(hu.HypothesisTestCase):
         fc = []
         for i in range(2):
             z = brew.fc(
-                m, "data{}".format(i), "fc".format(i), dim_in=2, dim_out=2)
+                m, f"data{i}", f"fc", dim_in=2, dim_out=2)
             fc.append(z)
         r = []
         # Trick is here to have same input appear twice in a same Sum
@@ -139,7 +139,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         static_blobs = \
             [o for op in m.param_init_net.Proto().op for o in op.output] + \
-            ["merged"] + ["data{}".format(i) for i in range(len(fc))]
+            ["merged"] + [f"data{i}" for i in range(len(fc))]
 
         optimized_net = memonger.optimize_inference_fast(
             m.Proto(), static_blobs)
@@ -180,7 +180,7 @@ class MemongerTest(hu.HypothesisTestCase):
             set(m.param_to_grad.values()),
             "name_x/",
             share_activations=True,
-            dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
+            dont_share_blobs={str(input_to_grad["name_x/fc1_w"])},
         )
         blobs_wact_optim = count_blobs(optim_proto_wacts)
         self.assertLessEqual(blobs_wact_optim, blobs_after)
@@ -295,8 +295,8 @@ class MemongerTest(hu.HypothesisTestCase):
             set(m.param_to_grad.values()),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
             share_activations=True,
-            dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
-                                   str(input_to_grad["name_x/fc1_w"])]),
+            dont_share_blobs={'name_x/fc6', 'name_x/fc5',
+                                   str(input_to_grad["name_x/fc1_w"])},
         )
         blobs_after = count_blobs(optim_proto)
         self.assertLess(blobs_after, blobs_before)
@@ -544,8 +544,8 @@ class MemongerTest(hu.HypothesisTestCase):
         init_blobs = []
         for i in range(2):
             hidden_init, cell_init = model.net.AddExternalInputs(
-                "hidden_init_{}".format(i),
-                "cell_init_{}".format(i)
+                f"hidden_init_{i}",
+                f"cell_init_{i}"
             )
             init_blobs.extend([hidden_init, cell_init])
         model.param_init_net.ConstantFill([], ["input"], shape=[T, 4, 10])

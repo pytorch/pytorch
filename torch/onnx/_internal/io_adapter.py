@@ -38,14 +38,14 @@ class InputAdaptStep(Protocol):
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         ...
 
 
 class InputAdapter:
     """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
 
-    def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
+    def __init__(self, steps: list[InputAdaptStep] | None = None):
         self._steps = steps or []
 
     @_beartype.beartype
@@ -60,7 +60,7 @@ class InputAdapter:
     @_beartype.beartype
     def apply(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, "torch.Tensor", None]]:
+    ) -> Sequence[int | float | bool | torch.Tensor | None]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -98,7 +98,7 @@ class OutputAdaptStep(Protocol):
 class OutputAdapter:
     """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
 
-    def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
+    def __init__(self, steps: list[OutputAdaptStep] | None = None):
         self._steps = steps or []
 
     @_beartype.beartype
@@ -113,7 +113,7 @@ class OutputAdapter:
     @_beartype.beartype
     def apply(
         self, model_outputs: Any
-    ) -> Sequence[Union["torch.Tensor", int, float, bool]]:
+    ) -> Sequence[torch.Tensor | int | float | bool]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -179,7 +179,7 @@ class BindInputStep:
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Bind the input arguments to the model signature.
 
         We hope the input kwargs will be mapped to bound.args after binding.
@@ -212,7 +212,7 @@ class MergeKwargsIntoArgsStep:
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Merge the input kwargs into the input args.
 
         Args:
@@ -228,12 +228,12 @@ class MergeKwargsIntoArgsStep:
 class LiftParametersAndBuffersIntoArgsStep:
     """Append parameters and buffers to model's positional argument list."""
 
-    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
+    def __init__(self, inputs: tuple[torch.Tensor, ...]) -> None:
         self.inputs = inputs
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Append model's parameters and buffers into its input.
 
         Args:
@@ -255,7 +255,7 @@ class RemoveNoneInputStep:
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove `None` from arguments.
 
         Args:
@@ -310,7 +310,7 @@ class RemoveNonTensorInputStep:
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove Constant from arguments.
 
         Args:
@@ -340,11 +340,11 @@ class FlattenInputWithTreeSpecValidationStep:
     time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
-    _spec: Optional[pytree.TreeSpec] = None
+    _spec: pytree.TreeSpec | None = None
 
     def apply(
         self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Flatten the model args and kwargs and validate the `SpecTree` output.
 
         Args:
@@ -399,7 +399,7 @@ class FlattenOutputWithTreeSpecValidationStep:
     time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
-    _spec: Optional[pytree.TreeSpec] = None
+    _spec: pytree.TreeSpec | None = None
 
     def apply(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.

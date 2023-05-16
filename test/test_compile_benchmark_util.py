@@ -23,7 +23,7 @@ class TestCompileBenchmarkUtil(TestCase):
     def test_training_and_inference(self):
         class ToyModel(torch.nn.Module):
             def __init__(self):
-                super(ToyModel, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.Tensor(2, 2))
 
             def forward(self, x):

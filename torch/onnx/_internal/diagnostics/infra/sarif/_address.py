@@ -10,37 +10,37 @@ from torch.onnx._internal.diagnostics.infra.sarif import _property_bag
 
 
 @dataclasses.dataclass
-class Address(object):
+class Address:
     """A physical or virtual address, or a range of addresses, in an 'addressable region' (memory or a binary file)."""
 
     absolute_address: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "absoluteAddress"}
     )
-    fully_qualified_name: Optional[str] = dataclasses.field(
+    fully_qualified_name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullyQualifiedName"}
     )
     index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    kind: Optional[str] = dataclasses.field(
+    kind: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "kind"}
     )
-    length: Optional[int] = dataclasses.field(
+    length: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "length"}
     )
-    name: Optional[str] = dataclasses.field(
+    name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "name"}
     )
-    offset_from_parent: Optional[int] = dataclasses.field(
+    offset_from_parent: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "offsetFromParent"}
     )
     parent_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "parentIndex"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    relative_address: Optional[int] = dataclasses.field(
+    relative_address: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "relativeAddress"}
     )
 

@@ -2962,7 +2962,7 @@ class InplaceBernoulliFallback(ExternKernel):
     kernel = "aten.bernoulli_"
 
     def codegen(self, wrapper):
-        (x,) = [t.codegen_reference() for t in self.inputs]
+        (x,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(
             f"{self.kernel}({x}, {', '.join(map(repr, self.constant_args))})"
         )
@@ -2993,9 +2993,9 @@ class ScatterFallback(ExternKernel):
 
     def codegen(self, wrapper):
         if self.src_is_tensor:
-            (x, index, src) = [t.codegen_reference() for t in self.inputs]
+            (x, index, src) = (t.codegen_reference() for t in self.inputs)
         else:
-            (x, index) = [t.codegen_reference() for t in self.inputs]
+            (x, index) = (t.codegen_reference() for t in self.inputs)
             src = self.constant_args[1]
         line = f"{self.kernel}({x}, {self.constant_args[0]}, {index}, {src}"
         if self.kernel == "aten.scatter_":
@@ -3046,7 +3046,7 @@ class IndexPutFallback(ExternKernel):
     """
 
     def codegen(self, wrapper):
-        (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
+        (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
         indices = []
         iter_valid_indices = iter(valid_indices)
         for i, _ in enumerate(self.indices):
@@ -4276,7 +4276,7 @@ class Wait(ExternKernelAlloc):
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives import _wait_tensor"
         )
-        (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        (input_collective,) = (t.codegen_reference() for t in self.inputs)
         wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
 
         # wait op still needs to produce a 'buffer' that represents the tensor output.

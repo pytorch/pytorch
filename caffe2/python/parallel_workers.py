@@ -72,7 +72,7 @@ def init_workers(
     workers = [
         threading.Thread(
             target=run_worker,
-            name="parallel_workers worker id {}".format(worker_id),
+            name=f"parallel_workers worker id {worker_id}",
             args=[coordinator,
                   Worker(coordinator, worker_id, worker_fun, metrics)],
         ) for worker_id in worker_ids
@@ -99,12 +99,12 @@ class Metrics:
             try:
                 logger.log(self._metrics)
             except Exception as e:
-                print("Failed to call ExternalLogger: {}".format(e))
+                print(f"Failed to call ExternalLogger: {e}")
 
     def put_metric(self, key, value, count=True):
         self._metrics[key] += value
         if count:
-            count_key = '{}_count'.format(key)
+            count_key = f'{key}_count'
             self._metrics[count_key] += 1
 
 
@@ -161,7 +161,7 @@ class WorkerCoordinator:
     def _stop(self, reason=None):
         self._active = False
         if reason is not None:
-            log.error("Data input failed due to an error: {}".format(reason))
+            log.error(f"Data input failed due to an error: {reason}")
         if self._shutdown_fun and self._started:
             self._shutdown_fun()
         if self._state:
@@ -170,21 +170,21 @@ class WorkerCoordinator:
         self._started = False
 
     def _wait_finish(self, cleanup=None):
-        print("Wait for workers to die: {}".format(self._worker_name))
+        print(f"Wait for workers to die: {self._worker_name}")
         for w in self._workers:
             if w != threading.current_thread():
                 w.join(5.0)  # don't wait forever, thread may be blocked in i/o
         success = True
         for w in self._workers:
             if w.is_alive():
-                print("Worker {} failed to close while waiting".format(w))
+                print(f"Worker {w} failed to close while waiting")
                 success = False
 
         # Release memory for the scratch blobs
         if success and self._state:
             self._state.cleanup()
 
-        print("All workers terminated: {}".format(success))
+        print(f"All workers terminated: {success}")
         return success
 
     def get_worker_ids(self):

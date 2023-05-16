@@ -19,7 +19,7 @@ class LastNWindowCollector(ModelLayer):
         assert num_to_collect > 0
         self.num_to_collect = num_to_collect
         assert isinstance(input_record, schema.Scalar), \
-            "Got {!r}".format(input_record)
+            f"Got {input_record!r}"
 
         self.last_n = self.create_param(param_name='last_n',
                                         shape=[0],

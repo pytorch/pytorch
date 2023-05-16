@@ -27,12 +27,12 @@ from torch.testing._internal import common_quantization, common_utils, jit_utils
 
 
 def export_to_onnx(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction],
-    input: Union[torch.Tensor, Tuple[torch.Tensor]],
-    custom_ops: Optional[
-        Iterable[Union[contextlib.AbstractContextManager, contextlib.ContextDecorator]]
-    ] = None,
-    mocks: Optional[Iterable] = None,
+    model: torch.nn.Module | torch.jit.ScriptFunction,
+    input: torch.Tensor | tuple[torch.Tensor],
+    custom_ops: None | (
+        Iterable[contextlib.AbstractContextManager | contextlib.ContextDecorator]
+    ) = None,
+    mocks: Iterable | None = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
     opset_version: int = GLOBALS.export_onnx_opset_version,
     **torch_onnx_export_kwargs,
@@ -360,7 +360,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_export_dict(self):
         class DictModule(torch.nn.Module):
-            def forward(self, x_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+            def forward(self, x_in: torch.Tensor) -> dict[str, torch.Tensor]:
                 return {"test_key_out": x_in}
 
         x_in = torch.tensor(1)
@@ -477,7 +477,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
             def __init__(self, bbox_xform_clip: float) -> None:
                 self.bbox_xform_clip = bbox_xform_clip
 
-            def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
+            def decode(self, rel_codes: Tensor, boxes: list[Tensor]) -> Tensor:
                 boxes = torch.cat(boxes, dim=0)
                 pred_ctr_x = (
                     torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip)
@@ -494,7 +494,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
                 super().__init__()
                 self.box_coder = BoxCoder(1.4)
 
-            def forward(self, box_regression: Tensor, proposals: List[Tensor]):
+            def forward(self, box_regression: Tensor, proposals: list[Tensor]):
                 return self.box_coder.decode(box_regression, proposals)
 
         model = torch.jit.script(MyModule())

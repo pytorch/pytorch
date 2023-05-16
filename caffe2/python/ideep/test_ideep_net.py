@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from caffe2.python.models.download import ModelDownloader
@@ -77,11 +72,11 @@ def GetArgumentParser():
 
 
 def benchmark(args):
-    print('Batch size: {}'.format(args.batch_size))
+    print(f'Batch size: {args.batch_size}')
     mf = ModelDownloader()
     init_net, pred_net, value_info = mf.get_c2_model(args.model)
     input_shapes = {k : [args.batch_size] + v[-1][1:] for (k, v) in value_info.items()}
-    print("input info: {}".format(input_shapes))
+    print(f"input info: {input_shapes}")
     external_inputs = {}
     for k, v in input_shapes.items():
         external_inputs[k] = np.random.randn(*v).astype(np.float32)
@@ -93,8 +88,8 @@ def benchmark(args):
     elif args.device == 'IDEEP':
         device_option = core.DeviceOption(caffe2_pb2.IDEEP)
     else:
-        raise Exception("Unknown device: {}".format(args.device))
-    print("Device option: {}, {}".format(args.device, device_option))
+        raise Exception(f"Unknown device: {args.device}")
+    print(f"Device option: {args.device}, {device_option}")
     pred_net.device_option.CopyFrom(device_option)
     for op in pred_net.op:
         op.device_option.CopyFrom(device_option)
@@ -119,7 +114,7 @@ def benchmark(args):
                                      args.warmup_iterations,
                                      args.iterations,
                                      args.layer_wise_benchmark)
-        print("FPS: {:.2f}".format(1/res[0]*1000*args.batch_size))
+        print(f"FPS: {1/res[0]*1000*args.batch_size:.2f}")
 
 if __name__ == '__main__':
     args, extra_args = GetArgumentParser().parse_known_args()

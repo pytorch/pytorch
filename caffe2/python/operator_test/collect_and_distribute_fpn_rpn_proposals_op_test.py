@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 
@@ -166,11 +161,11 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
                 # are in the format [[batch_idx, x0, y0, x1, y2], ...]
                 rpn_roi[i][3] += rpn_roi[i][1]
                 rpn_roi[i][4] += rpn_roi[i][2]
-            input_names.append('rpn_rois_fpn{}'.format(lvl + rpn_min_level))
+            input_names.append(f'rpn_rois_fpn{lvl + rpn_min_level}')
             inputs.append(rpn_roi)
         for lvl in range(rpn_num_levels):
             rpn_roi_score = np.random.rand(proposal_count).astype(np.float32)
-            input_names.append('rpn_roi_probs_fpn{}'.format(lvl + rpn_min_level))
+            input_names.append(f'rpn_roi_probs_fpn{lvl + rpn_min_level}')
             inputs.append(rpn_roi_score)
 
         return input_names, inputs
@@ -202,7 +197,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
             'rois',
         ]
         for lvl in range(roi_num_levels):
-            output_names.append('rois_fpn{}'.format(lvl + roi_min_level))
+            output_names.append(f'rois_fpn{lvl + roi_min_level}')
         output_names.append('rois_idx_restore')
 
         op = core.CreateOperator(
@@ -286,7 +281,7 @@ class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
 
         output_names = []
         for lvl in range(roi_num_levels):
-            output_names.append('rois_fpn{}'.format(lvl + roi_min_level))
+            output_names.append(f'rois_fpn{lvl + roi_min_level}')
         output_names.append('rois_idx_restore')
 
         distribute_op = core.CreateOperator(

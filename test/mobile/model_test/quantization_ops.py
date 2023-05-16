@@ -56,7 +56,7 @@ class DynamicQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(DynamicQuantModule.M, self).__init__()
+            super().__init__()
             self.rnn = nn.RNN(4, 8, 2)
             self.rnncell = nn.RNNCell(4, 8)
             self.gru = nn.GRU(4, 8, 2)
@@ -121,7 +121,7 @@ class StaticQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(StaticQuantModule.M, self).__init__()
+            super().__init__()
             self.quant = torch.ao.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)
             self.input2d = torch.randn((4, 2, 4, 4))
@@ -181,7 +181,7 @@ class FusedQuantModule:
 
     class M(torch.nn.Module):
         def __init__(self):
-            super(FusedQuantModule.M, self).__init__()
+            super().__init__()
             self.quant = torch.ao.quantization.QuantStub()
             self.input1d = torch.randn(4, 2, 2)
             self.input2d = torch.randn((4, 2, 4, 4))

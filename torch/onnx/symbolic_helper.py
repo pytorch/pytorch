@@ -66,8 +66,8 @@ _ValueDescriptor = Literal[
 def _parse_arg(
     value,
     desc: _ValueDescriptor,
-    arg_name: Optional[str] = None,
-    node_name: Optional[str] = None,
+    arg_name: str | None = None,
+    node_name: str | None = None,
 ):
     if desc == "none":
         return value
@@ -148,7 +148,7 @@ def _is_onnx_constant(value: _C.Value):
 
 @_beartype.beartype
 def _maybe_get_const(
-    value: Optional[Union[_C.Value, torch.Tensor, Number, Sequence]],
+    value: _C.Value | torch.Tensor | Number | Sequence | None,
     descriptor: _ValueDescriptor,
 ):
     # NOTE: prim::Constant at this stage usually means something not compatible in ONNX,
@@ -179,7 +179,7 @@ def _get_const(value, desc, arg_name):
 
 
 @_beartype.beartype
-def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
+def _unpack_list(list_value: _C.Value) -> list[_C.Value]:
     list_node = list_value.node()
     if list_node.kind() != "prim::ListConstruct":
         raise errors.SymbolicValueError(
@@ -191,7 +191,7 @@ def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
 
 
 @_beartype.beartype
-def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+def _unpack_tuple(tuple_value: _C.Value) -> tuple[_C.Value, ...]:
     tuple_node = tuple_value.node()
     if not _is_tuple_construct(tuple_value):
         raise errors.SymbolicValueError(
@@ -203,7 +203,7 @@ def _unpack_tuple(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
 
 
 @_beartype.beartype
-def _unpack_quantized_tensor(tuple_value: _C.Value) -> Tuple[_C.Value, ...]:
+def _unpack_quantized_tensor(tuple_value: _C.Value) -> tuple[_C.Value, ...]:
     """Unpacks a quantized tensor into a tuple of tensor and scale/zero_point.
     Args:
         tuple_value: A tuple of tensor, scale, zero_point, and optionally axis.
@@ -313,8 +313,8 @@ def parse_args(*arg_descriptors: _ValueDescriptor):
 @_beartype.beartype
 def quantized_args(
     *arg_q_descriptors: bool,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
 ):
     """A decorator which extends support for quantized version of the base operator.
     Quantization is detected by examining the arguments that are annotated by
@@ -443,7 +443,7 @@ def quantized_args(
 
 
 @_beartype.beartype
-def _scalar(x: Any) -> Optional[Number]:
+def _scalar(x: Any) -> Number | None:
     """Convert a scalar tensor into a Python value."""
     if isinstance(x, torch.Tensor) and x.shape == ():
         return x.item()
@@ -494,7 +494,7 @@ def _is_tensor(x: _C.Value) -> bool:
 
 
 # Note: _C.JitType is not exposed to Python and cannot be checked in runtime.
-def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
+def _as_list_type(jit_type: _C.JitType) -> _C.ListType | None:
     if isinstance(jit_type, _C.ListType):
         return jit_type
     return None
@@ -553,7 +553,7 @@ def is_caffe2_aten_fallback() -> bool:
 
 
 @_beartype.beartype
-def _get_tensor_rank(x: _C.Value) -> Optional[int]:
+def _get_tensor_rank(x: _C.Value) -> int | None:
     if not _is_tensor(x) or x.type() is None:
         return None
     x_type = x.type()
@@ -577,13 +577,13 @@ def _get_tensor_sizes(x: _C.Value, allow_nonstatic: bool = True):
 
 
 @_beartype.beartype
-def _get_tensor_dim_size(x: _C.Value, dim: int) -> Optional[int]:
+def _get_tensor_dim_size(x: _C.Value, dim: int) -> int | None:
     sizes = _get_tensor_sizes(x)
     return sizes[dim] if sizes else None
 
 
 @_beartype.beartype
-def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
+def _get_dim_for_cross(x: _C.Value, dim: int | None):
     if dim == -1:
         tensor_rank = _get_tensor_rank(x)
         assert tensor_rank is not None
@@ -599,7 +599,7 @@ def _get_dim_for_cross(x: _C.Value, dim: Optional[int]):
 
 
 @_beartype.beartype
-def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
+def _unimplemented(op: str, msg: str, value: _C.Value | None = None) -> None:
     # For BC reasons, the behavior for Caffe2 does not raise exception for unimplemented operators
     if _C_onnx._CAFFE2_ATEN_FALLBACK:
         warnings.warn(f"ONNX export failed on {op} because {msg} not supported")
@@ -608,7 +608,7 @@ def _unimplemented(op: str, msg: str, value: Optional[_C.Value] = None) -> None:
 
 
 @_beartype.beartype
-def _onnx_unsupported(op_name: str, value: Optional[_C.Value] = None) -> NoReturn:
+def _onnx_unsupported(op_name: str, value: _C.Value | None = None) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of operator {op_name}. "
         f"Please feel free to request support or submit a pull request "
@@ -627,7 +627,7 @@ def _onnx_opset_unsupported(
     op_name: str,
     current_opset: int,
     supported_opset: int,
-    value: Optional[_C.Value] = None,
+    value: _C.Value | None = None,
 ) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in opset {current_opset}. "
@@ -647,7 +647,7 @@ def _onnx_opset_unsupported_detailed(
     current_opset: int,
     supported_opset: int,
     reason: str,
-    value: Optional[_C.Value] = None,
+    value: _C.Value | None = None,
 ) -> NoReturn:
     message = (
         f"Unsupported: ONNX export of {op_name} in "
@@ -674,7 +674,7 @@ def _block_list_in_opset(name: str):
 
 
 @_beartype.beartype
-def _try_get_scalar_type(*args) -> Optional[_type_utils.JitScalarType]:
+def _try_get_scalar_type(*args) -> _type_utils.JitScalarType | None:
     for arg in args:
         scalar_type = _type_utils.JitScalarType.from_value(
             arg, _type_utils.JitScalarType.UNDEFINED
@@ -1308,11 +1308,11 @@ def _repeat_interleave_single_value_repeat_helper(
 @_beartype.beartype
 def _arange_cast_helper(
     g: jit_utils.GraphContext, end, start=None, step=None, dtype=None
-) -> Tuple[
+) -> tuple[
     _type_utils.JitScalarType,
-    Optional[_C.Value],
-    Optional[_C.Value],
-    Optional[_C.Value],
+    _C.Value | None,
+    _C.Value | None,
+    _C.Value | None,
 ]:
     def _is_all_integral(scalars):
         for scalar in scalars:
@@ -1475,12 +1475,12 @@ def _batchnorm_helper(
 @_beartype.beartype
 def _avgpool_helper(
     tuple_fn: Callable[[Any], Sequence[int]],
-    padding: Union[int, Sequence[int]],
+    padding: int | Sequence[int],
     kernel_size,
     stride,
     divisor_override,
     name,
-) -> Tuple[int, ...]:
+) -> tuple[int, ...]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
         _unimplemented(name, "divisor_override")
     return tuple(tuple_fn(padding))
@@ -1568,8 +1568,8 @@ def _handle_reduce_dim_none(g: jit_utils.GraphContext, self, op_name):
 def dequantize_helper(
     g: jit_utils.GraphContext,
     qtensor: _C.Value,
-    qdtype: Optional[_C_onnx.TensorProtoDataType] = None,
-) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
+    qdtype: _C_onnx.TensorProtoDataType | None = None,
+) -> tuple[_C.Value, _C.Value, _C.Value, _C.Value | None]:
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
@@ -1619,7 +1619,7 @@ def quantize_helper(
     tensor: _C.Value,
     scale: _C.Value,
     zero_point: _C.Value,
-    axis: Optional[_C.Value] = None,
+    axis: _C.Value | None = None,
 ) -> _C.Value:
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
@@ -1844,4 +1844,4 @@ scalar_type_to_onnx = [
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.
-_quantized_ops: Set[int] = set()
+_quantized_ops: set[int] = set()

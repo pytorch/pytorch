@@ -234,7 +234,7 @@ class PerChannelDetector(DetectorBase):
         if self.backend_chosen in self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES:
             self.supported_modules = self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[self.backend_chosen]
         else:
-            raise ValueError("Not configured to work with {}. Try a different default backend".format(self.backend_chosen))
+            raise ValueError(f"Not configured to work with {self.backend_chosen}. Try a different default backend")
 
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
@@ -352,7 +352,7 @@ class PerChannelDetector(DetectorBase):
         per_channel_info = self._detect_per_channel_helper(model)
 
         # String to let the user know of further optimizations
-        further_optims_str = "Further Optimizations for backend {}: \n".format(self.backend_chosen)
+        further_optims_str = f"Further Optimizations for backend {self.backend_chosen}: \n"
 
         optimizations_possible = False
         for fqn in per_channel_info:
@@ -1018,7 +1018,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
             # raise error if not in weight info
             if module_fqn not in weight_info:
-                raise KeyError("Unable to find weight range stats for module {}".format(module_fqn))
+                raise KeyError(f"Unable to find weight range stats for module {module_fqn}")
 
             # calculate the ratios of the weight info and input info
             weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)

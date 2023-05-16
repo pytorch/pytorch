@@ -23,7 +23,7 @@ class OptimizerContext(ModifierContext, context.DefaultManaged):
 
     def get_optimizer(self, name):
         assert self.has_optimizer(name), (
-            "{} optimizer is not provided!".format(name))
+            f"{name} optimizer is not provided!")
         return self._get_modifier(name)
 
 

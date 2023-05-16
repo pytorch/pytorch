@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import workspace, core
 from caffe2.proto import caffe2_pb2
 

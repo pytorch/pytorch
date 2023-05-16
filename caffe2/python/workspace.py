@@ -141,7 +141,7 @@ def StartMint(root_folder=None, port=None):
         )
     )
     process.start()
-    print('Mint running at http://{}:{}'.format(socket.getfqdn(), port))
+    print(f'Mint running at http://{socket.getfqdn()}:{port}')
     return process
 
 
@@ -346,7 +346,7 @@ def GetNetName(net):
         return net.Name()
     if isinstance(net, caffe2_pb2.NetDef):
         return net.name
-    raise Exception("Not a Net object: {}".format(str(net)))
+    raise Exception(f"Not a Net object: {str(net)}")
 
 
 def FeedBlob(name, arr, device_option=None):
@@ -700,7 +700,7 @@ def _Workspace_run(ws, obj):
     if isinstance(obj, caffe2_pb2.OperatorDef):
         return ws._run_operator(obj.SerializeToString())
     raise ValueError(
-        "Don't know how to do Workspace.run() on {}".format(type(obj)))
+        f"Don't know how to do Workspace.run() on {type(obj)}")
 
 
 def _Workspace_feed_blob(ws, name, arr, device_option=None):
@@ -718,8 +718,8 @@ def _Workspace_feed_blob(ws, name, arr, device_option=None):
             logger.warning(
                 "CUDA operators do not support 64-bit doubles, " +
                 "please use arr.astype(np.float32) or np.int32 for ints." +
-                " Blob: {}".format(name) +
-                " type: {}".format(str(arr.dtype))
+                f" Blob: {name}" +
+                f" type: {str(arr.dtype)}"
             )
 
     name = StringifyBlobName(name)

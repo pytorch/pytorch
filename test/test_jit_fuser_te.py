@@ -1676,7 +1676,7 @@ class TestTEFuser(JitTestCase):
                 self.assertEqual(ref, t(x))
             except Exception as e:
                 raise RuntimeError(
-                    "Failed: {} {} {} {}".format(dtype, op.__name__, device, scalar)
+                    f"Failed: {dtype} {op.__name__} {device} {scalar}"
                 ) from e
 
     def test_binary_pow(self):

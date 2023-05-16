@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from functools import partial
 from hypothesis import given, settings

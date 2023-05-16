@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: jit"]
 
 import torch
@@ -2892,7 +2891,7 @@ graph(%Ra, %Rb):
 
         with TemporaryFileName() as fname:
             fn.save(fname)
-            with io.open(fname, 'rb') as f:
+            with open(fname, 'rb') as f:
                 self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
@@ -3949,7 +3948,7 @@ def foo(x):
                 if idx < len(exprs):
                     return get_expr(idx)
                 else:
-                    return 'v{}'.format(idx - len(exprs))
+                    return f'v{idx - len(exprs)}'
 
             for i in range(50):
                 n = None
@@ -3958,12 +3957,12 @@ def foo(x):
                     n = template.count('{}')
 
                 if 'VAR' in template:
-                    src_lines.append('  v{} = {}'.format(n_variables, select_expr_or_var()))
+                    src_lines.append(f'  v{n_variables} = {select_expr_or_var()}')
                     n_variables += 1
                 else:
                     exprs.append(template.format(*(select_expr_or_var() for _ in range(n))))
 
-            src_lines.append('  return ({})\n'.format(''.join('v{},'.format(i) for i in range(n_variables))))
+            src_lines.append('  return ({})\n'.format(''.join(f'v{i},' for i in range(n_variables))))
             return '\n'.join(src_lines)
 
         for i in range(100):
@@ -4387,7 +4386,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 1)):
+        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 1}"):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4396,7 +4395,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, "test_jit.py\", line {}".format(lineno + 2)):
+        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 2}"):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4406,7 +4405,7 @@ def foo(x):
         scripted = torch.jit.script(foobar)
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:19'.format(lineno + 1))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 1}:19')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4426,7 +4425,7 @@ def foo(x):
         scripted = torch.jit.load(bytesio)
 
         _, lineno = inspect.getsourcelines(Scripted)
-        fc = FileCheck().check(':{}'.format(lineno + 3))
+        fc = FileCheck().check(f':{lineno + 3}')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4448,7 +4447,7 @@ def foo(xyz):
         scripted = torch.jit.trace(foobar, (torch.rand(3, 4)))
 
         _, lineno = inspect.getsourcelines(foobar)
-        fc = FileCheck().check('test_jit.py:{}:0'.format(lineno + 1))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 1}:0')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4463,7 +4462,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, 'test_jit.py\", line {}'.format(lineno + 3)):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4477,7 +4476,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest3)
 
-        fc = FileCheck().check('test_jit.py:{}'.format(lineno + 3))
+        fc = FileCheck().check(f'test_jit.py:{lineno + 3}')
         fc.run(loaded.graph)
 
     def test_serialized_source_ranges2(self):
@@ -4489,7 +4488,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py\", line {}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -6754,7 +6753,7 @@ a")
     def test_format(self):
         def func(x):
             print("{}, I'm a {}".format("Hello", "test"))
-            print("format blank".format())
+            print(f"format blank")
             print("stuff before {}".format("hi"))
             print("{} stuff after".format("hi"))
             return x + 1
@@ -7235,7 +7234,7 @@ a")
             scope = {}
             execWrapper(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-            message = 'with code `{} {} {}` and t={}'.format(args[0], op, args[1], tensor)
+            message = f'with code `{args[0]} {op} {args[1]}` and t={tensor}'
             res1 = cu.func(tensor)
             res2 = scope['func'](tensor)
             self.assertEqual(res1, res2, msg=message + "\nres1=" + str(res1) + "\nres2=" + str(res2))
@@ -7333,7 +7332,7 @@ a")
                 exec(code, globals(), scope)
                 cu = torch.jit.CompilationUnit(code)
                 torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
+                FileCheck().check(expect).check(f"aten::{op}").run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype: torch.dtype):
@@ -7540,7 +7539,7 @@ dedent """
             devices = [t.device]
             if t.device.type == 'cuda':
                 if t.device.index == -1:
-                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                    devices.append(f'cuda:{torch.cuda.current_device()}')
                 elif t.device.index == torch.cuda.current_device():
                     devices.append('cuda')
             for device in devices:
@@ -8595,7 +8594,7 @@ dedent """
                     if(not tensor_type.is_floating_point or (dtype is not None and not dtype.is_floating_point)):
                         if op in ['mean', 'softmax', 'log_softmax']:
                             continue
-                    return_line = "torch.tensor({}, dtype={}).{}({}dtype={})".format(tensor_data, tensor_type, op, str_args, dtype)
+                    return_line = f"torch.tensor({tensor_data}, dtype={tensor_type}).{op}({str_args}dtype={dtype})"
                     # uncomment for debugging a failed test:
                     # print("testing {}".format(return_line))
                     code = template.format(return_line=return_line)
@@ -8648,7 +8647,7 @@ dedent """
 
         args = []
         for dtype in dtypes:
-            args = args + ["torch.tensor({}, dtype={})".format(shape, dtype)]
+            args = args + [f"torch.tensor({shape}, dtype={dtype})"]
         args = args + [1, 1.5]
 
         def isBool(arg):
@@ -8665,7 +8664,7 @@ dedent """
                        isinstance(first_arg, int) or
                        (isinstance(first_arg, str) and 'int' in first_arg))):
                         continue
-                    return_line = "torch.{}({}, {})".format(op, first_arg, second_arg)
+                    return_line = f"torch.{op}({first_arg}, {second_arg})"
                     # uncomment for debugging a failed test:
                     # print("testing {}".format(return_line))
                     code = template.format(first_arg, second_arg, op)
@@ -9077,7 +9076,7 @@ dedent """
 
     class DerivedStateModule(torch.jit.ScriptModule):
         def __init__(self):
-            super(TestScript.DerivedStateModule, self).__init__()
+            super().__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
             self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
@@ -9573,7 +9572,7 @@ dedent """
 
     class StarTestSumStarred(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestSumStarred, self).__init__()
+            super().__init__()
 
         def forward(self, *inputs):
             output = inputs[0]
@@ -9583,7 +9582,7 @@ dedent """
 
     class StarTestReturnThree(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestReturnThree, self).__init__()
+            super().__init__()
 
         def forward(self, rep):
             return rep, rep, rep
@@ -9624,7 +9623,7 @@ dedent """
 
     class StarTestSumAndReturnThree(torch.nn.Module):
         def __init__(self):
-            super(TestScript.StarTestSumAndReturnThree, self).__init__()
+            super().__init__()
 
         def forward(self, *inputs):
             output = inputs[0]
@@ -10215,7 +10214,7 @@ dedent """
         def fn3(x, y, z):
             return fn_varargs(x, y, z)
 
-        x, y, z = [torch.randn(2, 2) for _ in range(3)]
+        x, y, z = (torch.randn(2, 2) for _ in range(3))
         self.checkScript(fn1, (x, y, z), optimize=True)
         self.checkScript(fn2, (x, y, z), optimize=True)
         self.checkScript(fn3, (x, y, z), optimize=True)
@@ -12959,7 +12958,7 @@ dedent """
             returns = fn.schema.returns
             self.assertEqual(str(args[0].type), pair[1])
             self.assertEqual(str(args[1].type), "Tuple[Tensor, Tensor]")
-            self.assertEqual(str(returns[0].type), "Tuple[{}, {}]".format(pair[1], pair[1]))
+            self.assertEqual(str(returns[0].type), f"Tuple[{pair[1]}, {pair[1]}]")
 
     def test_bad_multiline_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Return type line"):
@@ -13565,7 +13564,7 @@ dedent """
             # type: (str) -> Tensor
             return torch.tensor(ord(s))  # noqa: T484
 
-        s = u'\u00a3'.encode('utf8')[:1]
+        s = '\u00a3'.encode()[:1]
         self.checkScript(index_str_to_tensor, (s,))
 
     def test_chr(self):
@@ -14702,7 +14701,7 @@ dedent """
 
         over = Over()
         self.assertEqual(over((x, x)), x + 5)
-        self.assertEqual(over((x)), x + 20)
+        self.assertEqual(over(x), x + 20)
 
         class Unannotated(torch.nn.Module):
             @torch.jit._overload_method  # noqa: F811
@@ -16125,7 +16124,7 @@ def add_nn_module_test(*args, **kwargs):
 
             method_args = ', '.join(['self'] + actuals)
             call_args_str = ', '.join(actuals)
-            call = "self.submodule({})".format(call_args_str)
+            call = f"self.submodule({call_args_str})"
             script = script_method_template.format(method_args, call)
 
             submodule_constants = []
@@ -16248,5 +16247,5 @@ for test in criterion_tests:
 if __name__ == '__main__':
     run_tests()
     import jit.test_module_interface
-    suite = unittest.findTestCases(jit.test_module_interface)
+    suite = unittest.defaultTestLoader.loadTestsFromModule(jit.test_module_interface)
     unittest.TextTestRunner().run(suite)

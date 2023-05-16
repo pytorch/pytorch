@@ -12,7 +12,7 @@ with open('result.txt') as f:
     lines = f.readlines()
 
 failed = [line for line in lines if line.startswith('FAILED')]
-p = re.compile('FAILED test/test_\w+.py::\w+::(\S+)')  # noqa: W605
+p = re.compile(r'FAILED test/test_\w+.py::\w+::(\S+)')  # noqa: W605
 
 
 def get_failed_test(line):

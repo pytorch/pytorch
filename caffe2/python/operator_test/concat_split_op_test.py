@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -52,7 +47,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
 
         op = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result', 'split_info'],
             axis=axis
         )
@@ -78,7 +73,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
 
         op = core.CreateOperator(
             "Concat",
-            ['X_{}'.format(i) for i in range(len(splits))],
+            [f'X_{i}' for i in range(len(splits))],
             ['concat_result', 'split_info'],
             axis=axis,
             add_axis=1
@@ -121,7 +116,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
         op = core.CreateOperator(
             "Split",
             input_names,
-            ['X_{}'.format(i) for i in range(len(split_info))],
+            [f'X_{i}' for i in range(len(split_info))],
             **kwargs
         )
 
@@ -179,7 +174,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
         op = core.CreateOperator(
             "SplitByLengths",
             ["data", "lengths"],
-            ['X_{}'.format(i) for i in range(num_output)],
+            [f'X_{i}' for i in range(num_output)],
             axis=axis,
             use_scaling_lengths=split_by_scaling_lengths,
         )

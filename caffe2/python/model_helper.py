@@ -156,7 +156,7 @@ class ModelHelper:
 
     def _normalize_tags(self, tags):
         tags = tags or []
-        return set(tags) if isinstance(tags, list) else set([tags])
+        return set(tags) if isinstance(tags, list) else {tags}
 
     def create_param(self, param_name, shape, initializer, tags=None):
         """
@@ -233,7 +233,7 @@ class ModelHelper:
 
     def get_param_info(self, param):
         assert isinstance(param, core.BlobReference), \
-            "Param {} is not a BlobReference".format(param)
+            f"Param {param} is not a BlobReference"
         return self._parameters_info.get(param, None)
 
     # This method is deprecated, use create_param method which
@@ -385,7 +385,7 @@ class ModelHelper:
 
     def Validate(self):
         dupes = self._Validate()
-        assert dupes == [], "Duplicate params: {}".format(dupes)
+        assert dupes == [], f"Duplicate params: {dupes}"
 
     def GetComputedParams(self, namescope=None):
         '''
@@ -435,7 +435,7 @@ class ModelHelper:
         if op_type not in _known_working_ops:
             if not self.allow_not_known_ops:
                 raise AttributeError(
-                    "Operator {} is not known to be safe".format(op_type))
+                    f"Operator {op_type} is not known to be safe")
 
             logging.warning("You are creating an op that the ModelHelper "
                             "does not recognize: {}.".format(op_type))
@@ -540,7 +540,7 @@ def ExtractPredictorNet(
             ]
         )
     except ValueError as e:
-        raise Exception("No ops with input={}".format(input_blobs)) from e
+        raise Exception(f"No ops with input={input_blobs}") from e
     try:
         last_op_with_output = max(
             [
@@ -549,7 +549,7 @@ def ExtractPredictorNet(
             ]
         )
     except ValueError as e:
-        raise Exception("No ops with output={}".format(output_blobs)) from e
+        raise Exception(f"No ops with output={output_blobs}") from e
 
     def validate_op(op):
         # Check that the op does not have is_test = 0 set. This is a common
@@ -559,7 +559,7 @@ def ExtractPredictorNet(
                 raise Exception(
                     "An operator had is_test=0, did you try to extract a " +
                     "predictor from a train model (instead of test model)?" +
-                    " Op was: {}".format(str(op))
+                    f" Op was: {str(op)}"
                 )
 
     def rename_list(proto_list):
@@ -583,7 +583,7 @@ def ExtractPredictorNet(
             if op.type == 'RecurrentNetwork':
                 for arg in op.arg:
                     if arg.name == 'backward_step_net':
-                        arg.ClearField(str('n'))
+                        arg.ClearField('n')
                     elif arg.name == 'step_net':
                         for step_op in arg.n.op:
                             rename_list(step_op.input)

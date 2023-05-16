@@ -17,7 +17,7 @@ from torch.onnx._internal import _beartype, exporter, io_adapter
 # they are not automatically patched by FX's Python dispatcher.
 # The list below means `torch.arange`, `torch.tensor`, and so on will be
 # patched.
-_TORCH_METHODS_TO_PATCH: Tuple[str, ...] = (
+_TORCH_METHODS_TO_PATCH: tuple[str, ...] = (
     "arange",
     "tensor",
     "finfo",
@@ -52,7 +52,7 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         return False
 
 
-def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
+def _wrap_for_symbolic_trace(target: Callable) -> tuple[Callable, Callable]:
     """This function wraps ```target`` for symbolic tracing.
 
     This function wraps ```target``` so that its wrapper produces
@@ -83,8 +83,8 @@ def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
 
 @_beartype.beartype
 def _module_expansion_symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
-    concrete_args: Optional[Dict[str, Any]] = None,
+    root: torch.nn.Module | Callable[..., Any],
+    concrete_args: dict[str, Any] | None = None,
 ) -> torch.fx.GraphModule:
     """Trace a callable into FX graph.
 
@@ -154,7 +154,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
                 assert f({'a': 1, 'b': 2, 'c': 4}) == 7
     """
 
-    def __init__(self, concrete_args: Optional[Dict[str, Any]] = None):
+    def __init__(self, concrete_args: dict[str, Any] | None = None):
         super().__init__()
         # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
         self.concrete_args = concrete_args
@@ -193,7 +193,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:

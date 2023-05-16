@@ -42,8 +42,8 @@ class GetEntryFromBlobs(NetModifier):
         self._logging_frequency = logging_frequency
         self._i1 = i1
         self._i2 = i2
-        self._field_name_suffix = '_{0}_{1}'.format(i1, i2) if i2 >= 0 \
-            else '_{0}_all'.format(i1)
+        self._field_name_suffix = f'_{i1}_{i2}' if i2 >= 0 \
+            else f'_{i1}_all'
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
                     modify_output_record=False):
@@ -54,15 +54,15 @@ class GetEntryFromBlobs(NetModifier):
 
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
+            assert net.BlobIsDefined(blob), f'blob {blob} is not defined in net {net.Name()} whose proto is {net.Proto()}'
 
             blob_i1 = net.Slice([blob], starts=[i1, 0], ends=[i1 + 1, -1])
             if self._i2 == -1:
                 blob_i1_i2 = net.Copy([blob_i1],
-                    [net.NextScopedBlob(prefix=blob + '_{0}_all'.format(i1))])
+                    [net.NextScopedBlob(prefix=blob + f'_{i1}_all')])
             else:
                 blob_i1_i2 = net.Slice([blob_i1],
-                    net.NextScopedBlob(prefix=blob + '_{0}_{1}'.format(i1, i2)),
+                    net.NextScopedBlob(prefix=blob + f'_{i1}_{i2}'),
                     starts=[0, i2], ends=[-1, i2 + 1])
 
             if self._logging_frequency >= 1:

@@ -104,7 +104,7 @@ def AddNullInput(model, reader, batch_size, img_size, dtype):
 
 
 def SaveModel(args, train_model, epoch, use_ideep):
-    prefix = "[]_{}".format(train_model._device_prefix, train_model._devices[0])
+    prefix = f"[]_{train_model._device_prefix}"
     predictor_export_meta = pred_exp.PredictorExportMeta(
         predict_net=train_model.net.Proto(),
         parameters=data_parallel_model.GetCheckpointParams(train_model),
@@ -138,7 +138,7 @@ def LoadModel(path, model, use_ideep):
     '''
     Load pretrained model from file
     '''
-    log.info("Loading path: {}".format(path))
+    log.info(f"Loading path: {path}")
     meta_net_def = pred_exp.load_from_db(path, 'minidb')
     init_net = core.Net(pred_utils.GetNet(
         meta_net_def, predictor_constants.GLOBAL_INIT_NET_TYPE))
@@ -181,7 +181,7 @@ def RunEpoch(
     TODO: add checkpointing here.
     '''
     # TODO: add loading from checkpoint
-    log.info("Starting epoch {}/{}".format(epoch, args.num_epochs))
+    log.info(f"Starting epoch {epoch}/{args.num_epochs}")
     epoch_iters = int(args.epoch_size / total_batch_size / num_shards)
     test_epoch_iters = int(args.test_epoch_size / total_batch_size / num_shards)
     for i in range(epoch_iters):
@@ -205,7 +205,7 @@ def RunEpoch(
         log.info(train_fmt.format(loss, accuracy))
 
     num_images = epoch * epoch_iters * total_batch_size
-    prefix = "{}_{}".format(train_model._device_prefix, train_model._devices[0])
+    prefix = f"{train_model._device_prefix}_{train_model._devices[0]}"
     accuracy = workspace.FetchBlob(prefix + '/accuracy')
     loss = workspace.FetchBlob(prefix + '/loss')
     learning_rate = workspace.FetchBlob(
@@ -220,10 +220,10 @@ def RunEpoch(
             workspace.RunNet(test_model.net.Proto().name)
             for g in test_model._devices:
                 test_accuracy += np.asscalar(workspace.FetchBlob(
-                    "{}_{}".format(test_model._device_prefix, g) + '/accuracy'
+                    f"{test_model._device_prefix}_{g}" + '/accuracy'
                 ))
                 test_accuracy_top5 += np.asscalar(workspace.FetchBlob(
-                    "{}_{}".format(test_model._device_prefix, g) + '/accuracy_top5'
+                    f"{test_model._device_prefix}_{g}" + '/accuracy_top5'
                 ))
                 ntests += 1
         test_accuracy /= ntests
@@ -264,7 +264,7 @@ def Train(args):
         gpus = list(range(args.num_gpus))
         num_gpus = args.num_gpus
 
-    log.info("Running on GPUs: {}".format(gpus))
+    log.info(f"Running on GPUs: {gpus}")
 
     # Verify valid batch size
     total_batch_size = args.batch_size
@@ -293,7 +293,7 @@ def Train(args):
         "Epoch size must be larger than batch size times shard count"
 
     args.epoch_size = epoch_iters * global_batch_size
-    log.info("Using epoch size: {}".format(args.epoch_size))
+    log.info(f"Using epoch size: {args.epoch_size}")
 
     # Create ModelHelper object
     if args.use_ideep:
@@ -588,7 +588,7 @@ def Train(args):
         last_str = args.load_model_path.split('_')[-1]
         if last_str.endswith('.mdl'):
             epoch = int(last_str[:-4])
-            log.info("Reset epoch to {}".format(epoch))
+            log.info(f"Reset epoch to {epoch}")
         else:
             log.warning("The format of load_model_path doesn't match!")
 
@@ -618,7 +618,7 @@ def Train(args):
         # Save the model for each epoch
         SaveModel(args, train_model, epoch, args.use_ideep)
 
-        model_path = "%s/%s_" % (
+        model_path = "{}/{}_".format(
             args.file_store_path,
             args.save_model_name
         )

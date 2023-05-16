@@ -296,7 +296,7 @@ class cudaStatus:
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
-        super().__init__('{0} ({1})'.format(msg, code))
+        super().__init__(f'{msg} ({code})')
 
 
 def check_error(res: int) -> None:

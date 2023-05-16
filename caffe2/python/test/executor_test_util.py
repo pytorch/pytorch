@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import (
     brew, cnn, core, workspace, data_parallel_model,
     timeout_guard, model_helper, optimizer)
@@ -260,8 +255,8 @@ class ExecutorTestBase(TestCase):
         for blob_name, ref_val in ref_ws.items():
             self.assertTrue(
                 blob_name in test_ws,
-                "Blob {} not found in {} run".format(blob_name, test_executor))
+                f"Blob {blob_name} not found in {test_executor} run")
             val = test_ws[blob_name]
             np.testing.assert_array_equal(
                 val, ref_val,
-                "Blob {} differs in {} run".format(blob_name, test_executor))
+                f"Blob {blob_name} differs in {test_executor} run")

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -34,7 +29,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
                 arr.append(
                     np.pad(
                         chunk, ((0, pad_length), (0, 0)),
-                        mode=str("constant"),
+                        mode="constant",
                         constant_values=constant_values
                     )
                 )
@@ -48,7 +43,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
                     presence_arr.append(
                         np.pad(
                             np.ones((length), dtype=np.bool), ((0, pad_length)),
-                            mode=str("constant")
+                            mode="constant"
                         )
                     )
                 result.append(presence_arr)
@@ -93,7 +88,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             reference=self.pack_segments_ref(max_length=max_length),
         )
         end = time.time()
-        print("{} used time: {}".format(gc, end - start).replace('\n', ' '))
+        print(f"{gc} used time: {end - start}".replace('\n', ' '))
 
         with core.DeviceScope(gc):
             workspace.FeedBlob('l', lengths)
@@ -164,7 +159,7 @@ class TestTensorPackOps(serial.SerializedTestCase):
             reference=self.pack_segments_ref(),
         )
         end = time.time()
-        print("{} used time: {}".format(gc, end - start).replace('\n', ' '))
+        print(f"{gc} used time: {end - start}".replace('\n', ' '))
 
         with core.DeviceScope(gc):
             workspace.FeedBlob('l', lengths)

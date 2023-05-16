@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 
@@ -26,7 +21,7 @@ class LayerNormalization(ModelLayer):
         super().__init__(model, name, input_record, **kwargs)
 
         assert isinstance(input_record, schema.Scalar), (
-            "Incorrect input type: {}".format(input_record))
+            f"Incorrect input type: {input_record}")
 
         self.input_shape = input_record.field_type().shape
         self.axis = axis

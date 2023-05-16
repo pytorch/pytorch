@@ -54,13 +54,13 @@ class ModelHelperTest(unittest.TestCase):
         for op1, op2 in zip(net.Proto().op, net2.Proto().op):
             op1.debug_info = op1.debug_info + "/param_init_net"
             self.assertEqual(
-                op1, op2, "op mismatch between {}\n and {}\n".format(op1, op2)
+                op1, op2, f"op mismatch between {op1}\n and {op2}\n"
             )
         net = model.net
         net2 = model2.net
         for op1, op2 in zip(net.Proto().op, net2.Proto().op):
             self.assertEqual(
-                op1, op2, "op mismatch between {}\n and {}\n".format(op1, op2)
+                op1, op2, f"op mismatch between {op1}\n and {op2}\n"
             )
         # this is not guaranteed in other situations where user define own net
         self.assertEqual(

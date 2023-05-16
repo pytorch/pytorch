@@ -10,22 +10,22 @@ from torch.onnx._internal.diagnostics.infra.sarif import _property_bag
 
 
 @dataclasses.dataclass
-class Message(object):
+class Message:
     """Encapsulates a message intended to be read by the end user."""
 
-    arguments: Optional[List[str]] = dataclasses.field(
+    arguments: list[str] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "arguments"}
     )
-    id: Optional[str] = dataclasses.field(
+    id: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "id"}
     )
-    markdown: Optional[str] = dataclasses.field(
+    markdown: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "markdown"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    text: Optional[str] = dataclasses.field(
+    text: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "text"}
     )
 

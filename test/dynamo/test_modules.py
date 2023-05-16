@@ -850,7 +850,7 @@ class ModuleGuardNameIsValid(torch.nn.ModuleDict):
 class SequentialWithDuplicatedModule(torch.nn.Module):
     # Sequential module(self.layer) contains three duplicated ReLU module.
     def __init__(self):
-        super(SequentialWithDuplicatedModule, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             torch.nn.Linear(10, 20),
@@ -867,7 +867,7 @@ class SequentialWithDuplicatedModule(torch.nn.Module):
 
 class SequentialWithDuplicatedModule2(torch.nn.Module):
     def __init__(self):
-        super(SequentialWithDuplicatedModule2, self).__init__()
+        super().__init__()
         self.relu = torch.nn.ReLU()
         self.layer = torch.nn.Sequential(
             collections.OrderedDict(

@@ -48,7 +48,7 @@ class NetBuilder(context.Managed):
             parent._update_lexical_scope()
         self._init_lexical_scope = set(parent._lexical_scope) if parent else set()
         if initial_scope:
-            self._init_lexical_scope |= set([str(b) for b in initial_scope])
+            self._init_lexical_scope |= {str(b) for b in initial_scope}
         self._lexical_scope = set(self._init_lexical_scope)
         self._stop_blob = _stop_blob
         self._stop_blob_required = _stop_blob_required

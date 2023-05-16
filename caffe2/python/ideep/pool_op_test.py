@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import assume, given, settings
@@ -103,7 +98,7 @@ class PoolTest(hu.HypothesisTestCase):
         )
 
         pool = core.CreateOperator(
-            "Int8{}".format(method),
+            f"Int8{method}",
             ["Xi_quantized"],
             ["Y_quantized"],
             stride=stride,

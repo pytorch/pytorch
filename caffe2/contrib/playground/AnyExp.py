@@ -1,8 +1,3 @@
-
-
-
-
-
 from abc import abstractmethod
 
 from caffe2.python import workspace
@@ -125,7 +120,7 @@ class AnyExpTrainer:
         self.epoch = opts['temp_var']['epoch']
         self.epochs_to_run = opts['epoch_iter']['num_epochs_per_flow_schedule']
 
-        log.info('opts: {}'.format(str(opts)))
+        log.info(f'opts: {str(opts)}')
 
     @abstractmethod
     def get_input_dataset(self, opts):
@@ -214,7 +209,7 @@ class AnyExpTrainer:
 
     def gen_checkpoint_path(self, is_checkpoint, epoch):
         if (is_checkpoint):
-            filename = "model_checkpoint_epoch{}.pkl".format(epoch)
+            filename = f"model_checkpoint_epoch{epoch}.pkl"
         else:
             filename = "model_final.pkl"
         return self.opts['output']['checkpoint_folder'] + filename
@@ -337,7 +332,7 @@ class AnyExpTrainer:
         # for op in model.net.Proto().op:
         #     log.info('op type engine {} {}'.format(op.type, op.engine))
 
-        log.info('model.net.Proto() {}'.format(model.net.Proto()))
+        log.info(f'model.net.Proto() {model.net.Proto()}')
 
         workspace.CreateNet(model.net)
 
@@ -367,7 +362,7 @@ class AnyExpTrainer:
                         reset_epoch=False,
                     )
         elif pretrained_model is not None and os.path.exists(pretrained_model):
-            log.info("Load pretrained model: {}".format(pretrained_model))
+            log.info(f"Load pretrained model: {pretrained_model}")
             start_epoch, prev_checkpointed_lr, best_metric = \
                 checkpoint.initialize_params_from_file(
                     model=self.train_model,
@@ -381,10 +376,10 @@ class AnyExpTrainer:
         data_parallel_model.FinalizeAfterCheckpoint(self.train_model)
 
     def buildModelAndTrain(self, opts):
-        log.info('in buildModelAndTrain, trainer_input: {}'.format(str(opts)))
-        log.info("check type self: {}".format(type(self)))
-        log.info("check self dir: {}".format(dir(self)))
-        log.info("check self source: {}".format(self.__dict__))
+        log.info(f'in buildModelAndTrain, trainer_input: {str(opts)}')
+        log.info(f"check type self: {type(self)}")
+        log.info(f"check self dir: {dir(self)}")
+        log.info(f"check self source: {self.__dict__}")
         log.info("check self get_input_dataset methods: {}".
                  format(inspect.getsource(self.get_input_dataset)))
         log.info("check self gen_input_builder_fun method: {}".
@@ -414,7 +409,7 @@ class AnyExpTrainer:
 
         for epoch in self.list_of_epochs():
 
-            log.info("start training epoch {}".format(epoch))
+            log.info(f"start training epoch {epoch}")
 
             self.fun_per_epoch_b4RunNet(epoch)
 
@@ -476,7 +471,7 @@ class AnyExpTrainer:
                         self.sec_per_test_loop)
                     for metric, value in self.metrics.items():
                         logStr += ' {}:{} '.format(metric, value['output'][-1])
-                    log.info('Iter Stats: {}'.format(logStr))
+                    log.info(f'Iter Stats: {logStr}')
 
                 self.fun_per_iter_aftRunNetAftTest(epoch, epoch_iter)
 

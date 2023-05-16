@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import pickle
 from collections import OrderedDict
@@ -27,8 +22,8 @@ def initialize_params_from_file(
 
 
 def initialize_master_xpu_model_params(model, weights_file, opts, reset_epoch):
-    log.info("Initializing model params from file: {}".format(weights_file))
-    with open(weights_file, 'r') as fopen:
+    log.info(f"Initializing model params from file: {weights_file}")
+    with open(weights_file) as fopen:
         blobs = pickle.load(fopen)
     if 'blobs' in blobs:
         blobs = blobs['blobs']
@@ -62,12 +57,12 @@ def initialize_master_xpu_model_params(model, weights_file, opts, reset_epoch):
         caffe2_pb2_DEVICE =\
             caffe2_pb2.CUDA if opts['distributed']['device'] == 'gpu'\
             else caffe2_pb2.CPU
-        with core.NameScope('{}_{}'.format(device, root_xpu_id)):
+        with core.NameScope(f'{device}_{root_xpu_id}'):
             with core.DeviceScope(core.DeviceOption(caffe2_pb2_DEVICE, 0)):
                 for unscoped_blob_name in unscoped_blob_names.keys():
                     scoped_blob_name = scoped_name(unscoped_blob_name)
                     if unscoped_blob_name not in blobs:
-                        log.info('{:s} not found'.format(unscoped_blob_name))
+                        log.info(f'{unscoped_blob_name:s} not found')
                         continue
                     log.info(
                         '{:s} loaded from weights file into: {:s}'.format(
@@ -113,9 +108,9 @@ def broadcast_parameters(opts, model, num_xpus, broadcast_computed_param=False):
         for idx in range(params_per_xpu):
             blobs = [param for param in params[idx::params_per_xpu]]
             data = workspace.FetchBlob(blobs[0])
-            log.info('Broadcasting {} to'.format(str(blobs[0])))
+            log.info(f'Broadcasting {str(blobs[0])} to')
             for i, p in enumerate(blobs[1:]):
-                log.info(' |-> {}'.format(str(p)))
+                log.info(f' |-> {str(p)}')
                 with core.DeviceScope(core.DeviceOption(caffe2_pb2_DEVICE, i+1)):
                     workspace.FeedBlob(p, data)
     log.info("Complete parameter broadcast")
@@ -131,7 +126,7 @@ def save_model_params(is_checkpoint, model, checkpoint_path, epoch, opts, best_m
             model, checkpoint_path, epoch, opts, best_metric
         )
     except Exception as e:
-        log.warning('Exception from save_model_params {}'.format(str(e)))
+        log.warning(f'Exception from save_model_params {str(e)}')
     return checkpoint_path
 
 
@@ -141,7 +136,7 @@ def save_model_params_blob(model, params_file, epoch, opts, best_metric):
     root_xpu_id = opts['distributed']['first_xpu_id']
     device = opts['distributed']['device']
     save_params = [str(param) for param in
-                   model.GetParams('{}_{}'.format(device, root_xpu_id))]
+                   model.GetParams(f'{device}_{root_xpu_id}')]
     save_computed_params = [str(param) for param in
                             model.GetComputedParams('{}_{}'
                             .format(device, root_xpu_id))]
@@ -149,7 +144,7 @@ def save_model_params_blob(model, params_file, epoch, opts, best_metric):
     save_blobs['epoch'] = epoch
     save_blobs['best_metric'] = best_metric
     save_blobs['lr'] = \
-        workspace.FetchBlob('{}_{}/lr'.format(device, root_xpu_id))
+        workspace.FetchBlob(f'{device}_{root_xpu_id}/lr')
     for param in save_params + save_computed_params:
         scoped_blob_name = str(param)
         unscoped_blob_name = unscope_name(scoped_blob_name)
@@ -157,13 +152,13 @@ def save_model_params_blob(model, params_file, epoch, opts, best_metric):
             save_blobs[unscoped_blob_name] = workspace.FetchBlob(
                 scoped_blob_name)
             log.debug(
-                '{:s} -> {:s}'.format(scoped_blob_name, unscoped_blob_name))
-    log.info('to weights file {}'.format(params_file))
+                f'{scoped_blob_name:s} -> {unscoped_blob_name:s}')
+    log.info(f'to weights file {params_file}')
     try:
         with open(params_file, 'w') as fwrite:
             pickle.dump(dict(blobs=save_blobs), fwrite, pickle.HIGHEST_PROTOCOL)
-    except IOError as e:
-        log.error('I/O error({0}): {1}'.format(e.errno, e.strerror))
+    except OSError as e:
+        log.error(f'I/O error({e.errno}): {e.strerror}')
 
 
 def unscope_name(blob_name):

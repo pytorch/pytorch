@@ -14,43 +14,43 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class Region(object):
+class Region:
     """A region within an artifact where a result was detected."""
 
-    byte_length: Optional[int] = dataclasses.field(
+    byte_length: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "byteLength"}
     )
     byte_offset: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "byteOffset"}
     )
-    char_length: Optional[int] = dataclasses.field(
+    char_length: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "charLength"}
     )
     char_offset: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "charOffset"}
     )
-    end_column: Optional[int] = dataclasses.field(
+    end_column: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "endColumn"}
     )
-    end_line: Optional[int] = dataclasses.field(
+    end_line: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "endLine"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    snippet: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
+    snippet: _artifact_content.ArtifactContent | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "snippet"}
     )
-    source_language: Optional[str] = dataclasses.field(
+    source_language: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "sourceLanguage"}
     )
-    start_column: Optional[int] = dataclasses.field(
+    start_column: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "startColumn"}
     )
-    start_line: Optional[int] = dataclasses.field(
+    start_line: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "startLine"}
     )
 

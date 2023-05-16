@@ -1,4 +1,3 @@
-
 import torch
 import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat
@@ -58,7 +57,7 @@ class ConvReLU1d(nnq.Conv1d):
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super(ConvReLU1d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -107,7 +106,7 @@ class ConvReLU2d(nnq.Conv2d):
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super(ConvReLU2d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -163,7 +162,7 @@ class ConvReLU3d(nnq.Conv3d):
                 mod.bn.weight,
                 mod.bn.bias,
             )
-        return super(ConvReLU3d, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):

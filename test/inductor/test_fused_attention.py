@@ -282,7 +282,7 @@ class TestSDPAPatternRewriter(TestCase):
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):
             def __init__(self, is_inv_factor):
-                super(Model, self).__init__()
+                super().__init__()
                 self.is_inv_factor = is_inv_factor
 
             def forward(self, query, key, value, scale_factor) -> torch.Tensor:
@@ -313,7 +313,7 @@ class TestSDPAPatternRewriter(TestCase):
             def __init__(
                 self,
             ):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, query, key, value, attn_mask) -> torch.Tensor:
                 attn_weight = torch.softmax(

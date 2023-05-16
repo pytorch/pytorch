@@ -33,7 +33,7 @@ class Int8OpsTest(serial.SerializedTestCase):
     )
     @settings(deadline=datetime.timedelta(seconds=50))
     def test_int8_quantize(self, n, rand_seed, non_zero_offset):
-        print("n={}, rand_seed={}".format(n, rand_seed))
+        print(f"n={n}, rand_seed={rand_seed}")
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
@@ -235,7 +235,7 @@ class Int8OpsTest(serial.SerializedTestCase):
     )
     @settings(deadline=datetime.timedelta(seconds=10))
     def test_int8_small_input(self, n, rand_seed):
-        print("n={}, rand_seed={}".format(n, rand_seed))
+        print(f"n={n}, rand_seed={rand_seed}")
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 

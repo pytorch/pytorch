@@ -10,20 +10,20 @@ from torch.onnx._internal.diagnostics.infra.sarif import _message, _property_bag
 
 
 @dataclasses.dataclass
-class EdgeTraversal(object):
+class EdgeTraversal:
     """Represents the traversal of a single edge during a graph traversal."""
 
     edge_id: str = dataclasses.field(metadata={"schema_property_name": "edgeId"})
     final_state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "finalState"}
     )
-    message: Optional[_message.Message] = dataclasses.field(
+    message: _message.Message | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    step_over_edge_count: Optional[int] = dataclasses.field(
+    step_over_edge_count: int | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "stepOverEdgeCount"}
     )
 

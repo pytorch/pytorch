@@ -66,7 +66,7 @@ class TestNumericalEquivalence(test_util.TestCase):
             "conv4", "conv5", "pool5", "fc6", "fc7", "fc8", "prob"
         ]
         for name in names:
-            print('Verifying {}'.format(name))
+            print(f'Verifying {name}')
             caffe2_result = workspace.FetchBlob(name)
             reference = np.load(
                 'data/testdata/caffe_translator/' + name + '_dump.npy'

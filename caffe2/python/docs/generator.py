@@ -121,7 +121,7 @@ class OperatorDoc:
         self.name = name
         self.schema = schema
         self.priority = priority
-        print("Gathering docs for {}...".format(self.name))
+        print(f"Gathering docs for {self.name}...")
         self.engines = []
 
     def addEngines(self, engines):
@@ -177,7 +177,7 @@ class OperatorDoc:
             tuples += makeDesc('Outputs', self.schema.output_desc)
 
         self.generateTable(formatter, tuples, None, 'Interface')
-        print("Generated interface for {}".format(self.name))
+        print(f"Generated interface for {self.name}")
 
     def generateCodeLink(self, formatter):
         formatter.addHeader("Code", 3)

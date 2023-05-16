@@ -47,7 +47,7 @@ class GHMarkdown(Markdown):
             self.addRaw("<tr>")
             for cell in row:
                 self.addRaw("<td>")
-                self.addLine("{cell}".format(cell=cell))
+                self.addLine(f"{cell}")
                 self.addRaw("</td>")
             self.addRaw("</tr>")
         self.addRaw("</table>")
@@ -57,17 +57,17 @@ def getCodeLink(formatter, schema):
     path = os.path.relpath(schema.file, "caffe2")
     schemaLink = ('https://github.com/pytorch/pytorch/blob/main/{path}'
                   .format(path=path))
-    formatter.addLink('{path}'.format(path=path), schemaLink)
+    formatter.addLink(f'{path}', schemaLink)
     return formatter.dump()
 
 
 class GHOperatorEngine(OperatorEngine):
     def generateDoc(self, formatter):
         for device, _ in self.getDeviceImpl():
-            formatter.addCode('{engine}'.format(engine=self.engine), True)
+            formatter.addCode(f'{self.engine}', True)
             if device:
                 formatter.addRaw(' on ')
-                formatter.addEmphasis("{device}".format(device=device), 1)
+                formatter.addEmphasis(f"{device}", 1)
 
 
 class GHOperatorDoc(OperatorDoc):
@@ -79,9 +79,9 @@ class GHOperatorDoc(OperatorDoc):
     def getInfo(self, formatter, name, impl):
         formatter = formatter.clone()
         if impl:
-            formatter.addEmphasis('{name}'.format(name=name), 1)
+            formatter.addEmphasis(f'{name}', 1)
             formatter.addRaw(' ')
-            formatter.addCode('{impl}'.format(impl=impl), True)
+            formatter.addCode(f'{impl}', True)
         return formatter.dump()
 
     def generateSchema(self, formatter):
@@ -122,4 +122,4 @@ if __name__ == "__main__":
         ops = GHOpDocGenerator(GHMarkdown(), GHOpDocUploader)
         ops.createBody()
         fp.write(ops.content_body)
-        print("Updated {}!".format(args.catalog_path))
+        print(f"Updated {args.catalog_path}!")

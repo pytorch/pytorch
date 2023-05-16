@@ -92,7 +92,7 @@ def parse_lines(lines):
 def gen_class(op, op_def):
     attributes = op_def["attributes"]
     attribute_args = []
-    default_init = "NeuralNetOperator(NNKind::{op})".format(op=op)
+    default_init = f"NeuralNetOperator(NNKind::{op})"
     attribute_init = [default_init]
     attribute_declarations = []
     attribute_getters = []
@@ -100,7 +100,7 @@ def gen_class(op, op_def):
     for attr in attributes:
         lower_name = attr[0][0].lower() + attr[0][1:]
         private_name = lower_name + "_"
-        default_arg = "" if len(attr) < 3 else " = {}".format(attr[2])
+        default_arg = "" if len(attr) < 3 else f" = {attr[2]}"
         name = attr[0]
         t = attr[1]
         attr_arg = "{type} {lower_name}".format(

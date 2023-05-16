@@ -104,7 +104,7 @@ def enqueue(net, queue, data_blobs, status=None):
         if blob not in queue_blobs:
             queue_blobs.append(blob)
         else:
-            logger.warning("Need to copy blob {} to enqueue".format(blob))
+            logger.warning(f"Need to copy blob {blob} to enqueue")
             queue_blobs.append(net.Copy(blob))
     results = net.SafeEnqueueBlobs([queue] + queue_blobs, queue_blobs + [status])
     return results[-1]

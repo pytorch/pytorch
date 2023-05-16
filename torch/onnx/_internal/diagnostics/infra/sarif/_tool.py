@@ -10,16 +10,16 @@ from torch.onnx._internal.diagnostics.infra.sarif import _property_bag, _tool_co
 
 
 @dataclasses.dataclass
-class Tool(object):
+class Tool:
     """The analysis tool that was run."""
 
     driver: _tool_component.ToolComponent = dataclasses.field(
         metadata={"schema_property_name": "driver"}
     )
-    extensions: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
+    extensions: list[_tool_component.ToolComponent] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "extensions"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

@@ -1,8 +1,3 @@
-
-
-
-
-
 from hypothesis import given
 import numpy as np
 

@@ -92,7 +92,7 @@ class PredictorExportMeta(collections.namedtuple(
                 predict_net = predict_net.Proto()
 
             assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
-        return super(PredictorExportMeta, cls).__new__(
+        return super().__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
             extra_init_net, global_init_net, net_type, num_workers, trainer_prefix)
 
@@ -236,7 +236,7 @@ def load_from_db(filename, db_type, device_option=None, *args, **kwargs):
         [core.BlobReference(predictor_constants.PREDICTOR_DBREADER)],
         db=filename, db_type=db_type)
     assert workspace.RunOperatorOnce(create_db), (
-        'Failed to create db {}'.format(filename))
+        f'Failed to create db {filename}')
 
     # predictor_constants.META_NET_DEF is always stored before the parameters
     load_meta_net_def = core.CreateOperator(

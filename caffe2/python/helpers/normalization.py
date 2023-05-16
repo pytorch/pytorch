@@ -245,7 +245,7 @@ def layer_norm(
 
     # The learned multiplicative scale or "gain".
     scale = model.create_param(
-        param_name='{}_scale'.format(blob_out),
+        param_name=f'{blob_out}_scale',
         shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',
@@ -256,7 +256,7 @@ def layer_norm(
 
     # The learned additive bias or "shift".
     bias = model.create_param(
-        param_name='{}_bias'.format(blob_out),
+        param_name=f'{blob_out}_bias',
         shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',

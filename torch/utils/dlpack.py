@@ -102,7 +102,7 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
         # device is either CUDA or ROCm, we need to pass the current
         # stream
         if device[0] in (DLDeviceType.kDLGPU, DLDeviceType.kDLROCM):
-            stream = torch.cuda.current_stream('cuda:{}'.format(device[1]))
+            stream = torch.cuda.current_stream(f'cuda:{device[1]}')
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed

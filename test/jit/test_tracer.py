@@ -1963,7 +1963,7 @@ class TestTracer(JitTestCase):
     def test_trace_checking_with_deprecated_name(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
-                super(MyClass, self).__init__()
+                super().__init__()
 
             def forward(self, x, y, **deprecated_arguments):
                 if len(deprecated_arguments) > 0:
@@ -1977,7 +1977,7 @@ class TestTracer(JitTestCase):
     def test_trace_with_tuple_tensor(self):
         class MyClass(torch.nn.Module):
             def __init__(self):
-                super(MyClass, self).__init__()
+                super().__init__()
 
             def forward(self, x, y):
                 return x + y[0] + y[1]
@@ -2541,7 +2541,7 @@ class TestMixTracingScripting(JitTestCase):
         def outer_fn(x, y):
             return inner_fn(x + y).relu()
 
-        x, y = [torch.rand((2, 2), dtype=torch.float) for _ in range(2)]
+        x, y = (torch.rand((2, 2), dtype=torch.float) for _ in range(2))
         fn_t = torch.jit.trace(outer_fn, (x, y))
 
         # expect that the CallFunction node return type has shape information on it.

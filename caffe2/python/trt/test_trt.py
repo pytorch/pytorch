@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import onnx
@@ -25,19 +20,19 @@ from urllib.request import urlretrieve
 
 def _print_net(net):
     for i in net.external_input:
-        print("Input: {}".format(i))
+        print(f"Input: {i}")
     for i in net.external_output:
-        print("Output: {}".format(i))
+        print(f"Output: {i}")
     for op in net.op:
-        print("Op {}".format(op.type))
+        print(f"Op {op.type}")
         for x in op.input:
-            print("  input: {}".format(x))
+            print(f"  input: {x}")
         for y in op.output:
-            print("  output: {}".format(y))
+            print(f"  output: {y}")
 
 
 def _base_url(opset_version):
-    return 'https://s3.amazonaws.com/download.onnx/models/opset_{}'.format(opset_version)
+    return f'https://s3.amazonaws.com/download.onnx/models/opset_{opset_version}'
 
 # TODO: This is copied from https://github.com/onnx/onnx/blob/master/onnx/backend/test/runner/__init__.py. Maybe we should
 # expose a model retrival API from ONNX
@@ -50,7 +45,7 @@ def _download_onnx_model(model_name, opset_version):
         if os.path.exists(model_dir):
             bi = 0
             while True:
-                dest = '{}.old.{}'.format(model_dir, bi)
+                dest = f'{model_dir}.old.{bi}'
                 if os.path.exists(dest):
                     bi += 1
                     continue
@@ -60,7 +55,7 @@ def _download_onnx_model(model_name, opset_version):
 
         # On Windows, NamedTemporaryFile can not be opened for a
         # second time
-        url = '{}/{}.tar.gz'.format(_base_url(opset_version), model_name)
+        url = f'{_base_url(opset_version)}/{model_name}.tar.gz'
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
@@ -122,7 +117,7 @@ class TensorRTOpTest(TestCase):
         input_blob_dims = [int(x.dim_value) for x in model_def.graph.input[data_input_index].type.tensor_type.shape.dim]
         op_inputs = [x.name for x in model_def.graph.input]
         op_outputs = [x.name for x in model_def.graph.output]
-        print("{}".format(op_inputs))
+        print(f"{op_inputs}")
         data = np.random.randn(*input_blob_dims).astype(np.float32)
         Y_c2 = c2.run_model(model_def, {op_inputs[data_input_index]: data})
         op = convert_onnx_model_to_trt_op(model_def, verbosity=3)
@@ -210,7 +205,7 @@ class TensorRTTransformTest(TestCase):
         N = 2
         warmup = 20
         repeat = 100
-        print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
+        print(f"Batch size: {N}, repeat inference {repeat} times, warmup {warmup} times")
         init_net, pred_net, _ = self.model_downloader.get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
@@ -259,12 +254,12 @@ class TensorRTTransformTest(TestCase):
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
-        print("C2 runtime: {}s".format(c2_time))
+        print(f"C2 runtime: {c2_time}s")
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
-            print("Conversion time: {:.2f}s".format(end -start))
+            print(f"Conversion time: {end -start:.2f}s")
 
             for _ in range(warmup):
                 workspace.RunNet(pred_net_cut.name)
@@ -273,7 +268,7 @@ class TensorRTTransformTest(TestCase):
                 workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
-            print("TRT runtime: {}s, improvement: {}%".format(trt_time, (c2_time-trt_time)/c2_time*100))
+            print(f"TRT runtime: {trt_time}s, improvement: {(c2_time-trt_time)/c2_time*100}%")
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)

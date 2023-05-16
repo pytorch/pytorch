@@ -96,7 +96,7 @@ def convertAttributeProto(onnx_arg):
             retval.append(Caffe2Backend._graph_to_net(g, Caffe2Backend._known_opset_version))
         return retval
     else:
-        raise ValueError("Unsupported ONNX attribute: {}".format(onnx_arg))
+        raise ValueError(f"Unsupported ONNX attribute: {onnx_arg}")
 
 
 # TODO: Move this into ONNX main library
@@ -204,7 +204,7 @@ class Caffe2Backend(Backend):
     # opset_version if you don't want this to version.
     @classmethod
     def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
-        super(Caffe2Backend, cls).run_node(node, inputs, device=device,
+        super().run_node(node, inputs, device=device,
                                            outputs_info=outputs_info, opset_version=opset_version)
 
         value_infos = []
@@ -283,7 +283,7 @@ class Caffe2Backend(Backend):
             c2_values.strings.extend(onnx_tensor.string_data)
         else:
             raise RuntimeError(
-                "unrecognized tensor type {}".format(onnx_tensor.data_type))
+                f"unrecognized tensor type {onnx_tensor.data_type}")
 
         c2_shape = c2_op.arg.add()
         c2_shape.name = "shape"
@@ -296,14 +296,14 @@ class Caffe2Backend(Backend):
     @classmethod
     def _rnn_reform_weights(cls, reforms, name, hidden_size, init_net, gates, reorder_indices):
         for name_from, name_to, do_concat, extra_dims in reforms:
-            gate_blobs = ['%s/%s_%s' % (name, prefix, name_to) for prefix in gates]
+            gate_blobs = ['{}/{}_{}'.format(name, prefix, name_to) for prefix in gates]
             for i, x in enumerate(gate_blobs):
                 dim0 = i * hidden_size, (i+1) * hidden_size
                 starts, ends = zip(dim0, *extra_dims)
                 init_net.Slice(name_from, x, starts=starts, ends=ends)
             if do_concat:
                 reordered_gate_blobs = [gate_blobs[i] for i in reorder_indices]
-                init_net.Concat(reordered_gate_blobs, ['%s/%s' % (name, name_to), cls.dummy_name()], axis=0)
+                init_net.Concat(reordered_gate_blobs, ['{}/{}'.format(name, name_to), cls.dummy_name()], axis=0)
 
     @classmethod
     def _make_rnn_direction(cls, input_blob, B, W, R, initial_states_and_names, sequence_lens,
@@ -598,9 +598,9 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def _substitute_raw_value(cls, tp, raw_values_dict):
-        if tp.HasField('raw_data') and tp.raw_data == bytes(b'__EXTERNAL'):
+        if tp.HasField('raw_data') and tp.raw_data == b'__EXTERNAL':
             if tp.name not in raw_values_dict:
-                raise RuntimeError('TensorProto for value {} referenced raw data but it was not found!'.format(tp.name))
+                raise RuntimeError(f'TensorProto for value {tp.name} referenced raw data but it was not found!')
             else:
                 tp.raw_data = raw_values_dict[tp.name]
 
@@ -654,7 +654,7 @@ class Caffe2Backend(Backend):
         try:
             out = onnx.optimizer.optimize(input, passes)
         except AttributeError:
-            warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__))
+            warnings.warn(f"OptimizerWarning: optimizer module not found in ONNX version {onnx.__version__}")
             # ONNX does no ship onnx.optimizer since version 1.9+
             import onnxoptimizer
             out = onnxoptimizer.optimize(input, passes)
@@ -684,15 +684,15 @@ class Caffe2Backend(Backend):
         there is no way we can know which blob is the input of the predict_graph.
         '''
         if not kwargs.pop('no_check_UNSAFE', False):
-            super(Caffe2Backend, cls).prepare(model, device, **kwargs)
+            super().prepare(model, device, **kwargs)
         opset_version = None
         for imp in model.opset_import:
             if not imp.HasField("domain") or imp.domain == "":
                 opset_version = imp.version
                 if imp.version > cls._known_opset_version:
-                    warnings.warn("This version of onnx-caffe2 targets ONNX operator set version {}, but the model we are trying to import uses version {}.  We will try to import it anyway, but if the model uses operators which had BC-breaking changes in the intervening versions, import will fail.".format(cls._known_opset_version, imp.version))
+                    warnings.warn(f"This version of onnx-caffe2 targets ONNX operator set version {cls._known_opset_version}, but the model we are trying to import uses version {imp.version}.  We will try to import it anyway, but if the model uses operators which had BC-breaking changes in the intervening versions, import will fail.")
             else:
-                warnings.warn("Unrecognized operator set {}".format(imp.domain))
+                warnings.warn(f"Unrecognized operator set {imp.domain}")
         if opset_version is None:
             if model.ir_version >= 0x00000003:
                 raise RuntimeError("Model with IR version >= 3 did not specify ONNX operator set version (onnx-caffe2 requires it)")
@@ -809,11 +809,11 @@ class Caffe2Backend(Backend):
         broken_version = cls._broken_operators.get(onnx_op_type, float('Inf'))
         if broken_version <= opset_version:
             raise ValueError(
-                "Don't know how to translate op {} in ONNX operator set v{} (I only support prior to v{})".format(onnx_op_type, opset_version, broken_version))
+                f"Don't know how to translate op {onnx_op_type} in ONNX operator set v{opset_version} (I only support prior to v{broken_version})")
         c2_op.type = cls._renamed_operators.get(onnx_op_type, onnx_op_type)
         if not core.IsOperator(c2_op.type):
             raise ValueError(
-                "Don't know how to translate op {}".format(onnx_op_type))
+                f"Don't know how to translate op {onnx_op_type}")
 
         def kmap(k):
             if (onnx_op_type in cls._per_op_renamed_attrs and
@@ -881,7 +881,7 @@ class Caffe2Backend(Backend):
         except RuntimeError:
             warnings.warn("ShapeInferenceWarning: Inferred shape and existing shape differ in rank")
         except AttributeError:
-            warnings.warn("ShapeInferenceWarning: utils module not found in ONNX version {}".format(onnx.__version__))
+            warnings.warn(f"ShapeInferenceWarning: utils module not found in ONNX version {onnx.__version__}")
 
         # Optimizer module has been removed in ONNX-1.9 or later, warn caller if that is the case
         try:
@@ -912,7 +912,7 @@ class Caffe2Backend(Backend):
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
                 except Exception as e:
-                    msg = 'Error while processing node: {}. Exception: {}'.format(node, e)
+                    msg = f'Error while processing node: {node}. Exception: {e}'
                     errors.append(msg)
                     print('ONNX FATAL:', msg, file=sys.stderr)
                     continue
@@ -947,9 +947,9 @@ class Caffe2Backend(Backend):
 
     @classmethod
     def is_compatible(cls, model, device='CPU', **kwargs):
-        if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
-           and callable(super(Caffe2Backend, cls).is_compatible):
-            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+        if hasattr(super(), 'is_compatible') \
+           and callable(super().is_compatible):
+            if not super().is_compatible(model, device, **kwargs):
                 return False
         # TODO: should have an unspported list of operators, be optimistic for now
         return True

@@ -23,7 +23,7 @@ class Parser:
          lambda m, f: f.addCode(m.group(0))
          ),
         (r'([^\.])\n',
-         lambda m, f: f.addRaw('{c} '.format(c=m.group(1))) or True
+         lambda m, f: f.addRaw(f'{m.group(1)} ') or True
          ),
         ('`(.+?)`',
          lambda m, f: f.addCode(m.group(1), True)

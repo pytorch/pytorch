@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import net_printer
 from caffe2.python.checkpoint import Job
 from caffe2.python.net_builder import ops

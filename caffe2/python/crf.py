@@ -153,7 +153,7 @@ class CRFWithLoss:
             ""
             # We have to manually scope due to our internal/external blob
             # relationships.
-            return "{}/{}".format(str(scope), str(name))
+            return f"{str(scope)}/{str(name)}"
 
         step_model = model_helper.ModelHelper(name="crf_step", param_model=self.model)
         input_t, cell_t_prev, _ = step_model.net.AddExternalInputs(

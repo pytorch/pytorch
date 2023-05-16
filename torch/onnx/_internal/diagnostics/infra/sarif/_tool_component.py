@@ -17,105 +17,105 @@ from torch.onnx._internal.diagnostics.infra.sarif import (
 
 
 @dataclasses.dataclass
-class ToolComponent(object):
+class ToolComponent:
     """A component, such as a plug-in or the driver, of the analysis tool that was run."""
 
     name: str = dataclasses.field(metadata={"schema_property_name": "name"})
-    associated_component: Optional[
+    associated_component: None | (
         _tool_component_reference.ToolComponentReference
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "associatedComponent"}
     )
-    contents: List[Literal["localizedData", "nonLocalizedData"]] = dataclasses.field(
+    contents: list[Literal["localizedData", "nonLocalizedData"]] = dataclasses.field(
         default_factory=lambda: ["localizedData", "nonLocalizedData"],
         metadata={"schema_property_name": "contents"},
     )
-    dotted_quad_file_version: Optional[str] = dataclasses.field(
+    dotted_quad_file_version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "dottedQuadFileVersion"}
     )
-    download_uri: Optional[str] = dataclasses.field(
+    download_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "downloadUri"}
     )
-    full_description: Optional[
+    full_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullDescription"}
     )
-    full_name: Optional[str] = dataclasses.field(
+    full_name: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullName"}
     )
     global_message_strings: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "globalMessageStrings"}
     )
-    guid: Optional[str] = dataclasses.field(
+    guid: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    information_uri: Optional[str] = dataclasses.field(
+    information_uri: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "informationUri"}
     )
-    is_comprehensive: Optional[bool] = dataclasses.field(
+    is_comprehensive: bool | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "isComprehensive"}
     )
     language: str = dataclasses.field(
         default="en-US", metadata={"schema_property_name": "language"}
     )
-    localized_data_semantic_version: Optional[str] = dataclasses.field(
+    localized_data_semantic_version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "localizedDataSemanticVersion"}
     )
-    locations: Optional[List[_artifact_location.ArtifactLocation]] = dataclasses.field(
+    locations: list[_artifact_location.ArtifactLocation] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
-    minimum_required_localized_data_semantic_version: Optional[str] = dataclasses.field(
+    minimum_required_localized_data_semantic_version: str | None = dataclasses.field(
         default=None,
         metadata={
             "schema_property_name": "minimumRequiredLocalizedDataSemanticVersion"
         },
     )
-    notifications: Optional[
-        List[_reporting_descriptor.ReportingDescriptor]
-    ] = dataclasses.field(
+    notifications: None | (
+        list[_reporting_descriptor.ReportingDescriptor]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "notifications"}
     )
-    organization: Optional[str] = dataclasses.field(
+    organization: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "organization"}
     )
-    product: Optional[str] = dataclasses.field(
+    product: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "product"}
     )
-    product_suite: Optional[str] = dataclasses.field(
+    product_suite: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "productSuite"}
     )
-    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
+    properties: _property_bag.PropertyBag | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    release_date_utc: Optional[str] = dataclasses.field(
+    release_date_utc: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "releaseDateUtc"}
     )
-    rules: Optional[
-        List[_reporting_descriptor.ReportingDescriptor]
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rules"})
-    semantic_version: Optional[str] = dataclasses.field(
+    rules: None | (
+        list[_reporting_descriptor.ReportingDescriptor]
+    ) = dataclasses.field(default=None, metadata={"schema_property_name": "rules"})
+    semantic_version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "semanticVersion"}
     )
-    short_description: Optional[
+    short_description: None | (
         _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "shortDescription"}
     )
-    supported_taxonomies: Optional[
-        List[_tool_component_reference.ToolComponentReference]
-    ] = dataclasses.field(
+    supported_taxonomies: None | (
+        list[_tool_component_reference.ToolComponentReference]
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "supportedTaxonomies"}
     )
-    taxa: Optional[List[_reporting_descriptor.ReportingDescriptor]] = dataclasses.field(
+    taxa: list[_reporting_descriptor.ReportingDescriptor] | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "taxa"}
     )
-    translation_metadata: Optional[
+    translation_metadata: None | (
         _translation_metadata.TranslationMetadata
-    ] = dataclasses.field(
+    ) = dataclasses.field(
         default=None, metadata={"schema_property_name": "translationMetadata"}
     )
-    version: Optional[str] = dataclasses.field(
+    version: str | None = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}
     )
 

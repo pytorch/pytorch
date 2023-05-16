@@ -50,15 +50,15 @@ def create_db(output_file):
             label_tensor.data_type = 2
             label_tensor.int32_data.append(label)
             txn.put(
-                '{}'.format(j).encode('ascii'),
+                f'{j}'.encode('ascii'),
                 tensor_protos.SerializeToString()
             )
 
             checksum += np.sum(img_data) * label
             if (j % 16 == 0):
-                print("Inserted {} rows".format(j))
+                print(f"Inserted {j} rows")
 
-    print("Checksum/write: {}".format(int(checksum)))
+    print(f"Checksum/write: {int(checksum)}")
     return checksum
 
 
@@ -83,7 +83,7 @@ def read_db_with_caffe2(db_file, expected_checksum):
         for j in range(batch_size):
             checksum += np.sum(img_datas[j, :]) * labels[j]
 
-    print("Checksum/read: {}".format(int(checksum)))
+    print(f"Checksum/read: {int(checksum)}")
     assert np.abs(expected_checksum - checksum < 0.1), \
         "Read/write checksums dont match"
 

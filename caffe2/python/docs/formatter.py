@@ -57,7 +57,7 @@ class Formatter:
 
 class Markdown(Formatter):
     def addRaw(self, text):
-        self.content += "{text}".format(text=text)
+        self.content += f"{text}"
 
     def addLine(self, text, new_line=False):
         self.content += "{line}{text}\n".format(line=('\n' if new_line else ''),
@@ -74,20 +74,20 @@ class Markdown(Formatter):
 
     def addList(self, textList):
         for text in textList:
-            self.addLine("- {text}".format(text=text), True)
+            self.addLine(f"- {text}", True)
         self.addLinebreak()
 
     def addLink(self, text, url):
-        self.addRaw("[{text}]({url})".format(text=text, url=url))
+        self.addRaw(f"[{text}]({url})")
 
     def addCodeLink(self, path, options=None):
-        self.addRaw("({path})".format(path=path))
+        self.addRaw(f"({path})")
 
     def addCode(self, text, inline=False):
         if (inline):
-            self.content += "`{text}`".format(text=text)
+            self.content += f"`{text}`"
         else:
-            self.addRaw("\n\n```\n{text}```\n\n".format(text=text))
+            self.addRaw(f"\n\n```\n{text}```\n\n")
 
     def addTable(self, table, noTitle=False):
         self.addLinebreak()

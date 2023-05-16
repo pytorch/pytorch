@@ -1,7 +1,3 @@
-
-
-
-
 from caffe2.python import core, workspace
 from caffe2.python.test.executor_test_util import (
     build_conv_model,

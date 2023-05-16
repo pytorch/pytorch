@@ -94,14 +94,14 @@ def MLP(order):
     width = 3
     for i in range(depth):
         for j in range(width):
-            current = "fc_{}_{}".format(i, j) if i > 0 else "data"
-            next_ = "fc_{}_{}".format(i + 1, j)
+            current = f"fc_{i}_{j}" if i > 0 else "data"
+            next_ = f"fc_{i + 1}_{j}"
             model.FC(
                 current, next_,
                 dim_in=d, dim_out=d,
                 weight_init=model.XavierInit,
                 bias_init=model.XavierInit)
-            model.Sum(["fc_{}_{}".format(depth, j)
+            model.Sum([f"fc_{depth}_{j}"
                        for j in range(width)], ["sum"])
             model.FC("sum", "last",
                      dim_in=d, dim_out=1000,
@@ -581,9 +581,9 @@ def Benchmark(model_gen, arg):
     )
 
     if arg.forward_only:
-        print('{}: running forward only.'.format(arg.model))
+        print(f'{arg.model}: running forward only.')
     else:
-        print('{}: running forward-backward.'.format(arg.model))
+        print(f'{arg.model}: running forward-backward.')
         model.AddGradientOperators(["loss"])
         AddParameterUpdate(model)
 
@@ -601,10 +601,10 @@ def Benchmark(model_gen, arg):
     if arg.dump_model:
         # Writes out the pbtxt for benchmarks on e.g. Android
         with open(
-            "{0}_init_batch_{1}.pbtxt".format(arg.model, arg.batch_size), "w"
+            f"{arg.model}_init_batch_{arg.batch_size}.pbtxt", "w"
         ) as fid:
             fid.write(str(model.param_init_net.Proto()))
-            with open("{0}.pbtxt".format(arg.model), "w") as fid:
+            with open(f"{arg.model}.pbtxt", "w") as fid:
                 fid.write(str(model.net.Proto()))
 
     workspace.RunNetOnce(model.param_init_net)
@@ -616,7 +616,7 @@ def Benchmark(model_gen, arg):
     plan.AddStep(core.ExecutionStep("run", model.net, arg.iterations))
     start = time.time()
     workspace.RunPlan(plan)
-    print('Spent: {}'.format((time.time() - start) / arg.iterations))
+    print(f'Spent: {(time.time() - start) / arg.iterations}')
     if arg.layer_wise_benchmark:
         print('Layer-wise benchmark.')
         workspace.BenchmarkNet(model.net.Proto().name, 1, arg.iterations, True)

@@ -46,7 +46,7 @@ if os.path.isfile(rocm_version_h):
     RE_MINOR = re.compile(r"#define\s+ROCM_VERSION_MINOR\s+(\d+)")
     RE_PATCH = re.compile(r"#define\s+ROCM_VERSION_PATCH\s+(\d+)")
     major, minor, patch = 0, 0, 0
-    for line in open(rocm_version_h, "r"):
+    for line in open(rocm_version_h):
         match = RE_MAJOR.search(line)
         if match:
             major = int(match.group(1))

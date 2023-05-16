@@ -1,5 +1,3 @@
-
-
 import unittest
 
 import caffe2.python.hypothesis_test_util as hu
@@ -13,8 +11,8 @@ class TestQuantile(hu.HypothesisTestCase):
         net.Proto().type = "dag"
         input_tensors = []
         for i, input in enumerate(inputs):
-            workspace.FeedBlob("t_{}".format(i), input)
-            input_tensors.append("t_{}".format(i))
+            workspace.FeedBlob(f"t_{i}", input)
+            input_tensors.append(f"t_{i}")
         net.Quantile(
             input_tensors, ["quantile_value"], quantile=quantile, abs=abs, tol=tol
         )

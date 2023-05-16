@@ -362,7 +362,7 @@ def get_json_config(file_name, id):
         file_name (str): name of configuration file to load
         id (str): configuration that will be loaded
     """
-    with open(os.path.join(Path(__file__).parent, file_name), "r") as f:
+    with open(os.path.join(Path(__file__).parent, file_name)) as f:
         json_config = json.load(f)[id]
     return json_config
 

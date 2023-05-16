@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import core
 from caffe2.python.test_util import rand_array
 import caffe2.python.hypothesis_test_util as hu

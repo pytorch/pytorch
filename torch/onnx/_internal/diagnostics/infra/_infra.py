@@ -47,7 +47,7 @@ class PatchedPropertyBag(sarif.PropertyBag):
     arbitrary key/value pairs.
     """
 
-    def __init__(self, tags: Optional[List[str]] = None, **kwargs):
+    def __init__(self, tags: list[str] | None = None, **kwargs):
         super().__init__(tags=tags)
         self.__dict__.update(kwargs)
 
@@ -57,10 +57,10 @@ class Rule:
     id: str
     name: str
     message_default_template: str
-    short_description: Optional[str] = None
-    full_description: Optional[str] = None
-    full_description_markdown: Optional[str] = None
-    help_uri: Optional[str] = None
+    short_description: str | None = None
+    full_description: str | None = None
+    full_description_markdown: str | None = None
+    help_uri: str | None = None
 
     @classmethod
     def from_sarif(cls, **kwargs):
@@ -103,7 +103,7 @@ class Rule:
             help_uri=self.help_uri,
         )
 
-    def format(self, level: Level, *args, **kwargs) -> Tuple[Rule, Level, str]:
+    def format(self, level: Level, *args, **kwargs) -> tuple[Rule, Level, str]:
         """Returns a tuple of (rule, level, message) for a diagnostic.
 
         This method is used to format the message of a diagnostic. The message is
@@ -128,13 +128,13 @@ class Rule:
 
 @dataclasses.dataclass
 class Location:
-    uri: Optional[str] = None
-    line: Optional[int] = None
-    message: Optional[str] = None
-    start_column: Optional[int] = None
-    end_column: Optional[int] = None
-    snippet: Optional[str] = None
-    function: Optional[str] = None
+    uri: str | None = None
+    line: int | None = None
+    message: str | None = None
+    start_column: int | None = None
+    end_column: int | None = None
+    snippet: str | None = None
+    function: str | None = None
 
     def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
@@ -181,8 +181,8 @@ class StackFrame:
 class Stack:
     """Records a stack trace. The frames are in order from newest to oldest stack frame."""
 
-    frames: List[StackFrame] = dataclasses.field(default_factory=list)
-    message: Optional[str] = None
+    frames: list[StackFrame] = dataclasses.field(default_factory=list)
+    message: str | None = None
 
     def sarif(self) -> sarif.Stack:
         """Returns the SARIF representation of this stack."""
@@ -207,7 +207,7 @@ class ThreadFlowLocation:
     location: Location
     state: Mapping[str, str]
     index: int
-    stack: Optional[Stack] = None
+    stack: Stack | None = None
 
     def sarif(self) -> sarif.ThreadFlowLocation:
         """Returns the SARIF representation of this thread flow location."""
@@ -237,7 +237,7 @@ class Graph:
 
     graph: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
     def sarif(self) -> sarif.Graph:
         """Returns the SARIF representation of this graph."""
@@ -265,7 +265,7 @@ class Graph:
 
 @dataclasses.dataclass
 class RuleCollection:
-    _rule_id_name_set: FrozenSet[Tuple[str, str]] = dataclasses.field(init=False)
+    _rule_id_name_set: frozenset[tuple[str, str]] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         self._rule_id_name_set = frozenset(

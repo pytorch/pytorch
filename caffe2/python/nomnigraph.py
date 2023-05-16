@@ -1,5 +1,3 @@
-
-
 import errno
 import os
 from subprocess import PIPE, Popen
@@ -117,7 +115,7 @@ def render(s):
         p = Popen("graph-easy", stdin=PIPE)
         try:
             p.stdin.write(s.encode("utf-8"))
-        except IOError as e:
+        except OSError as e:
             if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
                 pass
             else:

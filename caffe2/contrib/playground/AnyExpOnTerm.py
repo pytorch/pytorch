@@ -1,8 +1,3 @@
-
-
-
-
-
 import argparse
 import json
 import os
@@ -30,7 +25,7 @@ def runShardedTrainLoop(opts, myTrainFun):
                 broadcast_computed_param=True,
                 reset_epoch=opts['model_param']['reset_epoch'],
             )
-    log.info('start epoch: {}'.format(start_epoch))
+    log.info(f'start epoch: {start_epoch}')
     pretrained_model = None if pretrained_model == '' else pretrained_model
     ret = None
 
@@ -62,7 +57,7 @@ def runShardedTrainLoop(opts, myTrainFun):
                 ret = shard_ret
                 opts['temp_var']['metrics_output'] = ret['metrics']
                 break
-        log.info('ret is: {}'.format(str(ret)))
+        log.info(f'ret is: {str(ret)}')
 
     return ret
 
@@ -85,7 +80,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     opts = args.params['opts']
     opts = AnyExp.initOpts(opts)
-    log.info('opts is: {}'.format(str(opts)))
+    log.info(f'opts is: {str(opts)}')
 
     AnyExp.initDefaultModuleMap()
 
@@ -95,4 +90,4 @@ if __name__ == '__main__':
     # some other custermized training function.
     ret = runShardedTrainLoop(opts, trainFun())
 
-    log.info('ret is: {}'.format(str(ret)))
+    log.info(f'ret is: {str(ret)}')

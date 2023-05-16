@@ -595,7 +595,7 @@ def _avg_pool(name, tuple_fn):
         input: _C.Value,
         kernel_size: Sequence[int],
         stride: Sequence[int],
-        padding: Union[int, Sequence[int]],
+        padding: int | Sequence[int],
         ceil_mode: int,
         count_include_pad: int,
         divisor_override=None,
@@ -884,7 +884,7 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 and all((isinstance(val, int) for val in args)):
+    if len(args) == 2 and all(isinstance(val, int) for val in args):
         # aten::arange(Scalar start, Scalar end)
         dtype = torch.int64
         # Start index.
@@ -1333,7 +1333,7 @@ def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self,
     ord,
-    dim: Optional[Sequence[int]],
+    dim: Sequence[int] | None,
     keepdim: bool,
     dtype,
 ):

@@ -524,7 +524,7 @@ class HypothesisTestCase(test_util.TestCase):
                     ref_vals,
                     atol=threshold,
                     rtol=threshold,
-                    err_msg='Gradient {0} (x) is not matching the reference (y)'
+                    err_msg='Gradient {} (x) is not matching the reference (y)'
                     .format(val_name),
                 )
                 if ref_indices is not None:
@@ -536,7 +536,7 @@ class HypothesisTestCase(test_util.TestCase):
                                  ensure_output_is_inferred=False):
         self.assertTrue(
             not ensure_output_is_inferred or (name in shapes),
-            'Shape for {0} was not inferred'.format(name))
+            f'Shape for {name} was not inferred')
 
         if name not in shapes:
             # No inferred shape or type available
@@ -552,7 +552,7 @@ class HypothesisTestCase(test_util.TestCase):
             elif output.dtype == np.dtype('int64'):
                 correct_type = caffe2_pb2.TensorProto.INT64
             else:
-                correct_type = "unknown {}".format(np.dtype)
+                correct_type = f"unknown {np.dtype}"
         else:
             correct_type = str(type(output))
         try:
@@ -665,7 +665,7 @@ class HypothesisTestCase(test_util.TestCase):
                     np.testing.assert_allclose(
                         output, ref, atol=atol, rtol=threshold,
                         err_msg=(
-                            'Output {0} is not matching the reference'.format(
+                            'Output {} is not matching the reference'.format(
                                 output_blob_name,
                             )),
                     )

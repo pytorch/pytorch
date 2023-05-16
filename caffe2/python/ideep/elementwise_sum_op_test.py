@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -31,7 +26,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                  dc):
         op = core.CreateOperator(
             "Sum",
-            ["X_{}".format(i) for i in range(inputs)],
+            [f"X_{i}" for i in range(inputs)],
             ["X_0" if inplace else "Y"],
         )
         Xs = [np.random.rand(batch_size, input_channels, size, size).astype(
@@ -55,7 +50,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                       dc):
         op = core.CreateOperator(
             "Sum",
-            ["X_{}".format(i) for i in range(inputs)],
+            [f"X_{i}" for i in range(inputs)],
             ["X_0" if inplace else "Y"],
             device_option=dc[1]
         )
@@ -67,7 +62,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
         for i, x in enumerate(Xs):
             if i == 0: continue
             sum_val += x
-            workspace.FeedBlob("X_{}".format(i), x, dc[1])
+            workspace.FeedBlob(f"X_{i}", x, dc[1])
 
         workspace.RunOperatorOnce(op)
         Y = workspace.FetchBlob("X_0" if inplace else "Y")
@@ -95,7 +90,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
                                  dc):
         sum_fp32 = core.CreateOperator(
             "Sum",
-            ["X_{}".format(i) for i in range(inputs)],
+            [f"X_{i}" for i in range(inputs)],
             ["X_0" if inplace else "Y"],
         )
         Xs = [np.random.rand(batch_size, input_channels, size, size).astype(
@@ -107,7 +102,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
         Xi_scales = []
         Xi_zero_points = []
         for i, X in enumerate(Xs):
-            workspace.FeedBlob("X_{}".format(i), X, dc[0])
+            workspace.FeedBlob(f"X_{i}", X, dc[0])
             if X.min() >= 0:
                 Xi_scales.append(np.absolute(X).max() / 0xFF)
                 Xi_zero_points.append(0)
@@ -129,17 +124,17 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
 
         net = caffe2_pb2.NetDef()
         for i, Xi in enumerate(Xs):
-            workspace.FeedBlob("Xi_{}".format(i), Xi, dc[1])
+            workspace.FeedBlob(f"Xi_{i}", Xi, dc[1])
             sw2nhwc = core.CreateOperator(
                 "NCHW2NHWC",
-                ["Xi_{}".format(i)],
-                ["Xi_{}_nhwc".format(i)],
+                [f"Xi_{i}"],
+                [f"Xi_{i}_nhwc"],
                 device_option=dc[1]
             )
             quantize = core.CreateOperator(
                 "Int8Quantize",
-                ["Xi_{}_nhwc".format(i)],
-                ["Xi_{}_quantized".format(i)],
+                [f"Xi_{i}_nhwc"],
+                [f"Xi_{i}_quantized"],
                 engine="DNNLOWP",
                 device_option=dc[1],
                 Y_zero_point=Xi_zero_points[i],
@@ -149,7 +144,7 @@ class ElementwiseSumTest(hu.HypothesisTestCase):
 
         sum = core.CreateOperator(
             "Int8Sum",
-            ["Xi_{}_quantized".format(i) for i in range(inputs)],
+            [f"Xi_{i}_quantized" for i in range(inputs)],
             ["Xi_0_quantized" if inplace else "Y_quantized"],
             engine="DNNLOWP",
             device_option=dc[1],

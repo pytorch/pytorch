@@ -453,7 +453,7 @@ class RNN(RNNBase):
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
-            raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
+            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'")
         super().__init__(mode, *args, **kwargs)
 
     @overload
@@ -1196,7 +1196,7 @@ class RNNCell(RNNCellBase):
         else:
             ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(
-                "Unknown nonlinearity: {}".format(self.nonlinearity))
+                f"Unknown nonlinearity: {self.nonlinearity}")
 
         if not is_batched:
             ret = ret.squeeze(0)

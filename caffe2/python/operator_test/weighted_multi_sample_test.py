@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 
 from hypothesis import given
@@ -20,7 +15,7 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
         **hu.gcs_cpu_only
     )
     def test_weighted_multi_sample(self, num_samples, data_len, gc, dc):
-        weights = np.zeros((data_len))
+        weights = np.zeros(data_len)
         expected_indices = []
         if data_len > 0:
             weights[-1] = 1.5
@@ -45,7 +40,7 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
         )
 
         # test shape input
-        shape = np.zeros((num_samples))
+        shape = np.zeros(num_samples)
         workspace.FeedBlob("shape", shape)
         op2 = core.CreateOperator(
             "WeightedMultiSampling",

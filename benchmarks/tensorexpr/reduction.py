@@ -139,7 +139,7 @@ class Reduce2DBench(benchmark.Benchmark):
         )]
 
         if red_dim != 0 and red_dim != 1 :
-            raise ValueError("invalid reduction dimension: {}".format(red_dim))
+            raise ValueError(f"invalid reduction dimension: {red_dim}")
 
     def forward(self, inputs):
         x = self.add(inputs, 0.001)

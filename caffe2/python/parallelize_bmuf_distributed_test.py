@@ -1,7 +1,3 @@
-
-
-
-
 from multiprocessing import Process, Manager
 
 import numpy as np
@@ -94,8 +90,8 @@ def bmuf_process(filestore_dir, process_id, shared_results,
                 data = full_data[st:en, :].astype(np.float32)
                 labels = full_labels[st:en].astype(np.float32)
                 with core.DeviceScope(core.DeviceOption(device_type, g)):
-                    workspace.FeedBlob("{}_{}/data".format(device_prefix, g), data)
-                    workspace.FeedBlob("{}_{}/label".format(device_prefix, g), labels)
+                    workspace.FeedBlob(f"{device_prefix}_{g}/data", data)
+                    workspace.FeedBlob(f"{device_prefix}_{g}/label", labels)
 
     _generate_data(devices, process_id, device_type, device_prefix)
 
@@ -144,9 +140,9 @@ def bmuf_process(filestore_dir, process_id, shared_results,
     # Save iteration momentum and post local update params
     results = {}
     v_b_ = workspace.FetchBlob(
-        "{}_{}/fc_b_v".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b_v")
     v_w_ = workspace.FetchBlob(
-        "{}_{}/fc_w_v".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w_v")
 
     results['v_b_'] = v_b_
     results['v_w_'] = v_w_
@@ -154,13 +150,13 @@ def bmuf_process(filestore_dir, process_id, shared_results,
     workspace.RunNetOnce(model.net)
 
     b_0_ = workspace.FetchBlob(
-        "{}_{}/fc_b".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b")
     w_0_ = workspace.FetchBlob(
-        "{}_{}/fc_w".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w")
     b_1_ = workspace.FetchBlob(
-        "{}_{}/fc_b".format(device_prefix, _device_pid(1, process_id)))
+        f"{device_prefix}_{_device_pid(1, process_id)}/fc_b")
     w_1_ = workspace.FetchBlob(
-        "{}_{}/fc_w".format(device_prefix, _device_pid(1, process_id)))
+        f"{device_prefix}_{_device_pid(1, process_id)}/fc_w")
 
     results['b_0_'] = b_0_
     results['w_0_'] = w_0_
@@ -176,9 +172,9 @@ def bmuf_process(filestore_dir, process_id, shared_results,
 
     # Compute block gradients.
     b_g_ = workspace.FetchBlob(
-        "{}_{}/fc_b_g".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b_g")
     w_g_ = workspace.FetchBlob(
-        "{}_{}/fc_w_g".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w_g")
     results['b_g_'] = b_g_
     results['w_g_'] = w_g_
     workspace.RunNetOnce(model._global_model_param_updates_net)
@@ -186,21 +182,21 @@ def bmuf_process(filestore_dir, process_id, shared_results,
     #  g_b = (b_0_ + b_1_) / 2 - b_g_
     #  g_w = (w_0_ + w_1_) / 2 - w_g_
     v_b = workspace.FetchBlob(
-        "{}_{}/fc_b_v".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b_v")
     v_w = workspace.FetchBlob(
-        "{}_{}/fc_w_v".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w_v")
     w_g = workspace.FetchBlob(
-        "{}_{}/fc_w_g".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w_g")
     b_g = workspace.FetchBlob(
-        "{}_{}/fc_b_g".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b_g")
     w_0 = workspace.FetchBlob(
-        "{}_{}/fc_w".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_w")
     b_0 = workspace.FetchBlob(
-        "{}_{}/fc_b".format(device_prefix, _device_pid(0, process_id)))
+        f"{device_prefix}_{_device_pid(0, process_id)}/fc_b")
     w_1 = workspace.FetchBlob(
-        "{}_{}/fc_w".format(device_prefix, _device_pid(1, process_id)))
+        f"{device_prefix}_{_device_pid(1, process_id)}/fc_w")
     b_1 = workspace.FetchBlob(
-        "{}_{}/fc_b".format(device_prefix, _device_pid(1, process_id)))
+        f"{device_prefix}_{_device_pid(1, process_id)}/fc_b")
     results['v_b'] = v_b
     results['v_w'] = v_w
     results['w_g'] = w_g
@@ -213,8 +209,8 @@ def bmuf_process(filestore_dir, process_id, shared_results,
     # Test add_blobs_to_sync
     for j in devices:
         sync = workspace.FetchBlob(
-            device_prefix + "_{}/sync_num".format(j))[0]
-        results['sync_{}'.format(j)] = sync
+            device_prefix + f"_{j}/sync_num")[0]
+        results[f'sync_{j}'] = sync
 
     shared_results[process_id] = results
 

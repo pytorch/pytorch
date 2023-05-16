@@ -1,8 +1,3 @@
-
-
-
-
-
 import inspect
 import logging
 logging.basicConfig()
@@ -93,13 +88,13 @@ def overrideAdditionalMethods(myTrainerClass, opts):
 
 
 def getModule(moduleName):
-    log.info("get module {} from MODULE_MAPS content {}".format(moduleName, str(MODULE_MAPS)))
+    log.info(f"get module {moduleName} from MODULE_MAPS content {str(MODULE_MAPS)}")
     myModule = None
     for ModuleMap in MODULE_MAPS:
         log.info("iterate through MODULE_MAPS content {}".
                  format(str(ModuleMap)))
         for name, obj in inspect.getmembers(ModuleMap):
-            log.info("iterate through MODULE_MAPS a name {}".format(str(name)))
+            log.info(f"iterate through MODULE_MAPS a name {str(name)}")
             if name == moduleName:
                 log.info("AnyExp get module {} with source:{}".
                          format(moduleName, inspect.getsource(obj)))

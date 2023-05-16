@@ -1,4 +1,3 @@
-
 import torch
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quant_type import QuantType

@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 import numpy as np

@@ -1,8 +1,3 @@
-
-
-
-
-
 import caffe2.python.models.resnet as resnet
 
 

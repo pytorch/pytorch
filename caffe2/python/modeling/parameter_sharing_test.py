@@ -1,8 +1,3 @@
-
-
-
-
-
 from caffe2.python import brew, model_helper, scope
 from caffe2.python.modeling.parameter_sharing import (
     ParameterSharing,

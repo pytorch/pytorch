@@ -1,8 +1,3 @@
-
-
-
-
-
 import unittest
 import hypothesis.strategies as st
 from hypothesis import given
@@ -31,7 +26,7 @@ class MKLElementwiseSumTest(hu.HypothesisTestCase):
                                  dc):
         op = core.CreateOperator(
             "Sum",
-            ["X_{}".format(i) for i in range(inputs)],
+            [f"X_{i}" for i in range(inputs)],
             ["X_0" if inplace else "Y"],
         )
         Xs = [np.random.rand(batch_size, input_channels, size, size).astype(

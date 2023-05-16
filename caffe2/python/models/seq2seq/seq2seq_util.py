@@ -217,7 +217,7 @@ def build_embeddings(
 
 def get_layer_scope(scope, layer_type, i):
     prefix = (scope + '/' if scope else '') + layer_type
-    return '{}/layer{}'.format(prefix, i)
+    return f'{prefix}/layer{i}'
 
 
 def build_embedding_encoder(
@@ -453,7 +453,7 @@ def build_initial_rnn_decoder_states(
         if final_encoder_hidden_state is None:
             decoder_initial_hidden_state = model.param_init_net.ConstantFill(
                 [],
-                'decoder_initial_hidden_state_{}'.format(i),
+                f'decoder_initial_hidden_state_{i}',
                 shape=[decoder_num_units],
                 value=0.0,
             )
@@ -462,7 +462,7 @@ def build_initial_rnn_decoder_states(
             decoder_initial_hidden_state = brew.fc(
                 model,
                 final_encoder_hidden_state,
-                'decoder_initial_hidden_state_{}'.format(i),
+                f'decoder_initial_hidden_state_{i}',
                 encoder_units_per_layer[i + offset],
                 decoder_num_units,
                 axis=2,
@@ -482,7 +482,7 @@ def build_initial_rnn_decoder_states(
         if final_encoder_cell_state is None:
             decoder_initial_cell_state = model.param_init_net.ConstantFill(
                 [],
-                'decoder_initial_cell_state_{}'.format(i),
+                f'decoder_initial_cell_state_{i}',
                 shape=[decoder_num_units],
                 value=0.0,
             )
@@ -491,7 +491,7 @@ def build_initial_rnn_decoder_states(
             decoder_initial_cell_state = brew.fc(
                 model,
                 final_encoder_cell_state,
-                'decoder_initial_cell_state_{}'.format(i),
+                f'decoder_initial_cell_state_{i}',
                 encoder_units_per_layer[i + offset],
                 decoder_num_units,
                 axis=2,
