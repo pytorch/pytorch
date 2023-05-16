@@ -6302,7 +6302,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
             self.assertIsNotNone(
-                re.search("tl.load(in_ptr0 + (tmp[0-9]+), xmask)", code)
+                re.search(r"tl.load\(in_ptr0 \+ \(tmp[0-9]+\), xmask\)", code),
+                msg=f"masked load not found in code:\n{code}",
             )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
