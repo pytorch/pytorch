@@ -386,17 +386,9 @@ class WrapperCodeGen(CodeGen):
     def codegen_cuda_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
 
-    def generate_return(self, output_refs, nt_input_name):
+    def generate_return(self, output_refs):
         # TODO: Fix this hack. For now, assume same nested structure as the input.
         if output_refs:
-            if nt_input_name is not None:
-                offset_name = f"torch.ops.aten._nested_get_jagged_offsets({nt_input_name})"
-                output_refs = [f"torch.ops.aten._nested_view_from_jagged({out}, {offset_name})"
-                               for out in output_refs]
-
-                # Get rid of "del arg0_1" line
-                self.wrapper_call._lines.pop()
-
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:
             self.wrapper_call.writeline("return ()")
@@ -488,10 +480,8 @@ class WrapperCodeGen(CodeGen):
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("end_graph()")
 
-            # TODO: Hack to rebuild as NT if there was an NT input.
-            # There needs to be a better way to do this, but it's hard
-            # with how shitty this codegen logic is.
-            self.generate_return(output_refs, self._find_nt_input())
+            self.generate_return(output_refs)
+            self._ensure_jagged_offset_sources_are_alive()
 
         self.append_precomputed_sizes_to_prefix()
         result.splice(self.prefix)
@@ -505,14 +495,23 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvaluewithlinemap()
 
-    def _find_nt_input(self) -> bool:
-        for name, inp in V.graph.graph_inputs.items():
+    def _ensure_jagged_offset_sources_are_alive(self):
+        jagged_sources = []
+        for out in V.graph.graph_outputs:
             try:
-                if inp.data.data.layout.full_nested_size is not None:
-                    return name
+                # TODO: Make this hack more robust; need to pull out all jagged_offsets_src
+                if out.data.data.jagged_offsets_src is not None:
+                    jagged_sources.append(out.data.data.jagged_offsets_src)
             except Exception:
                 pass
-        return None
+
+        # Remove any del calls on sources we need for jagged offsets
+        for jagged_source in jagged_sources:
+            new_lines = [
+                line for line in self.wrapper_call._lines
+                if not (isinstance(line, str) and line.strip() == f"del {jagged_source}")
+            ]
+            self.wrapper_call._lines = new_lines
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""

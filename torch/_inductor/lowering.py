@@ -350,10 +350,13 @@ def make_pointwise(
             obj = inputs[0].data.data
             if hasattr(obj, "layout"):
                 full_nested_size = obj.layout.full_nested_size
+                jagged_offsets_src = obj.layout.jagged_offsets_src
             else:
                 full_nested_size = obj.full_nested_size
+                jagged_offsets_src = obj.jagged_offsets_src
         except AttributeError:
             full_nested_size = None
+            jagged_offsets_src = None
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -386,6 +389,7 @@ def make_pointwise(
             inner_fn=inner_fn,
             ranges=ranges,
             full_nested_size=full_nested_size,
+            jagged_offsets_src=jagged_offsets_src,
         )
 
     return inner

@@ -377,7 +377,7 @@ class GraphLowering(torch.fx.Interpreter):
                 InputBuffer(
                     target,
                     FixedLayout(example.device, example.dtype, sizes, strides,
-                                full_nested_size=nested_sizes),
+                                full_nested_size=nested_sizes, jagged_offsets_src=target),
                 ),
                 jagged_offsets=jagged_offsets_tensor
             )

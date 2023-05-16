@@ -1190,7 +1190,7 @@ def wrap_node(x):
         return SymFloat(x)
     elif x.is_bool():
         return SymBool(x)
-    elif isinstance(x, SymNode) and x.pytype == tuple[int]:
+    elif isinstance(x, SymNode) and x.pytype == Tuple[int]:
         # hackery for array-backed SymInts
         return SymInt(x)
     else:
@@ -1969,7 +1969,7 @@ class ShapeEnv:
                 assert int(sym) == hint
             return int(sym)
         if isinstance(sym, sympy.Array) or (hint is not None and isinstance(hint, (list, tuple))):
-            return SymInt(SymNode(sym, self, tuple[int], hint))
+            return SymInt(SymNode(sym, self, Tuple[int], hint))
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):

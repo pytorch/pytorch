@@ -462,8 +462,10 @@ class Pointwise(Loops):
         ranges: List[Expr],
         # Indicates whether we're operating on a NT
         full_nested_size: List[Expr] = None,
+        jagged_offsets_src: Optional[str] = None
     ):
         self.full_nested_size = full_nested_size
+        self.jagged_offsets_src = jagged_offsets_src
         super().__init__(device, dtype, inner_fn, ranges)
 
     def __str__(self):
@@ -1644,10 +1646,20 @@ class ReinterpretView(BaseView):
         offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
         namespace = V.graph.wrapper_code.namespace
         if offset != "0":
-            return (
+            ref = (
                 f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
             )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+        else:
+            ref = f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+
+        # TODO: De-dupe this with Buffer.codegen_reference()
+        if self.layout.jagged_offsets_src is not None:
+            src = self.layout.jagged_offsets_src
+            if ref != src:
+                offset_name = f"torch.ops.aten._nested_get_jagged_offsets({src})"
+                ref = f"torch.ops.aten._nested_view_from_jagged({ref}, {offset_name})"
+
+        return ref
 
 
 class SliceView(View):
@@ -1763,7 +1775,8 @@ class Layout(IRNode):
         size: List[Expr],
         stride: List[Expr],
         offset: Expr = Integer(0),
-        full_nested_size = None
+        full_nested_size = None,
+        jagged_offsets_src = None,
     ):
         assert stride is None or len(size) == len(
             stride
@@ -1775,6 +1788,7 @@ class Layout(IRNode):
         self._stride = stride
         self.offset = offset
         self.full_nested_size = full_nested_size
+        self.jagged_offsets_src = jagged_offsets_src
 
     @property
     def stride(self):
@@ -1880,7 +1894,8 @@ class FixedLayout(Layout):
         size: List[Expr],
         stride: List[Expr] = None,
         offset: Expr = Integer(0),
-        full_nested_size: List[Expr] = None
+        full_nested_size: List[Expr] = None,
+        jagged_offsets_src: Optional[str] = None,
     ):
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -1890,7 +1905,8 @@ class FixedLayout(Layout):
             size,
             stride,
             offset,
-            full_nested_size
+            full_nested_size,
+            jagged_offsets_src,
         )
 
     def make_indexer(self):
@@ -2176,11 +2192,13 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self):
-        full_nested_size = getattr(self.layout, "full_nested_size", None)
-        is_nested = (full_nested_size is not None)
-        # if is_nested:
-        #     breakpoint()
-        return self.get_name()
+        ref = self.get_name()
+        if self.layout.jagged_offsets_src is not None:
+            src = self.layout.jagged_offsets_src
+            if ref != src:
+                offset_name = f"torch.ops.aten._nested_get_jagged_offsets({src})"
+                ref = f"torch.ops.aten._nested_view_from_jagged({ref}, {offset_name})"
+        return ref
 
     def decide_layout(self):
         pass
@@ -3357,6 +3375,7 @@ class FallbackKernel(ExternKernelAlloc):
                 )
             elif isinstance(output, torch.Tensor):
                 if output.is_nested:
+                    # TODO: Handle jagged_offsets_src here!
                     full_nested_size = output.size()
                     output = torch.ops.aten._nested_view_as_jagged(output)
                     return MultiOutput(
@@ -4065,13 +4084,16 @@ class StorageBox(MutableBox):
         origin_node = self.data.get_origin_node()
         traceback = self.data.get_traceback()
 
+        # Pull these from the Pointwise, for example
         full_nested_size = getattr(self.data, "full_nested_size", None)
+        jagged_offsets_src = getattr(self.data, "jagged_offsets_src", None)
         if full_nested_size is not None:
             layout = FixedLayout(
                 device=self.data.get_device(),
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),
                 full_nested_size=full_nested_size,
+                jagged_offsets_src=jagged_offsets_src,
             )
         else:
             layout=FlexibleLayout(
