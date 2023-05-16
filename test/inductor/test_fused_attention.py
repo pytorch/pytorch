@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_SDPA
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -344,5 +344,5 @@ class TestSDPAPatternRewriter(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
+    if IS_LINUX and HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA and not TEST_WITH_ROCM:
         run_tests()
