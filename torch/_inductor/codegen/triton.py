@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set
 
 import sympy
 
@@ -437,6 +437,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -1646,13 +1654,22 @@ class TritonKernel(Kernel):
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
+            assignment = False
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = pexpr(tree.numel)
             else:
+                assignment = True
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {pexpr(tree.numel)}")
+                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
+                # The real fix here is to revisit our cross language calling convention.
+                code.writeline(
+                    f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
+                )
             if tree.prefix != "r" or self.inside_reduction:
-                call_args.append(expr)
+                if assignment:
+                    call_args.append(SymbolicCallArg(expr))
+                else:
+                    call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
@@ -1662,7 +1679,7 @@ class TritonKernel(Kernel):
             )
         else:
             # TODO: refactor generate_kernel_call
-            call_args_str = ", ".join(call_args)
+            call_args_str = ", ".join(str(item) for item in call_args)
             stream_name = code.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
