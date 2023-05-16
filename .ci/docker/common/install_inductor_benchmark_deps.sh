@@ -1,3 +1,5 @@
+set -ex
+
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 function install_huggingface() {
