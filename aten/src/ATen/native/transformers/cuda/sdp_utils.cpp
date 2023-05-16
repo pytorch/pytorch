@@ -49,6 +49,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
       SDPBackend::math};
 
   constexpr std::array<SDPBackend, num_backends> efficient_first{
+      SDPBackend::cudnn_mha,
       SDPBackend::efficient_attention,
       SDPBackend::flash_attention,
       SDPBackend::math};
@@ -248,9 +249,49 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   return true;
 }
 
-bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
-  static bool flag = c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true;
-  return flag;
+bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (ctx.deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN_ONCE(
+          "Memory Efficient attention is a non-deterministic algorithm. ",
+          "To explicitly disable Memory Efficient attention call torch.use_deterministic_algorithms(True, warn_only=False).");
+      // Warn the user but don't disable the kernel.
+      return true;
+    } else {
+      if (debug) {
+        TORCH_WARN(
+            "Memory Efficient attention is a non-deterministic algorithm and torch.use_deterministic_algorithms(True) has been set.");
+      }
+      return false;
+    }
+  }
+  // Determinism is not set so we can use the kernel.
+  return true;
+}
+
+static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
+  const auto num_heads{params.query.sym_size(1)},
+      query_lengths{params.query.sym_size(2)},
+      head_dim{params.query.sym_size(3)};
+  TORCH_WARN("num heads ", num_heads, " query lengths ", query_lengths, " head dim ", head_dim);
+  return num_heads > 1 && query_lengths % 64 == 0 && head_dim % 64 == 0;
+}
+
+static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  return dprops->minor == 0 && dprops->major >= 8;
+}
+
+inline bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
+  TORCH_WARN("checking cudnn mha...");
+  static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
+	                  check_cudnn_mha_compute_capability(kernel_params, print_debug);
+  bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
+  if (supported && shape_ok) {
+    TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
+  }
+  return supported && shape_ok;
 }
 
 bool use_flash_attention(sdp_params params, bool debug) {
@@ -347,6 +388,7 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
         if (use_cudnn_mha(kernel_params, print_debug)) {
               return SDPBackend::cudnn_mha;
         }
+	break;
       case SDPBackend::flash_attention:
         if (use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
