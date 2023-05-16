@@ -304,9 +304,28 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
 
 } // namespace
 
+static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
+  const auto num_heads{params.query.sym_size(1)},
+      query_lengths{params.query.sym_size(2)},
+      head_dim{params.query.sym_size(3)};
+  TORCH_WARN("num heads ", num_heads, " query lengths ", query_lengths, " head dim ", head_dim);
+  return num_heads > 1 && query_lengths % 64 == 0 && head_dim % 64 == 0;
+}
+
+static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  return dprops->minor == 0 && dprops->major >= 8;
+}
+
 inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
-  static bool flag = c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true;
-  return flag;
+  TORCH_WARN("checking cudnn mha...");
+  static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
+	                  check_cudnn_mha_compute_capability(kernel_params, print_debug);
+  bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
+  if (supported && shape_ok) {
+    TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
+  }
+  return supported && shape_ok;
 }
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
@@ -442,6 +461,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
         if (use_cudnn_mha(kernel_params, print_debug)) {
               return SDPBackend::cudnn_mha;
         }
+	break;
       case SDPBackend::flash_attention:
         if (sdp::can_use_flash_attention(kernel_params, print_debug)) {
           return SDPBackend::flash_attention;
