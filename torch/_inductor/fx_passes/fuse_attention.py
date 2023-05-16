@@ -4,7 +4,6 @@ import math
 
 import torch
 from ..._dynamo.utils import counters
-from .. import config
 from ..pattern_matcher import (
     filter_nodes,
     inference_graph,
@@ -142,10 +141,6 @@ def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
     )
 
 
-# TODO(jansel): add more patterns based on what we see in real models
-# TODO(jansel): make these pattern work with lowmem_dropout=True
-
-
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -187,7 +182,6 @@ def _sfdp_scale_factor_check(scale_factor_op):
 
 
 @functools.lru_cache(None)
-@config.patch(lowmem_dropout=False)
 def _sfdp_init():
     from .joint_graph import patterns
 
