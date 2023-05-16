@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 
-from builtins import round
 
 import copy
 import itertools
@@ -2218,7 +2217,7 @@ class TestQuantizedOps(TestCase):
         test_cases = itertools.product(scale_list, zero_point_list, shapes, dtypes, dims)
         op = torch.mean
         for scale, zp, shape, dtype, dim in test_cases:
-            if not all([d < len(shape) for d in dim]):
+            if not all(d < len(shape) for d in dim):
                 continue
             X = torch.randn(*shape) * 10
             qX = torch.quantize_per_tensor(X, scale, zp, dtype)
@@ -2257,7 +2256,7 @@ class TestQuantizedOps(TestCase):
                                        dtypes, dims, unbiased_list, keep_dim_list)
         op = torch.std
         for scale, zp, shape, dtype, dim, unbiased, keep_dim in test_cases:
-            if not all([d < len(shape) for d in dim]):
+            if not all(d < len(shape) for d in dim):
                 continue
             X = torch.randn(*shape) * 10
             qX = torch.quantize_per_tensor(X, scale, zp, dtype)
