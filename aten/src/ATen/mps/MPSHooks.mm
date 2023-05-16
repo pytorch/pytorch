@@ -1,9 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/mps/MPSHooks.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSHooks.h>
+#include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
+#include <c10/util/Logging.h>
 
 namespace at {
 namespace mps {
@@ -28,7 +31,7 @@ bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
     case 3:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
     default:
-      TORCH_WARN("Can't check whether running on 13.",minor,"+ returning one for 13.3+");
+      TORCH_WARN("Can't check whether running on 13.", minor, "+ returning one for 13.3+");
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   }
 }
@@ -42,7 +45,19 @@ const Generator& MPSHooks::getDefaultMPSGenerator() const {
 }
 
 void MPSHooks::deviceSynchronize() const {
-  at::mps::device_synchronize();
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+}
+
+void MPSHooks::commitStream() const {
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT);
+}
+
+void* MPSHooks::getCommandBuffer() const {
+  return at::mps::getDefaultMPSStream()->commandBuffer();
+}
+
+void* MPSHooks::getDispatchQueue() const {
+  return at::mps::getDefaultMPSStream()->queue();
 }
 
 void MPSHooks::emptyCache() const {
@@ -59,6 +74,14 @@ size_t MPSHooks::getDriverAllocatedMemory() const {
 
 void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
+}
+
+void MPSHooks::profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
+  at::mps::getMPSProfiler().StartTrace(mode, waitUntilCompleted);
+}
+
+void MPSHooks::profilerStopTrace() const {
+  at::mps::getMPSProfiler().StopTrace();
 }
 
 using at::MPSHooksRegistry;
