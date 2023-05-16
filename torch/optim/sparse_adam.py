@@ -105,7 +105,7 @@ SparseAdam.__doc__ = r"""SparseAdam implements a lazy version of the Adam algori
     gradient get updated, and only those portions of the gradient get applied to the
     parameters. This is an optimization, since the 0-values in the gradient will be
     skipped, and one can presume that this is only an optimization in semantically
-    sparse tensors, meaning there are lots of 0-values that are skipped. We implement
+    sparse grads, meaning there are lots of 0-values that are skipped. We implement
     the optimization by using the sparse layout to do the update computations. This
     does NOT mean that SparseAdam is especially meant for tensors with a sparse layout,
     as some of our other optimizers can handle tensors with a sparse layout as well.
