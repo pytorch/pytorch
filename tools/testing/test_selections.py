@@ -5,8 +5,9 @@ import subprocess
 from pathlib import Path
 
 from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from warnings import warn
 
-from tools.shared.logging_utils import pluralize, to_time_str
+from tools.shared.logging_utils import duration_to_str, pluralize
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
@@ -141,8 +142,9 @@ def _get_previously_failing_tests() -> Set[str]:
     PYTEST_FAILED_TESTS_CACHE_FILE_PATH = Path(".pytest_cache/v/cache/lastfailed")
 
     if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
-        print(f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH}")
-        print(f"cwd is {os.getcwd()}")
+        warn(
+            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}"
+        )
         return set()
 
     with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH, "r") as f:
@@ -169,7 +171,8 @@ def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[st
 def _get_modified_tests() -> Set[str]:
     try:
         changed_files = _query_changed_test_files()
-    except Exception:
+    except Exception as e:
+        warn(f"Can't query changed test files due to {e}")
         # If unable to get changed files from git, quit without doing any sorting
         return set()
 
@@ -179,8 +182,7 @@ def _get_modified_tests() -> Set[str]:
 def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     prefix = f"test{os.path.sep}"
     valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
-    valid_tests = {f[len(prefix) :] for f in valid_tests}
-    valid_tests = {f[: -len(".py")] for f in valid_tests}
+    valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
 
     return valid_tests
 
@@ -242,7 +244,7 @@ def get_reordered_tests(
     test_cnt_str = pluralize(len(tests), "test")
     print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
     print(
-        f"Prioritized tests estimated to run up to {to_time_str(time_savings_sec)} sooner than they would've otherwise"
+        f"Prioritized tests estimated to run up to {duration_to_str(time_savings_sec)} sooner than they would've otherwise"
     )
 
     prioritized_test_names = [t.name for t in bring_to_front]

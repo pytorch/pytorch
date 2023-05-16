@@ -8,7 +8,7 @@ def pluralize(count: int, singular_word: str, plural_word: str = "") -> str:
     return f"{count} {plural_word}"
 
 
-def to_time_str(seconds: float) -> str:
+def duration_to_str(seconds: float) -> str:
     if seconds < 0.00001:
         return "0s"
     elif seconds < 60:
