@@ -185,7 +185,7 @@ _PyFunction_CopyWithNewCode(PyFunctionObject *o, PyCodeObject* code)
   COPY_FIELD(op, o, closure);
   COPY_FIELD(op, o, doc);
   COPY_FIELD(op, o, dict);
-  COPY_FIELD(op, o, weakreflist);
+  op->func_weakreflist = NULL;
   COPY_FIELD(op, o, module);
   COPY_FIELD(op, o, annotations);
   op->vectorcall = o->vectorcall;

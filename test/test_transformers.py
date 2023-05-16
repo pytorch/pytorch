@@ -1693,7 +1693,7 @@ class TestSDPA(NNTestCase):
         if PLATFORM_SUPPORTS_FUSED_SDPA:
             batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
             shape = (batch_size, seq_len, num_heads, head_dim)
-            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True)
+            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True, requires_grad=True)
 
             qkv = make_tensor(shape, type=type)
             query, key, value = qkv.chunk(3, dim=-1)
