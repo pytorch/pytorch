@@ -137,10 +137,8 @@ def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_cond(mode, cond, pred, true_fn, false_fn, operands)
-        else:
-            return cond(pred, true_fn, false_fn, operands)
+        res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
+    return res
 
 
 @cond.py_impl(FakeTensorMode)
@@ -216,19 +214,13 @@ def _has_potential_branch_input_alias(branch, inputs):
     def _detect_input_alias(gm):
         input_storages = set()
         for node in gm.graph.nodes:
-            # We need to check existence of "val" because we reuse the logic here
-            # for map operator, where num_mapped_args is a scalar
-            # and doesn't have a "val" meta.
-            if node.op == "placeholder" and "val" in node.meta:
+            if node.op == "placeholder":
                 input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
             if node.op == "output":
-                def check_alias(out):
-                    if out is not None and "val" in out.meta:
-                        out_storage = StorageWeakRef(out.meta['val']._typed_storage())
-                        return out_storage in input_storages
-                    return False
-                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
-                    return True
+                for out in node.args:
+                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
+                    if out_storage in input_storages:
+                        return True
 
         for _, module in gm.named_children():
             if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
