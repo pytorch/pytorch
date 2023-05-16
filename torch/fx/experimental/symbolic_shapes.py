@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import os
 import re
 import sys
 import textwrap
@@ -34,6 +33,7 @@ from torch import (  # noqa: F401
 from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._traceback import format_frame
 
 InputList = List
 DimList = List
@@ -68,10 +68,6 @@ def uninteresting_files():
         torch._inductor.sizevars,
     ]
     return {inspect.getfile(m) for m in mods}
-
-def shorten_filename(fn):
-    prefix = os.path.commonprefix([fn, __file__])
-    return fn[len(prefix):]
 
 SYM_FUNCTION_MODE = None
 
@@ -2830,9 +2826,6 @@ class ShapeEnv:
                 for frame in reversed(tb):
                     if frame.filename not in uninteresting_files():
                         break
-
-                def format_frame(frame):
-                    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
 
                 # NB: this stack is truncated, but it's fine because the main
                 # stack_info will give you the rest of the info you need
