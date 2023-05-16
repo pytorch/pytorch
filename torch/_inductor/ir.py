@@ -210,12 +210,8 @@ class OptionalScalar(OptionalAttr):
         self.name = "optional_scalar"
 
 
-def need_convert_to_optional(value):
-    return not value and V.graph.cpp_wrapper
-
-
 def may_convert_to_optional(optional_value, value):
-    if need_convert_to_optional(value):
+    if not value and V.graph.cpp_wrapper:
         optional_name = optional_value.__repr__()
         assert (
             optional_name in V.graph.optional_variable
