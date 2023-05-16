@@ -106,8 +106,6 @@ namespace c10d {
 
 namespace {
 
-constexpr int kBytes = 8;
-
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -2857,20 +2855,7 @@ void ProcessGroupGloo::monitoredBarrier(
 }
 
 void ProcessGroupGloo::setSequenceNumberForGroup() {
-  if (rank_ == 0) {
-    // Create and broadcast sequence number
-    auto seq = 1 + rand();
-    sequenceNum_ = c10d::SequenceNum(seq);
-    std::vector<char> values = c10d::toVec<char>(seq, kBytes);
-    store_->set(kSeqNumStoreKey, values);
-  } else {
-    // Read rank 0's sequence number from store.
-    sequenceNum_ = c10d::SequenceNum();
-    store_->wait({kSeqNumStoreKey}, options_->timeout);
-    std::vector<char> values = store_->get(kSeqNumStoreKey);
-    uint64_t num = c10d::fromVec<char>(values);
-    sequenceNum_->set(num);
-  }
+  sequenceNum_ = c10d::SequenceNum(0);
 }
 
 uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
