@@ -221,34 +221,24 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
     for mr in match_and_replacement:
+        # Find replacement conv and bn nodes by climbing upwards from anchor node
+        assert len(mr.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
         replacement_bn_node = None
-        replacement_getitem_node = None
-
-        for replacement in mr.replacements:
-            if (
-                replacement.op == "call_function"
-                and replacement.target == torch.ops.aten.convolution.default
-            ):
-                replacement_conv_node = replacement
-            elif (
-                replacement.op == "call_function"
-                and replacement.target == torch.ops.aten._native_batch_norm_legit.default
-            ):
-                replacement_bn_node = replacement
-            elif (
-                replacement.op == "call_function"
-                and replacement.target == operator.getitem
-            ):
-                replacement_getitem_node = replacement
-
-        assert replacement_conv_node is not None
-        assert replacement_bn_node is not None
-        assert replacement_getitem_node is not None
+        replacement_getitem_node = mr.replacements[0]
+        assert replacement_getitem_node.target == operator.getitem
+        n = replacement_getitem_node
+        while replacement_conv_node is None or replacement_bn_node is None:
+            if n.target == torch.ops.aten.convolution.default:
+                replacement_conv_node = n
+            if n.target == torch.ops.aten._native_batch_norm_legit.default:
+                replacement_bn_node = n
+            assert isinstance(n.args[0], Node)
+            n = n.args[0]
 
         # Copy over metadata for all three nodes in [conv - bn - getitem]
         # Also copy over constant args for conv
-        for original_node in mr.nodes_map.values():
+        for match_pattern_node, original_node in mr.nodes_map.items():
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 # Note: Unlike other tensor args like conv weights and biases, literal args are
