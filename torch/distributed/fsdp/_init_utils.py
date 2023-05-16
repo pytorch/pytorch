@@ -284,7 +284,9 @@ def _init_device_handle(
     determined_device = None
     if device_id is not None:
         determined_device = (
-            device_id if isinstance(device_id, torch.device) else torch.device(device_id)
+            device_id
+            if isinstance(device_id, torch.device)
+            else torch.device(device_id)
         )
     if determined_device is None:
         for param in _get_orig_params(module, ignored_params):
