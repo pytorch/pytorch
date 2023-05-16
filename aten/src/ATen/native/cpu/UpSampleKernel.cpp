@@ -1004,9 +1004,10 @@ struct HelperInterpNearest : public HelperInterpBase {
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, scalar_type, "compute_indices_weights_nearest", [&] {
-        scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, scalar_type, "compute_indices_weights_nearest", [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        opmath_t scale = area_pixel_compute_scale<opmath_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
         int64_t input_index;
@@ -1016,7 +1017,6 @@ struct HelperInterpNearest : public HelperInterpBase {
         // index_f32 = (output_index) * scale
         // input_index = floor(index_f32)
         // Same as OpenCV INTER_NEAREST
-        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
           const auto real_input_index =
               area_pixel_compute_source_index<opmath_t>(
@@ -1055,9 +1055,10 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_nearest", [&] {
-        scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, scalar_type, "compute_indices_weights_nearest", [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        opmath_t scale = area_pixel_compute_scale<opmath_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index_ptr = output[0].data_ptr<int64_t>();
         int64_t input_index;
@@ -1067,7 +1068,6 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // index_f32 = (output_index + 0.5) * scale - 0.5
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
-        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
           const auto real_input_index =
               area_pixel_compute_source_index<opmath_t>(
@@ -1104,8 +1104,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     std::vector<Tensor> output;
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
-    AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, scalar_type, "compute_indices_weights_linear", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, scalar_type, "compute_indices_weights_linear", [&] {
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
         auto input_index0_ptr = output[0].data_ptr<int64_t>();
@@ -1228,9 +1228,10 @@ struct HelperInterpCubic : public HelperInterpBase {
     HelperInterpCubic::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpCubic::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, scalar_type, "compute_indices_weights_cubic", [&] {
-        scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, scalar_type, "compute_indices_weights_cubic", [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        opmath_t scale = area_pixel_compute_scale<opmath_t>(input_size, output_size, align_corners, opt_scale);
 
         int64_t input_index;
         int64_t zero = static_cast<int64_t>(0);
@@ -1239,7 +1240,6 @@ struct HelperInterpCubic : public HelperInterpBase {
 
         int64_t * idx_ptr;
         scalar_t * wt_ptr;
-        using opmath_t = at::opmath_type<scalar_t>;
         for (const auto i : c10::irange(output_size)) {
           const auto real_input_index =
               area_pixel_compute_source_index<opmath_t>(
@@ -1388,14 +1388,14 @@ void upsample_generic_Nd_kernel_impl(
 
   if (interp_size > 1) {
     // Nearest also supports uint8 tensor, so need to handle it separately
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        at::ScalarType::BFloat16, iter.dtype(), "upsample_generic_Nd", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16, kHalf, iter.dtype(), "upsample_generic_Nd", [&] {
         // MSVC can not catch constexpr int interp_size here
         constexpr int mode = F::interp_size;
         cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf,
         iter.dtype(), "upsample_generic_Nd", [&] {
         constexpr int mode = F::interp_size;
         cpu_upsample_generic<scalar_t, out_ndims, mode>(iter);
@@ -1630,7 +1630,7 @@ void upsample_nearest2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (_use_vectorized_kernel_cond_2d(output, input)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf,
         input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_h, scales_w});
     });
@@ -1646,7 +1646,7 @@ void _upsample_nearest_exact2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (_use_vectorized_kernel_cond_2d(output, input)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf, input.scalar_type(), "upsample_nearest2d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_h, scales_w});
     });
   } else {
@@ -1662,7 +1662,7 @@ void upsample_nearest3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (_use_vectorized_kernel_cond_3d(output, input)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Byte, at::ScalarType::BFloat16,
+    AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf,
         input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_idx>(output, input, {scales_d, scales_h, scales_w});
     });
@@ -1679,7 +1679,7 @@ void _upsample_nearest_exact3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if (_use_vectorized_kernel_cond_3d(output, input)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Byte, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf, input.scalar_type(), "upsample_nearest3d_channels_last", [&] {
       cpu_upsample_nearest_channels_last<scalar_t, scale_t, nearest_exact_idx>(output, input, {scales_d, scales_h, scales_w});
     });
   } else {
@@ -1711,7 +1711,7 @@ void upsample_bilinear2d_kernel_impl_float(
   // That's not the case for masks though (C == 1), which strongly benefit from
   // using the generic kernel.
   if ((_use_vectorized_kernel_cond_2d(output, input)) || (at::get_num_threads() == 1 && input.size(1) == 3)) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "upsample_bilinear2d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_h, scales_w});
     });
   } else {
@@ -1780,7 +1780,7 @@ void upsample_trilinear3d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   if ((_use_vectorized_kernel_cond_3d(output, input))) {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "upsample_trilinear3d_channels_last", [&] {
       cpu_upsample_linear_channels_last<scalar_t, scale_t>(output, input, align_corners, {scales_d, scales_h, scales_w});
     });
   } else {
