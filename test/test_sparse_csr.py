@@ -3446,7 +3446,8 @@ class TestSparseCompressedTritonKernels(TestCase):
             bsr_dense_mm(lhs.to(torch.double), rhs.to(torch.double))
         with self.assertRaisesRegex(ValueError, "all inputs involved in the matrix product are expected to be at least 2D"):
             bsr_dense_mm(lhs, torch.rand(1, dtype=dtype, device=device))
-        with self.assertRaisesRegex(ValueError, "sizes involved in the matrix product are not compatible for matrix multiplication"):
+        with self.assertRaisesRegex(ValueError,
+                                    "sizes involved in the matrix product are not compatible for matrix multiplication"):
             bsr_dense_mm(lhs, torch.rand(1, 1, dtype=dtype, device=device))
         with self.assertRaisesRegex(ValueError,
                                     r"dense.size\(-1\) == 15 should be divisible by blocksize\[0\] == 16"):
