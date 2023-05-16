@@ -6,6 +6,7 @@ import sys
 import warnings
 
 from copy import deepcopy
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -32,6 +33,21 @@ from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
+
+if config.is_fbcode():
+    from torch._inductor.fb.logging import time_and_log
+else:
+    # no-op decorator
+    def time_and_log(attr: str):
+        def wrap(old_func):
+            @wraps(old_func)
+            def newFunction(*args, **kwargs):
+                return old_func(*args, **kwargs)
+
+            return newFunction
+
+        return wrap
+
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
@@ -195,6 +211,7 @@ def inner_compile_with_cpp_wrapper(inner_compile):
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
+@time_and_log(attr="compilation time (in seconds)")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
