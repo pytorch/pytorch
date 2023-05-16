@@ -266,6 +266,51 @@ def _init_ignored_module_states(
 
 
 @no_type_check
+def _init_device_handle(
+    state: _FSDPState,
+    module: nn.Module,
+    ignored_params: Set[nn.Parameter],
+    device_id: Optional[Union[int, torch.device]],
+) -> _FSDPState:
+    """
+    Determines device handle used for initializing FSDP. If a device is specified by ``device_id``,
+    then returns device handle corresponds to that device type. Otherwise, If the
+    module is already on a non-CPU device, then the device type is that non-CPU device type.
+    If the module is on CPU or meta, then the device type is the current cuda device.
+
+    This method will be called once ignored paramters was determined, as the device handle maybe needed
+    for other initialization.
+    """
+    determined_device = None
+    if device_id is not None:
+        determined_device = (
+            device_id
+            if isinstance(device_id, torch.device)
+            else torch.device(device_id)
+        )
+    if determined_device is None:
+        for param in _get_orig_params(module, ignored_params):
+            if param.device.type in {"cpu", "meta"}:
+                continue
+            if determined_device is None:
+                determined_device = param.device
+            else:
+                if param.device.type != determined_device.type:
+                    raise RuntimeError(
+                        f"FSDP not supports modules on different device type "
+                        f"but got params on {determined_device.type} and {param.device.type}"
+                    )
+        determined_device = determined_device or torch.device(
+            "cuda", torch.cuda.current_device()
+        )
+
+    state._device_handle = _FSDPDeviceHandle.from_device(
+        torch.device("cuda", torch.cuda.current_device())
+    )
+    return state
+
+
+@no_type_check
 def _init_buffer_state(
     state: _FSDPState,
     module: nn.Module,
@@ -430,7 +475,6 @@ def _init_param_handle_from_module(
         device_from_device_id,
         state.rank,
     )
-    state._device_handle = _FSDPDeviceHandle.from_device(state.compute_device)
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
@@ -515,7 +559,6 @@ def _init_param_handles_from_module(
                 device_from_device_id,
                 state.rank,
             )
-            state._device_handle = _FSDPDeviceHandle.from_device(state.compute_device)
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
         _init_param_handle_from_params(state, params, fully_sharded_module)
