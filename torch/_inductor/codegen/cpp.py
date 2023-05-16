@@ -20,6 +20,7 @@ from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
+from ..codecache import code_hash 
 from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
@@ -190,8 +191,10 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
+        content = f.read()
         _, filename = codecache.write(
-            f.read(),
+            content,
+            code_hash(content),
             "h",
         )
     return f'#include "{filename}"'
