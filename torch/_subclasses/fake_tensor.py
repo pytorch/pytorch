@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import threading
 import weakref
 from dataclasses import dataclass
 from functools import partial
@@ -1098,6 +1099,7 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
         self.shape_env = shape_env
+        self._lock = threading.RLock()
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1134,6 +1136,10 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 return func(*args, **kwargs)
 
+        with self._lock:
+            return self.dispatch_impl(func, types, args, kwargs)
+
+    def dispatch_impl(self, func, types, args, kwargs):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymInt, (args, kwargs))
         has_symbolic_sizes = (
