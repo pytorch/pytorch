@@ -160,8 +160,8 @@ class IndexPropagation:
 
         return inner
 
-    def indirect_indexing(self, index, size):
+    def indirect_indexing(self, index, size, check=True):
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.expr is not None:
             return index.expr.expr
-        return self.fallback("indirect_indexing", (index, size), {}).rep
+        return self.fallback("indirect_indexing", (index, size, check), {}).rep

@@ -2915,7 +2915,6 @@
   variants: function, method
   dispatch:
     QuantizedCPU: quantized_index
-  tags: dynamic_output_shape
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -2929,6 +2928,13 @@
   - indices -> DimVector sizes, DimVector strides
   dispatch:
     CPU, CUDA, MPS: index_out
+
+# Used by inductor to signal indexing without bounds checks
+- func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: _unsafe_index
+
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
