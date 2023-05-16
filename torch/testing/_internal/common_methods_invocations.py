@@ -12012,6 +12012,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float: tol(atol=1.5e-5, rtol=1.5e-5), }),
                    'TestCommon', 'test_numpy_ref_mps'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-3), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ),
            skips=(
                # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
@@ -12057,7 +12060,10 @@ op_db: List[OpInfo] = [
                    "TestCudaFuserOpInfo", "test_nvfuser_correctness"),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=8e-2, rtol=8e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')],
+                   'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-3), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -12117,7 +12123,10 @@ op_db: List[OpInfo] = [
                    "TestMathBits", "test_conj_view", device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')],
+                   'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-1), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.

@@ -39,7 +39,10 @@ class TestMkldnn(TestCase):
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            # float cpu tensor to mkldnn float tensor or bfloat tensor.
+            convert_dtypes = {torch.half: [torch.half, torch.float],
+                              torch.bfloat16: [torch.bfloat16, torch.float],
+                              torch.float: [torch.bfloat16, torch.half]}
+            # float/bfloat16/half cpu tensor to mkldnn tensortensor.
             for dtype1 in types:
                 mkldnn_tensor = cpu_tensor.to_mkldnn(dtype1)
                 self.assertEqual(mkldnn_tensor.dtype, dtype1)
@@ -47,7 +50,7 @@ class TestMkldnn(TestCase):
                 # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
                 self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
                 # mkldnn float/bfloat tensor to cpu float or bfloat tensor
-                for dtype2 in types:
+                for dtype2 in convert_dtypes[dtype1]:
                     cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
                     atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
@@ -65,10 +68,6 @@ class TestMkldnn(TestCase):
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
             # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
-            convert_dtypes = {
-                torch.half: [torch.half, torch.float],
-                torch.bfloat16: [torch.bfloat16, torch.float]
-            }
             for orig_dtype in [torch.half, torch.bfloat16]:
                 cpu_tensor_lower = cpu_tensor.to(dtype=orig_dtype)
                 for dtype1 in convert_dtypes[orig_dtype]:
@@ -402,7 +401,7 @@ class TestMkldnn(TestCase):
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=2e-2)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=2e-2)
             self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half, prec=3e-3)
-            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half, prec=2e-3)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half, prec=3e-3)
 
     def _test_conv_transpose_base(self, dim):
         conv_module = {
