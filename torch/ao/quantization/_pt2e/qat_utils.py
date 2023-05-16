@@ -334,6 +334,15 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             # bias can be None
             if original_node is None:
                 continue
+            # We expect the subgraph rewriter to erase the non-literal args of the matched nodes.
+            # However, this is not done for placeholder nodes, since these nodes do not need to
+            # be replaced. Here we filter out these placeholder nodes since they do not need
+            # metadata copying. E.g. we want to filter out `getitem_placeholder` in this pattern:
+            #
+            #   getitem_placeholder -> conv -> bn -> getitem
+            #
+            if any(isinstance(a, Node) for a in original_node.args):
+                continue
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 # Note: Unlike other tensor args like conv weights and biases, literal args are
