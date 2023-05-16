@@ -1,20 +1,36 @@
 import torch
+from typing import Any, List, Sequence, Tuple, TypeVar, Union, overload
 from ._functions import Scatter, Gather
 import warnings
 
 __all__ = ['scatter', 'scatter_kwargs', 'gather']
 
-def is_namedtuple(obj):
+def is_namedtuple(obj: Any) -> bool:
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.
     warnings.warn("is_namedtuple is deprecated, please use the python checks instead")
     return _is_namedtuple(obj)
 
-def _is_namedtuple(obj):
+def _is_namedtuple(obj: Any) -> bool:
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.
     return (
         isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")
     )
 
+
+T = TypeVar("T", dict, list, tuple)
+
+# For some reason, 'scatter' returns a tuple when given a single Tensor input but a list otherwise.
+@overload
+def scatter(
+    inputs: torch.Tensor,
+    target_gpus: Sequence[Union[int, torch.device]],
+    dim: int = ...,
+) -> Tuple[torch.Tensor, ...]:
+    ...
+
+@overload
+def scatter(inputs: T, target_gpus: Sequence[Union[int, torch.device]], dim: int = ...) -> List[T]:
+    ...
 
 def scatter(inputs, target_gpus, dim=0):
     r"""
@@ -33,7 +49,7 @@ def scatter(inputs, target_gpus, dim=0):
             return [list(i) for i in zip(*map(scatter_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
             return [type(obj)(i) for i in zip(*map(scatter_map, obj.items()))]
-        return [obj for targets in target_gpus]
+        return [obj for _ in target_gpus]
 
     # After scatter_map is called, a scatter_map cell will exist. This cell
     # has a reference to the actual function scatter_map, which has references
@@ -43,11 +59,17 @@ def scatter(inputs, target_gpus, dim=0):
     try:
         res = scatter_map(inputs)
     finally:
-        scatter_map = None
+        scatter_map = None  # type: ignore[assignment]
     return res
 
 
-def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
+# TODO More precise types here.
+def scatter_kwargs(
+    inputs: Any,
+    kwargs: Any,
+    target_gpus: Sequence[Union[int, torch.device]],
+    dim: int = 0,
+) -> Any:
     r"""Scatter with support for kwargs dictionary"""
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
     kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
@@ -60,7 +82,7 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     return inputs, kwargs
 
 
-def gather(outputs, target_device, dim=0):
+def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
     r"""
     Gathers tensors from different GPUs on a specified device.
     Use 'cpu' for CPU to avoid a deprecation warning.
@@ -85,5 +107,5 @@ def gather(outputs, target_device, dim=0):
     try:
         res = gather_map(outputs)
     finally:
-        gather_map = None
+        gather_map = None  # type: ignore[assignment]
     return res
