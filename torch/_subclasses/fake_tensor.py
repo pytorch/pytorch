@@ -922,22 +922,13 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
-        if isinstance(elem, torch._subclasses.FakeTensor):
-            # TODO: This is a hack to make sure that we don't double-wrap
-            #       An alternative is to prevent FakeTensor from being called within
-            #       dispatch when the input is already fake
-            # Tried and failed using:
-            # 1) fake_mode.fake_tensor_converter(elem, device)
-            # 2) self = fake_mode.from_tensor(elem)
-            self = elem
-        else:
-            self = torch.Tensor._make_subclass(
-                cls,
-                elem,
-                elem.requires_grad,
-                dispatch_device=True,
-                device_for_backend_keys=device,
-            )
+        self = torch.Tensor._make_subclass(
+            cls,
+            elem,
+            elem.requires_grad,
+            dispatch_device=True,
+            device_for_backend_keys=device,
+        )
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
