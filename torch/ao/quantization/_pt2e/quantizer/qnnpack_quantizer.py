@@ -482,7 +482,7 @@ class QNNPackQuantizer(Quantizer):
                     # find use of act node within the matched pattern
                     act_use_node = None
                     for node in p.nodes:
-                        if node in act_node.users:
+                        if node in act_node.users:  # type: ignore[union-attr]
                             act_use_node = node
                             break
                     if act_use_node is None:

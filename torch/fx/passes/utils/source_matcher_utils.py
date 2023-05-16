@@ -44,7 +44,7 @@ class SourcePartition():
     output_nodes: List[Node] = field(default_factory=list)
 
     # Parameters that are being used
-    params: List[str] = field(default_factory=list)
+    params: List[Node] = field(default_factory=list)
 
 
 @compatibility(is_backward_compatible=False)
