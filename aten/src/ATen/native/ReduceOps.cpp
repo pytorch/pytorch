@@ -2060,6 +2060,21 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!self.is_same_size(other)) {
     return false;
   }
+  // Since the flags like neg/conj should be already handled outside the
+  // TensorIterator, it should be safe to have the following fast path by
+  // ensuring the storage and strides exactly the same.
+  if (self.is_alias_of(other)
+      && self.storage_offset() == other.storage_offset()
+      && self.dtype() == other.dtype()
+      && self.is_contiguous() == other.is_contiguous()
+      && self.strides().equals(other.strides())
+      // Extra checks to ensure the safety in case cpu_equal is directly called in C++.
+      && self.layout() == other.layout()
+      && self.is_neg() == other.is_neg()
+      && self.is_conj() == other.is_conj()) {
+    return true;
+  }
+
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
     .add_input(self)

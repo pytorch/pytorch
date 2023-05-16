@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <ATen/ScalarOps.h>
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
@@ -373,7 +374,7 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-bool use_mkldnn(const Tensor& input) {
+static bool use_mkldnn(const Tensor& input) {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
@@ -577,8 +578,9 @@ inline void _rrelu_with_noise_train(
     const Scalar& lower_,
     const Scalar& upper_,
     c10::optional<Generator> generator) {
-  scalar_t lower = lower_.to<scalar_t>();
-  scalar_t upper = upper_.to<scalar_t>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t lower = lower_.to<opmath_t>();
+  opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
   scalar_t* input_data = input.data_ptr<scalar_t>();
@@ -588,7 +590,7 @@ inline void _rrelu_with_noise_train(
   for (const auto i : c10::irange(input.numel())) {
     if (input_data[i] <= 0) {
       at::uniform_real_distribution<double> uniform(lower, upper);
-      const scalar_t r = (scalar_t)uniform(gen);
+      const opmath_t r = (opmath_t)uniform(gen);
       output_data[i] = input_data[i] * r;
       noise_data[i] = r;
     } else {

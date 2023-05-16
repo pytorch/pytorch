@@ -40,8 +40,9 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
-    export USE_UCC=1
-    export USE_SYSTEM_UCC=1
+    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
+    export USE_UCC=0
+    export USE_SYSTEM_UCC=0
   fi
 fi
 
@@ -196,7 +197,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   if [[ "$CUDA_VERSION" == "cpu" ]]; then
     # Build torch, the Python module, and tests for CPU-only
-    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
   else
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi

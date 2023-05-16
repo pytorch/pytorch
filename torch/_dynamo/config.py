@@ -4,7 +4,6 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-
 from . import external_utils
 
 
@@ -99,7 +98,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
-replay_record_enabled = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
@@ -109,6 +108,10 @@ print_graph_breaks = False
 
 # Show a warning for every specialization
 print_specializations = False
+
+# Simplify guards, summarizing static and dynamic constraints on dimensions.
+# NOTE: This only has an effect when dynamic_shapes=True.
+summarize_dim_constraints = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -164,6 +167,12 @@ repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
 # has diverged so that we should treat it as an accuracy failure
 repro_tolerance = 1e-3
 
+# If True, when testing if two models are the same, we will test them against
+# a third fp64 reference and only report a problem if the RMSE relative to the
+# fp64 is greater.  However, this will use more memory; you may disable this
+# if memory usage is too high.
+same_two_models_use_fp64 = True
+
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
@@ -215,8 +224,15 @@ allow_rnn = False
 # been seen before.
 error_on_recompile = False
 
+# reports why guards fail. Useful to identify the guards failing frequently and
+# causing recompilations.
+report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
+
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+numpy_ndarray_as_tensor = False
 
 
 def is_fbcode():
@@ -231,11 +247,6 @@ elif is_fbcode():
     debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
 else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
-
-
-# this is to resolve a import problem in fbcode, we will be deleting
-# this very shortly
-DO_NOT_USE_legacy_non_fake_example_inputs = False
 
 
 _save_config_ignore = {
