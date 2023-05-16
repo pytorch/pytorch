@@ -10236,7 +10236,7 @@
     CPU: foreach_tensor_addcdiv_tensor_slow_
     CUDA: foreach_tensor_addcdiv_tensor_cuda_
   autogen: _foreach_addcdiv.Tensor_out
-  
+
 - func: _foreach_addcmul.Scalar(Tensor[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
