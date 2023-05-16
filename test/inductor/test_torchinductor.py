@@ -8,6 +8,7 @@ import itertools
 import math
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -6263,6 +6264,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
                 code = run_and_get_triton_code(fn_opt)
 
+                # this cannot be optimized away, value too large
+                self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
         def test_optimize_compute(self):
@@ -6292,13 +6295,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_computed_indirect_mask(self):
             def fn(x, n):
                 tmp = torch.arange(n, device=x.device)
+                # Complicated expression so it isn't collapsed into direct indexing
+                tmp = tmp.pow(1.2).to(torch.int64).clamp(min=0, max=n - 1)
                 return x[tmp] + 1
 
             x = torch.randn(8, device="cuda")
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
-            self.assertTrue("tl.load(in_ptr0 + (x0), xmask)" in code)
+            self.assertIsNotNone(
+                re.search("tl.load(in_ptr0 + (tmp[0-9]+), xmask)", code)
+            )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):
