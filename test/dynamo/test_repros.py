@@ -37,10 +37,11 @@ from torch.nn import functional as F
 
 _orig_module_call = torch.nn.Module.__call__
 
-# Custom operator that only supports CPU
+# Custom operator that only supports CPU and Meta
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
+lib.impl("foo", torch.sin, "Meta")
 
 
 requires_cuda = functools.partial(
