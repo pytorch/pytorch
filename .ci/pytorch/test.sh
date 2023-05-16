@@ -560,11 +560,6 @@ test_libtorch() {
     # Run Lazy Tensor cpp tests
     if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
       LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    elif [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
-        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-        mkdir -p $TEST_REPORTS_DIR
-
-        "$TORCH_BIN_DIR"/test_lazy --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     else
       python test/run_test.py --cpp --verbose -i cpp/test_lazy
     fi
@@ -578,6 +573,9 @@ test_libtorch() {
     wait
 
     if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
+        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+        mkdir -p $TEST_REPORTS_DIR
+
         # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
         # this is due to the fact that a python executable is used or some logic
         # inside run_test. This test usually takes only minutes to run
