@@ -682,7 +682,7 @@ CalcDsDb(
     db_vec += fVec::loadu(db_ptr + j + fVec::size()) * gamma_vec1;
   }
   if (j < D) {
-    const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j);
+    const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j, D - j);
     fVec gamma_vec0, gamma_vec1;
     std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
     if (D - j > fVec::size()) {
