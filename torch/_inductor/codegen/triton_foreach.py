@@ -1,7 +1,7 @@
 import itertools
 
 from .. import config
-from ..utils import ceildiv
+from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
@@ -48,6 +48,7 @@ class ForeachKernel(Kernel):
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
+        self.block_count = 0
 
     @staticmethod
     def _compute_num_blocks(tensor_elem_counts, block_size):
@@ -57,52 +58,33 @@ class ForeachKernel(Kernel):
 
         return num_blocks
 
-    def _gen_tile_ptrs(self, code):
-        block_count = 0
-        for index, num_elems in enumerate(self.tensor_elem_counts):
-            num_blocks = ceildiv(num_elems, self.block_size)
-            upper_bound_pid = block_count + num_blocks
-            lower_bound_pid = block_count
-            last_block_elem_count = self.block_size - (
-                num_blocks * self.block_size - num_elems
-            )
-
-            if block_count == 0:
-                cond = "if"
-                # initialize tile ptrs
-                code.splice("xmask = tl.arange(0, BLOCK_SIZE) < BLOCK_SIZE\n")
-                for list_tracker in self.lists.values():
-                    code.splice(
-                        f"{list_tracker.var}_tile_ptrs = {list_tracker.arg_names[index]} + tl.arange(0, BLOCK_SIZE)"
-                    )
+    def codegen_pid_range(self, code, num_elems):
+        num_blocks = ceildiv(num_elems, self.block_size)
+        upper_bound_pid = self.block_count + num_blocks
+        lower_bound_pid = self.block_count
+        if self.block_count == 0:
+            cond = "if"
+        else:
+            cond = "elif"
+        code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
+        with code.indent():
+            if self.block_count == 0:
+                code.splice("pid_offset = pid")
             else:
-                cond = "elif"
-
-            code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
-            with code.indent():
-                code.splice(f"xoffset = (pid - {lower_bound_pid}) * BLOCK_SIZE")
-                code.splice("xindex = xoffset + tl.arange(0, BLOCK_SIZE)")
-                for list_tracker in self.lists.values():
-                    list_tracker.codegen_tile_ptrs(code, index)
-
-                code.splice(f"if pid == {upper_bound_pid - 1}:")
-                with code.indent():
-                    code.splice(
-                        f"xmask = tl.arange(0, BLOCK_SIZE) < {last_block_elem_count}"
-                    )
-
-            block_count += num_blocks
+                code.splice(f"pid_offset = pid - {lower_bound_pid}")
+        self.block_count += num_blocks
 
     def create_sub_kernel(self, *groups, index_dtype, mutations, reduction_hint):
         sub_kernel = TritonKernel(
             *groups,
             index_dtype=index_dtype,
             mutations=mutations,
-            pid_cache=dict(),
+            pid_cache={"tl.program_id(0)": "pid_offset"},
             reduction_hint=reduction_hint,
         )
         sub_kernel.args = self.args
         sub_kernel.iter_vars_count = self.iter_vars_count
+        sub_kernel.cse.iter_buffer_ids = self.cse.iter_buffer_ids
         self.sub_kernels.append(sub_kernel)
         return sub_kernel
 
@@ -117,6 +99,13 @@ class ForeachKernel(Kernel):
         return (
             f"@template(num_stages=1, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
+        )
+
+    def grid(self):
+        return (
+            self.block_count,
+            1,
+            1,
         )
 
     def codegen_kernel(self, name=None):
@@ -148,17 +137,19 @@ class ForeachKernel(Kernel):
 
         with code.indent():
             code.splice("pid = tl.program_id(0)")
-            code.splice(f"BLOCK_SIZE: tl.constexpr = {self.block_size}")
+            code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
 
             for sub_kernel in self.sub_kernels:
-                sub_kernel.codegen_body()
-                code.splice(sub_kernel.body)
+                num_elems = int(sympy_product(sub_kernel.numels))
+                self.codegen_pid_range(code, num_elems)
+                with code.indent():
+                    code.splice(f"xnumel = {num_elems}")
+                    sub_kernel.codegen_body()
+                    code.splice(sub_kernel.body)
 
-            # self._gen_tile_ptrs(code)
-
-            # code.splice(self.loads)
-            # code.splice(self.compute)
-            # code.splice(self.stores)
+            code.splice("else:")
+            with code.indent():
+                code.splice("pass")
 
         print(code.getvalue())
         return code.getvalue()
@@ -180,5 +171,5 @@ class ForeachKernel(Kernel):
                 V.graph.scheduler.current_device.index
             )
             code.writeline(
-                f"{name}.run({call_args_str}, grid=({self.grid}), stream={stream_name})"
+                f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )

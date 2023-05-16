@@ -1135,7 +1135,7 @@ class TritonScheduling:
         """
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
-        node_schedule = self.generate_node_schedule(self, nodes, numel, rnumel)
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Schedule:\n %s", node_schedule)
