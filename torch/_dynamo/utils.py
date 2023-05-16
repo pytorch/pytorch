@@ -1540,6 +1540,17 @@ def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
+forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+state_dict_hook_names = [
+    "_state_dict_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+]
+all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
+
+
 def nnmodule_has_hooks(
     mod,
     check_forward_hooks=False,
@@ -1557,28 +1568,11 @@ def nnmodule_has_hooks(
         and not check_state_dict_hooks
     )
     if check_forward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_forward_pre_hooks",
-                "_forward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(forward_hook_names)
     if check_backward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(state_dict_hook_names)
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
 
 

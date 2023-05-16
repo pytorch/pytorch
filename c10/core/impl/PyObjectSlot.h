@@ -125,7 +125,7 @@ struct C10_API PyObjectSlot {
   bool check_interpreter(PyInterpreter* interpreter);
 
   // Check if the PyObjectSlot is holding a PyObject, owned or non-owned
-  bool has_pyobj() const;
+  bool has_pyobj();
 
   bool owns_pyobj();
 
