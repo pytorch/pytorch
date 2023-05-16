@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import functools
 from typing import Any
 
@@ -5,11 +7,12 @@ import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
 
 import torch
+import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
 
-_LENGTH_LIMIT: int = 80
+_LENGTH_LIMIT: int = 89
 
 # NOTE(bowbao): This is a shim over `torch.onnx._internal.diagnostics`, which is
 # used in `torch.onnx`, and loaded with `torch`. Hence anything related to `onnxscript`
@@ -39,7 +42,7 @@ def format_argument(obj: Any) -> str:
             )
         )
         diag.with_location(utils.function_location(formatter))
-        diagnostics.export_context().add_diagnostic(diag)
+        diagnostics.export_context().log(diag)
 
     return result_str
 
@@ -61,6 +64,11 @@ def _torch_nn_module(obj: torch.nn.Module) -> str:
 @_format_argument.register
 def _torch_fx_graph_module(obj: torch.fx.GraphModule) -> str:
     return f"torch.fx.GraphModule({obj.__class__.__name__})"
+
+
+@_format_argument.register
+def _torch_fx_node(obj: torch.fx.Node) -> str:
+    return f"torch.fx.Node(target: {obj.target})"
 
 
 @_format_argument.register
