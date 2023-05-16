@@ -2,6 +2,7 @@ import functools
 import logging
 import math
 import numbers
+from itertools import chain
 
 import torch
 import torch._decomp as decomp
@@ -103,6 +104,13 @@ def check_device(a: Tensor, b: Tensor):
     return a.is_cuda and b.is_cuda
 
 
+def is_symbolic(a: Tensor, b: Tensor):
+    return any(
+        isinstance(x, torch.SymInt)
+        for x in chain(a.size(), a.stride(), b.size(), b.stride())
+    )
+
+
 def get_padded_length(x, alignment_size):
     if alignment_size == 0 or x % alignment_size == 0:
         return 0
@@ -121,6 +129,7 @@ def addmm(input, mat1, mat2, *, beta=1, alpha=1):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.addmm, input=input)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -161,16 +170,60 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
         return torch.ops.aten.addmm(input, mat1, mat2)[:-m_padded_length, :]
 
 
-def should_pad_bench(mat1, mat2, op, input=None):
-    assert utils.has_triton()
+_PAD_MM_CACHE = None
 
-    import triton.testing
+
+def get_pad_cache():
+    global _PAD_MM_CACHE
+    if _PAD_MM_CACHE is None:
+        _PAD_MM_CACHE = torch._inductor.codecache.LocalCache()
+
+    return _PAD_MM_CACHE
+
+
+def get_cached_should_pad(key):
+    return get_pad_cache().lookup(key)
+
+
+def set_cached_should_pad(key, value):
+    return get_pad_cache().set_value(key, value=value)
+
+
+def should_pad_bench_key(mat1, mat2, op, input=None):
+    def tensor_key(t):
+        return (t.shape, t.stride(), t.dtype)
+
+    key = (
+        tensor_key(mat1),
+        tensor_key(mat2),
+        op,
+        input if input is None else tensor_key(input),
+    )
+
+    return str(key)
+
+
+def should_pad_bench(mat1, mat2, op, input=None):
+    key = should_pad_bench_key(mat1, mat2, op, input)
+
+    cached_pad = get_cached_should_pad(key)
+    if cached_pad is not None:
+        return cached_pad
+
+    should_pad = _should_pad_bench_impl(mat1, mat2, op, input)
+
+    set_cached_should_pad(key, should_pad)
+
+    return should_pad
+
+
+def _should_pad_bench_impl(mat1, mat2, op, input=None):
+    if not utils.has_triton():
+        return False
 
     do_bench = functools.partial(
-        triton.testing.do_bench,
+        utils.do_bench,
         warmup=5,
-        rep=100,
-        fast_flush=True,
     )
 
     with no_dispatch():
@@ -190,8 +243,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
 
         mat1 = torch.randn_like(mat1)
         mat2 = torch.randn_like(mat2)
-        warmup = 5
-        rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2),
@@ -203,9 +254,6 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 lambda: op(input, mat1, mat2),
             )
 
-        mat1_pad = torch.randn_like(mat1)
-        mat2_pad = torch.randn_like(mat2)
-
         if op is torch.ops.aten.addmm:
             input_pad = None
             if input is not None and input.is_cuda:
@@ -213,8 +261,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
             pad_time = do_bench(
                 lambda: pad_addmm(
                     input_pad,
-                    mat1_pad,
-                    mat2_pad,
+                    mat1,
+                    mat2,
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
@@ -223,8 +271,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
         elif op is torch.ops.aten.mm:
             pad_time = do_bench(
                 lambda: pad_mm(
-                    mat1_pad,
-                    mat2_pad,
+                    mat1,
+                    mat2,
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
@@ -233,8 +281,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
         else:
             pad_time = do_bench(
                 lambda: pad_bmm(
-                    mat1_pad,
-                    mat2_pad,
+                    mat1,
+                    mat2,
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
@@ -252,6 +300,7 @@ def mm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.mm)
     ):
         m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
@@ -283,6 +332,7 @@ def bmm_decomp(mat1, mat2):
     if (
         config.shape_padding
         and check_device(mat1, mat2)
+        and not is_symbolic(mat1, mat2)
         and should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
     ):
         m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
