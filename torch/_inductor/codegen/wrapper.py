@@ -140,7 +140,10 @@ class EnterCudaDeviceContextManagerLine:
         if V.graph.cpp_wrapper:
             code.writeline("\n")
             if self.first_time:
-                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+                if torch.version.hip is None:
+                    code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+                else:
+                    code.writeline(f"at::hip::HIPGuard device_guard({self.device_idx});")
             else:
                 code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
@@ -1097,43 +1100,82 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.cuda = True
 
     def write_prefix(self):
-        self.prefix.splice(
-            """
-            #include <c10/util/Exception.h>
-            #include <c10/cuda/CUDAGuard.h>
+        if torch.version.hip is None:
+            self.prefix.splice(
+                """
+                #include <c10/util/Exception.h>
+                #include <c10/cuda/CUDAGuard.h>
 
-            #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                         \\
-            do {                                                                \\
-                CUresult __err = EXPR;                                          \\
-                if (__err != CUDA_SUCCESS) {                                    \\
-                    AT_ERROR("CUDA driver error: ", static_cast<int>(__err));   \\
-                }                                                               \\
-            } while (0)
+                #define AT_CUDA_DRIVER_CHECK_OVERRIDE(EXPR)                         \\
+                do {                                                                \\
+                    CUresult __err = EXPR;                                          \\
+                    if (__err != CUDA_SUCCESS) {                                    \\
+                        AT_ERROR("CUDA driver error: ", static_cast<int>(__err));   \\
+                    }                                                               \\
+                } while (0)
 
-            static inline CUfunction loadKernel(const std::string &filePath,
-                    const std::string &funcName) {
-                CUmodule mod;
-                CUfunction func;
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                return func;
-            }
+                static inline CUfunction loadKernel(const std::string &filePath,
+                        const std::string &funcName) {
+                    CUmodule mod;
+                    CUfunction func;
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleLoad(&mod, filePath.c_str()));
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                    return func;
+                }
 
-            static inline void launchKernel(
-                    CUfunction func,
-                    int gridX,
-                    int gridY,
-                    int gridZ,
-                    int numWraps,
-                    int sharedMemBytes,
-                    void* args[],
-                    int device_index) {
-                AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
-                    at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
-            }
-            """
-        )
+                static inline void launchKernel(
+                        CUfunction func,
+                        int gridX,
+                        int gridY,
+                        int gridZ,
+                        int numWraps,
+                        int sharedMemBytes,
+                        void* args[],
+                        int device_index) {
+                    AT_CUDA_DRIVER_CHECK_OVERRIDE(cuLaunchKernel(
+                        func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
+                        at::cuda::getCurrentCUDAStream(device_index), args, nullptr));
+                }
+                """
+            )
+        else:
+            self.prefix.splice(
+                """
+                #include <c10/util/Exception.h>
+                #include <c10/hip/HIPGuard.h>
+
+                #define AT_HIP_DRIVER_CHECK_OVERRIDE(EXPR)                         \\
+                do {                                                                \\
+                    hipError_t __err = EXPR;                                        \\
+                    if (__err != hipSuccess) {                                      \\
+                        AT_ERROR("HIP driver error: ", static_cast<int>(__err));    \\
+                    }                                                               \\
+                } while (0)
+
+                static inline hipFunction_t loadKernel(const std::string &filePath,
+                        const std::string &funcName) {
+                    hipModule_t mod;
+                    hipFunction_t func;
+                    AT_HIP_DRIVER_CHECK_OVERRIDE(hipModuleLoad(&mod, filePath.c_str()));
+                    AT_HIP_DRIVER_CHECK_OVERRIDE(hipModuleGetFunction(&func, mod, funcName.c_str()));
+                    return func;
+                }
+
+                static inline void launchKernel(
+                        hipFunction_t func,
+                        int gridX,
+                        int gridY,
+                        int gridZ,
+                        int numWraps,
+                        int sharedMemBytes,
+                        void* args[],
+                        int device_index) {
+                    AT_HIP_DRIVER_CHECK_OVERRIDE(hipModuleLaunchKernel(
+                        func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
+                        at::hip::getCurrentHIPStream(device_index), args, nullptr));
+                }
+                """
+            )
 
     def define_kernel(
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
@@ -1144,21 +1186,25 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def generate(self):
         self.prefix.writeline("\n")
         for kernel in self.src_to_kernel.values():
-            self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
+            if torch.version.hip is None:
+                self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
+            else:
+                self.prefix.writeline(f"static hipFunction_t {kernel} = nullptr;")
         self.prefix.writeline("\n")
         return super().generate()
 
     def generate_load_kernel(self, name, params):
         mangled_name = params.get("mangled_name", None)
         assert mangled_name is not None, "missing mangled_name"
-        cubin_path = params.get("cubin_path", None)
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
+        bin_path = params.get(f"{bin_type}_path", None)
         assert os.path.exists(
-            cubin_path
-        ), "cubin file should already exist at this moment"
+            bin_path
+        ), "{bin_type} file should already exist at this moment"
 
         self.writeline(f"if ({name} == nullptr) {{")
         self.writeline(
-            f"""     {name} = loadKernel("{cubin_path}", "{mangled_name}");"""
+            f"""     {name} = loadKernel("{bin_path}", "{mangled_name}");"""
         )
         self.writeline("}")
 
@@ -1181,9 +1227,14 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")
             else:
-                self.writeline(
-                    f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
-                )
+                if torch.version.hip is None:
+                    self.writeline(
+                        f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                    )
+                else:
+                    self.writeline(
+                        f"hipDeviceptr_t {var_name} = reinterpret_cast<hipDeviceptr_t>({arg}.data_ptr());"
+                    )
             new_args.append(f"&{var_name}")
 
         return ", ".join(new_args)

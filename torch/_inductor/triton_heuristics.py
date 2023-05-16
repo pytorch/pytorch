@@ -268,7 +268,11 @@ class CachingAutotuner(KernelInterface):
             "shared_mem": launcher.bin.shared,
             "stream": stream,
         }
-        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+
+        if torch.version.hip is None:
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
+        else:
+            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco_path"])
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """

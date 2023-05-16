@@ -79,6 +79,11 @@ def cubin_cache_dir():
     os.makedirs(cubin_dir, exist_ok=True)
     return cubin_dir
 
+@functools.lru_cache(None)
+def hsaco_cache_dir():
+    hsaco_dir = os.path.join(cache_dir(), "hsaco")
+    os.makedirs(hsaco_dir, exist_ok=True)
+    return hsaco_dir
 
 class PersistentCache:
     def __init__(self):
@@ -523,7 +528,10 @@ def get_include_and_linking_paths(
         if macros:
             macros = f"-D{macros}"
         if cuda:
-            libs += ["c10_cuda", "cuda", "torch_cuda"]
+            if torch.version.hip is None:
+                libs += ["c10_cuda", "cuda", "torch_cuda"]
+            else:
+                libs += ["c10_hip", "torch_hip"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -586,17 +594,31 @@ class CudaKernelParamCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def set(cls, key, params, cubin):
+    def set(cls, key, params, binary):
         from filelock import FileLock
+        import os
+        import shutil
 
-        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
-        params["cubin_path"] = cubin_path
+        if torch.version.hip is None:
+            cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
+            params["cubin_path"] = cubin_path
+        else:
+            hsaco_path = os.path.join(hsaco_cache_dir(), f"{key}.hsaco")
+            params["hsaco_path"] = hsaco_path
+
         lock_dir = get_lock_dir()
+
+        # There is some divergence between CUDA and ROCm here.
+        # On ROCm's triton we only have the the path to the binary, not the binary itself.
+        # For ROCm we will copy the binary to the new location instead of writing to file
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             cls.cache[key] = params
-            with open(cubin_path, "wb") as f:
-                f.write(cubin)
+            if torch.version.hip is None:
+                with open(cubin_path, "wb") as f:
+                    f.write(binary)
+            else:
+                shutil.copy(binary, hsaco_path)
 
     @classmethod
     def get(cls, key):
