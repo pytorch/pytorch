@@ -6,6 +6,7 @@ from torch.cuda._utils import _get_device_index
 from torch.cuda.amp import autocast
 from torch._utils import ExceptionWrapper
 
+__all__ = ['parallel_apply']
 
 def get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
     if isinstance(obj, torch.Tensor):

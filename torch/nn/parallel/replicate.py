@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     import torch.jit
     import torch.jit._state
 
+__all__ = ['replicate']
 
 def _is_script_module(module: Module) -> bool:
     import torch.jit
