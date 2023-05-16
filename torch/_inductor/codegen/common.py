@@ -536,7 +536,7 @@ class KernelArgs:
             live_outs.add(outer)
         return live_outs
 
-# @Yueming Hao TODO: check if uint16+ exisits in torch
+# PyTorch only supports uint8. Use this list for future updates.
 _uint_types = [torch.uint8, ]
 
 def _torch_uint_type_to_tl_type(dtype):
@@ -622,7 +622,7 @@ class CSE:
         expr: typing.Union[str, CSEVariable],
         write=True,
         assignment=True,
-        args=None,
+        origin_args=None,
         name=None,
     ) -> CSEVariable:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
@@ -640,12 +640,11 @@ class CSE:
                     )
                 if assignment:
                     line = f"{self.prefix}{var} = {expr}{self.suffix}"
-                        
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
-                if assignment and name == 'constant' and args[1] in _uint_types:
-                    target_tl_type = _torch_uint_type_to_tl_type(args[1])
+                if assignment and name == 'constant' and origin_args[1] in _uint_types:
+                    target_tl_type = _torch_uint_type_to_tl_type(origin_args[1])
                     line = f"{self.prefix}{var} = {self.prefix}{var}.to({target_tl_type})"
                     buffer.writeline(line)
 
