@@ -109,18 +109,6 @@ def define_targets(rules):
         visibility = ["//c10/test:__pkg__"],
     )
 
-    rules.cc_library(
-        name = "impl/cow/try_ensure",
-        srcs = ["impl/cow/try_ensure.cpp"],
-        hdrs = ["impl/cow/try_ensure.h"],
-        deps = [
-            ":base",
-            ":impl/cow/context",
-            "//c10/util:base",
-        ],
-        visibility = ["//c10/test:__pkg__"],
-    )
-
     rules.filegroup(
         name = "headers",
         srcs = rules.glob(
