@@ -27,10 +27,15 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def post_already_uptodate(pr: GitHubPR, onto_branch: str, dry_run: bool) -> None:
+def post_already_uptodate(
+    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool
+) -> None:
     msg = f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date."
     def_branch = pr.default_branch()
-    if onto_branch != f"refs/remotes/origin/{def_branch}":
+    def_branch_fcn = f"refs/remotes/{repo.remote}/{def_branch}"
+    if onto_branch != def_branch_fcn and repo.rev_parse(
+        def_branch_fcn
+    ) != repo.rev_parse(onto_branch):
         def_branch_url = f"https://github.com/{pr.org}/{pr.project}/tree/{def_branch}"
         msg += f" Try rebasing against [{def_branch}]({def_branch_url}) by issuing:"
         msg += f"\n`@pytorchbot rebase -b {def_branch}`"
@@ -62,7 +67,7 @@ def rebase_onto(
     else:
         push_result = repo._run_git("push", "-f", remote_url, refspec)
     if "Everything up-to-date" in push_result:
-        post_already_uptodate(pr, onto_branch, dry_run)
+        post_already_uptodate(pr, repo, onto_branch, dry_run)
     else:
         gh_post_comment(
             pr.org,
@@ -160,7 +165,7 @@ def rebase_ghstack_onto(
             f"Skipped https://github.com/{org}/{project}/pull/{pr.pr_num}"
             in push_result
         ):
-            post_already_uptodate(pr, onto_branch, dry_run)
+            post_already_uptodate(pr, repo, onto_branch, dry_run)
 
 
 @contextlib.contextmanager

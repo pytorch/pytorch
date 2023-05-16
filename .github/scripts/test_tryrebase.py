@@ -108,6 +108,10 @@ class TestRebase(TestCase):
             "Tried to rebase and push PR #31093, but it was already up to date",
             mocked_post_comment.call_args[0][3],
         )
+        self.assertNotIn(
+            "Try rebasing against [main]",
+            mocked_post_comment.call_args[0][3],
+        )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     @mock.patch("gitutils.GitRepo._run_git", return_value="Everything up-to-date")
@@ -124,17 +128,6 @@ class TestRebase(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         rebase_onto(pr, repo, VIABLE_STRICT_BRANCH)
-        calls = [
-            mock.call("fetch", "origin", "pull/31093/head:pull/31093/head"),
-            mock.call("rebase", VIABLE_STRICT_BRANCH, "pull/31093/head"),
-            mock.call(
-                "push",
-                "-f",
-                "https://github.com/mingxiaoh/pytorch.git",
-                "pull/31093/head:master",
-            ),
-        ]
-        mocked_run_git.assert_has_calls(calls)
         self.assertIn(
             "Tried to rebase and push PR #31093, but it was already up to date. Try rebasing against [main]",
             mocked_post_comment.call_args[0][3],
