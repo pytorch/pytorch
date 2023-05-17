@@ -696,3 +696,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y, z).sum().backward()
 
         self.assertEqual(cnts.frame_count, 2)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

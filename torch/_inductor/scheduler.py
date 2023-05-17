@@ -1235,14 +1235,7 @@ class Scheduler:
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                with config.patch(
-                    inplace_buffers=(
-                        config.inplace_buffers
-                        # workaround https://github.com/openai/triton/issues/1615
-                        and not (ir.is_triton(device) and node.is_reduction())
-                    )
-                ):
-                    self.get_backend(device).codegen_nodes(node.get_nodes())
+                self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
