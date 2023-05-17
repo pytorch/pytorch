@@ -987,12 +987,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
       TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
       p.seqlen_k_ptr = (int32_t*)seqlen_k->data_ptr();
     }
-
-    if (scale.has_value()) {
-      p.scale = float(*scale);
-    } else {
-      p.scale = float(1.0 / std::sqrt(float(p.head_dim)));
-    }
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));

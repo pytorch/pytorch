@@ -284,11 +284,7 @@ _efficient_attention_backward(
     p.num_batches = cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     p.num_heads = nH;
     p.custom_mask_type = custom_mask_type;
-    if (scale.has_value()) {
-      p.scale = float(*scale);
-    } else {
-      p.scale = float(1.0 / std::sqrt(float(p.head_dim)));
-    }
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     if (cu_seqlens_q.has_value()) {
       p.cu_seqlens_q_ptr = (int32_t*)cu_seqlens_q->data_ptr();
       p.cu_seqlens_k_ptr = (int32_t*)cu_seqlens_k->data_ptr();
