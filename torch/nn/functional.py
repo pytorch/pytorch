@@ -3165,7 +3165,7 @@ def binary_cross_entropy_with_logits(
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
         pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+                If provided it's repeated to match input tensor shape.
 
     Examples::
 
