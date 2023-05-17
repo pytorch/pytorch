@@ -894,7 +894,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
             self.assertEqual(
                 self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2), (0, 3)],
+                [(0, 1), (0, 2)],
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
@@ -1010,6 +1010,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             with self.assertRaisesRegex(Exception, "overwritten by a subsequent run."):
                 out2 + out2
+
+        @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+        def test_conv_benchmark(self):
+            with torch.backends.cudnn.flags(
+                enabled=True, benchmark=True, deterministic=False
+            ):
+                m = torch.nn.Conv2d(5, 6, [3, 3]).cuda()
+                inp = torch.randn([2, 5, 16, 16]).cuda()
+
+                @torch.compile()
+                def foo(m, inp):
+                    return m(inp)
+
+                foo(m, inp)
 
         def test_single_stream_use(self):
             @torch.compile()
