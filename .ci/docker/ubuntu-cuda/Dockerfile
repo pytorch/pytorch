@@ -137,8 +137,15 @@ RUN rm install_cudnn.sh
 # [Optional] Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
 COPY ./common/install_inductor_benchmark_deps.sh ./common/common_utils.sh ./
+COPY ci_commit_pins/vision.txt vision.txt
+COPY ci_commit_pins/audio.txt audio.txt
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
+COPY ci_commit_pins/text.txt text.txt
+
 RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
 
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
