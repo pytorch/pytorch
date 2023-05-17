@@ -76,7 +76,8 @@ class Match:
 
     def erase_nodes(self, graph: torch.fx.Graph):
         for n in reversed(self.nodes):
-            graph.erase_node(n)
+            if not n._erased:
+                graph.erase_node(n)
 
     def output_nodes(self):
         return [
@@ -95,10 +96,13 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
-            trace_fn(replacement_fn, [arg.meta["val"] for arg in args]),
+            replacement,
             args,
         )
 
@@ -143,7 +147,7 @@ class MatchContext:
         return {
             pattern: node
             for pattern, node in self.pattern_to_node.items()
-            if pattern.has_multiple_users()
+            if pattern.has_multiple_users() and node is not None
         }
 
 
@@ -318,7 +322,7 @@ class _TargetArgsExpr(_TargetExpr):
             return FailedMatch("function_mismatch")
 
         if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users")
+            return FailedMatch(f"multiple_users {node}")
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -403,10 +407,11 @@ class ListOf(PatternExpr):
     Matches a repeated pattern
     """
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, partial=False):
         super().__init__()
         assert isinstance(pattern, PatternExpr)
         self.pattern = pattern
+        self.partial = partial
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.pattern})"
@@ -418,15 +423,21 @@ class ListOf(PatternExpr):
         # Propogating patterns with multiple users will ensure we don't revisit
         # the same nodes
         pattern_to_node = ctx.filter_multi_user_patterns()
+        matched = False
         for i, child_node in enumerate(node):
             child_ctx = MatchContext(
                 ctx.outputs, pattern_to_node, graph=child_node.graph
             )
             child_match = child_ctx.match(self.pattern, child_node)
-            if not child_match:
-                return FailedMatch(f"list[{i}]: {child_match}")
             pattern_to_node = child_ctx.filter_multi_user_patterns()
+            if not child_match:
+                if not self.partial:
+                    return FailedMatch(f"list[{i}]: {child_match}")
+                continue
+            matched = True
             m.extend(child_match.bundle())
+        if not matched:
+            return FailedMatch("list: no_match")
         return m.bundle()
 
 
@@ -658,7 +669,7 @@ def register_replacement(
         search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
-            ignore_types=(int, float, torch.device, torch.dtype),
+            ignore_types=(int, float, list, torch.device, torch.dtype),
             argnames=argnames,
             scalar_workaround=scalar_workaround,
         )
@@ -748,6 +759,9 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
+    def clear(self):
+        self.patterns.clear()
+
 
 def _not_implemented(*args, **kwargs):
     raise NotImplementedError()
@@ -768,6 +782,8 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
             return KeywordArg(inv_scalar_workaround[x])
         if type(x) in ignore_types:
+            return Ignored()
+        if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
         return x
 
@@ -791,11 +807,16 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
 
         def call_function(self, target, args, kwargs):
             args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            if list in ignore_types:
+                # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
+                args = [process_arg(a) for a in args]
+                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n):
             rv = super().run_node(n)
-            rv.users = len(n.users)
+            if not isinstance(rv, tuple):
+                rv.users = len(n.users)
             return rv
 
     pattern = Converter(gm).run()
