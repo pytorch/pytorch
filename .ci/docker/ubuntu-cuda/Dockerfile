@@ -136,7 +136,8 @@ RUN rm install_cudnn.sh
 
 # [Optional] Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
-COPY ./common/install_inductor_benchmark_deps.sh ./common/common_utils.sh ./
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh 
+COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/vision.txt vision.txt
 COPY ci_commit_pins/audio.txt audio.txt
 COPY ci_commit_pins/huggingface.txt huggingface.txt
