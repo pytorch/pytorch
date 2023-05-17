@@ -121,10 +121,10 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
       [computeEncoder setBuffer:outBuf offset:0 atIndex:0];
       [computeEncoder setBuffer:inputBuf offset:0 atIndex:1];
 
-      id<MTLBuffer> erfinvConstants = [device newBufferWithLength:sizeof(ErfinvConstant)
-                                                          options:MTLResourceStorageModePrivate];
-      memcpy([erfinvConstants contents], &erfinv_constant, sizeof(ErfinvConstant));
-      [computeEncoder setBuffer:erfinvConstants offset:0 atIndex:2];
+      id<MTLBuffer> erfinvConstant = [device newBufferWithLength:sizeof(ErfinvConstant)
+                                                         options:MTLResourceStorageModePrivate];
+      memcpy([erfinvConstant contents], &erfinv_constant, sizeof(ErfinvConstant));
+      [computeEncoder setBuffer:erfinvConstant offset:0 atIndex:2];
 
       MTLSize gridSize = MTLSizeMake(length, 1, 1);
       uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
