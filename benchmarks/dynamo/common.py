@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import collections
+import contextlib
 import copy
 import csv
 import functools
@@ -15,7 +16,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -30,7 +31,7 @@ from scipy.stats import gmean, ttest_ind
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
-from torch._dynamo.utils import clone_inputs
+from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
@@ -38,6 +39,8 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map, tree_map_only
+
+from tqdm.auto import tqdm, trange
 
 try:
     from .microbenchmarks.operator_inp_utils import OperatorInputsMode
@@ -60,6 +63,8 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
+MAX_DOWNLOAD_ATTEMPTS = 5
+
 
 class CI(NamedTuple):
     backend: str  # aot_eager or inductor
@@ -77,18 +82,13 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "llama",  # does not support complex32
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
+    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
-    # KeyError: '_ignore_torch_cuda_oom'
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
@@ -98,7 +98,8 @@ CI_SKIP[CI("eager", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
-    "vision_maskrcnn",  # eager_two_runs_differ
+    "llama",  # Accuracy failed: allclose not within tol=0.001
+    "vision_maskrcnn",  # shape mismatch in accuracy check!
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -144,7 +145,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "vision_maskrcnn",
+    "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -154,17 +155,14 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "convit_base",  # fp64_OOM
     "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "lcnet_050",  # Accuracy (blocks.1.0.bn2.weight.grad)
     "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM,
-    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "llama",  # does not support complex32
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
     "demucs",  # OOM
@@ -192,7 +190,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
-    "vision_maskrcnn",  # accuracy
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -216,10 +213,8 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "hf_Bert_large",  # OOM
     "hf_GPT2_large",  # Intermittent failure on CI
     "hf_T5_base",  # OOM
-    "llama",  # does not support complex32
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
-    "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -245,17 +240,29 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
+    "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
+    "mobilevit_s",
+    "pit_b_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "vit_base_patch16_224",
+    "xcit_large_24_p8_224",
 ]
 
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    "cm3leon_generate",  # Could not validate constraint UnspecConstraint
+    "hf_T5_generate",  # Could not validate constraint UnspecConstraint
+    "vision_maskrcnn",  # nothing in example_inputs had a dim with 4
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "llama",  # AssertionError: cannot compute free_symbols of True
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -340,14 +347,6 @@ def output_csv(filename, headers, row):
             writer.writerow(line + ["0"] * (len(headers) - len(line)))
 
 
-class NullContext:
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
-
-
 def nothing(f):
     return f
 
@@ -373,6 +372,30 @@ def synchronize():
     pass
 
 
+def summarize_graph_break(filename):
+    """
+    Sorts and de-dupes the graphs breaks on the reason string. Note that this
+    function is just a best effort to reduce the logging information. We could
+    miss some graph breaks because of de-duping. We can further refine this
+    function as need arises.
+    """
+    log_file = f"{filename.rstrip('.csv')}_graph_breaks.csv"
+    if os.path.exists(log_file):
+        df = pd.read_csv(log_file)
+        df = df.sort_values("reason").drop_duplicates(subset="reason")
+
+        # Specialize for multi tensor sgd as reason is not identical
+        multi_tensor_sgd_row = df.loc[df["reason"].str.contains("_multi_tensor_sgd")]
+        if len(multi_tensor_sgd_row):
+            df = df[
+                ~df["reason"].str.contains("_multi_tensor_sgd")
+            ]  # Drop all sgd rows
+            df = pd.concat(
+                [df, pd.DataFrame([multi_tensor_sgd_row.iloc[0]])], axis=0
+            )  # Add back a single row
+        df.to_csv(f"{log_file.rstrip('.csv')}_deduped.csv", index=False)
+
+
 def print_summary(filename):
     if not (filename and os.path.exists(filename)):
         return
@@ -385,6 +408,7 @@ def print_summary(filename):
             print_summary_table(data[data.tag == tag])
     else:
         print_summary_table(data)
+    summarize_graph_break(filename)
 
 
 def print_summary_table(data):
@@ -541,17 +565,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    prof = torch._dynamo.utils.CompileProfiler()
-    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-        model_iter_fn
-    )
-    opt_model_iter_fn(model, example_inputs)
-    output_csv(
-        output_filename, ["model", "profiler report"], [current_name, prof.report()]
-    )
-    met = prof.get_metrics()
-    guard_failures = len(met["guard_failures"])
-    return [guard_failures]
+    with torch._dynamo.utils.CompileProfiler() as prof:
+        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+            model_iter_fn
+        )
+        opt_model_iter_fn(model, example_inputs)
+        output_csv(
+            output_filename, ["model", "profiler report"], [current_name, prof.report()]
+        )
+        met = prof.get_metrics()
+        guard_failures = len(met["guard_failures"])
+        return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -619,7 +643,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
-        for rep in range(args.repeat):
+        for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
                 if should_randomize_input
@@ -920,6 +944,43 @@ def try_script(model, example_inputs):
         return None
 
 
+def download_retry_decorator(download_fn):
+    """
+    Decorator function for applying retry logic to a download function.
+
+    The wrapped function will be called up to 5 times and raises an exception if the function fails each time.
+    After each unsuccessful attempt, there is a delay before the next attempt, which is increased linearly with the number of tries.
+
+    Usage:
+    @download_retry_decorator
+    def download_function(model_name: str):
+        # download logic goes here
+    """
+
+    @functools.wraps(download_fn)
+    def wrapper(self, *args, **kwargs) -> Any:
+        tries = 0
+        total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
+        while tries <= total_allowed_tries:
+            try:
+                model = download_fn(self, *args, **kwargs)
+                return model
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError(
+                        f"Failed to load model '{args}' with following error(s): {str(e)}."
+                    )
+
+    return wrapper
+
+
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -1044,7 +1105,7 @@ def get_dynamo_stats():
 
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
-        cache_minder = NullContext()
+        cache_minder = contextlib.nullcontext()
         if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_inductor_cache(cache_entries)
@@ -1091,7 +1152,7 @@ class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
-        self.autocast = NullContext
+        self.autocast = contextlib.nullcontext
         self.optimizer = None
         self._args = None
 
@@ -1119,7 +1180,7 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
-        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
             self.autocast = torch.cpu.amp.autocast
 
     def init_optimizer(self, name, device, params):
@@ -1142,6 +1203,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cuda(self):
+        return set()
+
+    @property
+    def skip_models_for_cpu(self):
         return set()
 
     @property
@@ -1570,7 +1635,7 @@ class BenchmarkRunner:
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
             msg += f" {tag:26}"
-        print(msg, end=" ", flush=True)
+        print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
 
@@ -1606,6 +1671,24 @@ class BenchmarkRunner:
                 f"covering {stats['calls_captured']} ops with "
                 f"{stats['graph_breaks']} graph breaks ({stats['unique_graph_breaks']} unique)"
             )
+
+        if explain or self.args.log_graph_breaks or self.args.print_graph_breaks:
+            filename = f"{output_filename.rstrip('.csv')}_graph_breaks.csv"
+
+            def add_double_quotes(x):
+                # Delimiter because reason could have comma
+                return f'"{x}"'
+
+            for graph_break in graph_break_reasons:
+                reason = add_double_quotes(graph_break.reason)
+                user_stack = add_double_quotes(
+                    ", ".join([str(x) for x in graph_break.user_stack])
+                )
+                output_csv(
+                    filename,
+                    ["model", "reason", "user_stack"],
+                    [current_name, reason, user_stack],
+                )
 
         if self.args.stats:
             Stats.print_summary()
@@ -1908,6 +1991,11 @@ def parse_args(args=None):
         help="Show a warning whenever graph break",
     )
     parser.add_argument(
+        "--log-graph-breaks",
+        action="store_true",
+        help="log graph breaks in a file",
+    )
+    parser.add_argument(
         "--trace-on-xla",
         action="store_true",
         help="Whether to trace the model on XLA or on eager device",
@@ -2167,7 +2255,6 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
-            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -2260,6 +2347,7 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+        runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
@@ -2287,7 +2375,7 @@ def run(runner, args, original_dir=None):
 
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
-    optimize_ctx = NullContext()
+    optimize_ctx = contextlib.nullcontext()
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -2438,24 +2526,30 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 try:
-                    if args.part:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(
-                            device, model_name, batch_size=batch_size, part=args.part
-                        )
-                    else:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(device, model_name, batch_size=batch_size)
+                    with tqdm(desc="loading model"):
+                        if args.part:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device,
+                                model_name,
+                                batch_size=batch_size,
+                                part=args.part,
+                            )
+                        else:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device, model_name, batch_size=batch_size
+                            )
                 except NotImplementedError as e:
                     print(e)
                     import traceback

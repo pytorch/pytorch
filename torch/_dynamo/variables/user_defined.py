@@ -16,6 +16,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
+    all_hook_names,
     check_constant_args,
     get_custom_getattr,
     is_namedtuple_cls,
@@ -346,6 +347,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif callable(self.value):
+            self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -459,6 +463,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
+        elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
+            assert isinstance(subobj, collections.OrderedDict)
+            if not subobj:
+                return variables.ConstDictVariable(
+                    subobj, collections.OrderedDict, **options
+                )
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
