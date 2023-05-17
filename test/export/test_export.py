@@ -551,7 +551,7 @@ class TestExport(TestCase):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    def test_export_preserve_constraints_as_metadata(self):
+    def test_export_constrain_static(self):
         def f(x, y):
             b = x.item()
             constrain_as_size(b, min=2, max=5)
@@ -565,7 +565,7 @@ class TestExport(TestCase):
         example_inputs = (x, y)
         constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
         with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "Cannot constrain symbol with constraints"
+            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint on a value which we evaluated to have a static value of 3. "
         ):
             export(f, example_inputs, constraints)
     

@@ -902,7 +902,7 @@ def export(
                     f"{shape_env.var_to_stack[k]}\n"
                     "It appears that you're trying to set a constraint on a "
                     f"value which we evaluated to have a static value of {k}. "
-                    f"Scroll up to see where " 
+                    "Scroll up to see where this constraint was set."
                 )
     if constraint_violation_error:
         raise constraint_violation_error
