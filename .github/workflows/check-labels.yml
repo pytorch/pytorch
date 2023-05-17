@@ -1,8 +1,21 @@
 name: Check Labels
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches-ignore: [main]
+    paths: [.github] # To allow testing PRs that change workflows.
+
+  # We need pull_request_target to be able to post comments on PRs from forks.
+  # Only allow pull_request_target when merging to main, not some historical branch.
+  #
+  # Make sure to don't introduce explicit checking out and installing/running
+  # untrusted user code into this workflow!
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+    paths-ignore: [.github] # May be triggered together with pull_request if
+                            # the PR has files in and out of .github, it's OK.
   workflow_dispatch:
 
 concurrency:
