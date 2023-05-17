@@ -126,8 +126,16 @@ def _query_changed_test_files() -> List[str]:
         .decode()
         .strip()
     )
+
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+    base_commit = merge_base
+    if base_commit == head:
+        # We are on the default branch, so check for changes since the last commit
+        base_commit = "HEAD^"
+
     proc = subprocess.run(
-        ["git", "diff", "--name-only", merge_base, "HEAD"], capture_output=True
+        ["git", "diff", "--name-only", base_commit, "HEAD"], capture_output=True
     )
 
     if proc.returncode != 0:
