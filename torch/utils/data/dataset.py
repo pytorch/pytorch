@@ -229,6 +229,7 @@ class StackDataset(Dataset[T_stack]):
         *args (Dataset): Datasets for stacking returned as tuple.
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
+    datasets: Union[tuple, dict]
 
     def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
         if args:
@@ -237,13 +238,13 @@ class StackDataset(Dataset[T_stack]):
             self._length = len(args[0])  # type: ignore[arg-type]
             if any(self._length != len(dataset) for dataset in args):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
-            self.datasets = args  # type: ignore
+            self.datasets = args
         elif kwargs:
             tmp = list(kwargs.values())
             self._length = len(tmp[0])  # type: ignore[arg-type]
             if any(self._length != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
-            self.datasets = kwargs  # type: ignore
+            self.datasets = kwargs
         else:
             raise ValueError("At least one dataset should be passed")
 
