@@ -7,6 +7,7 @@
 #include <limits>
 #include <omp.h>
 
+#include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
@@ -21,6 +22,22 @@ typedef at::BFloat16 bfloat16;
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
+
+template <typename scalar_t>
+inline scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a > b ? a : b;
+}
+
+template <typename scalar_t>
+inline scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
+  if (at::_isnan(a)) {
+    return a;
+  }
+  return a < b ? a : b;
+}
 
 constexpr float uint32_to_uniform_float(uint32_t value) {
   // maximum value such that `MAX_INT * scale < 1.0` (with float rounding)
@@ -37,8 +54,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint32_t randint_cpu(uint32_t seed, uint32_t offset) {
-  return at::Philox4_32(seed, 0, offset)();
+uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+  auto gen = at::Philox4_32(seed, 0, offset);
+  uint64_t r0 = gen();
+  uint64_t r1 = gen();
+  uint64_t result = r0 | (r1 << 32);
+  return (result % static_cast<uint64_t>(high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
@@ -110,8 +131,14 @@ inline void store_float_as_bf16(
   res.store(bf16_buf, at::vec::Vectorized<float>::size());
 }
 
+inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
+  auto zeros = at::vec::Vectorized<float>(0);
+  auto ones = at::vec::Vectorized<float>(1);
+  return at::vec::Vectorized<float>::blendv(zeros, ones, src);
+}
+
 template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
@@ -121,10 +148,15 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
 
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+    *(uint32_t*)(dst_tmp + i) = src_tmp[i] ? 0xFFFFFFFF : 0;
   }
 
   return res_vec.loadu(dst_tmp);
+}
+
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+  return vec_convert_to_mask(src);
 }
 
 template <>

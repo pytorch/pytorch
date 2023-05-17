@@ -186,7 +186,7 @@ __all__ = [
     #
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
-    "item",  # TODO: add OpInfo
+    "item",
     "to",
     #
     # Reduction ops
@@ -295,7 +295,7 @@ __all__ = [
     # Test-related functions
     #
     "allclose",
-    "equal",  # TODO: add OpInfo
+    "equal",
     #
     # Statistical operations
     #
@@ -4341,7 +4341,7 @@ def empty_like(
     )
 
 
-@register_decomposition(aten.arange)
+@register_decomposition([aten.arange.start_step, aten.arange.start_out])
 @out_wrapper()
 def arange(
     start: NumberType = 0,
@@ -5021,7 +5021,6 @@ def allclose(
     )
 
 
-# TODO: add OpInfo for torch.equal and refs.equal
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
     utils.check_same_dtype(a, b)
