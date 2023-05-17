@@ -54,6 +54,14 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
+def check_inplace_broadcast(self_shape, *args_shape):
+    broadcasted_shape = tuple(_broadcast_shapes(self_shape, *args_shape))
+    check(
+        broadcasted_shape == self_shape,
+        lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
 def meta_take(self, index, *, out=None):
     # Type and device checks
@@ -562,6 +570,107 @@ def linalg_ldl_factor_ex_meta(
     pivots = self.new_empty(self.shape[:-1], dtype=torch.int)
     info = self.new_empty(self.shape[:-2], dtype=torch.int)
     return LD, pivots, info
+
+
+@register_meta([aten.linalg_ldl_solve.default, aten.linalg_ldl_solve.out])
+@out_wrapper()
+def linalg_ldl_solve_meta(
+    LD: Tensor, pivots: Tensor, B: Tensor, *, hermitian: bool = False
+) -> Tensor:
+    squareCheckInputs(LD, "torch.linalg.ldl_solve")
+    checkFloatingOrComplex(LD, "torch.linalg.ldl_solve")
+    linearSolveCheckInputs(B, LD, "torch.linalg.ldl_solve")
+    check(
+        B.ndim >= 2,
+        lambda: (
+            f"torch.linalg.ldl_solve: Expected B to have at least 2 dimensions, "
+            f"but it has {B.ndim} dimensions instead"
+        ),
+    )
+    expected_pivots_shape = LD.shape[:-1]
+    check(
+        expected_pivots_shape == pivots.shape,
+        lambda: (
+            f"torch.linalg.ldl_solve: Expected LD.shape[:-1] and pivots.shape to be the same, "
+            f"but got pivots with shape {pivots.shape} instead"
+        ),
+    )
+    check(
+        utils.is_integer_dtype(pivots.dtype),
+        lambda: f"torch.linalg.ldl_solve: Expected pivots to be integers. Got {pivots.dtype}",
+    )
+    check(
+        LD.dtype == B.dtype,
+        lambda: f"torch.linalg.ldl_solve: LD dtype {LD.dtype} does not match b dtype {B.dtype}",
+    )
+    B_broadcast_size, _ = _linalg_broadcast_batch_dims(B, LD)
+    return torch.empty_strided(
+        size=B_broadcast_size,
+        stride=make_contiguous_strides_for(B_broadcast_size, row_major=False),
+        dtype=B.dtype,
+        device=B.device,
+    )
+
+
+@register_meta([aten.linalg_lu.default, aten.linalg_lu.out])
+@out_wrapper("P", "L", "U")
+def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+    check(
+        A.ndim >= 2,
+        lambda: f"linalg.lu: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
+    )
+
+    sizes = list(A.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+    k = min(m, n)
+
+    sizes[-1] = m
+    if pivot:
+        P = A.new_empty(sizes)
+    else:
+        P = A.new_empty([0])
+
+    sizes[-1] = k
+    L = A.new_empty(sizes)
+
+    sizes[-2] = k
+    sizes[-1] = n
+    U = A.new_empty(sizes)
+    return P, L, U
+
+
+@register_meta([aten.linalg_lu_factor_ex.default, aten.linalg_lu_factor_ex.out])
+@out_wrapper("LU", "pivots", "info")
+def linalg_lu_factor_ex_meta(
+    A: Tensor, *, pivot: bool = True, check_errors: bool = False
+) -> Tuple[Tensor, Tensor, Tensor]:
+    check(
+        A.ndim >= 2,
+        lambda: f"torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
+    )
+
+    sizes = list(A.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+
+    LU = torch.empty_strided(
+        size=sizes,
+        stride=make_contiguous_strides_for(sizes, row_major=False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+
+    # Sets sizes to the size of pivots
+    sizes.pop()
+    sizes[-1] = min(m, n)
+    pivots = A.new_empty(sizes, dtype=torch.int)
+
+    # Sets sizes to the size of info
+    sizes.pop()
+    info = A.new_empty(sizes, dtype=torch.int)
+
+    return LU, pivots, info
 
 
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
@@ -2024,6 +2133,8 @@ def meta_zero_(self):
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -2036,6 +2147,8 @@ def meta_binop_inplace(self, other):
     ],
 )
 def meta_binop_inplace_alpha(self, other, alpha=1):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -2073,6 +2186,7 @@ def meta_index_put(self, indices, values, accumulate=False):
 
 @register_meta(aten.masked_fill_.Scalar)
 def meta_masked_fill_(self, mask, value):
+    check_inplace_broadcast(self.shape, mask.shape)
     return self
 
 

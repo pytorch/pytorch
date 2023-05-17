@@ -483,16 +483,24 @@ def run_test(
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module
     stepcurrent_key = test_file
+
+    use_sharded_test = False
     if isinstance(test_file, ShardedTest):
-        # C++ tests work with pytest sharding
-        unittest_args.extend(
-            [
-                f"--shard-id={test_module.shard - 1}",
-                f"--num-shards={test_module.num_shards}",
-            ]
-        )
         test_file = test_module.name
-        stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
+        use_sharded_test = True
+
+    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    if use_sharded_test:
+        if is_cpp_test:
+            stepcurrent_key = test_file
+        else:
+            unittest_args.extend(
+                [
+                    f"--shard-id={test_module.shard - 1}",
+                    f"--num-shards={test_module.num_shards}",
+                ]
+            )
+            stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
 
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -506,7 +514,6 @@ def run_test(
         assert isinstance(extra_unittest_args, list)
         unittest_args.extend(extra_unittest_args)
 
-    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args.extend(
@@ -937,17 +944,20 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     pytest_args = [
         "-vv",
         "-rfEX",
-        "-p",
-        "no:xdist",
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        pytest_args.append("--use-pytest")
-    elif IS_CI:
-        # Add the option to generate XML test report here as C++ tests
-        # won't go into common_utils
-        test_report_path = get_report_path(pytest=True)
-        pytest_args.extend(["--junit-xml-reruns", test_report_path])
+        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+    else:
+        # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
+        # is much slower than running them directly
+        pytest_args.extend(["-n", "auto"])
+
+        if IS_CI:
+            # Add the option to generate XML test report here as C++ tests
+            # won't go into common_utils
+            test_report_path = get_report_path(pytest=True)
+            pytest_args.extend(["--junit-xml-reruns", test_report_path])
 
     if options.pytest_k_expr:
         pytest_args.extend(["-k", options.pytest_k_expr])
