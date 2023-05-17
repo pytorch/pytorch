@@ -6,11 +6,13 @@ from typing import Any, Callable, ContextManager, Iterable, List, Tuple, Dict, O
 from collections import defaultdict
 import uuid
 import contextlib
+from torch.testing._internal.logging_tensor import LoggingTensorMode
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop"
+    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop",
+    "CheckpointError"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -581,7 +583,8 @@ class _NoopSaveInputs(torch.autograd.Function):
         raise AssertionError("Did not expect to backward on this graph")
 
 class _CheckpointFrame():
-    def __init__(self, recompute_fn, early_stop):
+    def __init__(self, recompute_fn, early_stop, is_strict_mode, unpack_error_cb,
+                 get_metadata_fn):
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -598,6 +601,44 @@ class _CheckpointFrame():
         # See Rule 5
         self.early_stop = early_stop
 
+        # Debugging
+        self.is_strict_mode = is_strict_mode
+        self.get_metadata_fn = get_metadata_fn
+        self.unpack_error_cb = unpack_error_cb
+        self.x_metadatas = []
+
+def _get_debug_context_and_cb() -> Tuple[Optional[Dict[str, Any]], Optional[Callable]]:
+    logging_mode_fwd = LoggingTensorMode(collect_logs=True)
+    logging_mode_recompute = LoggingTensorMode(collect_logs=True)
+
+    def unpack_error_cb(e: CheckpointError):
+        raise CheckpointError(
+            "An error happened while unpacking tensors; dumping logs of latest computation\n"
+            f"Forward ops:\n{logging_mode_fwd.str_logs()}\n"
+            f"Recompute ops:\n{logging_mode_recompute.str_logs()}\n"
+        ) from e
+
+    def context_fn():
+        return logging_mode_fwd, logging_mode_recompute
+
+    return context_fn, unpack_error_cb
+
+def _default_get_metadata_fn(x: torch.Tensor) -> Dict[str, Any]:
+    return {
+        "shape": x.shape,
+    }
+
+def _debug_get_metadata_fn(x: torch.Tensor) -> Dict[str, Any]:
+    return {
+        "shape": x.shape,
+        "dtype": x.dtype,
+        # We are already inside no-grad
+        "max": x.max().item()
+    }
+
+class CheckpointError(Exception):
+    pass
+
 # See Rule 5
 class _StopRecomputationError(Exception):
     pass
@@ -611,6 +652,8 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             target_frame.recomp_counter[gid] += 1
 
             if recomp_idx >= len(target_frame.weak_holders):
+                if target_frame.is_strict_mode:
+                    raise CheckpointError("not allowed!")
                 # We run into this case when early stop is not enabled and do
                 # grad within checkpoint.
                 return x.detach()
@@ -638,10 +681,14 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
 
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, frame):
-        def pack_hook(_unused_x):
+        def pack_hook(x):
             # See Rule 4 above
             holder = _Holder()
             frame.weak_holders.append(weakref.ref(holder))
+            # Save metadata
+            if frame.metadata_fn is not None:
+                with torch.no_grad():
+                    frame.x_metadata.append(frame.metadata_fn(x))
             return holder
 
         def unpack_hook(holder):
@@ -663,8 +710,28 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     pass
                 frame.is_recomputed[gid] = True
 
+                if not len(frame.weak_holders) == len(frame.recomputed[gid]):
+                    raise CheckpointError(
+                        "torch.utils.checkpoint: a different number of tensors was saved ", len(frame.weak_holders), len(frame.recomputed[gid])
+                    )
+
+                for idx, (x_meta, recomputed_x) in enumerate(frame.x_metadata, frame.recomputed[gid]):
+                    if frame.metadata_fn is not None:
+                        if frame.metadata_fn(recomputed_x) != x_meta:
+                            raise CheckpointError(
+                                "torch.utils.checkpoint: recomputed value of tensor at position "
+                                f"{idx} does not match saved value\n"
+                                f"saved metadata: {x_meta}\n"
+                                f"recomputed metadata: {frame.metadata_fn(recomputed_x)}\n"
+                            )
+
+            if gid not in holder.handles:
+                raise CheckpointError(
+                    "torch.utils.checkpoint: Unpack is triggered for a tensor that was never recomputed"
+                )
+
             if holder.handles[gid] is None:
-                raise RuntimeError(
+                raise CheckpointError(
                     "torch.utils.checkpoint: unpack is being triggered for a tensor that was either "
                     "never recomputed, or already unpacked once. If you are calling ctx.saved_tensors "
                     "in backward, make sure to do so only once. Otherwise please open an issue with "
@@ -675,7 +742,15 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             holder.handles[gid] = None
             return ret
 
-        super().__init__(pack_hook, unpack_hook)
+        if frame.unpack_error_cb is not None:
+            def unpack_hook_with_error_cb(holder):
+                try:
+                    return unpack_hook(holder)
+                except CheckpointError as e:
+                    frame.unpack_error_cb(e)
+            super().__init__(pack_hook, unpack_hook_with_error_cb)
+        else:
+            super().__init__(pack_hook, unpack_hook)
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
@@ -683,6 +758,10 @@ def _checkpoint_without_reentrant(
     fn,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    unpack_error_cb: Optional[Callable[[CheckpointError], None]] = None,
+    get_metadata_fn: Optional[Callable[[Any], Any]] = None,
+    strict: bool = False,
+    debug: bool = False,
     *args,
     **kwargs
 ):
@@ -703,6 +782,18 @@ def _checkpoint_without_reentrant(
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
     forward_context, recompute_context = context_fn()
+    if debug:
+        if context_fn != noop_context_fn or unpack_error_cb is not None and get_metadata_fn is not None:
+            raise ValueError(
+                "debug=True is incompatible with non-default context_fn or "
+                "unpack_error_cb or get_metadata_fn"
+            )
+        context_fn, unpack_error_cb = _get_debug_context_and_cb()
+        get_metadata_fn = _debug_get_metadata_fn
+
+    if get_metadata_fn is None:
+        get_metadata_fn = _default_get_metadata_fn
+
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
@@ -736,7 +827,13 @@ def _checkpoint_without_reentrant(
                  recompute_context:
                 fn(*args, **kwargs)
 
-    new_frame = _CheckpointFrame(recompute_fn, _enable_checkpoint_early_stop)
+    new_frame = _CheckpointFrame(
+        recompute_fn,
+        _enable_checkpoint_early_stop,
+        strict,
+        unpack_error_cb,
+        get_metadata_fn,
+    )
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
