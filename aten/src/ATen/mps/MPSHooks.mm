@@ -5,6 +5,7 @@
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/util/Logging.h>
 
 namespace at {
@@ -44,7 +45,19 @@ const Generator& MPSHooks::getDefaultMPSGenerator() const {
 }
 
 void MPSHooks::deviceSynchronize() const {
-  at::mps::device_synchronize();
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
+}
+
+void MPSHooks::commitStream() const {
+  at::mps::getDefaultMPSStream()->synchronize(SyncType::COMMIT);
+}
+
+void* MPSHooks::getCommandBuffer() const {
+  return at::mps::getDefaultMPSStream()->commandBuffer();
+}
+
+void* MPSHooks::getDispatchQueue() const {
+  return at::mps::getDefaultMPSStream()->queue();
 }
 
 void MPSHooks::emptyCache() const {
