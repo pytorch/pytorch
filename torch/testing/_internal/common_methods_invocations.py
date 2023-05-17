@@ -9383,9 +9383,7 @@ op_db: List[OpInfo] = [
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
            # trigger addmm being decomposed by a jit pass.
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -9428,6 +9426,11 @@ op_db: List[OpInfo] = [
                                            torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=[
+               DecorateInfo(
+                    toleranceOverride({torch.half: tol(atol=5e-3, rtol=5e-3)}),
+                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+           ],
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
@@ -9459,6 +9462,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.5e-05, rtol=1e-05)}),
                    'TestCommon', 'test_out'),
+               DecorateInfo(
+                    toleranceOverride({torch.half: tol(atol=1e-2, rtol=1e-2)}),
+                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
@@ -9552,8 +9558,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           backward_dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10097,8 +10101,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True),
     OpInfo('corrcoef',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_corrcoef,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10171,9 +10174,7 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.chalf,), active_if=IS_WINDOWS),
                    )),
     OpInfo('cov',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-           backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cov,
            error_inputs_func=error_inputs_cov,
            supports_out=False,

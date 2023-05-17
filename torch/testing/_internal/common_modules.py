@@ -2436,6 +2436,7 @@ module_db: List[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False, transposed=True),
@@ -2467,6 +2468,7 @@ module_db: List[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ConvTranspose3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False, transposed=True),
@@ -2495,6 +2497,7 @@ module_db: List[ModuleInfo] = [
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU,
