@@ -98,36 +98,36 @@ class SparseAdam(Optimizer):
         return loss
 
 SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algorithm
-    suitable for sparse gradients. This is a semantically different optimizer that
-    approximates the Adam algorithm by masking out the parameter and moment updates
-    corresponding to the zero values in the gradients. Whereas the Adam algorithm will
-    update the first moment, the second moment, and the parameter based on all values
+    suitable for sparse gradients. Currently, due to implementation constraints (explained
+    below), SparseAdam is only intended for a narrow subset of use cases, specifically
+    parameters of a dense layout with gradients of a sparse layout. This occurs in a
+    special case where the module backwards produces grads already in a sparse layout.
+    One example NN module that behaves as such is ``nn.Embedding(sparse=True)``.
+
+    SparseAdam approximates the Adam algorithm by masking out the parameter and moment
+    updates corresponding to the zero values in the gradients. Whereas the Adam algorithm
+    will update the first moment, the second moment, and the parameters based on all values
     of the gradients, SparseAdam only updates the moments and parameters corresponding
     to the non-zero values of the gradients.
 
-    A simplified way of thinking about the implementation is as such:
+    A simplified way of thinking about the `intended` implementation is as such:
 
     1. Create a mask of the non-zero values in the sparse gradients. For example,
-       if your gradient is [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
+       if your gradient looks like [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
     2. Apply this mask over the running moments and do computation on only the
        non-zero values.
     3. Apply this mask over the parameters and only apply an update on non-zero values.
 
-    We use sparse layout Tensors to optimize this approximation, which means the more
-    gradients that are masked by not being materialized, the more performant the optimization.
+    In actuality, we use sparse layout Tensors to optimize this approximation, which means the
+    more gradients that are masked by not being materialized, the more performant the optimization.
     Since we rely on using sparse layout tensors, we infer that any materialized value in the
     sparse layout is non-zero and we do NOT actually verify that all values are not zero!
     It is important to not conflate a semantically sparse tensor (a tensor where many
     of its values are zeros) with a sparse layout tensor (a tensor where ``.is_sparse``
     returns ``True``). The SparseAdam approximation is intended for `semantically` sparse
-    tensors and the sparse layout is only an implementation detail. A clearer implementation
+    tensors and the sparse layout is only a implementation detail. A clearer implementation
     would be to use MaskedTensors, but those are experimental.
 
-    Thus, due to implementation constraints, SparseAdam is currently intended for a
-    narrow subset of use cases, specifically parameters of a dense layout with gradients
-    of a sparse layout. This occurs in a special case where the module backwards produces
-    grads already in a sparse layout. One example NN module that behaves as such is
-    ``nn.Embedding(sparse=True)``.
 
     .. note::
 
