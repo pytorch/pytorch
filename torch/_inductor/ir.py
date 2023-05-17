@@ -4248,6 +4248,8 @@ class LoopBodyBlock:
             handler = IndexPropagation(handler)
 
         with V.set_ops_handler(handler):
+            # This indirection is just a cute way to get IndexPropagation to
+            # unwrap the return value.
             ops.output(fn(*args))
         self.graph = tracer.graph
 
