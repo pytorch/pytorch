@@ -622,7 +622,7 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
 }
 
 Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices) {
-  // Disallow boolean indexing
+  // Disallow boolean indexing since it leads to dynamic output shapes
   for (auto i : c10::irange(indices.size())) {
     auto index = indices.get(i);
     if (index.has_value()) {

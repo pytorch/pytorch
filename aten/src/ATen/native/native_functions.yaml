@@ -2931,6 +2931,7 @@
     CPU, CUDA, MPS: index_out
 
 # Used by inductor to signal indexing without bounds checks
+# Note that we don't support boolean indexing, to avoid dynamic output shapes
 - func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function
   dispatch:
