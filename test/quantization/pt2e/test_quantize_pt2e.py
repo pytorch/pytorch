@@ -2,7 +2,7 @@
 import copy
 import operator
 import unittest
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -535,6 +535,75 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=False)
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=False)
 
+    def test_prepare_qat_conv_bn_fusion_constant_args(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3, stride=(2, 2), padding=(4, 4))
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        # stride, padding, dilation, transposed, output_padding, groups
+        conv_args = ((2, 2), (4, 4), (1, 1), False, (0, 0), 1)
+        self._verify_symmetric_qnnpack_qat_graph(
+            M(), example_inputs, is_per_channel=False, has_relu=False, expected_conv_constant_args=conv_args
+        )
+        self._verify_symmetric_qnnpack_qat_graph(
+            M(), example_inputs, is_per_channel=True, has_relu=False, expected_conv_constant_args=conv_args
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
+
+    def test_prepare_qat_conv_bn_fusion_no_conv_bias(self):
+        class M1(torch.nn.Module):
+            """
+            Single conv + BN with no conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                return x
+
+        class M2(torch.nn.Module):
+            """
+            Mixed conv + BN with and without conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3, bias=True)
+                self.bn2 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                return x
+
+        example_inputs = (torch.randn(3, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=False, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=True, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=True)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=True)
+
     def test_prepare_qat_conv_bn_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -553,12 +622,78 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=True)
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=True)
 
+    def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
+        """
+        Test this special case seen in resnet18:
+
+          maxpool -> maxpool_getitem -> conv -> bn -> conv_bn_getitem
+
+        We want the metadata to be copied from the `conv_bn_getitem` node, not `maxpool_getitem`.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=1)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.maxpool(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        def _get_getitem_nodes(m: torch.fx.GraphModule):
+            """
+            Return a 2-tuple of (maxpool_getitem_node, conv_bn_getitem_node) from the graph.
+            """
+            maxpool_getitem_node, conv_bn_getitem_node = None, None
+            for node in m.graph.nodes:
+                if node.target != operator.getitem:
+                    continue
+                if node.args[0].target == torch.ops.aten.max_pool2d_with_indices.default:
+                    maxpool_getitem_node = node
+                elif node.args[0].target == torch.ops.aten._native_batch_norm_legit.default:
+                    conv_bn_getitem_node = node
+                else:
+                    raise ValueError("Unexpected getitem node ", node, node.args)
+            assert maxpool_getitem_node is not None, "did not find maxpool getitem node, bad test setup"
+            assert conv_bn_getitem_node is not None, "did not find conv bn getitem node, bad test setup"
+            return (maxpool_getitem_node, conv_bn_getitem_node)
+
+        # Program capture
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m, guards = torchdynamo.export(
+            M(),
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m.graph.eliminate_dead_code()
+        m.recompile()
+        (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Prepare QAT
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=False, is_qat=True))
+        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        (maxpool_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
+        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta["target_dtype_info"]
+        maxpool_getitem_meta = maxpool_getitem_node.meta["target_dtype_info"]
+        conv_bn_getitem_meta = conv_bn_getitem_node.meta["target_dtype_info"]
+        self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
+        self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
+
     def _verify_symmetric_qnnpack_qat_graph(
         self,
         m: torch.fx.GraphModule,
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
+        has_bias: bool = True,
+        expected_conv_constant_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
         Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
@@ -600,15 +735,24 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, torch.ops.aten._native_batch_norm_legit.default)
 
-        # Verify: conv / scale_factor.reshape + bias.reshape
-        add_bias_node = bn_node.args[0]
-        (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+        # Verify: conv / scale_factor.reshape [+ bias.reshape]
+        if has_bias:
+            add_bias_node = bn_node.args[0]
+            (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+            self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
+            self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
+        else:
+            div_scale_factor_node = bn_node.args[0]
         (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
-        self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
         self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
         self.assertEqual(conv_node.target, torch.ops.aten.convolution.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
+
+        # Verify: conv constant args
+        if expected_conv_constant_args is not None:
+            assert len(expected_conv_constant_args) == 6, "wrong num conv args, bad test setup"
+            for i in range(6):
+                self.assertEqual(conv_node.args[i + 3], expected_conv_constant_args[i])
 
         # Verify: conv input activation fake quantize
         conv_input_fq_node = conv_node.args[0]
@@ -640,9 +784,11 @@ class TestQuantizePT2E(QuantizationTestCase):
         zero_bias_node = conv_node.args[2]
         mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
         (conv_weight_fq_node, scale_factor_reshape_node) = mul_weight_scale_factor_node.args
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        if has_bias:
+            self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        else:
+            self.assertTrue(zero_bias_node is None)
         self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
         # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
@@ -657,6 +803,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertTrue("tensor_constant" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
 
+    # TODO: merge these numerics tests with the graph tests above
     def test_prepare_qat_conv_bn_numerics(self):
         class M(torch.nn.Module):
             def __init__(self):

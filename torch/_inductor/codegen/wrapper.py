@@ -4,8 +4,9 @@ import dataclasses
 import functools
 import hashlib
 import os
+import re
 from itertools import count
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -21,7 +22,6 @@ from ..utils import (
     LineContext,
     sympy_dot,
     sympy_product,
-    sympy_symbol,
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
@@ -57,6 +57,58 @@ def is_float(s: str):
     except ValueError:
         return False
     return True
+
+
+def convert_arg_type(python_type):
+    from .cpp import PYTHON_TO_CPP
+
+    if python_type == "Tensor":
+        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
+        return f"at::{python_type} const&"
+
+    # Convert arg of type Optional[*]
+    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
+    if len(optional_match) == 1:
+        optional_type = optional_match[0]
+        assert (
+            optional_type in PYTHON_TO_CPP
+        ), f"unsupported optional type in convert_arg_type: {optional_type}"
+        cpp_optional_type = PYTHON_TO_CPP[optional_type]
+        return f"c10::optional<{cpp_optional_type}>"
+
+    raise AssertionError(f"unsupport python_type: {python_type}")
+
+
+def convert_return_type(python_type):
+    # TODO: only support Tensor as func return type for now
+    # TODO: support alias
+    assert (
+        python_type == "Tensor"
+    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
+    return f"at::{python_type}"
+
+
+def get_cpp_op_schema(kernel):
+    arg_types = [repr(x.type) for x in kernel._schema.arguments]
+    arg_names = [x.name for x in kernel._schema.arguments]
+    # TODO: only support len(returns) == 1 for now.
+    returns = [repr(x.type) for x in kernel._schema.returns]
+    assert (
+        len(returns) == 1
+    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
+    return_value = returns[0]
+    cpp_return_value = convert_return_type(return_value)
+
+    cpp_arg_type = [
+        f"{convert_arg_type(arg_type)} {arg_name}"
+        for arg_type, arg_name in zip(arg_types, arg_names)
+    ]
+    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+
+
+SUPPORTED_FALLBACK_CPP_WRAPPER = [
+    "repeat_interleave.Tensor",
+]
 
 
 class MemoryPlanningState:
@@ -200,7 +252,6 @@ class WrapperCodeGen(CodeGen):
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
         self.lines = []
-        self.need_seed = False
         self.declare = ""
         self.ending = ""
         self.open_bracket = "["
@@ -305,10 +356,6 @@ class WrapperCodeGen(CodeGen):
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
-            for name in V.graph.randomness_seeds:
-                self.prefix.writeline(
-                    f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
-                )
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
     def append_precomputed_sizes_to_prefix(self):
@@ -363,7 +410,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -442,10 +489,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
 
         @functools.lru_cache(None)
         def sizeof(name):
@@ -589,7 +632,9 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=False
+    ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
@@ -598,7 +643,9 @@ class WrapperCodeGen(CodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
-        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        self.wrapper_call.writeline(
+            f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
+        )
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
@@ -621,6 +668,18 @@ class WrapperCodeGen(CodeGen):
     def val_to_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
+        elif isinstance(s, sympy.Expr):
+            return pexpr(s)
+        elif isinstance(s, (tuple, list)):
+
+            @dataclasses.dataclass
+            class Shim:
+                ref: Any
+
+                def __repr__(self):
+                    return self.ref
+
+            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
         else:
             return repr(s)
 
@@ -760,16 +819,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
 
-    def seed(self):
-        """
-        Seed is a special variable used to hold the rng seed for a graph.
-
-        Note this is only used by the CPU backend, we put seeds in a
-        1-element tensor for the CUDA backend.
-        """
-        self.need_seed = True
-        return sympy_symbol("seed")
-
     def write_header(self):
         if V.graph.aot_mode:
             self.header.splice(
@@ -834,18 +883,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.wrapper_call.writeline(f"at::Tensor {input_key};")
                         self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
 
-            for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(f"at::Tensor {name};")
-                self.wrapper_call.writeline(
-                    f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
-                )
             self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
 
     def generate(self):
         self.write_wrapper_decl()
         return super().generate()
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=True):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=True
+    ):
         self.header.splice(f"\n{kernel}\n")
 
     def generate_return(self, output_refs):
@@ -981,7 +1027,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -1076,7 +1122,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None, cpp=False):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cpp=False
+    ):
         if cpp:
             return super().define_kernel(name, kernel, metadata)
         pass
@@ -1107,7 +1155,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if is_int(arg):
+            if isinstance(arg, torch._inductor.codegen.triton.SymbolicCallArg):
+                self.writeline(f"auto {var_name} = {arg};")
+            elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")

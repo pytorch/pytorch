@@ -597,7 +597,6 @@ meta_function_expected_failures = {
     torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32},
     torch.functional.istft : {f64, c64, c128, f32},
     torch.geqrf : {f64, c64, c128, f32},
-    torch.linalg.householder_product : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
@@ -616,7 +615,7 @@ meta_function_expected_failures = {
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
-    torch.nn.functional.gaussian_nll_loss : {f64, bf16, f32},
+    torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
     torch.nn.functional.max_pool3d_with_indices : {f64, f32},
     torch.nn.functional.max_unpool1d : {f64, f32},
@@ -716,11 +715,9 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
-    torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
@@ -824,8 +821,6 @@ meta_dispatch_expected_failures = {
     aten.cholesky_solve.out : {c64, c128, f64, f32},
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
-    aten.linalg_householder_product.default : {c64, c128, f64, f32},
-    aten.linalg_householder_product.out : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.linalg_matrix_exp.default : {c64, bf16, f32, f64, c128},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -922,8 +917,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
-    aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
-    aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
@@ -1225,6 +1218,18 @@ class TestMeta(TestCase):
         t = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14], device='meta')
         r = t.nan_to_num()
         self.assertEqual(r.device.type, 'meta')
+
+    def test_inplace_masked_fill_error(self):
+        t = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
+            t.masked_fill_((t > 0).unsqueeze(0), 0.1)
+
+    def test_inplace_bin_ops_error(self):
+        t = torch.randn(3, 3, device='meta')
+        for op in (torch.Tensor.add_, torch.Tensor.sub_, torch.Tensor.mul_, torch.Tensor.div_,
+                   torch.Tensor.logical_and_, torch.Tensor.logical_or_, torch.Tensor.logical_xor_):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
+                op(t, t.clone().unsqueeze(0))
 
     @onlyCPU
     def test_meta_autograd_no_error(self):
