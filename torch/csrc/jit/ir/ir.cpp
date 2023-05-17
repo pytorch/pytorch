@@ -128,6 +128,12 @@ static std::ostream& operator<<(
   return printValueRefs(out, nodes);
 }
 
+static std::ostream& operator<<(
+    std::ostream& out,
+    const at::ArrayRef<Value*> nodes) {
+  return printValueRefs(out, nodes);
+}
+
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
   std::string delim;
