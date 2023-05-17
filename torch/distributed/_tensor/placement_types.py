@@ -175,7 +175,7 @@ class Shard(Placement):
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp,
+        reduce_op: c10d.ReduceOp.RedOpType,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -328,15 +328,13 @@ class _Partial(Placement):
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
 
-    def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
-        self.reduce_op: c10d.ReduceOp = reduce_op
+    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
+        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        return mesh.all_reduce(
-            tensor, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
-        )
+        return mesh.all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
 
     def _to_shard(
         self,
@@ -347,9 +345,7 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
-        return shard_spec._reduce_shard_tensor(
-            tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
-        )
+        return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):
