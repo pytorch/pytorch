@@ -90,12 +90,13 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx, initialize=True):
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
-        self._initialize()
+        if initialize:
+            self._initialize()
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
@@ -115,14 +116,18 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self._call_lazy_check
 
     def __getstate__(self):
-        state = dict(self.__dict__)
-        state.pop("forward", None)
-        state.pop("__call__", None)
-        return state
+        return {"_orig_mod": self._orig_mod}
 
     def __setstate__(self, state):
-        self.__dict__ = state
-        self._initialize()
+        self._orig_mod = state["_orig_mod"]
+        self.dynamo_ctx = None
+        self.forward = self._orig_mod.forward
+
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        # Call the parent __init__ method to set up the Module infrastructure
+        super(OptimizedModule, instance).__init__()
+        return instance
 
     def __getattr__(self, name):
         if name == "_orig_mod":

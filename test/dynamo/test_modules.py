@@ -1397,33 +1397,47 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod(torch.randn(10, 10))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_composition(self):
-        class InnerModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(torch.sin(x))
-
-        opt_inner_mod = InnerModule()
-
-        class OuterModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = opt_inner_mod
-
-            def forward(self, x):
-                return self.mod(torch.cos(x))
-
-        outer_mod = OuterModule()
+    def test_save_and_load(self):
+        mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
-        opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+        opt_mod = torch._dynamo.optimize(cnt)(mod)
+        inp = torch.randn(10, 10)
+        opt_mod(inp)
 
-        x = torch.randn(4)
-        self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
-        self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
-        self.assertEqual(cnt.frame_count, 1)
+        torch.save(opt_mod, "opt_mod.pt")
+
+        loaded_model = torch.load("opt_mod.pt")
+        loaded_model(inp)
+
+        assert torch.equal(loaded_model(inp), mod(inp))
+
+        def test_composition(self):
+            class InnerModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.relu = torch.nn.ReLU()
+
+                def forward(self, x):
+                    return self.relu(torch.sin(x))
+
+            opt_inner_mod = InnerModule()
+
+            class OuterModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod = opt_inner_mod
+
+                def forward(self, x):
+                    return self.mod(torch.cos(x))
+
+            outer_mod = OuterModule()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_outer_mod = torch._dynamo.optimize(cnt)(outer_mod)
+
+            x = torch.randn(4)
+            self.assertIsInstance(opt_outer_mod, torch._dynamo.OptimizedModule)
+            self.assertTrue(torch._dynamo.testing.same(outer_mod(x), opt_outer_mod(x)))
+            self.assertEqual(cnt.frame_count, 1)
 
     def test_composition_with_opt_mod(self):
         class InnerModule(torch.nn.Module):
