@@ -323,7 +323,23 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if not isinstance(a, SymInt):
         if not (min <= a <= max):
             raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
-    elif isinstance(a.node.expr, sympy.Integer):
+
+        if (
+            (fake_mode := detect_fake_mode()) is not None and 
+            getattr(fake_mode, "shape_env", None) is not None
+        ):
+            # If we are tracing with a fake mode then add this integer to the
+            # shape_env's var_to_range
+            sym_integer = sympy.Integer(a)
+            shape_env = fake_mode.shape_env
+            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            shape_env.var_to_stack[sym_integer] = ''.join(
+                traceback.format_list(TracingContext.extract_stack())
+            )
+
+        return
+
+    if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
     elif isinstance(a.node.expr, sympy.Symbol):
@@ -335,17 +351,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    if not isinstance(a, SymInt):
-        if detect_fake_mode() is None:
-            return
-
-        # If we are tracing with a fake mode then add this integer to the
-        # shape_env's var_to_range
-        sym_integer = sympy.Integer(a)
-        shape_env = detect_fake_mode().shape_env
-        shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
-        shape_env.var_to_stack[sym_integer] = ''.join(traceback.format_list(TracingContext.extract_stack()))
-        return
     var = a.node.expr
     r = a.node.shape_env.var_to_range[var]
     a.node.shape_env.var_to_range[var] = ValueRanges(
