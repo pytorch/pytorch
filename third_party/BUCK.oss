@@ -302,6 +302,7 @@ cxx_binary(
         "flatbuffers/grpc/src/compiler/python_generator.cc",
         "flatbuffers/grpc/src/compiler/swift_generator.cc",
         "flatbuffers/grpc/src/compiler/ts_generator.cc",
+        "flatbuffers/src/annotated_binary_text_gen.cpp",
         "flatbuffers/src/binary_annotator.cpp",
         "flatbuffers/src/bfbs_gen_lua.cpp",
         "flatbuffers/src/bfbs_gen_nim.cpp",
