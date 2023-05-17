@@ -3362,8 +3362,8 @@ def margin_ranking_loss(
         reduction_enum = _Reduction.get_enum(reduction)
     if (input1.dim() != input2.dim() or input1.dim() != target.dim()):
         raise RuntimeError(
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
+            "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())
         )
     return torch.margin_ranking_loss(input1, input2, target, margin, reduction_enum)
 
@@ -4650,8 +4650,8 @@ def triplet_margin_with_distance_loss(
     if not (a_dim == p_dim and p_dim == n_dim):
         raise RuntimeError(
             f"The anchor, positive, and negative tensors are expected to have "
-             f"the same number of dimensions, but got: anchor {a_dim}D, "
-             f"positive {p_dim}D, and negative {n_dim}D inputs")
+            f"the same number of dimensions, but got: anchor {a_dim}D, "
+            f"positive {p_dim}D, and negative {n_dim}D inputs")
 
     # Calculate loss
     if distance_function is None:

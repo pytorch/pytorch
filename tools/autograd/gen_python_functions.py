@@ -1255,8 +1255,8 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-                f"{a.type_str} {a.name}"
-                for a in dispatch_lambda_args(ps, f, symint=symint)
+            f"{a.type_str} {a.name}"
+            for a in dispatch_lambda_args(ps, f, symint=symint)
         )
         lambda_return = dispatch_lambda_return_str(f)
 

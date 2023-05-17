@@ -61,8 +61,8 @@ class CMake:
 
         _cmake_min_version = LooseVersion("3.13.0")
         if all(
-                ver is None or ver < _cmake_min_version
-                for ver in [cmake_version, cmake3_version]
+            ver is None or ver < _cmake_min_version
+            for ver in [cmake_version, cmake3_version]
         ):
             raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
 

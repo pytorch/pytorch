@@ -570,10 +570,10 @@ def margin_ranking_loss(
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
-                "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-                "input1: {}, input2: {}, target: {} ".format(
-                    input1.shape, input2.shape, target.shape
-                )
+            "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
+            "input1: {}, input2: {}, target: {} ".format(
+                input1.shape, input2.shape, target.shape
+            )
         )
     _check_reduction_value(reduction)
     neg_target = refs.neg(target)
