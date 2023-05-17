@@ -504,9 +504,13 @@ static PyObject* NNModuleGuard_call(
     Py_RETURN_FALSE;
   }
 
-  if (Py_TYPE(mod)->tp_version_tag != guard->version_tag) {
-    Py_RETURN_FALSE;
-  }
+  // TODO(sgross): temporarily disable tp_version_tag check due to
+  // torch.fx._symbolic_trace patching __getattr__ and __call__.  Modifying
+  // those attributes on the class changes the tp_version_tag, invalidating
+  // the guard.
+  // if (Py_TYPE(mod)->tp_version_tag != guard->version_tag) {
+  //   Py_RETURN_FALSE;
+  // }
 
   // NOTE: we must check the dict version tag before we check the attributes,
   // because the attributes may be dead references if the dict has been updated.
