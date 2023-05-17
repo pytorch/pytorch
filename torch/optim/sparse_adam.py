@@ -113,7 +113,9 @@ SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algo
     3. Apply this mask over the parameters and only apply an update on non-zero values.
     
     We use sparse layout Tensors to optimize this approximation, which means the more
-    gradients that are masked by being set to 0s, the more performant the optimization.
+    gradients that are masked by not being materialized, the more performant the optimization.
+    Since we rely on using sparse layout tensors, we infer that any materialized value in the
+    sparse layout is non-zero and we do NOT actually verify that all values are not zero!
     It is important to not conflate a semantically sparse tensor (a tensor where many
     of its values are zeros) with a sparse layout tensor (a tensor where ``.is_sparse``
     returns ``True``). The SparseAdam approximation is intended for `semantically` sparse
