@@ -3670,7 +3670,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         graph = t_jit.graph_for(x, output_shape)
 
-        has_inferred_dimension = any([dim == -1 for dim in output_shape])
+        has_inferred_dimension = any(dim == -1 for dim in output_shape)
         if has_inferred_dimension:
             # prohibit fusing when view_shape contains an inferred dimension
             self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
@@ -5269,7 +5269,7 @@ class TestCudaFuserOpInfo(TestCudaFuserOpInfoParent):
             vals = [float('inf'), float('-inf'), float('nan')]
             if dtype.is_complex:
                 complex_vals = itertools.product(vals, vals)
-                vals = tuple(map(lambda x: complex(*x), complex_vals))
+                vals = tuple(complex(*x) for x in complex_vals)
             for val in vals:
                 yield _get_extremal_sample(sample, val, dtype)
 
