@@ -540,7 +540,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
