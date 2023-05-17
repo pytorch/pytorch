@@ -787,6 +787,10 @@
   self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
   result: auto_linear
 
+- name: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
+  result: auto_linear
+
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
   self: grad
   # The case source.dim() == 0  is necessary to support scalar tensors of the form

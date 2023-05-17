@@ -87,6 +87,7 @@ class TestCase(TorchTestCase):
             config.patch(
                 {
                     "debug": True,
+                    "debug_index_asserts": True,
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,

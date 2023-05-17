@@ -4213,7 +4213,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size):
+            def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -4221,7 +4221,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size)
+                        var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
                 var = self.body.add_indirect(size)

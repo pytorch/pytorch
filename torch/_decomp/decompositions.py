@@ -2137,8 +2137,7 @@ def upsample_nearest1d(
     scales: Optional[float] = None,
 ) -> Tensor:
     (l_indices,) = _compute_upsample_nearest_indices(input, output_size, (scales,))
-    result = input[:, :, l_indices]
-    return result
+    return aten._unsafe_index(input, (None, None, l_indices))
 
 
 @register_decomposition(aten.upsample_nearest2d.default)
@@ -2153,7 +2152,7 @@ def upsample_nearest2d(
     h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_h, scales_w)
     )
-    result = input[:, :, h_indices, w_indices]
+    result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -2181,7 +2180,7 @@ def upsample_nearest3d(
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_d, scales_h, scales_w)
     )
-    result = input[:, :, d_indices, h_indices, w_indices]
+    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
 
     return result
 
@@ -2816,10 +2815,10 @@ def upsample_bilinear2d(
     x_floor_view = x_floor.unsqueeze(1)
     x_ceil_view = x_ceil.unsqueeze(1)
 
-    v1 = input[:, :, x_floor_view, y_floor]
-    v2 = input[:, :, x_ceil_view, y_floor]
-    v3 = input[:, :, x_floor_view, y_ceil]
-    v4 = input[:, :, x_ceil_view, y_ceil]
+    v1 = aten._unsafe_index(input, [None, None, x_floor_view, y_floor])
+    v2 = aten._unsafe_index(input, [None, None, x_ceil_view, y_floor])
+    v3 = aten._unsafe_index(input, [None, None, x_floor_view, y_ceil])
+    v4 = aten._unsafe_index(input, [None, None, x_ceil_view, y_ceil])
 
     xscale2 = x_view - x_floor_view
     xscale1 = 1.0 - xscale2
@@ -3334,7 +3333,7 @@ def upsample_bicubic2d_default(
     def load_bounded(ys, xs):
         y_idx = torch.clamp(ys, 0, iH - 1)
         x_idx = torch.clamp(xs, 0, iW - 1)
-        return a[N_idx, C_idx, y_idx, x_idx]
+        return aten._unsafe_index(a, [N_idx, C_idx, y_idx, x_idx])
 
     def get_x_interp(y):
         coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
