@@ -221,8 +221,8 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_dropout3_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_lowmem_dropout1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_lowmem_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_masked_fill_promotion_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),

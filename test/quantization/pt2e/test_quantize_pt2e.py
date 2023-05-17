@@ -622,6 +622,70 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=True)
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=True)
 
+    def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
+        """
+        Test this special case seen in resnet18:
+
+          maxpool -> maxpool_getitem -> conv -> bn -> conv_bn_getitem
+
+        We want the metadata to be copied from the `conv_bn_getitem` node, not `maxpool_getitem`.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=1)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.maxpool(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        def _get_getitem_nodes(m: torch.fx.GraphModule):
+            """
+            Return a 2-tuple of (maxpool_getitem_node, conv_bn_getitem_node) from the graph.
+            """
+            maxpool_getitem_node, conv_bn_getitem_node = None, None
+            for node in m.graph.nodes:
+                if node.target != operator.getitem:
+                    continue
+                if node.args[0].target == torch.ops.aten.max_pool2d_with_indices.default:
+                    maxpool_getitem_node = node
+                elif node.args[0].target == torch.ops.aten._native_batch_norm_legit.default:
+                    conv_bn_getitem_node = node
+                else:
+                    raise ValueError("Unexpected getitem node ", node, node.args)
+            assert maxpool_getitem_node is not None, "did not find maxpool getitem node, bad test setup"
+            assert conv_bn_getitem_node is not None, "did not find conv bn getitem node, bad test setup"
+            return (maxpool_getitem_node, conv_bn_getitem_node)
+
+        # Program capture
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m, guards = torchdynamo.export(
+            M(),
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m.graph.eliminate_dead_code()
+        m.recompile()
+        (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Prepare QAT
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=False, is_qat=True))
+        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        (maxpool_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
+        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta["target_dtype_info"]
+        maxpool_getitem_meta = maxpool_getitem_node.meta["target_dtype_info"]
+        conv_bn_getitem_meta = conv_bn_getitem_node.meta["target_dtype_info"]
+        self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
+        self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
+
     def _verify_symmetric_qnnpack_qat_graph(
         self,
         m: torch.fx.GraphModule,
