@@ -6294,6 +6294,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        # Disable constant propagation, so we isolate value range analysis
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6320,6 +6322,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
+        # Disable constant propagation, so we isolate value range analysis
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6345,6 +6349,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        # Disable index propagation, so the indirect indexing isn't optimized away
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_computed_indirect_mask(self):
             def fn(x, n):
                 tmp = torch.arange(n, device=x.device)
@@ -6356,6 +6362,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
+
+        def test_index_propagation(self):
+            def flip(x):
+                i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+                return x[i]
+
+            x = torch.randn(8, device="cuda")
+            flip_opt = torch._dynamo.optimize("inductor")(flip)
+            code = run_and_get_triton_code(flip_opt, x)
+
+            # this should be collapsed to direct indexing, so the index
+            # calculation shouldn't contain a `tmp` variable
+            load_line = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(load_line), 1)
+            load_stmt = load_line[0].split("=")[-1]
+            self.assertTrue(
+                "tmp" not in load_stmt,
+                msg=f"Found indirect indexing in code:\n{code}",
+            )
+
+            self.assertEqual(flip_opt(x), flip(x))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
