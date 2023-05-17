@@ -9160,46 +9160,46 @@
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: histogram_histc_cpu_out
+    CPU, MPS: histogram_histc_out
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
-    CPU: histogram_histc_cpu
+    CPU, MPS: histogram_histc
     CUDA: _histc_cuda
 
 - func: histogram.bins_tensor_out(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
-    CPU: histogram_out_cpu
+    CPU, MPS: histogram_out
 
 - func: histogram.bins_tensor(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
-    CPU: histogram_cpu
+    CPU, MPS: histogram
 
 - func: histogram.bin_ct_out(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
-    CPU: histogram_out_cpu
+    CPU, MPS: histogram_out
 
 - func: histogram.bin_ct(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
-    CPU: histogram_cpu
+    CPU, MPS: histogram
 
 - func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
   dispatch:
-    CPU: histogramdd_bin_edges_cpu
+    CPU, MPS: histogramdd_bin_edges
   autogen: _histogramdd_bin_edges.out
 
 - func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
-    CPU: histogramdd_cpu
+    CPU, MPS: _histogramdd
   autogen: _histogramdd_from_bin_cts.out
 
 - func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
-    CPU: histogramdd_cpu
+    CPU, MPS: _histogramdd
   autogen: _histogramdd_from_bin_tensors.out
 
 - func: histogramdd(Tensor self, int[] bins, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor[] bin_edges)
