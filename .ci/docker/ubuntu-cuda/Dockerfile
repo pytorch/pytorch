@@ -136,9 +136,9 @@ RUN rm install_cudnn.sh
 
 # Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
-COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/install_inductor_benchmark_deps.sh ./common/common_utils.sh ./
 RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh
 
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi
