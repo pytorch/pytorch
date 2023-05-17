@@ -1369,6 +1369,9 @@ class FakeTensorMode(TorchDispatchMode):
 
                 x = converter(self, x)
             else:
+                if not hasattr(x, "fake_mode"):
+                    print("In bad state", func)
+
                 assert x.fake_mode is self, "Mixing fake modes NYI"
 
             flat_arg_fake_tensors.append(x)
