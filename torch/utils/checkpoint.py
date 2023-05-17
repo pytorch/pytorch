@@ -843,7 +843,6 @@ def _checkpoint_without_reentrant_pre_forward(
         # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
-        had_device_in_fwd = False
         if device_module._initialized:
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
@@ -905,7 +904,7 @@ def _checkpoint_without_reentrant(
     *args,
     **kwargs,
 ):
-    """Checkpointining without re-entrant autograd
+    """Checkpointing without reentrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
@@ -928,7 +927,9 @@ def _checkpoint_without_reentrant(
         forward_context,
         device_module,
         had_device_in_fwd,
-    ) = _checkpoint_without_reentrant_pre_forward(preserve_rng_state, context_fn, *args)
+    ) = _checkpoint_without_reentrant_pre_forward(
+        fn, preserve_rng_state, context_fn, *args, **kwargs
+    )
 
     if not should_checkpoint:
         return fn(*args, **kwargs)
