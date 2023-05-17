@@ -1022,6 +1022,10 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
+    @staticmethod
+    def indirect_indexing(index_var, size):
+        return sympy_symbol(str(index_var))
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
