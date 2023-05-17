@@ -325,7 +325,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
 
         if (
-            (fake_mode := detect_fake_mode()) is not None and 
+            (fake_mode := detect_fake_mode()) is not None and
             getattr(fake_mode, "shape_env", None) is not None
         ):
             # If we are tracing with a fake mode then add this integer to the
@@ -342,18 +342,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
-    elif isinstance(a.node.expr, sympy.Symbol):
-        pass
-    else:
-        raise ValueRangeError("constraining non-Symbols NYI")
+        return
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    var = a.node.expr
-    r = a.node.shape_env.var_to_range[var]
-    a.node.shape_env.var_to_range[var] = ValueRanges(
+    r = a.node.shape_env.var_to_range[a.node.expr]
+    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
 
