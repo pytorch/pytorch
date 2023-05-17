@@ -25,17 +25,15 @@ import torch._ops
 from torch.onnx._internal import _beartype, io_adapter
 from torch.onnx._internal.diagnostics import infra
 
-from torch.onnx._internal.fx import (
-    decomposition_table,
-    function_dispatcher,
-    registration,
-)
+from torch.onnx._internal.fx import decomposition_table, registration
 
 # We can only import onnx from this module in a type-checking context to ensure that
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
     import onnx
+
+    from torch.onnx._internal.fx import function_dispatcher
 
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
@@ -172,6 +170,10 @@ class ResolvedExportOptions(ExportOptions):
                     self.onnx_registry
                 )
             )
+
+            # TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types in diagnostics.
+            from torch.onnx._internal.fx import function_dispatcher
+
             self.onnx_dispatcher = function_dispatcher.OnnxDispatcher(
                 self.onnx_registry, self.opset_version
             )

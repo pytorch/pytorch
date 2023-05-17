@@ -6,21 +6,14 @@ import functools
 
 from typing import Any, Optional
 
+import onnxscript  # type: ignore[import]
+from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
+
 import torch
 import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
-
-# TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types.
-#   `TYPE_CHECKING` doesn't work due to the registration.
-try:
-    import onnxscript  # type: ignore[import]
-    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-        graph_building,
-    )
-except ImportError as e:
-    pass
 
 _LENGTH_LIMIT: int = 89
 
