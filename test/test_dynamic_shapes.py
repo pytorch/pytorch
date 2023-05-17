@@ -1794,7 +1794,7 @@ def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
         expected_dynamic = '''
 def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
     return [
-        2 <= dynamic_dim(x6, 1),
+        dynamic_dim(x6, 1),
         dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
         dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
     ]
