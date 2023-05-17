@@ -1071,7 +1071,7 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def indirect_indexing(self, var, size):
+    def indirect_indexing(self, var, size, check=True):
         class IndirectAssertLine(DeferredLineBase):
             def __init__(self, line, var, mask, size_map):
                 self.var = var
@@ -1092,9 +1092,12 @@ class TritonKernel(Kernel):
             def _new_line(self, line):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
 
-        var_str = str(var)
-
-        if config.triton.assert_indirect_indexing and torch.version.hip is None:
+        generate_assert = (
+            (check or config.debug_index_asserts)
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        )
+        if generate_assert:
             mask_vars = set(var.mask_vars)
             if self._load_mask:
                 mask_vars.add(self._load_mask)
