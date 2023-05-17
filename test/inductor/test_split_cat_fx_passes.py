@@ -401,6 +401,35 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1
 
+        def input_shuffling_multiple_output_same_ranges(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+
+            cat2 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            relu1 = torch.relu(split_output[6])
+
+            return cat1, cat2, stack1, relu1
+
         def unequal_split_multiple_output(x):
             split_output = list(torch.split(x, [2, 4, 4, 4, 4, 4, 8, 2], dim=1))
             cat1 = torch.cat(
@@ -457,6 +486,7 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4),
             (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4),
             (input_shuffling_multiple_output, 1, 1, 2, 2, 3),
+            (input_shuffling_multiple_output_same_ranges, 1, 1, 3, 3, 3),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3),
         ]:
             expected = fn(*args)
