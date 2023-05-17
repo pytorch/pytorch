@@ -62,42 +62,75 @@ inline int64_t getTimeUs() {
 }
 
 using torch::profiler::impl::ActiveProfilerType;
-using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::get_record_concrete_inputs_enabled;
+using torch::profiler::impl::ivalueListToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
+using torch::profiler::impl::strListToStr;
 using torch::profiler::impl::TensorMetadata;
 
-auto shapesAndDtypes(const std::vector<op_input_t>& inputs) {
+struct OpArgData {
+  bool has_data;
   std::vector<std::vector<int64_t>> shapes;
   std::vector<std::string> dtypes;
-  for (const auto& i : inputs) {
+  std::vector<c10::IValue> concrete_inputs;
+};
+
+auto parseArgData(
+    const std::vector<op_input_t>& input_shapes,
+    const std::vector<op_input_t>& concrete_inputs) {
+  if (input_shapes.empty()) {
+    return OpArgData{false, {}, {}, {}};
+  }
+
+  std::vector<std::vector<int64_t>> shapes(input_shapes.size());
+  std::vector<std::string> dtypes(input_shapes.size());
+  std::vector<c10::IValue> concrete_inputs_list;
+
+  for (const auto& i : c10::irange(input_shapes.size())) {
     c10::visit(
         c10::overloaded(
             [&](const TensorMetadata& t) {
-              shapes.emplace_back(t.sizes_);
-              dtypes.emplace_back(scalarTypeToTypeMeta(t.dtype_).name());
+              shapes[i] = t.sizes_;
+              dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
             },
             [&](const std::vector<TensorMetadata>&) {
-              shapes.emplace_back();
-              dtypes.emplace_back("TensorList");
+              dtypes[i] = "TensorList";
             },
-            [&](const c10::IValue&) {
-              shapes.emplace_back();
-              dtypes.emplace_back("Scalar");
-            },
-            [&](const auto&) {
-              shapes.emplace_back();
-              dtypes.emplace_back();
-            }),
-        i);
+            [&](const c10::IValue& val) { dtypes[i] = "Scalar"; },
+            [&](const auto&) {}),
+        input_shapes[i]);
   }
-  return std::make_pair(shapes, dtypes);
+
+  // If we recorded concrete inputs, then parse them
+  if (input_shapes.size() == concrete_inputs.size() &&
+      !concrete_inputs.empty()) {
+    concrete_inputs_list.resize(input_shapes.size());
+
+    for (const auto& i : c10::irange(input_shapes.size())) {
+      c10::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
+              [&](const auto&) {}),
+          input_shapes[i]);
+      c10::visit(
+          c10::overloaded(
+              [&](const c10::IValue& val) {
+                concrete_inputs_list[i] = val;
+                dtypes[i] = "ScalarList";
+              },
+              [&](const auto&) {}),
+          concrete_inputs[i]);
+    }
+  }
+
+  return OpArgData{true, shapes, dtypes, concrete_inputs_list};
 }
 
 struct MetadataBase {
@@ -181,13 +214,16 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(ExtraFields<EventType::TorchOp>& op_event) {
-    const auto shapes_and_dtypes = shapesAndDtypes(op_event.inputs_);
-    if (!shapes_and_dtypes.first.empty()) {
-      addMetadata("Input Dims", shapesToStr(shapes_and_dtypes.first));
-    }
+    const auto arg_data =
+        parseArgData(op_event.inputs_, op_event.concrete_inputs_);
 
-    if (!shapes_and_dtypes.second.empty()) {
-      addMetadata("Input type", dtypesToStr(shapes_and_dtypes.second));
+    if (arg_data.has_data) {
+      addMetadata("Input Dims", shapesToStr(arg_data.shapes));
+      addMetadata("Input type", strListToStr(arg_data.dtypes));
+      if (!arg_data.concrete_inputs.empty()) {
+        addMetadata(
+            "Concrete Inputs", ivalueListToStr(arg_data.concrete_inputs));
+      }
     }
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
@@ -717,7 +753,10 @@ KinetoEvent::KinetoEvent(
   }
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
-    std::tie(shapes_, dtypes_) = shapesAndDtypes(op.inputs_);
+    auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
+    shapes_ = std::move(arg_data.shapes);
+    dtypes_ = std::move(arg_data.dtypes);
+    concrete_inputs_ = std::move(arg_data.concrete_inputs);
   });
 }
 
@@ -741,6 +780,14 @@ bool KinetoEvent::hasTypes() const {
 
 const c10::ArrayRef<std::string> KinetoEvent::dtypes() const {
   return dtypes_;
+}
+
+bool KinetoEvent::hasConcreteInputs() const {
+  return !concrete_inputs_.empty();
+}
+
+const c10::ArrayRef<c10::IValue> KinetoEvent::concreteInputs() const {
+  return concrete_inputs_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {

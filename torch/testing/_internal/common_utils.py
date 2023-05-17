@@ -714,6 +714,8 @@ def sanitize_pytest_xml(xml_file: str):
         full_classname = testcase.attrib['classname']
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
+        if regex_result is None:
+            continue
         classname = regex_result.group("classname")
         file = regex_result.group("file").replace(".", "/")
         testcase.set("classname", classname)
@@ -1794,6 +1796,7 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))

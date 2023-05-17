@@ -105,9 +105,6 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 
@@ -222,6 +219,9 @@ class cpp:
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing.
     vec_isa_ok = None
+
+    # similar to config.triton.descriptive_names
+    descriptive_names = "original_aten"
 
 
 # config specific to codegen/triton.py
