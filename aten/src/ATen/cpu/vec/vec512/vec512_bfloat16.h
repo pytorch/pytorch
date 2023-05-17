@@ -26,15 +26,13 @@ template<> inline BFloat16 down_scale(float val) {
 }
 
 template<> inline Half down_scale(float val) {
-  uint16_t d;
-  __m512 v = _mm512_set_ps(val, val, val, val, val, val, val, val,
-                           val, val, val, val, val, val, val, val);
+  unsigned short d[16];
+  __m512 v = _mm512_set1_ps(val);
   __m256i o = _mm512_cvtps_ph(
       v, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-  // _mm256_storeu_epi16(reinterpret_cast<__m256i*>(d), o);
-  std::memcpy(&d, &o, sizeof(d));
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(d), o);
   Half result;
-  result.x = d;
+  result.x = d[0];
   return result;
 }
 
