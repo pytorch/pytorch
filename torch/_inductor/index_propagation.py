@@ -101,8 +101,16 @@ class SymPyOps:
 
 @dataclass
 class IndexPropVar:
-    rep: Any  # A wrapped IR value, if present
-    expr: Optional[TypedExpr] = None
+    value: Any # Either an IR value, or TypedExpr if is_symbolic is true
+    is_symbolic: bool = False
+
+    @staticmethod
+    def new_symbolic(expr: TypedExpr) -> "IndexPropVar":
+        return IndexPropVar(expr, is_symbolic=True)
+
+    def __post_init__(self):
+        assert not self.is_symbolic or isinstance(self.value, TypedExpr), \
+            "Symbolic IndexPropVar must contain a TypedExpr"
 
 
 class IndexPropagation:
@@ -115,10 +123,6 @@ class IndexPropagation:
 
     def __init__(self, inner):
         self._inner = inner
-        self.id_iter = itertools.count()
-
-    def new_symbol(self, expr: TypedExpr):
-        return IndexPropVar(f"index_tmp{next(self.id_iter)}", expr)
 
     def materialize_expr(self, expr, dtype):
         # Construct a new constant/index_expr from the SymPy expression
@@ -133,10 +137,10 @@ class IndexPropagation:
             return a
 
         # Prefer the sympy representation if possible
-        if a.expr is not None:
-            return self.materialize_expr(a.expr.expr, a.expr.dtype)
+        if a.is_symbolic:
+            return self.materialize_expr(a.value.expr, a.value.dtype)
 
-        return a.rep
+        return a.value
 
     def fallback(self, name, args, kwargs):
         # Fallback to the wrapped handler
@@ -149,14 +153,14 @@ class IndexPropagation:
         def unwrap(a):
             if not isinstance(a, IndexPropVar):
                 return a
-            return a.expr
+            return a.value
 
         new_args = [unwrap(a) for a in args]
         new_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
         new_expr = getattr(SymPyOps, name)(*new_args, **new_kwargs)
         if new_expr is NotImplemented:
             return self.fallback(name, args, kwargs)
-        return self.new_symbol(new_expr)
+        return IndexPropVar.new_symbolic(new_expr)
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -168,7 +172,7 @@ class IndexPropagation:
                 for a in itertools.chain(args, kwargs.values())
                 if isinstance(a, IndexPropVar)
             ]
-            if any(v.expr is None for v in var_arguments):
+            if not all(v.is_symbolic for v in var_arguments):
                 return self.fallback(name, args, kwargs)
 
             return self.propagate_sympy(name, args, kwargs)
@@ -177,6 +181,6 @@ class IndexPropagation:
 
     def indirect_indexing(self, index, size, check=True):
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
-        if isinstance(index, IndexPropVar) and index.expr is not None:
-            return index.expr.expr
-        return self.fallback("indirect_indexing", (index, size, check), {}).rep
+        if isinstance(index, IndexPropVar) and index.is_symbolic:
+            return index.value.expr
+        return self.fallback("indirect_indexing", (index, size, check), {}).value
