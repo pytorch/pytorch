@@ -97,7 +97,7 @@ explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
-change (e.g., you will probably need to update `torchgen/autograd/derivatives.yaml` at
+change (e.g., you will probably need to update `tools/autograd/derivatives.yaml` at
 least, and it may affect Python keyword arguments). For more details please see the section on `variants`.
 
 As a convention we use 'out' to indicate an output argument. This aligns with the
@@ -151,7 +151,7 @@ Return also supports specifying (optional) return argument names. These serve
 two functions:
 
 - They let you easily write derivatives in terms of return arguments in
-  `torchgen/autograd/derivatives.yaml`
+  `tools/autograd/derivatives.yaml`
 
 - They correspond to the named field the output can be referred to from
   Python.  (This means that changing a return argument name is
@@ -520,12 +520,12 @@ your implementation of `foo` is probably not automatically differentiable:
 it might make use of functions like `data_ptr()` or it dispatches differently
 depending on if it's operating on CPU or CUDA tensors.  Once you write these two functions,
 you will have to write an entry correlating them together in
-`torchgen/autograd/derivatives.yaml`.
+`tools/autograd/derivatives.yaml`.
 
 However, in some situations, you can write a function in ATen and it
 will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
-case, you don't have to write an entry in `torchgen/autograd/derivatives.yaml`.
+case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
 
 ### Choosing the right dispatch keyword
 

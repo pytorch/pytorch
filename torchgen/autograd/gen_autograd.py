@@ -50,16 +50,15 @@ def gen_autograd(
     native_functions_path: str,
     tags_path: str,
     out: str,
-    autograd_dir: str,
+    yaml_dir: str,
+    template_path: str,
     operator_selector: SelectiveBuilder,
     disable_autograd: bool = False,
 ) -> None:
     # Parse and load derivatives.yaml
     differentiability_infos, used_dispatch_keys = load_derivatives(
-        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path, tags_path
+        os.path.join(yaml_dir, "derivatives.yaml"), native_functions_path, tags_path
     )
-
-    template_path = os.path.join(autograd_dir, "templates")
 
     native_funcs = parse_native_yaml(native_functions_path, tags_path).native_functions
     fns = sorted(
@@ -100,19 +99,18 @@ def gen_autograd_python(
     native_functions_path: str,
     tags_path: str,
     out: str,
-    autograd_dir: str,
+    yaml_dir: str,
+    template_path: str,
 ) -> None:
     differentiability_infos, _ = load_derivatives(
-        os.path.join(autograd_dir, "derivatives.yaml"), native_functions_path, tags_path
+        os.path.join(yaml_dir, "derivatives.yaml"), native_functions_path, tags_path
     )
-
-    template_path = os.path.join(autograd_dir, "templates")
 
     # Generate Functions.h/cpp
     gen_autograd_functions_python(out, differentiability_infos, template_path)
 
     # Generate Python bindings
-    deprecated_path = os.path.join(autograd_dir, "deprecated.yaml")
+    deprecated_path = os.path.join(yaml_dir, "deprecated.yaml")
     gen_python_functions.gen(
         out, native_functions_path, tags_path, deprecated_path, template_path
     )
@@ -129,11 +127,13 @@ def main() -> None:
         "autograd", metavar="AUTOGRAD", help="path to autograd directory"
     )
     args = parser.parse_args()
+    template_path = os.fspath(args.autograd.parent.parent / "torchgen/autograd/templates")
     gen_autograd(
         args.native_functions,
         args.tags,
         args.out,
         args.autograd,
+        template_path,
         SelectiveBuilder.get_nop_selector(),
     )
 

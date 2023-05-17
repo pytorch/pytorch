@@ -15,7 +15,6 @@ torch/testing/_internal/generated
 """
 
 import argparse
-import os
 import textwrap
 from collections import defaultdict
 
@@ -40,7 +39,10 @@ from .gen_python_functions import (
 
 
 def gen_annotated(
-    native_yaml_path: str, tags_yaml_path: str, out: str, autograd_dir: str
+    native_yaml_path: str,
+    tags_yaml_path: str,
+    out: str,
+    template_path: str,
 ) -> None:
     native_functions = parse_native_yaml(
         native_yaml_path, tags_yaml_path
@@ -64,7 +66,6 @@ def gen_annotated(
             for f in group:
                 annotated_args.append(f"{namespace}.{gen_annotated_args(f)}")
 
-    template_path = os.path.join(autograd_dir, "templates")
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template(
         "annotated_fn_args.py",

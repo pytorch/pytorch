@@ -1173,7 +1173,7 @@ def main() -> None:
     parser.add_argument(
         "--deprecated-functions-path",
         metavar="DEPRECATED",
-        default="torchgen/autograd/deprecated.yaml",
+        default="tools/autograd/deprecated.yaml",
         help="path to deprecated.yaml",
     )
     parser.add_argument(

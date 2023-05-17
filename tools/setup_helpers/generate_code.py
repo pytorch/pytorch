@@ -39,8 +39,9 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(
-        pathlib.Path(__file__).parent.parent.parent / "torchgen/autograd"
+    yaml_dir = os.fspath(pathlib.Path(__file__).parent.parent / "autograd")
+    template_path = os.fspath(
+        pathlib.Path(__file__).parent.parent.parent / "torchgen/autograd/templates"
     )
 
     if subset == "pybindings" or not subset:
@@ -48,7 +49,8 @@ def generate_code(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
             autograd_gen_dir,
-            autograd_dir,
+            yaml_dir,
+            template_path,
         )
 
     if operator_selector is None:
@@ -59,7 +61,8 @@ def generate_code(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
             autograd_gen_dir,
-            autograd_dir,
+            yaml_dir,
+            template_path,
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
         )
@@ -69,7 +72,7 @@ def generate_code(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,
             python_install_dir,
-            autograd_dir,
+            template_path,
         )
 
 
