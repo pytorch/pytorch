@@ -108,10 +108,9 @@ SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algo
     A simplified way of thinking about the implementation is as such:
 
     1. Create a mask of the non-zero values in the sparse gradients. For example,
-    2. f your gradient is [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
-    3. Apply this mask over the running moments and do computation on only the
-
-    non-zero values.
+       if your gradient is [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
+    2. Apply this mask over the running moments and do computation on only the
+       non-zero values.
     3. Apply this mask over the parameters and only apply an update on non-zero values.
 
     We use sparse layout Tensors to optimize this approximation, which means the more
