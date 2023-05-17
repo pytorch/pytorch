@@ -1935,6 +1935,7 @@ cc_test(
 py_test(
     name = "test_bazel",
     srcs = ["test/_test_bazel.py"],
+    main = "test/_test_bazel.py",
     deps = [":pytorch_py"],
 )
 
