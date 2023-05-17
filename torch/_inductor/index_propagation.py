@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -101,7 +101,7 @@ class SymPyOps:
 
 @dataclass
 class IndexPropVar:
-    value: Any # Either an IR value, or TypedExpr if is_symbolic is true
+    value: Any  # Either an IR value, or TypedExpr if is_symbolic is true
     is_symbolic: bool = False
 
     @staticmethod
@@ -109,8 +109,9 @@ class IndexPropVar:
         return IndexPropVar(expr, is_symbolic=True)
 
     def __post_init__(self):
-        assert not self.is_symbolic or isinstance(self.value, TypedExpr), \
-            "Symbolic IndexPropVar must contain a TypedExpr"
+        assert not self.is_symbolic or isinstance(
+            self.value, TypedExpr
+        ), "Symbolic IndexPropVar must contain a TypedExpr"
 
 
 class IndexPropagation:

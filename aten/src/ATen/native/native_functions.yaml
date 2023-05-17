@@ -2936,7 +2936,6 @@
   dispatch:
     CPU, CUDA: _unsafe_index
 
-
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function

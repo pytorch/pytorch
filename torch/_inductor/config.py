@@ -110,7 +110,11 @@ lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
+# Enable constant and index_expr folding
 constant_and_index_propagation = True
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 
 def is_fbcode():

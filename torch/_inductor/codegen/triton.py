@@ -1078,7 +1078,7 @@ class TritonKernel(Kernel):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
 
         generate_assert = (
-            check
+            (check or config.debug_index_asserts)
             and config.triton.assert_indirect_indexing
             and torch.version.hip is None
         )
