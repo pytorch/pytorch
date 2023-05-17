@@ -4243,11 +4243,11 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        with V.set_ops_handler(
-            IndexPropagation(
-                SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
-            )
-        ):
+        handler = SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        if config.constant_and_index_propagation:
+            handler = IndexPropagation(handler)
+
+        with V.set_ops_handler(handler):
             ops.output(fn(*args))
         self.graph = tracer.graph
 
