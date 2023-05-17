@@ -118,13 +118,12 @@ class OptimizedModule(torch.nn.Module):
         return {"_orig_mod": self._orig_mod}
 
     def __setstate__(self, state):
-        self._orig_mod = state["_orig_mod"]
-        self.dynamo_ctx = None
-        self.forward = self._orig_mod.forward
+        orig_mod = state["_orig_mod"]
+        self.__class__ = orig_mod.__class__
+        self.__dict__.update(orig_mod.__dict__)
 
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
-        # Call the parent __init__ method to set up the Module infrastructure
         super(OptimizedModule, instance).__init__()
         return instance
 
