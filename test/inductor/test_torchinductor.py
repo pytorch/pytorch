@@ -26,7 +26,7 @@ import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
@@ -76,6 +76,15 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16]
+
+
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
 
 
 class TestCase(TorchTestCase):
@@ -1056,6 +1065,20 @@ class CommonTemplate:
         self.common(
             forward,
             (torch.randn(4, 4, 4, 4),),
+        )
+
+    def test_views6(self):
+        def forward(x):
+            x = torch.ops.aten.relu(x)
+            s = torch.ops.aten.slice(x, 0, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 1, 0, 9223372036854775807)
+            s = torch.ops.aten.slice(s, 3, 0, 0)
+            y = torch.ops.aten.view(s, [4, 2, -1])
+            return y
+
+        self.common(
+            forward,
+            (torch.randn(4, 2, 4, 4),),
         )
 
     def test_relu(self):
@@ -4582,28 +4605,19 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
 
-    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_0(self):
         def fn1(a):
             return torch.nn.functional.dropout(a, 0.0, True) + a
 
         self.common(fn1, [torch.randn(55)])
 
-    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 
         self.common(fn2, [torch.randn(55)])
 
-    @config.patch({"lowmem_dropout": True})
-    def test_dropout_trivial_1_lowmem(self):
-        def fn2(a):
-            return torch.nn.functional.dropout(a, 1.0, True) + a
-
-        self.common(fn2, [torch.randn(55)])
-
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4742,6 +4756,36 @@ class CommonTemplate:
         x = torch.rand(10, 3, 0)
 
         self.common(model, (x,))
+
+    def test_randint(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return (
+                torch.randint(10, [1024], device=x.device),
+                torch.randint(-4, 7, [1024], dtype=torch.int32, device=x.device),
+                torch.randint_like(x, 2**50),
+            )
+
+        torch.manual_seed(12345)
+        a0, b0, c0 = fn(torch.zeros([40, 40], device=self.device))
+        self.assertEqual(a0.shape, [1024])
+        self.assertEqual(b0.shape, [1024])
+        self.assertEqual(c0.shape, [40, 40])
+        torch.manual_seed(12345)
+        a1, b1, c1 = fn(torch.zeros([40, 40], device=self.device))
+        self.assertEqual(a0, a1)
+        self.assertEqual(b0, b1)
+        self.assertEqual(c0, c1)
+
+        self.assertEqual(a0.min(), 0)
+        self.assertEqual(a0.max(), 9)
+
+        self.assertEqual(b0.min(), -4)
+        self.assertEqual(b0.max(), 6)
+
+        self.assertGreaterEqual(c0.min(), 0)
+        self.assertGreater(c0.max(), 2**40)
+        self.assertLess(c0.max(), 2**50)
 
     @config.patch(fallback_random=True)
     def test_like_rands(self):
@@ -5036,8 +5080,7 @@ class CommonTemplate:
             torch._inductor.metrics.disable_cpp_wrapper, expected_disable_cpp_wrapper
         )
 
-    @config.patch({"triton.cudagraphs": False})
-    def test_lowmem_dropout1(self):
+    def test_dropout2(self):
         n = 100000
         weight = torch.ones(
             n, device=self.device, dtype=torch.float32, requires_grad=True
@@ -5074,8 +5117,10 @@ class CommonTemplate:
 
         torch.manual_seed(1234)
         weight.grad.zero_()
-        r2 = run(ones)
-        r2.sum().backward()
+        r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5091,9 +5136,7 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    def test_lowmem_dropout2(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("lowmem_dropout only supports cuda")
+    def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
@@ -5106,10 +5149,17 @@ class CommonTemplate:
             return m(x)
 
         torch._inductor.metrics.generated_kernel_count = 0
-        result = run(torch.randn([8, 32], device=self.device))
-        result.sum().backward()
 
-        expected_kernel = 4
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(
+            lambda: run(torch.randn([8, 32], device=self.device))
+        )
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
+            expected_kernel = 4
+        else:
+            expected_kernel = 6
+
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
@@ -5760,8 +5810,8 @@ class CommonTemplate:
         b = torch.rand((100,))
         with profile() as prof:
             fn(a, b)
-        assert "inductor_wrapper_call" in (
-            e.name for e in prof.profiler.function_events
+        assert any(
+            "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
         )
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
@@ -6084,6 +6134,12 @@ class CommonTemplate:
         x_clone = x.clone()
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         same(fn(x, y), opt_fn(x_clone, y))
+
+    def test_erfc(self):
+        def fn(x):
+            return torch.erfc(x)
+
+        self.common(fn, (torch.randn(8, 8),))
 
 
 @dataclasses.dataclass
