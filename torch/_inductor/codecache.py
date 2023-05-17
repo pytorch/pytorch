@@ -17,6 +17,7 @@ import sys
 import sysconfig
 import tempfile
 import threading
+import traceback
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -241,6 +242,14 @@ def get_lock_dir():
     return lock_dir
 
 
+def get_vecISA_path():
+    isa_dir = cpp_wrapper_cache_dir("check_vec_isa")
+    # isa_dir = os.path.join(cache_dir(), "check_vec_isa")
+    if not os.path.exists(isa_dir):
+        os.makedirs(isa_dir, exist_ok=True)
+    return isa_dir, os.path.join(isa_dir, "vec_isa.json")
+
+
 def code_hash(code):
     return (
         "c"
@@ -403,30 +412,77 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
+        lock = FileLock(
+            os.path.join(lock_dir, "vec_isa.lock"),
+            timeout=LOCK_TIMEOUT,
+        )
+        _, isa_path = get_vecISA_path()
+        print("[liaoxuan] isa path: ", isa_path)
+        if os.path.exists(isa_path):
+            with lock, open(isa_path, "r") as isa_f:
+                check_isa_dict = json.load(isa_f)
+                if str(self._bit_width) in check_isa_dict:
+                    check_isa_val = check_isa_dict[str(self._bit_width)].split("\t")[-1]
+                    print(
+                        "[liaoxuan] check_isa_dict: ",
+                        check_isa_dict,
+                        self._bit_width,
+                        check_isa_val,
+                    )
+                    return bool(int(check_isa_val))
+
+        _, input_path = write(VecISA._avx_code, "cpp")
+        with lock, open(isa_path, "w+") as isa_f:
             output_path = input_path[:-3] + "so"
             build_cmd = cpp_compile_command(
                 input_path, output_path, warning_all=False, vec_isa=self
             ).split(" ")
+            check_isa_dict = {}
+            try:
+                check_isa_dict = json.load(isa_f)
+            except json.decoder.JSONDecodeError:
+                pass
             try:
                 # Check build result
-                subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
-                subprocess.check_call(
-                    [
-                        "python",
-                        "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
-                    ],
-                    stderr=subprocess.DEVNULL,
-                )
+                try:
+                    subprocess.check_output(build_cmd, stderr=subprocess.STDOUT)
+                except Exception as e1:
+                    print("[liaoxuan] check_output_except build_cmd: " + build_cmd)
+                    print(
+                        "[liaoxuan] check_output_except traceback: "
+                        + traceback.format_exc()
+                    )
+                    print("[liaoxuan] check_output_except msg: " + e1)
+                    raise e1
+                try:
+                    subprocess.check_call(
+                        [
+                            "python",
+                            "-c",
+                            VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        ],
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception as e2:
+                    print("[liaoxuan] check_call_except output_path: " + output_path)
+                    print(
+                        "[liaoxuan] check_call_except traceback: "
+                        + traceback.format_exc()
+                    )
+                    print("[liaoxuan] check_call_except msg: " + e2)
+                    raise e2
             except Exception as e:
+                check_isa_dict[str(self._bit_width)] = str(time()) + "\t0"
+                json.dump(check_isa_dict, isa_f)
+                print("[liaoxuan] compile false: ", str(check_isa_dict), e)
                 return False
 
+            check_isa_dict[str(self._bit_width)] = str(time()) + "\t1"
+            json.dump(check_isa_dict, isa_f)
+            print("[liaoxuan] compile true: ", check_isa_dict)
             return True
 
 
@@ -489,6 +545,7 @@ def valid_vec_isa_list():
         for isa in supported_vec_isa_list:
             if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
+        print("[liaoxuan] isa list: ", isa_list)
         return isa_list
 
 

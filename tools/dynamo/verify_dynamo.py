@@ -144,6 +144,8 @@ def check_rocm():
 def check_dynamo(backend, device, err_msg):
     import torch
 
+    print("[liaoxuan] check dynamo: " + backend + device + err_msg)
+
     if device == "cuda" and not torch.cuda.is_available():
         print(f"CUDA not available -- skipping CUDA check on {backend} backend\n")
         return

@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import os
+import shutil
 import sys
 import unittest
 from typing import Callable
@@ -1815,6 +1817,36 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_vec_isa_cache(self):
+        # https://github.com/pytorch/pytorch/issues/100378
+        def f(a):
+            return a * a
+
+        _, _, cpp_path = codecache.get_code_path(codecache.VecISA._avx_code, "cpp", "")
+        so_path = cpp_path[:-3] + "so"
+
+        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
+        for item in bit_widths:
+            with config.patch({"cpp.simdlen": item}):
+                # Initialization. Clean up cache files.
+                isa_dir, _ = codecache.get_vecISA_path()
+                shutil.rmtree(isa_dir)
+
+                # 1st time run -- Warm up. Create cache files for Vec ISA.
+                codecache.VecISA.__bool__.cache_clear()
+                x = torch.rand(3, 5)
+                self.common(f, (x,))
+                for path in [cpp_path, so_path]:
+                    assert os.path.exists(path) is True
+                    os.remove(path)
+
+                # 2nd time run -- Testing. Directly read Vec ISA cache. Tmp hash files aren't created this time.
+                codecache.VecISA.__bool__.cache_clear()
+                x = torch.rand(3, 5)
+                self.common(f, (x,))
+                for path in [cpp_path, so_path]:
+                    assert os.path.exists(path) is False
 
 
 if __name__ == "__main__":
