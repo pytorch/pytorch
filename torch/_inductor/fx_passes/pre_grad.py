@@ -13,22 +13,23 @@ from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
-from .. import config, overrides
+from .. import config
 
 from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
 from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
-from ..quantization import quantization_pre_grad_pass
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
 normalize_split_pass = PatternMatcherPass()
 merge_splits_pass = PatternMatcherPass()
+merge_split_cat_pass = PatternMatcherPass()
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalize_split_pass,
     merge_splits_pass,
+    merge_split_cat_pass,
 ]
 
 
@@ -56,12 +57,6 @@ def pre_grad_passes(gm, example_inputs):
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
-
-    # used to implement low memory dropout
-    gm = overrides.replace_fx(gm, example_inputs)
-
-    # Preprocessing for quantization on CPU. Skipped if gm is not quantized.
-    gm = quantization_pre_grad_pass(gm, example_inputs)
 
     if config.pattern_matcher:
         lazy_init()

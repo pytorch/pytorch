@@ -768,7 +768,7 @@ class TorchHigherOrderOperator(VariableTracker):
             next_name = None
             i = 0
             while not next_name:
-                candidate = f"cond_{name}_{i}"
+                candidate = f"{name}_{i}"
                 if candidate in tx.output.nn_modules:
                     i += 1
                 else:
@@ -1052,11 +1052,11 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             true_name = add_subgraph(
-                "true",
+                "cond_true",
                 torch.fx.GraphModule(true_nn_modules_context.nn_modules, true_graph),
             )
             false_name = add_subgraph(
-                "false",
+                "cond_false",
                 torch.fx.GraphModule(false_nn_modules_context.nn_modules, false_graph),
             )
 
@@ -1122,7 +1122,7 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body",
+                "map_body",
                 torch.fx.GraphModule(body_nn_modules_context.nn_modules, body_graph),
             )
 
@@ -1169,7 +1169,7 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+                "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
             body_node = make_attr(body_name)
             p_args = (
