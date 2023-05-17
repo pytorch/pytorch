@@ -1646,7 +1646,6 @@ void qmaxpool_3d_nthwc_kernel(
           } // for t
           o_p[c] = max_val;
         } // for c
-
         data_index_step(b, nBatch, time, oT, row, oH, col, oW);
       }
 

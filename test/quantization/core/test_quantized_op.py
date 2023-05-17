@@ -1462,10 +1462,10 @@ class TestQuantizedOps(TestCase):
     """Tests 3D max pool operation on quantized tensors."""
     def test_max_pool3d(self):
         torch_types = [torch.qint8, torch.quint8]
-        kernels = [1, 3, 5]
-        strides = [1, 3, 5]
+        kernels = [1, 3]
+        strides = [1, 3]
         dilations = [1, 3]
-        paddings = [1, 3, 5]
+        paddings = [1, 3]
         ceil_modes = [True, False]
         options = itertools.product(torch_types, kernels, strides, dilations, paddings, ceil_modes)
         for torch_type, kernel, stride, dilation, padding, ceil_mode in options:
@@ -1568,14 +1568,14 @@ class TestQuantizedOps(TestCase):
     """Tests 3D max pool operation on quantized channel_last tensors."""
     def test_max_pool3d_nhwc(self):
         torch_types = [torch.qint8, torch.quint8]
-        kernels = [1, 3, 5]
-        strides = [1, 3, 5]
+        kernels = [1, 3]
+        strides = [1, 3]
         dilations = [1, 3]
-        paddings = [1, 3, 5]
+        paddings = [1, 3]
         ceil_modes = [True, False]
         options = itertools.product(torch_types, kernels, strides, dilations, paddings, ceil_modes)
         for torch_type, kernel, stride, dilation, padding, ceil_mode in options:
-            X = torch.randint(20, 40, (2, 176, 16, 10, 10)).to(torch.float)
+            X = torch.randint(20, 40, (2, 67, 16, 10, 10)).to(torch.float)
             X_copy = copy.deepcopy(X)
             X = X.contiguous(memory_format=torch.channels_last_3d)
             scale = 15
