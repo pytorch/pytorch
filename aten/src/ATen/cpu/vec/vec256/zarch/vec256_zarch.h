@@ -2301,6 +2301,9 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   Vectorized<T> exp2() const {
     return mapOrdinary(exp2_impl);
   }
+  Vectorized<T> expm1() const {
+    return mapOrdinary(std::expm1);
+  }
 
   Vectorized<T> log() const {
     return mapOrdinary(std::log);
