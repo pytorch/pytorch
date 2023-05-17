@@ -8,16 +8,16 @@ from torch._utils import ExceptionWrapper
 
 __all__ = ['parallel_apply']
 
-def get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
+def _get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
     if isinstance(obj, torch.Tensor):
         return obj
 
     if isinstance(obj, (list, tuple)):
-        for result in map(get_a_var, obj):
+        for result in map(_get_a_var, obj):
             if isinstance(result, torch.Tensor):
                 return result
     if isinstance(obj, dict):
-        for result in map(get_a_var, obj.items()):
+        for result in map(_get_a_var, obj.items()):
             if isinstance(result, torch.Tensor):
                 return result
     return None
@@ -67,7 +67,7 @@ def parallel_apply(
     ) -> None:
         torch.set_grad_enabled(grad_enabled)
         if device is None:
-            t = get_a_var(input)
+            t = _get_a_var(input)
             if t is None:
                 with lock:
                     results[i] = ExceptionWrapper(
