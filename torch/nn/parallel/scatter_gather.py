@@ -1,5 +1,5 @@
 import torch
-from typing import Any, List, Sequence, Tuple, TypeVar, Union, overload
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union, overload
 from ._functions import Scatter, Gather
 import warnings
 
@@ -63,23 +63,20 @@ def scatter(inputs, target_gpus, dim=0):
     return res
 
 
-# TODO More precise types here.
 def scatter_kwargs(
-    inputs: Any,
-    kwargs: Any,
+    inputs: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]],
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
-) -> Any:
+) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
     r"""Scatter with support for kwargs dictionary"""
-    inputs = scatter(inputs, target_gpus, dim) if inputs else []
-    kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
-    if len(inputs) < len(kwargs):
-        inputs.extend(() for _ in range(len(kwargs) - len(inputs)))
-    elif len(kwargs) < len(inputs):
-        kwargs.extend({} for _ in range(len(inputs) - len(kwargs)))
-    inputs = tuple(inputs)
-    kwargs = tuple(kwargs)
-    return inputs, kwargs
+    scattered_inputs = scatter(inputs, target_gpus, dim) if inputs else []
+    scattered_kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
+    if len(scattered_inputs) < len(scattered_kwargs):
+        scattered_inputs.extend(() for _ in range(len(scattered_kwargs) - len(scattered_inputs)))
+    elif len(scattered_kwargs) < len(inputs):
+        scattered_kwargs.extend({} for _ in range(len(scattered_inputs) - len(scattered_kwargs)))
+    return tuple(scattered_inputs), tuple(scattered_kwargs)
 
 
 def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
