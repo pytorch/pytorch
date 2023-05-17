@@ -284,7 +284,6 @@ class TensorVariable(VariableTracker):
     ) -> "VariableTracker":
         if tx.strict_checks_enabled:
             if name in self._strict_mode_banned_ops():
-                breakpoint()
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy

@@ -839,7 +839,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
-        print(gm)
         tot = 0
         placeholders = []
         for node in gm.graph.nodes:

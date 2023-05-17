@@ -61,7 +61,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "eq",
             "ne",
         ]
-        ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
+        ops_with_dtype_arg = ["constant", "to_dtype"]
         reduction_to_dtype = {
             "any": torch.bool,
             "argmin": torch.int64,
@@ -78,6 +78,10 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             return False
         if _node.target in ops_to_bool:
             opt_ctx.dtype = torch.bool
+        elif _node.target in ("rand", "randn"):
+            opt_ctx.dtype = torch.float32
+        elif _node.target in ("randint64",):
+            opt_ctx.dtype = torch.int64
         elif _node.target in ops_with_dtype_arg:
             opt_ctx.dtype = _node.args[-1]
         elif _node.target == "reduction":
@@ -95,7 +99,6 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
 
         # node.target not belong to any ops which can directly get the dtype
         # need propogate dtype with it's input node
-        dtype = None
         inputs = node.all_input_nodes
         input_nodes = [
             n
@@ -295,6 +298,10 @@ class OpOverrides:
     def remainder(a, b):
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+
+    @staticmethod
+    def load_seed(name, offset):
+        return ops.load(name, sympy.Integer(offset))
 
 
 class DeferredLine(DeferredLineBase):
