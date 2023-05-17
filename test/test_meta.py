@@ -1219,6 +1219,18 @@ class TestMeta(TestCase):
         r = t.nan_to_num()
         self.assertEqual(r.device.type, 'meta')
 
+    def test_inplace_masked_fill_error(self):
+        t = torch.randn(3, 3, device='meta')
+        with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
+            t.masked_fill_((t > 0).unsqueeze(0), 0.1)
+
+    def test_inplace_bin_ops_error(self):
+        t = torch.randn(3, 3, device='meta')
+        for op in (torch.Tensor.add_, torch.Tensor.sub_, torch.Tensor.mul_, torch.Tensor.div_,
+                   torch.Tensor.logical_and_, torch.Tensor.logical_or_, torch.Tensor.logical_xor_):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the broadcast"):
+                op(t, t.clone().unsqueeze(0))
+
     @onlyCPU
     def test_meta_autograd_no_error(self):
         lib = torch.library.Library("meta_test", "DEF")

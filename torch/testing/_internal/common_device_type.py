@@ -585,7 +585,7 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     @classmethod
     def setUpClass(cls):
         cls.device_type = torch._C._get_privateuse1_backend_name()
-        cls.divice_mod = getattr(torch, device_type, None)
+        cls.device_mod = getattr(torch, cls.device_type, None)
         assert cls.device_mod is not None, f'''torch has no module of `{cls.device_type}`, you should register
                                             a module by `torch._register_device_module`.'''
         cls.primary_device = '{device_type}:{id}'.format(device_type=cls.device_type, id=cls.device_mod.current_device())
