@@ -1380,7 +1380,6 @@ class TritonScheduling:
                 )
 
             src_code = kernel.codegen_kernel()
-            breakpoint()
             kernel_name = self.define_kernel(src_code, [foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 

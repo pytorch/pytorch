@@ -137,6 +137,10 @@ class ForeachKernel(Kernel):
             code.splice("pid = tl.program_id(0)")
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
 
+            for i in range(next(self.iter_vars_count)):
+                code.splice(f"x{i} = tl.arange(0, XBLOCK)")
+                code.splice(f"xmask = tl.arange(0, XBLOCK) < XBLOCK")
+
             for sub_kernel in self.sub_kernels:
                 num_elems = int(sympy_product(sub_kernel.numels))
                 self.codegen_pid_range(code, num_elems)
@@ -149,7 +153,6 @@ class ForeachKernel(Kernel):
             with code.indent():
                 code.splice("pass")
 
-        print(code.getvalue())
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
