@@ -2491,6 +2491,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.size() == 0 && inputSplitSizes.size() == 0) {
+    TORCH_CHECK(
+        outputTensor.numel() == inputTensor.numel() &&
+            outputTensor.type() == inputTensor.type(),
+        "Tensors are not equal in size or data type");
+    TORCH_CHECK(
+        outputTensor.size(0) % size_ == 0,
+        "Tensor's dim 0 does not divide equally across group size");
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
 
@@ -2530,6 +2537,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         OpType::ALLTOALL_BASE,
         "nccl:all_to_all");
   } else {
+    TORCH_CHECK(
+        outputTensor.type() == inputTensor.type(),
+        "Tensors are not equal in data type");
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
     std::vector<at::Tensor> inputTensors = {inputTensor};
