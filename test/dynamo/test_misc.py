@@ -5182,6 +5182,21 @@ def fn():
         compile_out = torch._dynamo.optimize("eager")(func)(torch.ones(10, 10, 3))
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
+    
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_cuda_set_device(self):
+        torch.cuda.set_device(0)
+        def fn():
+            a = torch.ones(2, device="cuda")
+            torch.cuda.set_device(1)
+            return a + 1
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        res = opt_fn()
+        self.assertEqual(res.device.type, "cuda")
+        self.assertEqual(res.device.index, 0)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_nested_function_resuming_with_correct_globals(self):
         # https://github.com/pytorch/pytorch/issues/99665
