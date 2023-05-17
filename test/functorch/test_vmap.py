@@ -3680,7 +3680,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.tensorsolve'),
         xfail('bernoulli', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
-        xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
         xfail('multinomial', ''),
         xfail('pca_lowrank', ''),
@@ -3966,6 +3965,26 @@ class TestVmapOperatorsOpInfo(TestCase):
             transposed, output_padding, groups, output_mask,
         )
         op = torch.ops.aten._convolution_double_backward
+
+        generator = get_fallback_and_vmap_exhaustive(op, args, {})
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        atol, rtol = (1e-3, 1e-3) if is_cuda_sm86 else (1e-4, 1e-4)
+
+        def test():
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out, atol=atol, rtol=rtol)
+
+        check_vmap_fallback(self, test, op)
+
+    def test_native_dropot_backward(self, device):
+        grad_output = torch.randn(3, device=device)
+        mask = torch.randn(1, 3, device=device)
+        scale = 0.5
+
+        args = (
+            grad_output, mask, scale
+        )
+        op = torch.ops.aten.native_dropout_backward
 
         generator = get_fallback_and_vmap_exhaustive(op, args, {})
         is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)

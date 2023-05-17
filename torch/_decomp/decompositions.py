@@ -944,7 +944,7 @@ def col2im(
     return output
 
 
-@register_decomposition(aten.native_dropout_backward)
+@register_decomposition(aten.native_dropout_backward.default)
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     # According to the CUDA kernel implementation we should have this test;
     # but it seems to fail tests!
