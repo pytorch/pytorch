@@ -89,6 +89,10 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
@@ -409,9 +413,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'histc': None,
-        'histogram': None,
-        'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -709,6 +710,7 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
@@ -10243,11 +10245,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement `torch.lgamma`
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
+        return (torch.lgamma,
                 torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
