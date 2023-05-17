@@ -90,13 +90,12 @@ class OptimizedModule(torch.nn.Module):
     forward method to optimized self.forward method.
     """
 
-    def __init__(self, mod: torch.nn.Module, dynamo_ctx, initialize=True):
+    def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
-        if initialize:
-            self._initialize()
+        self._initialize()
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
