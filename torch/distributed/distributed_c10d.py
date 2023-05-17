@@ -575,7 +575,7 @@ STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 def _get_pg_default_device(group: Optional[ProcessGroup] = None):
     """
-    Returns the device to use with ``group`` for object collectives and barrier.
+    Returns the device to use with ``group`` for control flow usage (object collectives, barrier).
     There are selection rules:
         1. If user specifies exactly one backend in ``init_process_group`` call:
             use that backend
@@ -588,8 +588,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None):
             the default process group will be used.
 
     Returns:
-        A distributed request object.
-        None, if not part of the group
+        torch.device: The device to use with ``group``.
 
     """
     group = group or _get_default_group()
@@ -3640,8 +3639,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
-        device_ids ([int], optional): List of device/GPU ids. Valid only
-            for NCCL backend when argument device is None.
+        device_ids ([int], optional): List of device/GPU ids.
 
     Returns:
         Async work handle, if async_op is set to True.
