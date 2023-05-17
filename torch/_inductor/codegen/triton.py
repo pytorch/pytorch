@@ -330,24 +330,22 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset):
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def randn(seed, offset):
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
+    # TODO: work out how to use randint4x
     @staticmethod
-    def randint64(seed, offset, low, high):
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
         offset = f"({offset}).to(tl.uint32)"
-        return f"triton_helpers.randint64({seed}, {offset}, {low}, {high})"
-
-    @staticmethod
-    def load_seed(name, offset):
-        var = V.kernel.args.input(name)
-        return f"tl.load({var} + {offset})"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
 
     @staticmethod
     def rsqrt(x):
@@ -1291,8 +1289,10 @@ class TritonKernel(Kernel):
                 {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
                 """
                 )
+                idx_dtype = self.index_dtype
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
+                updated = value
                 if reduction_type == "min":
                     updated = f"triton_helpers.minimum({accumulator}, {value})"
                 elif reduction_type == "max":
