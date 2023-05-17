@@ -10392,6 +10392,8 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy',
         'nn.functional.interpolate',
+        'nn.functional.upsample_bilinear',
+        'nn.functional.upsample_nearest',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
