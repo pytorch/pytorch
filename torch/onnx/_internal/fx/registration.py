@@ -20,9 +20,7 @@ from torch.onnx._internal import _beartype
 # 'import torch.onnx' continues to work without having 'onnx' installed. We fully
 # 'import onnx' inside of dynamo_export (by way of _assert_dependencies).
 if TYPE_CHECKING:
-    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-        registration,
-    )
+    from onnxscript.function_libs.torch_lib import registration  # type: ignore[import]
 
 OpsetVersion = int
 _K = TypeVar("_K")
@@ -182,10 +180,12 @@ class OnnxRegistry:
         )
 
         self._opset_version = opset_version
-        self.initiate_registry_from_torchlib(registration.default_registry)
+        self._initiate_registry_from_torchlib(registration.default_registry)
 
     # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
-    def initiate_registry_from_torchlib(self, torchlib_registry: registration.Registry):
+    def _initiate_registry_from_torchlib(
+        self, torchlib_registry: registration.Registry
+    ):
         """Populates the registry with ATen functions from torchlib.
 
         Args:

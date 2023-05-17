@@ -173,7 +173,7 @@ class ResolvedExportOptions(ExportOptions):
                 )
             )
             self.onnx_dispatcher = function_dispatcher.OnnxDispatcher(
-                self.onnx_registry, self.diagnostic_context, self.opset_version
+                self.onnx_registry, self.opset_version
             )
             self.op_level_debug = resolve(options.op_level_debug, False)
 

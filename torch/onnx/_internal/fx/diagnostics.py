@@ -3,16 +3,24 @@ from __future__ import annotations
 import dataclasses
 
 import functools
-from typing import Any, Optional
 
-import onnxscript  # type: ignore[import]
-from onnxscript.function_libs.torch_lib import graph_building  # type: ignore[import]
+from typing import Any, Optional
 
 import torch
 import torch.fx
 from torch.onnx._internal import diagnostics
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import decorator, formatter, utils
+
+# TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types.
+#   `TYPE_CHECKING` doesn't work due to the registration.
+try:
+    import onnxscript  # type: ignore[import]
+    from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+        graph_building,
+    )
+except ImportError as e:
+    raise ImportError("onnxscript is required to use diagnostics.") from e
 
 _LENGTH_LIMIT: int = 89
 
@@ -90,7 +98,7 @@ def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> st
 
 
 @_format_argument.register
-def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
+def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
     return f"`OnnxFunction({obj.name})`"
 
 

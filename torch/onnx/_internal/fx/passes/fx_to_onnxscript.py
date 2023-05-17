@@ -8,7 +8,7 @@ import re
 import types
 import warnings
 
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
@@ -277,7 +277,12 @@ def _wrap_fx_args_as_onnxscript_args(
         ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
-) -> Tuple[tuple, dict]:
+) -> Tuple[
+    Sequence[
+        Optional[Union[graph_building.TorchScriptTensor, str, int, float, bool, list]]
+    ],
+    Dict[str, _type_utils.Argument],
+]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     onnxscript_args = tuple(
@@ -371,11 +376,12 @@ def _export_fx_node_to_onnxscript(
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
         # function signature in OpSchema, and find the best matched overload.
-        # TODO(titaiwang): Add nearest match (auto cast) into matcher.
+        # TODO(titaiwang): diagnostic rules.
         symbolic_fn = options.onnx_dispatcher.dispatch(
             node=node,
             onnx_args=onnx_args,
             onnx_kwargs=onnx_kwargs,
+            diagnostic_context=diagnostic_context,
         )
 
         with evaluator.default_as(tracer):

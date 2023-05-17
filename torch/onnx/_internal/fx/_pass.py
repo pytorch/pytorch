@@ -220,9 +220,7 @@ class Analysis(abc.ABC):
         self.diagnostic_context = diagnostic_context
         self.module = module
         self.registry = registration.OnnxRegistry()
-        self.dispatcher = function_dispatcher.OnnxDispatcher(
-            self.registry, self.diagnostic_context
-        )
+        self.dispatcher = function_dispatcher.OnnxDispatcher(self.registry)
 
     @abc.abstractmethod
     def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:

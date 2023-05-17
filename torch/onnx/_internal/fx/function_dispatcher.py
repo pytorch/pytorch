@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import operator
+
+import warnings
 from typing import (
     Any,
     Callable,
     Collection,
     Dict,
-    Mapping,
     Optional,
     Protocol,
     runtime_checkable,
@@ -30,6 +31,16 @@ if TYPE_CHECKING:
     import onnx.defs  # type: ignore[import]
     import onnxscript  # type: ignore[import]
 
+
+# Enable both TorchScriptTensor and torch.Tensor to be tested
+# for dtype in OpSchemaWrapper.
+@runtime_checkable
+class _TensorLike(Protocol):
+    @property
+    def dtype(self) -> Optional[torch.dtype]:
+        ...
+
+
 _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
     Union[Callable[..., Any], str], torch._ops.OpOverload
 ] = {
@@ -42,11 +53,13 @@ _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
 
 class OnnxDispatcher:
     """
-    The OnnxDispatcher class finds the best matched function for a given aten operation
+    The OnnxDispatcher class finds the nearest matched function for a given aten operation
     in the FX exporter. It uses the torch.ops name to find the function. If not found,
-    it falls back to default. Then, it finds the best match among all overloaded
+    it falls back to default. Then, it finds the nearest match among all overloaded
     functions. If the types match, it selects the function. Otherwise, it finds the
-    nearest upcast/downcast: Float to Float / Int to Int, Int to Float.
+    nearest one with matching score mechanism.
+
+    method: dispatch
 
     Steps for overloaded function dispatch:
 
@@ -54,15 +67,18 @@ class OnnxDispatcher:
         a. Check if the ATen overload exists.
         b. If not found, check ATen overload=default.
 
-    2. Find the best match among all overloaded functions:
+    2. Find the nearest match among all overloaded functions:
         a. If the types match perfectly, select the function.
-        b. Otherwise, find the nearest one with matching score.
+        b. Otherwise, find the nearest one with the highest matching score. Because of
+              the potential wronly annotated dtypes and attributes matching, we use
+              nearest match to find the best function once the aten name is targeted.
+              The nearest match `doesn't guarantee` a correct match, and a warning message
+              will be sent to SARIF.
     """
 
     def __init__(
         self,
         registry: registration.OnnxRegistry,
-        diagnostic_context: diagnostics.DiagnosticContext,
         opset_version: int = 18,
     ):
         """Initialize the Dispatcher.
@@ -70,11 +86,9 @@ class OnnxDispatcher:
         Args:
             registry: The registration registry.
             opset_version: The model opset version.
-            diagnostic_context: The diagnostic context to use for diagnostic messages.
         """
         self._registry = registry
         self._opset_version = opset_version
-        self._diagnostic_context = diagnostic_context
 
     @property
     def opset_version(self) -> int:
@@ -90,8 +104,9 @@ class OnnxDispatcher:
     def dispatch(
         self,
         node: torch.fx.Node,
-        onnx_args: Sequence,
-        onnx_kwargs: Mapping,
+        onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        onnx_kwargs: Dict[str, _type_utils.Argument],
+        diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
 
@@ -99,6 +114,7 @@ class OnnxDispatcher:
             node: The TorchFX node to dispatch the function for.
             onnx_args: The arguments of the ONNX function.
             onnx_kwargs: The keyword arguments of the ONNX function.
+            diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
             Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
@@ -106,24 +122,69 @@ class OnnxDispatcher:
         Raises:
             RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        aten_name = self._get_aten_name(node)
-        function_overloads = self._get_function_overloads(node, aten_name)
+        aten_name = self._get_aten_name(node, diagnostic_context)
+        # If there are no overloaded functions available for the given FX node, raise an
+        # unsupported error
+        function_overloads = self._get_function_overloads(
+            node, aten_name, diagnostic_context
+        )
+        # If there are overloaded functions available, we will find one that perfect or
+        # nearest matches the given arguments and keyword arguments
+        return self._find_the_perfect_or_nearest_match_onnxfunction(
+            node,
+            aten_name,
+            function_overloads,
+            onnx_args,
+            onnx_kwargs,
+            diagnostic_context,
+        )
 
+    @_beartype.beartype
+    def _find_the_perfect_or_nearest_match_onnxfunction(
+        self,
+        node: torch.fx.Node,
+        aten_name: str,
+        function_overloads: Set[
+            Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
+        ],
+        onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        onnx_kwargs: Dict[str, _type_utils.Argument],
+        diagnostic_context: diagnostics.DiagnosticContext,
+    ):
+        """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments."""
         overload_match_ranking: Dict[
             Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction], int
         ] = {}
-        # TODO: Cache the OpSchemaWrapper so we don't need to run the init logic everytime
+        # TODO(justinchuby): Cache the OpSchemaWrapper so we don't need to run the init logic everytime
         for overload_func in function_overloads:
-            function_opschema = OpSchemaWrapper(overload_func.op_schema)
+            function_opschema = _OpSchemaWrapper(overload_func.op_schema)
             if function_opschema.perfect_match_inputs(onnx_args, onnx_kwargs):
                 # If the perfect match is found, return the function
                 return overload_func
+            # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[overload_func] = function_opschema.match_score
-        # TODO(titaiwang): Add diagnostic message saying not perfect match get the best match
+
+        # TODO(titaiwang): Change inflight_diagnostic to a new rule. Do we need to handle
+        # the special case where the same scores happended?
+        # If the perfect match is not found, find the nearest match
+        warnings.warn(
+            f"A perfect matched Opchema is not found in torchlib for {aten_name}, but \n"
+            f"a nearest match is found. Please check the ONNX output carefully. \n",
+        )
+        diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+            diagnostics.rules.no_symbolic_function_for_call_function,
+            diagnostics.levels.WARNING,
+            f"Cannot find a perfect match of symbolic overload for {aten_name}, "
+            f"which should be registered under {node.target}. But a nearest match is found.",
+            unsupported_fx_node=node,
+        )
+        diagnostic_context.log(diagnostic)
         return max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
 
     @_beartype.beartype
-    def _get_aten_name(self, node: torch.fx.Node) -> str:
+    def _get_aten_name(
+        self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
+    ) -> str:
         """Get the aten name from the target."""
         if node.target == operator.getitem:
             return "aten::getitem"
@@ -137,7 +198,7 @@ class OnnxDispatcher:
                     f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!",
                     unsupported_fx_node=node,
                 )
-                self._diagnostic_context.log(diagnostic)
+                diagnostic_context.log(diagnostic)
                 raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
             # overloadpacket for some reasons.
@@ -162,7 +223,7 @@ class OnnxDispatcher:
                         " only int/float/SymInt/SymFloat is supported with built-in ops!",
                         unsupported_fx_node=node,
                     )
-                    self._diagnostic_context.log(diagnostic)
+                    diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             aten_op = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[node.target]
             return aten_op.name()
@@ -176,7 +237,7 @@ class OnnxDispatcher:
             f"Unknown call_function target: {node.target}",
             unsupported_fx_node=node,
         )
-        self._diagnostic_context.log(diagnostic)
+        diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
     @_beartype.beartype
@@ -184,6 +245,7 @@ class OnnxDispatcher:
         self,
         node: torch.fx.Node,
         aten_name: str,
+        diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Set[Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]]:
         """Get the function overloads from the registry."""
         function_group = None
@@ -217,7 +279,7 @@ class OnnxDispatcher:
             f"which should be registered under {node.target}.",
             unsupported_fx_node=node,
         )
-        self._diagnostic_context.log(diagnostic)
+        diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
 
@@ -263,16 +325,7 @@ def _dispatch_opset_version(
     return None
 
 
-# Enable both TorchScriptTensor and torch.Tensor to be tested
-# for dtype in OpSchemaWrapper.
-@runtime_checkable
-class _TensorLike(Protocol):
-    @property
-    def dtype(self) -> Optional[torch.dtype]:
-        ...
-
-
-class OpSchemaWrapper:
+class _OpSchemaWrapper:
     """
     The OpSchemaWrapper class is a wrapper for ONNX OpSchema.
 
@@ -280,9 +333,59 @@ class OpSchemaWrapper:
     provides a matching score to indicate how well the OpSchema matches the input and
     kwargs types.
 
+    There are three types of ONNX overloads in torchlib:
+
+    1. Different types: Caused by the difference between the ONNX spec and PyTorch.The
+        matching system finds the correct one.
+
+        ```python
+        @torch_op("aten::mul")
+        def aten_mul(self: TReal, other: TReal) -> TReal:
+            ...
+
+        @torch_op("aten::mul")
+        def aten_mul_bool(self: BOOL, other: BOOL) -> BOOL:
+            ...
+    ```
+
+    2. Optional dim: caused by unsupported op.OptionalHasElement (will support on opset
+        version == 20). dim could be "None"
+
+        ```python
+        @torch_op("aten::argmax", trace_only=True)
+        def aten_argmax(
+            self: TrealOrUInt8, dim: Optional[int] = None, keepdim: bool = False
+        ) -> TrealOrUInt8:
+            ...
+
+        @torch_op("aten::argmax", private=True)
+        def _aten_argmax_dim(self: TrealOrUInt8, dim: int, keepdim: bool = False) -> TrealOrUInt8:
+            ...
+        ```
+
+        This case is impossible to differentiate, as they both might have dim in kwargs, so
+        in this case, please make sure you turn the one with `dim: int` to private function.
+
+    3. Optional dtype: dtype could be "unprovided". The difference from 2 is that dtype
+        would not be None.
+
+        ```python
+        @torch_op("aten::new_full")
+        def aten_new_full(self: TTensor, size: INT64, fill_value: TTensor) -> TTensor:
+            ...
+
+        @torch_op("aten::new_full")
+        def aten_new_full_dtype(self: TTensor, size: INT64, fill_value: TTensor, dtype: int) -> TTensor:
+            ...
+        ```
+
+        Depends on dtype is provided or not, matching system will dispatch the ATen op to
+        the correct one.
+
     Attributes:
         schema: The ONNX OpSchema.
         type_constraints: The type constraints defined in the OpSchema.
+
     """
 
     def __init__(self, op_schema: onnx.defs.OpSchema):
@@ -315,9 +418,13 @@ class OpSchemaWrapper:
     def perfect_match_inputs(
         self,
         args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        kwargs,
+        kwargs: Dict[str, _type_utils.Argument],
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
+
+        The definition of perfect match is that the input types are all in the type
+        constraints and the number of inputs matches the number of inputs in the
+        OpSchema.
 
         Args:
             args: The input arguments.
@@ -353,9 +460,18 @@ class OpSchemaWrapper:
     def _record_matching_score(
         self,
         args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        kwargs,
+        kwargs: Dict[str, _type_utils.Argument],
     ):
-        """Calculate the inputs matching score of the OpSchema requirements.
+        """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
+
+        How the matchsing score is calculated:
+        1. score += 1 if one input type is in the type constraints.
+        2. score -= 1 if one kwarg is not symmetrically the same.
+
+        Limitations:
+        1. An Overload is punished if it doesn't have `default` attributes.
+        2. None/NoeType/[] could result in zero matches, and the same score of overloads,
+            which will be recorded in SARIF.
 
         Args:
             args: The input arguments.
@@ -365,7 +481,7 @@ class OpSchemaWrapper:
             True if the inputs match the requirements, False otherwise.
         """
 
-        # If they have different length of argumetns, the score woule be lower to those
+        # If they have different length of arguments, the score would be lower to those
         # functions which have the same length of arguments.
         for schema_input, torch_input in zip(self.schema.inputs, args):
             torch_input_compatible_types = _find_onnx_data_type(torch_input)
