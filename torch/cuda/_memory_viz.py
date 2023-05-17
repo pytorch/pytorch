@@ -359,7 +359,7 @@ def trace(data):
     return out.getvalue()
 
 class PlotWriter:
-    def __init__(self, categories: List[str] = None):
+    def __init__(self, viz, categories: List[str] = None):
         string_table: List[str] = []
 
         # compresses lists of strings that have common suffixes
@@ -381,28 +381,12 @@ class PlotWriter:
         # indexes into the elements_ tables
         initially_allocated: List[int] = []
 
-        @cache
-        def intern_str(s):
-            string_table.append(s)
-            return len(string_table) - 1
-
-        @cache
-        def intern_suffix(sid, restid):
-            suffix_table.append((sid, restid))
-            return len(suffix_table) - 1
-
-        def intern_stack(frames):
-            next_id = None
-            for f in reversed(frames):
-                next_id = intern_suffix(intern_str(f), next_id)
-            return next_id
-
         def add_element(size, lines, category=None):
             nonlocal elements_category
             # note: struct of arrays format to info about elements
             # avoids a lot of repeated string keys when serialized
             elements_size.append(size)
-            elements_info.append(intern_stack(lines))
+            elements_info.append(viz.intern_stack(lines))
 
             # lazily create since we will not always have categories
             if categories is not None:
@@ -412,7 +396,7 @@ class PlotWriter:
 
             return len(elements_size) - 1
 
-        def to_html():
+        def data():
             r = {
                 'actions': actions,
                 'elements_size': elements_size,
@@ -423,24 +407,21 @@ class PlotWriter:
                 'initially_allocated': list(reversed(initially_allocated)),
                 'categories': categories,
             }
-            plot_data = json.dumps(r)
-            return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
+            return r
 
         self.add_element = add_element
         self.allocate = actions.append
         self.free = actions.append
         self.initially_allocated = initially_allocated.append
-        self.to_html = to_html
         self.categories = categories
+        self.data = data
 
 def _choose_device(data, device):
-    if device is None:
-        for i, t in enumerate(data['device_traces']):
-            if len(t) > 0:
-                if device is not None:
-                    raise ValueError(f'Both device {device} and {i} have traces, use --device to specify which trace.')
-                device = i
-    return device
+    if device is not None:
+        return [device]
+    has_segment = {s['device']: True for s in data['segments']}
+    return [i for i, t in enumerate(data['device_traces']) if len(t) > 0 or i in has_segment]
+
 
 def trace_plot(data, device=None, plot_segments=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
@@ -454,67 +435,10 @@ def trace_plot(data, device=None, plot_segments=False):
     Returns:
         str: HTML of visualization
     """
-    w = PlotWriter()
-    addr_to_alloc = {}
-    device = _choose_device(data, device)
-    if device is None:
-        raise ValueError('No trace information was recorded.')
-
-    trace = data['device_traces'][device]
-
-    if plot_segments:
-        addr_prefix = 's'
-        alloc = 'segment_alloc'
-        free = 'segment_free'
-    else:
-        addr_prefix = 'b'
-        alloc = 'alloc'
-        free = 'free_completed'
-
-    addr_versions: Dict[int, int] = {}
-
-    next_stream = 0
-    @cache
-    def stream_id(stream):
-        nonlocal next_stream
-        next_stream += 1
-        return next_stream
-
-    def add_element(addr, size, stream, frames, extra=()):
-        next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
-        title = f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)"
-        if stream != 0:
-            title = f"{title}, stream {stream_id(stream)}"
-        frames = [title,
-                  *extra,
-                  *_frames_fmt(frames, full_filename=True)]
-        return w.add_element(size, frames)
-
-    for i, e in enumerate(trace):
-        if e['action'] == alloc:
-            elemid = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []))
-            addr_to_alloc[e['addr']] = elemid
-            w.allocate(elemid)
-        elif e['action'] == free:
-            idx = addr_to_alloc.pop(e['addr'], None)
-            if idx is None:
-                idx = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
-                w.initially_allocated(idx)
-            w.free(idx)
-
-    for seg in data['segments']:
-        if seg['device'] != device:
-            continue
-        addr = seg['address']
-        for b in seg['blocks']:
-            if b['state'] == 'active_allocated' and addr not in addr_to_alloc:
-                frames, real_size = _block_extra(b)
-                extra = () if frames else ('<block was allocated before _record_history was enabled>',)
-                elemid = add_element(addr, real_size, seg['stream'], frames, extra=extra)
-                w.initially_allocated(elemid)
-            addr += b['size']
-
-    return w.to_html()
+    viz = VizTemplate()
+    for d in _choose_device(data, device):
+        viz.add_trace_view(data, d, plot_segments)
+    return viz.to_html()
 
 def profile_plot(profile, device=None):
     """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
@@ -536,9 +460,8 @@ def profile_plot(profile, device=None):
             device = torch.device('cuda', torch.cuda.current_device())
         else:
             device = torch.device('cpu')
-
-    w = PlotWriter(categories=["unknown", *(c.name.lower() for c in Category)])
-
+    viz = VizTemplate()
+    w = PlotWriter(viz, categories=["unknown", *(c.name.lower() for c in Category)])
 
     allocation_stacks = {}
     for event in memory_profile._op_tree.sorted_nodes:
@@ -582,7 +505,215 @@ def profile_plot(profile, device=None):
         elif action == Action.PREEXISTING:
             kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
             w.initially_allocated(elemid)
-    return w.to_html()
+    viz.add_plot('Active Memory Timeline', 'trace_view', device, w.data())
+    return viz.to_html()
+
+def segment_plot(data: Any, device=None):
+    viz = VizTemplate()
+    for d in _choose_device(data, device):
+        viz.add_segment_view(data, d)
+    return viz.to_html()
+
+def all_plot(data: Any, device=None):
+    viz = VizTemplate()
+    for view in (viz.add_trace_view, viz.add_segment_view):
+        for d in _choose_device(data, device):
+            view(data, d)
+    return viz.to_html()
+
+class VizTemplate:
+    def __init__(self):
+        self.string_table: List[str] = []
+        self.suffix_table: List[Tuple[int, Optional[int]]] = []
+        self.plots = []
+        self.selected = 0
+
+    @cache
+    def intern_str(self, s):
+        self.string_table.append(s)
+        return len(self.string_table) - 1
+
+    @cache
+    def intern_suffix(self, sid, restid):
+        self.suffix_table.append((sid, restid))
+        return len(self.suffix_table) - 1
+
+    def intern_stack(self, frames):
+        next_id = None
+        for f in reversed(frames):
+            next_id = self.intern_suffix(self.intern_str(f), next_id)
+        return next_id
+
+    def json(self):
+        return json.dumps(self.__dict__)
+
+    def to_html(self):
+        return _viz_template.replace('$PLOT_DATA', self.json())
+
+    def add_plot(self, name, kind, gpu, data):
+        self.plots.append({
+            'name': name,
+            'kind': kind,
+            'gpu': gpu,
+            'data': data,
+        })
+
+    def add_trace_view(self, data, device, plot_segments=False):
+        w = PlotWriter(self)
+        addr_to_alloc = {}
+
+        trace = data['device_traces'][device]
+
+        if plot_segments:
+            addr_prefix = 's'
+            alloc = 'segment_alloc'
+            free = 'segment_free'
+        else:
+            addr_prefix = 'b'
+            alloc = 'alloc'
+            free = 'free_completed'
+
+        addr_versions: Dict[int, int] = {}
+
+        next_stream = 0
+        @cache
+        def stream_id(stream):
+            nonlocal next_stream
+            next_stream += 1
+            return next_stream
+
+        def add_element(addr, size, stream, frames, extra=()):
+            next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
+            title = f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)"
+            if stream != 0:
+                title = f"{title}, stream {stream_id(stream)}"
+            frames = [title,
+                    *extra,
+                    *_frames_fmt(frames, full_filename=True)]
+            return w.add_element(size, frames)
+
+        for i, e in enumerate(trace):
+            if e['action'] == alloc:
+                elemid = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []))
+                addr_to_alloc[e['addr']] = elemid
+                w.allocate(elemid)
+            elif e['action'] == free:
+                idx = addr_to_alloc.pop(e['addr'], None)
+                if idx is None:
+                    idx = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
+                    w.initially_allocated(idx)
+                w.free(idx)
+
+        for seg in data['segments']:
+            if seg['device'] != device:
+                continue
+            addr = seg['address']
+            for b in seg['blocks']:
+                if b['state'] == 'active_allocated' and addr not in addr_to_alloc:
+                    frames, real_size = _block_extra(b)
+                    extra = () if frames else ('<block was allocated before _record_history was enabled>',)
+                    elemid = add_element(addr, real_size, seg['stream'], frames, extra=extra)
+                    w.initially_allocated(elemid)
+                addr += b['size']
+        name = 'Active Memory Timeline' if not plot_segments else 'Reserved Memory Timeline'
+        self.add_plot(name, 'trace_view', device, w.data())
+
+    def add_segment_view(self, data: Any, device: int):
+        trace = data['device_traces'][device]
+        def format_frames(frames):
+            return self.intern_stack(_frames_fmt(frames, full_filename=True))
+
+        segment = {
+            'events': {
+                'action': [],  # reference to string table
+                'addr': [],  # for OOM, this will hold device_free value
+                'size': [],
+                'stream': [],
+                'frames': []  # reference to suffix_table
+            },
+            'segments': {
+                'addr': [],
+                'size': [],
+                'stream': []
+            },
+            'blocks': {
+                'addr': [],
+                'size': [],
+                'real_size': [],
+                'frames': [],  # reference to string table
+                'pending_free': [],
+            }
+        }
+
+        def fold_free(ts):
+            # turn a free_requested/free_completed pair into a single free event
+            i = 0
+            while i < len(ts):
+                t = ts[i]
+                if i + 1 < len(ts):
+                    tnext = ts[i + 1]
+                    if t['action'] == 'free_requested' and tnext['action'] == 'free_completed' and t['addr'] == tnext['addr']:
+                        yield {**t, 'action': 'free'}
+                        i += 2
+                        continue
+                if t['action'] == 'oom':
+                    yield {**t, 'addr': t['device_free']}
+                else:
+                    yield t
+                i += 1
+
+        seen_streams = 0
+        @cache
+        def format_stream(s):
+            nonlocal seen_streams
+            if s == 0:
+                return 0
+            seen_streams += 1
+            return seen_streams
+
+
+        preproc: Any = {
+            'action': self.intern_str,
+            'frames': format_frames,
+            'stream': format_stream,
+        }
+
+        events: Any = segment['events']
+        for event in fold_free(trace):
+            for k in events.keys():
+                # stack frames not recorded on event
+                # happens for snapshot even when
+                # frames are recorded for other things.
+                if k == 'frames' and k not in event:
+                    events[k].append(None)
+                    continue
+                events[k].append(preproc.get(k, lambda x: x)(event[k]))
+
+        segments = segment['segments']
+        blocks = segment['blocks']
+
+        segment_names = {
+            'addr': 'address',
+            'size': 'total_size',
+        }
+
+        for seg in data['segments']:
+            if seg['device'] != device:
+                continue
+            for k in segments.keys():
+                sk = segment_names.get(k, k)
+                segments[k].append(preproc.get(k, lambda x: x)(seg[sk]))
+            addr = seg['address']
+            for b in seg['blocks']:
+                if b['state'] in ('active_pending_free', 'active_allocated'):
+                    frames, real_size = _block_extra(b)
+                    blocks['addr'].append(addr)
+                    blocks['size'].append(b['size'])
+                    blocks['real_size'].append(real_size)
+                    blocks['frames'].append(format_frames(frames))
+                    blocks['pending_free'].append(1 if b['state'] == 'active_pending_free' else 0)
+                addr += b['size']
+        self.add_plot('Allocator State History', 'segment_view', device, segment)
 
 # note: this template should eventually move to its own file,
 # however, we first need to package _memory_viz.py so that it can be
@@ -590,492 +721,7 @@ def profile_plot(profile, device=None):
 # on a laptop with downloaded snapshots. Currently this is
 # accomplished by downloading _memory_viz.py so the template
 # needs to be included
-_memory_over_time_template = r"""
-<!DOCTYPE html>
-<html>
-<head></head>
-<body>
-<script type="module">
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7.7.0/+esm";
-import {schemeTableau10} from "https://cdn.skypack.dev/d3-scale-chromatic@3";
-import {axisLeft} from "https://cdn.skypack.dev/d3-axis@3";
-import {scaleLinear} from "https://cdn.skypack.dev/d3-scale@4";
-import {zoom, zoomIdentity} from "https://cdn.skypack.dev/d3-zoom@3";
-import {brushX} from "https://cdn.skypack.dev/d3-brush@3";
-
-let alloc_data = $PLOT_DATA
-
-function process_alloc_data(max_entries) {
-    let current = []
-    let current_data = []
-    let data = []
-    let max_size = 0
-
-    let total_mem = 0
-    let total_summarized_mem = 0
-    let timestep = 0
-
-    let max_at_time = []
-
-
-    let summarized_mem = {elem: 'summarized', timesteps: [], offsets: [total_mem], size: [], color: 0}
-    let summarized_elems = {}
-
-    function advance(n) {
-        summarized_mem.timesteps.push(timestep)
-        summarized_mem.offsets.push(total_mem)
-        summarized_mem.size.push(total_summarized_mem)
-        timestep += n
-        for (let i = 0; i < n; i++) {
-            max_at_time.push(total_mem + total_summarized_mem)
-        }
-    }
-
-    let sizes = alloc_data.elements_size.map((x, i) => [x, i]).sort(([x, xi], [y, yi]) => y - x)
-
-    let draw_elem = {}
-    for (const [s, e] of sizes.slice(0, max_entries)) {
-        draw_elem[e] = true
-    }
-
-    function add_allocation(elem) {
-        let size = alloc_data.elements_size[elem]
-        current.push(elem)
-        let color = elem
-        if (alloc_data.elements_category !== null) {
-            color = alloc_data.elements_category[elem]
-        }
-        let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: size, color: color}
-        current_data.push(e)
-        data.push(e)
-        total_mem += size
-    }
-
-    for (const elem of alloc_data.initially_allocated) {
-        if (elem in draw_elem) {
-            add_allocation(elem)
-        } else {
-            total_summarized_mem += alloc_data.elements_size[elem]
-            summarized_elems[elem] = true
-        }
-    }
-
-    for (const action of alloc_data.actions) {
-        const elem = action
-        const size = alloc_data.elements_size[elem]
-        if ( !(elem in draw_elem)) {
-            if (elem in summarized_elems) {
-                advance(1)
-                total_summarized_mem -= size
-                summarized_elems[elem] = null
-            } else {
-                total_summarized_mem += size
-                summarized_elems[elem] = true
-                advance(1)
-            }
-            continue
-        }
-        const idx = current.findLastIndex(x => x === elem)
-        // first time we see an action we add it
-        // second time we remove it
-        if (idx == -1) {
-            add_allocation(elem)
-            advance(1)
-        } else {
-            advance(1)
-            const removed = current_data[idx]
-            removed.timesteps.push(timestep)
-            removed.offsets.push(removed.offsets.at(-1))
-            current.splice(idx, 1)
-            current_data.splice(idx, 1)
-
-            if (idx < current.length) {
-                for (let j = idx; j < current.length; j++) {
-                    const e = current_data[j]
-                    e.timesteps.push(timestep)
-                    e.offsets.push(e.offsets.at(-1))
-                    e.timesteps.push(timestep + 3)
-                    e.offsets.push(e.offsets.at(-1) - size)
-                }
-                advance(3)
-            }
-            total_mem -= size
-        }
-        max_size = Math.max(total_mem + total_summarized_mem, max_size)
-    }
-
-    for (const elem of current_data) {
-        elem.timesteps.push(timestep)
-        elem.offsets.push(elem.offsets.at(-1))
-    }
-    data.push(summarized_mem)
-
-    return {
-        max_size: max_size,
-        allocations_over_time: data,
-        max_at_time: max_at_time,
-        summarized_mem: summarized_mem,
-        context_for_id:  (elem) => {
-            let strings = []
-            let id = alloc_data.elements_info[elem]
-            while (id !== null) {
-                const [sid, next_id] = alloc_data.suffix_table[id]
-                strings.push(alloc_data.string_table[sid])
-                id = next_id
-            }
-            return `${strings.join('\n')}\n`
-        }
-    }
-}
-
-function MemoryPlot(svg, data, left_pad, colors=schemeTableau10) {
-    function format_points(d) {
-        const size = d.size
-        const xs = d.timesteps.map(t => xscale(t))
-        const bottom = d.offsets.map(t => yscale(t))
-        const m = Array.isArray(size) ? ((t, i) => yscale(t + size[i]))
-                                      :  (t => yscale(t + size))
-        const top = d.offsets.map(m)
-        const p0 = xs.map((x, i) => `${x},${bottom[i]}`)
-        const p1 = xs.map((x, i) => `${x},${top[i]}`).reverse()
-
-        return `${p0.join(' ')} ${p1.join(' ')}`
-    }
-
-    let max_timestep = data.max_at_time.length
-    let max_size = data.max_size
-
-    let width = svg.attr('width')
-    let height = svg.attr('height')
-    let plot_width = width - left_pad
-    let plot_height = height
-
-    let yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-    let heightscale = scaleLinear().domain([0, max_size]).range([0, plot_height]);
-    let yaxis = axisLeft(yscale).tickFormat(d3.format("~s"))
-    let xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width])
-    let plot_coordinate_space = svg.append("g").attr("transform", `translate(${left_pad}, ${0})`)
-    let plot_outer = plot_coordinate_space.append('g')
-
-    function view_rect(a) {
-        return a.append('rect').attr('x', 0).attr('y', 0)
-                .attr('width', plot_width).attr('height', plot_height)
-                .attr('fill', 'white')
-    }
-
-    view_rect(plot_outer)
-
-    let cp = svg.append("clipPath").attr("id", "clip")
-    view_rect(cp)
-    plot_outer.attr('clip-path', "url(#clip)")
-
-
-    let zoom_group = plot_outer.append("g")
-    let scrub_group = zoom_group.append('g')
-
-    let plot = scrub_group.selectAll("polygon")
-    .data(data.allocations_over_time)
-    .enter()
-    .append("polygon")
-    .attr('points', format_points)
-    .attr('fill', d => colors[d.color % colors.length])
-
-    let axis = plot_coordinate_space.append('g').call(yaxis)
-
-
-    let scale_mini = 0
-    let translate_mini = 0
-    function handleZoom(e) {
-        const t = e.transform
-        zoom_group.attr("transform", t)
-        axis.call(yaxis.scale(e.transform.rescaleY(yscale)))
-    }
-
-    const thezoom = zoom().on('zoom', handleZoom)
-    plot_outer.call(thezoom)
-
-    return {
-        select_window: (stepbegin, stepend, max) => {
-            let begin = xscale(stepbegin)
-            let size = xscale(stepend) - xscale(stepbegin);
-            let scale = plot_width / size
-            let translate = -begin
-            let yscale =  max_size/max
-            scrub_group.attr("transform", `scale(${scale/yscale}, 1) translate(${translate}, 0)`)
-            plot_outer.call(thezoom.transform, zoomIdentity.scale(yscale).translate(0, -(plot_height - plot_height/yscale)))
-        },
-        set_delegate: (delegate) => {
-            plot.on('mouseover', function (e, d) { delegate.set_selected(d3.select(this)) } )
-            .on('mousedown', function(e, d) { delegate.default_selected = d3.select(this)})
-            .on('mouseleave', function (e, d) { delegate.set_selected(delegate.default_selected) } )
-        }
-    }
-}
-
-function ContextViewer(text, data) {
-    let current_selected = null
-
-    return {
-        default_selected: null,
-        set_selected: (d) => {
-            if (current_selected !== null) {
-                current_selected.attr('stroke', null).attr('stroke-width', null);
-            }
-            if (d === null) {
-                text.text("")
-            } else {
-                const dd = d.datum()
-                if (dd.elem === 'summarized') {
-                    text.html(
-                        "Small tensors that were not plotted to cutdown on render time.\n" +
-                        "Use detail slider to see smaller allocations.")
-                } else {
-                    text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`)
-                }
-                d.attr('stroke', 'black').attr('stroke-width', 1).attr('vector-effect', 'non-scaling-stroke')
-            }
-            current_selected = d
-        }
-    }
-}
-
-
-function MiniMap(mini_svg, plot, data, left_pad, height=70) {
-    let max_at_time = data.max_at_time
-    let width = mini_svg.attr('width')
-    let plot_width = width - left_pad
-    let yscale = scaleLinear().domain([0, data.max_size]).range([height, 0]);
-    let minixscale = scaleLinear().domain([0, max_at_time.length]).range([left_pad, width])
-
-    let mini_points = [[max_at_time.length, 0], [0, 0]]
-
-    for (const [i, m] of max_at_time.entries()) {
-        let [lastx, lasty] = mini_points[mini_points.length - 1]
-        if (m !== lasty) {
-            mini_points.push([i, lasty])
-            mini_points.push([i, m])
-        } else if (i === max_at_time.length - 1) {
-            mini_points.push([i, m])
-        }
-    }
-
-
-    let points = mini_points.map(([t, o]) => `${minixscale(t)}, ${yscale(o)}`)
-    points = points.join(' ')
-    mini_svg.append('polygon').attr('points', points).attr('fill', schemeTableau10[0])
-
-    let xscale = scaleLinear().domain([0, max_at_time.length]).range([0, plot_width])
-
-
-    const brush = brushX()
-    brush.extent([[left_pad, 0], [width, height]])
-    brush.on('brush', function({selection}) {
-        let [begin, end] = selection.map(x => x - left_pad)
-
-        let stepbegin = Math.floor(xscale.invert(begin))
-        let stepend = Math.floor(xscale.invert(end))
-        let max = 0
-        for (let i = stepbegin; i < stepend; i++) {
-            max = Math.max(max, max_at_time[i])
-        }
-        plot.select_window(stepbegin, stepend, max)
-    })
-    mini_svg.call(brush)
-    return {}
-}
-
-function Legend(svg, categories) {
-    let xstart = width - 100
-    let ystart = 30
-    plot_svg.append('g').selectAll('rect')
-    .data(categories)
-    .enter()
-    .append('rect')
-    .attr('x', (c, i) => xstart)
-    .attr('y', (c, i) => ystart + i*15)
-    .attr('width', 10)
-    .attr('height', 10)
-    .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length])
-    plot_svg.append('g').selectAll('text')
-    .data(categories)
-    .enter()
-    .append('text')
-    .attr('x', (c, i) => xstart + 20)
-    .attr('y', (c, i) => ystart + i*15 + 8)
-    .attr("font-family", "helvetica")
-    .attr('font-size', 10)
-    .text((c) => c)
-    return {}
-}
-
-
-function create(max_entries) {
-    let left_pad = 70
-    let width = 1024
-    let height = 768
-    let data = process_alloc_data(max_entries)
-    let body = d3.select("body")
-    body.selectAll('svg').remove()
-    body.selectAll('div').remove()
-
-    if (alloc_data.elements_info.length > max_entries) {
-         let d = body.append('div')
-         d.append('input')
-         .attr("type", "range")
-         .attr('min', 0)
-         .attr('max', alloc_data.elements_info.length)
-         .attr("value", max_entries)
-         .on('change', function() {
-            create(this.value)
-         })
-         d.append('label').text('Detail')
-    }
-
-    let plot_svg = body.append("svg").attr('width', width).attr('height', height).attr('display', 'block')
-    let plot = MemoryPlot(plot_svg, data, left_pad)
-
-    if (alloc_data.categories !== null) {
-        Legend(plot_svg.append('g'), alloc_data.categories)
-    }
-
-    MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)
-    let delegate = ContextViewer(body.append("div").append("pre").text('none'), data)
-    plot.set_delegate(delegate)
-}
-
-create(15000)
-
-</script>
-</body>
-</html>
-"""
-
-def segment_plot(data: Any, device=None):
-    device = _choose_device(data, device)
-    if device is None:
-        trace = []
-    else:
-        trace = data['device_traces'][device]
-
-    string_table: List[str] = []
-    suffix_table: List[Tuple[int, Optional[int]]] = []
-
-    @cache
-    def intern_str(s):
-        string_table.append(s)
-        return len(string_table) - 1
-
-    @cache
-    def intern_suffix(sid, restid):
-        suffix_table.append((sid, restid))
-        return len(suffix_table) - 1
-
-    def intern_stack(frames):
-        next_id = None
-        for f in reversed(frames):
-            next_id = intern_suffix(intern_str(f), next_id)
-        return next_id
-
-    def format_frames(frames):
-        return intern_stack(_frames_fmt(frames, full_filename=True))
-
-    result: Any = {
-        'string_table': string_table,
-        'suffix_table': suffix_table,
-        'events': {
-            'action': [],  # reference to string table
-            'addr': [],  # for OOM, this will hold device_free value
-            'size': [],
-            'stream': [],
-            'frames': []  # reference to suffix_table
-        },
-        'segments': {
-            'addr': [],
-            'size': [],
-            'stream': []
-        },
-        'blocks': {
-            'addr': [],
-            'size': [],
-            'real_size': [],
-            'frames': [],  # reference to string table
-            'pending_free': [],
-        }
-    }
-
-    def fold_free(ts):
-        # turn a free_requested/free_completed pair into a single free event
-        i = 0
-        while i < len(ts):
-            t = ts[i]
-            if i + 1 < len(ts):
-                tnext = ts[i + 1]
-                if t['action'] == 'free_requested' and tnext['action'] == 'free_completed' and t['addr'] == tnext['addr']:
-                    yield {**t, 'action': 'free'}
-                    i += 2
-                    continue
-            if t['action'] == 'oom':
-                yield {**t, 'addr': t['device_free']}
-            else:
-                yield t
-            i += 1
-
-    seen_streams = 0
-    @cache
-    def format_stream(s):
-        nonlocal seen_streams
-        if s == 0:
-            return 0
-        seen_streams += 1
-        return seen_streams
-
-
-    preproc: Any = {
-        'action': intern_str,
-        'frames': format_frames,
-        'stream': format_stream,
-    }
-
-    events: Any = result['events']
-    for event in fold_free(trace):
-        for k in events.keys():
-            # stack frames not recorded on event
-            # happens for snapshot even when
-            # frames are recorded for other things.
-            if k == 'frames' and k not in event:
-                events[k].append(None)
-                continue
-            events[k].append(preproc.get(k, lambda x: x)(event[k]))
-
-    segments = result['segments']
-    blocks = result['blocks']
-
-    segment_names = {
-        'addr': 'address',
-        'size': 'total_size',
-    }
-
-    for seg in data['segments']:
-        if seg['device'] != device:
-            continue
-        for k in segments.keys():
-            sk = segment_names.get(k, k)
-            segments[k].append(preproc.get(k, lambda x: x)(seg[sk]))
-        addr = seg['address']
-        for b in seg['blocks']:
-            if b['state'] in ('active_pending_free', 'active_allocated'):
-                frames, real_size = _block_extra(b)
-                blocks['addr'].append(addr)
-                blocks['size'].append(b['size'])
-                blocks['real_size'].append(real_size)
-                blocks['frames'].append(format_frames(frames))
-                blocks['pending_free'].append(1 if b['state'] == 'active_pending_free' else 0)
-            addr += b['size']
-
-    plot_data = json.dumps(result)
-    return _events_template.replace('$PLOT_DATA', plot_data)
-
-_events_template = r"""
+_viz_template = r"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -1085,6 +731,7 @@ pre {
 }
 html, body {
     height: 100%;
+    overflow: clip;
 }
 </style>
 </head>
@@ -1097,35 +744,37 @@ import {scaleLinear} from "https://cdn.skypack.dev/d3-scale@4";
 import {zoom, zoomIdentity} from "https://cdn.skypack.dev/d3-zoom@3";
 import {brushX} from "https://cdn.skypack.dev/d3-brush@3";
 
-let trace_data = $PLOT_DATA
+let generated_data = $PLOT_DATA
+
+function string_for(id) {
+    return generated_data.string_table[id]
+}
 
 function frames_for(id) {
     let strings = []
     while (id !== null) {
-        const [sid, next_id] = trace_data.suffix_table[id]
-        strings.push(trace_data.string_table[sid])
+        const [sid, next_id] = generated_data.suffix_table[id]
+        strings.push(string_for(sid))
         id = next_id
     }
     return `${strings.join('\n')}\n`
 }
 
-let events_data = trace_data.events
-let string_table = trace_data.string_table
+function createEvents(trace_data) {
+    let events_data = trace_data.events
 
-class Event {
-    constructor(id) {
-        this.idx = id
+    class Event {
+        constructor(id) {
+            this.idx = id
+        }
+        get size() { return events_data.size[this.idx] }
+        get action() { return string_for(events_data.action[this.idx]) }
+        get addr() { return events_data.addr[this.idx] }
+        get frames() { return frames_for(this.frames_idx) }
+        get frames_idx() { return events_data.frames[this.idx]}
+        get stream() { return events_data.stream[this.idx] }
+        get device_free() { return events_data.addr[this.idx] }
     }
-    get size() { return events_data.size[this.idx] }
-    get action() { return string_table[events_data.action[this.idx]] }
-    get addr() { return events_data.addr[this.idx] }
-    get frames() { return frames_for(this.frames_idx) }
-    get frames_idx() { return events_data.frames[this.idx]}
-    get stream() { return events_data.stream[this.idx] }
-    get device_free() { return events_data.addr[this.idx] }
-}
-
-function createEvents() {
     let events = trace_data.events.action.map( (_, i) => new Event(i))
 
     function version_space() {
@@ -1182,7 +831,7 @@ function Block(addr, size, real_size, frame_idx, free_requested, version) {
     return {addr, size, real_size, get frames() { return frames_for(frame_idx)}, free_requested, version}
 }
 
-function EventSelector(body, outer, events, stack_info, memory_view) {
+function EventSelector(outer, events, stack_info, memory_view) {
     let events_div = outer
     .append("div")
     .attr('style', 'grid-column: 1; grid-row: 1; overflow: auto; font-family: monospace')
@@ -1216,7 +865,7 @@ function EventSelector(body, outer, events, stack_info, memory_view) {
             selected_event_idx = idx
         }
     }
-    body.on('keydown', (e) => {
+    d3.select("body").on('keydown', (e) => {
         let actions = {ArrowDown: 1, ArrowUp: -1}
         if (selected_event_idx !== null && e.key in actions) {
             let new_idx = selected_event_idx + actions[e.key]
@@ -1572,24 +1221,391 @@ function StackInfo(outer) {
     }
 }
 
-function main() {
+function create_segment_view(dst, trace_data) {
     // add some supplement information to trace_data
-    let events = createEvents()
+    let events = createEvents(trace_data)
 
-    let body = d3.select("body")
-
-    let outer = body.append("div")
+    let outer = dst.append("div")
     .attr('style', "display: grid; grid-template-columns: 1fr 2fr; grid-template-rows: 2fr 1fr; height: 100%; gap: 10px")
 
     let stack_info = StackInfo(outer)
     let memory_view = MemoryView(outer, stack_info, trace_data, events)
-    let event_selector = EventSelector(body, outer, events, stack_info, memory_view)
+    let event_selector = EventSelector(outer, events, stack_info, memory_view)
 
-    window.addEventListener('load', function() {
+    window.requestAnimationFrame(function() {
         event_selector.select(events.length > 0 ? events.length - 1 : null)
     });
 }
-main()
+
+function process_alloc_data(alloc_data, max_entries) {
+    let current = []
+    let current_data = []
+    let data = []
+    let max_size = 0
+
+    let total_mem = 0
+    let total_summarized_mem = 0
+    let timestep = 0
+
+    let max_at_time = []
+
+
+    let summarized_mem = {elem: 'summarized', timesteps: [], offsets: [total_mem], size: [], color: 0}
+    let summarized_elems = {}
+
+    function advance(n) {
+        summarized_mem.timesteps.push(timestep)
+        summarized_mem.offsets.push(total_mem)
+        summarized_mem.size.push(total_summarized_mem)
+        timestep += n
+        for (let i = 0; i < n; i++) {
+            max_at_time.push(total_mem + total_summarized_mem)
+        }
+    }
+
+    let sizes = alloc_data.elements_size.map((x, i) => [x, i]).sort(([x, xi], [y, yi]) => y - x)
+
+    let draw_elem = {}
+    for (const [s, e] of sizes.slice(0, max_entries)) {
+        draw_elem[e] = true
+    }
+
+    function add_allocation(elem) {
+        let size = alloc_data.elements_size[elem]
+        current.push(elem)
+        let color = elem
+        if (alloc_data.elements_category !== null) {
+            color = alloc_data.elements_category[elem]
+        }
+        let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: size, color: color}
+        current_data.push(e)
+        data.push(e)
+        total_mem += size
+    }
+
+    for (const elem of alloc_data.initially_allocated) {
+        if (elem in draw_elem) {
+            add_allocation(elem)
+        } else {
+            total_summarized_mem += alloc_data.elements_size[elem]
+            summarized_elems[elem] = true
+        }
+    }
+
+    for (const action of alloc_data.actions) {
+        const elem = action
+        const size = alloc_data.elements_size[elem]
+        if ( !(elem in draw_elem)) {
+            if (elem in summarized_elems) {
+                advance(1)
+                total_summarized_mem -= size
+                summarized_elems[elem] = null
+            } else {
+                total_summarized_mem += size
+                summarized_elems[elem] = true
+                advance(1)
+            }
+            continue
+        }
+        const idx = current.findLastIndex(x => x === elem)
+        // first time we see an action we add it
+        // second time we remove it
+        if (idx == -1) {
+            add_allocation(elem)
+            advance(1)
+        } else {
+            advance(1)
+            const removed = current_data[idx]
+            removed.timesteps.push(timestep)
+            removed.offsets.push(removed.offsets.at(-1))
+            current.splice(idx, 1)
+            current_data.splice(idx, 1)
+
+            if (idx < current.length) {
+                for (let j = idx; j < current.length; j++) {
+                    const e = current_data[j]
+                    e.timesteps.push(timestep)
+                    e.offsets.push(e.offsets.at(-1))
+                    e.timesteps.push(timestep + 3)
+                    e.offsets.push(e.offsets.at(-1) - size)
+                }
+                advance(3)
+            }
+            total_mem -= size
+        }
+        max_size = Math.max(total_mem + total_summarized_mem, max_size)
+    }
+
+    for (const elem of current_data) {
+        elem.timesteps.push(timestep)
+        elem.offsets.push(elem.offsets.at(-1))
+    }
+    data.push(summarized_mem)
+
+    return {
+        max_size: max_size,
+        allocations_over_time: data,
+        max_at_time: max_at_time,
+        summarized_mem: summarized_mem,
+        context_for_id:  (elem) => {
+            let strings = []
+            let id = alloc_data.elements_info[elem]
+            return frames_for(id)
+        }
+    }
+}
+
+function MemoryPlot(svg, data, left_pad, width, height, colors=schemeTableau10) {
+    function format_points(d) {
+        const size = d.size
+        const xs = d.timesteps.map(t => xscale(t))
+        const bottom = d.offsets.map(t => yscale(t))
+        const m = Array.isArray(size) ? ((t, i) => yscale(t + size[i]))
+                                      :  (t => yscale(t + size))
+        const top = d.offsets.map(m)
+        const p0 = xs.map((x, i) => `${x},${bottom[i]}`)
+        const p1 = xs.map((x, i) => `${x},${top[i]}`).reverse()
+
+        return `${p0.join(' ')} ${p1.join(' ')}`
+    }
+
+    let max_timestep = data.max_at_time.length
+    let max_size = data.max_size
+
+    let plot_width = width - left_pad
+    let plot_height = height
+
+    let yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
+    let heightscale = scaleLinear().domain([0, max_size]).range([0, plot_height]);
+    let yaxis = axisLeft(yscale).tickFormat(d3.format("~s"))
+    let xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width])
+    let plot_coordinate_space = svg.append("g").attr("transform", `translate(${left_pad}, ${0})`)
+    let plot_outer = plot_coordinate_space.append('g')
+
+    function view_rect(a) {
+        return a.append('rect').attr('x', 0).attr('y', 0)
+                .attr('width', plot_width).attr('height', plot_height)
+                .attr('fill', 'white')
+    }
+
+    view_rect(plot_outer)
+
+    let cp = svg.append("clipPath").attr("id", "clip")
+    view_rect(cp)
+    plot_outer.attr('clip-path', "url(#clip)")
+
+
+    let zoom_group = plot_outer.append("g")
+    let scrub_group = zoom_group.append('g')
+
+    let plot = scrub_group.selectAll("polygon")
+    .data(data.allocations_over_time)
+    .enter()
+    .append("polygon")
+    .attr('points', format_points)
+    .attr('fill', d => colors[d.color % colors.length])
+
+    let axis = plot_coordinate_space.append('g').call(yaxis)
+
+
+    let scale_mini = 0
+    let translate_mini = 0
+    function handleZoom(e) {
+        const t = e.transform
+        zoom_group.attr("transform", t)
+        axis.call(yaxis.scale(e.transform.rescaleY(yscale)))
+    }
+
+    const thezoom = zoom().on('zoom', handleZoom)
+    plot_outer.call(thezoom)
+
+    return {
+        select_window: (stepbegin, stepend, max) => {
+            let begin = xscale(stepbegin)
+            let size = xscale(stepend) - xscale(stepbegin);
+            let scale = plot_width / size
+            let translate = -begin
+            let yscale =  max_size/max
+            scrub_group.attr("transform", `scale(${scale/yscale}, 1) translate(${translate}, 0)`)
+            plot_outer.call(thezoom.transform, zoomIdentity.scale(yscale).translate(0, -(plot_height - plot_height/yscale)))
+        },
+        set_delegate: (delegate) => {
+            plot.on('mouseover', function (e, d) { delegate.set_selected(d3.select(this)) } )
+            .on('mousedown', function(e, d) { delegate.default_selected = d3.select(this)})
+            .on('mouseleave', function (e, d) { delegate.set_selected(delegate.default_selected) } )
+        }
+    }
+}
+
+function ContextViewer(text, data) {
+    let current_selected = null
+
+    return {
+        default_selected: null,
+        set_selected: (d) => {
+            if (current_selected !== null) {
+                current_selected.attr('stroke', null).attr('stroke-width', null);
+            }
+            if (d === null) {
+                text.text("")
+            } else {
+                const dd = d.datum()
+                if (dd.elem === 'summarized') {
+                    text.html(
+                        "Small tensors that were not plotted to cutdown on render time.\n" +
+                        "Use detail slider to see smaller allocations.")
+                } else {
+                    text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`)
+                }
+                d.attr('stroke', 'black').attr('stroke-width', 1).attr('vector-effect', 'non-scaling-stroke')
+            }
+            current_selected = d
+        }
+    }
+}
+
+
+function MiniMap(mini_svg, plot, data, left_pad, width, height=70) {
+    let max_at_time = data.max_at_time
+    let plot_width = width - left_pad
+    let yscale = scaleLinear().domain([0, data.max_size]).range([height, 0]);
+    let minixscale = scaleLinear().domain([0, max_at_time.length]).range([left_pad, width])
+
+    let mini_points = [[max_at_time.length, 0], [0, 0]]
+
+    for (const [i, m] of max_at_time.entries()) {
+        let [lastx, lasty] = mini_points[mini_points.length - 1]
+        if (m !== lasty) {
+            mini_points.push([i, lasty])
+            mini_points.push([i, m])
+        } else if (i === max_at_time.length - 1) {
+            mini_points.push([i, m])
+        }
+    }
+
+
+    let points = mini_points.map(([t, o]) => `${minixscale(t)}, ${yscale(o)}`)
+    points = points.join(' ')
+    mini_svg.append('polygon').attr('points', points).attr('fill', schemeTableau10[0])
+
+    let xscale = scaleLinear().domain([0, max_at_time.length]).range([0, plot_width])
+
+
+    const brush = brushX()
+    brush.extent([[left_pad, 0], [width, height]])
+    brush.on('brush', function({selection}) {
+        let [begin, end] = selection.map(x => x - left_pad)
+
+        let stepbegin = Math.floor(xscale.invert(begin))
+        let stepend = Math.floor(xscale.invert(end))
+        let max = 0
+        for (let i = stepbegin; i < stepend; i++) {
+            max = Math.max(max, max_at_time[i])
+        }
+        plot.select_window(stepbegin, stepend, max)
+    })
+    mini_svg.call(brush)
+    return {}
+}
+
+function Legend(svg, categories) {
+    let xstart = width - 100
+    let ystart = 30
+    plot_svg.append('g').selectAll('rect')
+    .data(categories)
+    .enter()
+    .append('rect')
+    .attr('x', (c, i) => xstart)
+    .attr('y', (c, i) => ystart + i*15)
+    .attr('width', 10)
+    .attr('height', 10)
+    .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length])
+    plot_svg.append('g').selectAll('text')
+    .data(categories)
+    .enter()
+    .append('text')
+    .attr('x', (c, i) => xstart + 20)
+    .attr('y', (c, i) => ystart + i*15 + 8)
+    .attr("font-family", "helvetica")
+    .attr('font-size', 10)
+    .text((c) => c)
+    return {}
+}
+
+
+function create_trace_view(dst, alloc_data, max_entries=15000) {
+    let left_pad = 70
+    let data = process_alloc_data(alloc_data, max_entries)
+    dst.selectAll('svg').remove()
+    dst.selectAll('div').remove()
+
+    let d = dst.append('div')
+    d.append('input')
+    .attr("type", "range")
+    .attr('min', 0)
+    .attr('max', alloc_data.elements_info.length)
+    .attr("value", max_entries)
+    .on('change', function() {
+    create_trace_view(dst, alloc_data, this.value)
+    })
+    d.append('label').text('Detail')
+
+    let grid_container = dst.append('div').attr('style', "display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px")
+
+    let plot_svg = grid_container.append("svg").attr('display', 'block')
+                                               .attr('viewBox', '0 0 1024 576')
+                                               .attr('preserveAspectRatio', 'none')
+                                               .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;')
+
+    let plot = MemoryPlot(plot_svg, data, left_pad, 1024, 576)
+
+    if (alloc_data.categories !== null) {
+        Legend(plot_svg.append('g'), alloc_data.categories)
+    }
+
+    let mini_svg = grid_container.append("svg").attr('display', 'block')
+                                               .attr('viewBox', '0 0 1024 60')
+                                               .attr('preserveAspectRatio', 'none')
+                                               .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;')
+
+    MiniMap(mini_svg, plot, data, left_pad, 1024)
+    let  context_div = grid_container.append("div").attr('style', 'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;')
+    let delegate = ContextViewer(context_div.append("pre").text('none'), data)
+    plot.set_delegate(delegate)
+}
+
+let kinds = {
+    trace_view: create_trace_view,
+    segment_view: create_segment_view,
+}
+
+function selected(idx) {
+    let e = generated_data.plots.at(idx)
+    if (!e.div) {
+        e.div = d3.select("body").append("div")
+        kinds[e.kind](e.div, e.data)
+    }
+    for (const gd of generated_data.plots) {
+        if (gd.div) {
+            if (gd === e) {
+                gd.div.attr('style', 'display: float; height: 100%')
+            } else {
+                gd.div.attr('style', 'display: none; height: 100%')
+            }
+        }
+    }
+}
+
+let body = d3.select("body")
+let selector = body.append('select')
+selector.on('change', function() {
+    selected(this.selectedIndex)
+})
+for (const gd of generated_data.plots) {
+    let option = selector.append('option')
+    option.text(`${gd.name} (GPU ${gd.gpu})`)
+}
+selected(generated_data.selected)
 
 </script>
 </body>
@@ -1639,6 +1655,7 @@ if __name__ == "__main__":
     _output(compare_a)
 
     plots = (
+        ("plot", "Generate all html visualizations in a single file."),
         ("trace_plot", "Generate a visualization over time of the memory usage recorded by the trace as an html file."),
         ("segment_plot", "Visualize how allocations are packed into allocator segments at each point in a trace as an html file.")
     )
@@ -1692,3 +1709,6 @@ if __name__ == "__main__":
     elif args.action == 'segment_plot':
         data = _read(args.input)
         _write(args.output, segment_plot(data, device=args.device))
+    elif args.action == 'plot':
+        data = _read(args.input)
+        _write(args.output, all_plot(data, device=args.device))
