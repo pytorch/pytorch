@@ -2120,7 +2120,9 @@ def index_impl(x, indices, check):
         assert len(idx) == len(output_size)
         assert len(indices_loaders) == len(indexed_size)
         new_index = [
-            ops.indirect_indexing(loader(idx[start_offset:end_offset]), size, check=check)
+            ops.indirect_indexing(
+                loader(idx[start_offset:end_offset]), size, check=check
+            )
             for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
