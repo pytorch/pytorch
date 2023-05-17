@@ -290,7 +290,7 @@ def checkpoint(
     *args,
     use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    **kwargs
+    **kwargs,
 ):
     r"""Checkpoint a model or part of the model
 
@@ -823,37 +823,19 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
         super().__init__(pack_hook, unpack_hook)
 
 
-# NB: this helper wraps fn before calling checkpoint_impl. kwargs and
-#     saving/restoring of global state is handled here.
-def _checkpoint_without_reentrant(
-    fn,
-    preserve_rng_state=True,
-    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    *args,
-    **kwargs
-):
-    """Checkpointining without re-entrant autograd
-    Args:
-        function: describes what to run in the forward pass of the model or
-            part of the model. It should also know how to handle the inputs
-            passed as the tuple. For example, in LSTM, if user passes
-            ``(activation, hidden)``, :attr:`function` should correctly use the
-            first input as ``activation`` and the second input as ``hidden``
-        preserve_rng_state(bool, optional):  Omit stashing and restoring
-            the RNG state during each checkpoint.
-            Default: ``True``
-        context_fn(Callable, optional): A callable returning a tuple of two
-            context managers. The function and its recomputation will be run
-            under the first and second context managers respectively.
-        *args: Arguments to pass in to the given ``function``.
-        **kwargs: Keyword arguments to pass into the given ``function``.
-    """
+def _checkpoint_without_reentrant_pre_forward(
+    fn: Callable,
+    preserve_rng_state: bool,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[bool, ContextManager, ContextManager, torch.device, bool]:
     device = _infer_device_type(*args)
     device_module = _get_device_module(device)
     forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     device_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs(device=device)
-
+    had_device_in_fwd = False
     if preserve_rng_state:
         fwd_cpu_state = torch.get_rng_state()
         # Don't eagerly initialize the cuda context by accident.
@@ -890,13 +872,20 @@ def _checkpoint_without_reentrant(
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
-    # When ambient grad_mode is False
-    if new_frame.input_saver.grad_fn is None:
-        return fn(*args, **kwargs)
+    # When ambient grad_mode is False, new_frame.input_saver.grad_fn is None
+    # and we should not checkpoint.
+    return (
+        new_frame.input_saver.grad_fn is not None,
+        _checkpoint_hook(new_frame),
+        forward_context,
+        device_module,
+        had_device_in_fwd,
+    )
 
-    with _checkpoint_hook(new_frame), forward_context:
-        ret = fn(*args, **kwargs)
 
+def _checkpoint_without_reentrant_post_forward(
+    device_module: torch.device, preserve_rng_state: bool, had_device_in_fwd: bool
+):
     if device_module._initialized and preserve_rng_state and not had_device_in_fwd:
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
@@ -905,5 +894,50 @@ def _checkpoint_without_reentrant(
             "of a Checkpoint, which is not allowed. Please open an issue "
             "if you need this feature."
         )
+
+
+# NB: this helper wraps fn before calling checkpoint_impl. kwargs and
+#  saving/restoring of global state is handled here.
+def _checkpoint_without_reentrant(
+    fn,
+    preserve_rng_state=True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    *args,
+    **kwargs,
+):
+    """Checkpointining without re-entrant autograd
+    Args:
+        function: describes what to run in the forward pass of the model or
+            part of the model. It should also know how to handle the inputs
+            passed as the tuple. For example, in LSTM, if user passes
+            ``(activation, hidden)``, :attr:`function` should correctly use the
+            first input as ``activation`` and the second input as ``hidden``
+        preserve_rng_state(bool, optional):  Omit stashing and restoring
+            the RNG state during each checkpoint.
+            Default: ``True``
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively.
+        *args: Arguments to pass in to the given ``function``.
+        **kwargs: Keyword arguments to pass into the given ``function``.
+    """
+
+    (
+        should_checkpoint,
+        _checkpoint_hook,
+        forward_context,
+        device_module,
+        had_device_in_fwd,
+    ) = _checkpoint_without_reentrant_pre_forward(preserve_rng_state, context_fn, *args)
+
+    if not should_checkpoint:
+        return fn(*args, **kwargs)
+
+    with _checkpoint_hook, forward_context:
+        ret = fn(*args, **kwargs)
+
+    _checkpoint_without_reentrant_post_forward(
+        device_module, preserve_rng_state, had_device_in_fwd
+    )
 
     return ret
