@@ -1,7 +1,22 @@
-"""
-This file implements the IndexPropagation ops handler, which wraps an
-underlying handler to add a limited for of constant propagation, as well as
-propagation of sympy expressions downstream of `ops.index_expr` calls.
+"""This file implements the IndexPropagation ops handler, which wraps an
+underlying handler to add a limited form of constant propagation, as well as
+propagation of sympy expressions downstream of ops.index_expr calls.
+
+For example, say we have the IR:
+
+   tmp0 = ops.index_expr(x, torch.int32)
+   tmp1 = ops.constant(2, torch.int32)
+   tmp2 = ops.mul(tmp0, tmp1)
+   tmp3 = ops.indirect_indexing(tmp2, x_size)
+   tmp4 = ops.load("buf0", tmp3)
+
+The underlying handler would just see:
+
+   ops.load("buf0", x * 2)
+
+This is limited by the set of operators handled in the sympy expression
+printers. So simple operations like minimum and maximum cannot be translated to
+SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 
 """
 import itertools
@@ -130,7 +145,7 @@ class IndexPropagation:
         return IndexPropVar(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(self, name, args, kwargs):
-        # Builld a new SymPy expression from this ops call
+        # Build a new SymPy expression from this ops call
         def unwrap(a):
             if not isinstance(a, IndexPropVar):
                 return a
