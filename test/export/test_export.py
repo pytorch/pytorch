@@ -565,10 +565,11 @@ class TestExport(TestCase):
         example_inputs = (x, y)
         constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
         with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint on a value which we evaluated to have a static value of 3. "
+            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
+            "on a value which we evaluated to have a static value of 3. "
         ):
             export(f, example_inputs, constraints)
-    
+
 
 if __name__ == '__main__':
     run_tests()

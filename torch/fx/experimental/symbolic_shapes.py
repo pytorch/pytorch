@@ -330,7 +330,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         pass
     else:
         raise ValueRangeError("constraining non-Symbols NYI")
-    
+
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
@@ -338,7 +338,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if not isinstance(a, SymInt):
         if detect_fake_mode() is None:
             return
-        
+
         # If we are tracing with a fake mode then add this integer to the
         # shape_env's var_to_range
         sym_integer = sympy.Integer(a)
