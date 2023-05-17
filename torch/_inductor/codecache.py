@@ -8,6 +8,7 @@ import logging
 import multiprocessing
 import os
 import pickle
+import pathlib
 import re
 import shutil
 import signal
@@ -15,6 +16,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import types
 from copy import copy, deepcopy
 from dataclasses import field
@@ -67,10 +69,9 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def cache_dir():
-    cache_dir = os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR",
-        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
-    )
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -265,12 +266,15 @@ def write(content, key, ext):
 
 def write_atomic(path: str, content: Union[str, bytes]):
     assert isinstance(content, str) or isinstance(content, bytes), "Only strings and byte arrays can be saved in the cache"
-    # use a temp file for thread safety
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    # Write into temporary file first to avoid conflicts between threads
+    # Avoid using a named temporary file, as those have restricted permissions
+    path = pathlib.Path(path)
+    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    with os.fdopen(fd, write_mode) as f:
+    with tmp_path.open(write_mode) as f:
         f.write(content)
-    os.rename(tmp_path, path)
+
+    tmp_path.rename(path)
 
 
 class FxGraphCache:

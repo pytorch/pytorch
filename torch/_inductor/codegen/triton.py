@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set
 
 import sympy
 
@@ -330,22 +330,24 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
+    def rand(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+    def randn(seed, offset):
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
-    # TODO: work out how to use randint4x
     @staticmethod
-    def randint(
-        seed, offset, _
-    ):  # _ here to keep the contract identical to CPU randint op
+    def randint64(seed, offset, low, high):
         offset = f"({offset}).to(tl.uint32)"
-        return f"tl.randint({seed}, {offset}).to(tl.int32)"
+        return f"triton_helpers.randint64({seed}, {offset}, {low}, {high})"
+
+    @staticmethod
+    def load_seed(name, offset):
+        var = V.kernel.args.input(name)
+        return f"tl.load({var} + {offset})"
 
     @staticmethod
     def rsqrt(x):
@@ -418,6 +420,13 @@ class TritonOverrides(OpOverrides):
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
+
+    @staticmethod
     def trunc(x):
         return f"tl.math.trunc({x})"
 
@@ -430,6 +439,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -1172,6 +1189,19 @@ class TritonKernel(Kernel):
         ):
             self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
+        # Guard against write-after-read corruption in triton.
+        # See # https://github.com/openai/triton/issues/1615
+        # This triton bug means that a load which is broadcasted over multiple
+        # warps may see the result of a store that happens later in the triton
+        # program. The workaround is to add a barrier before storing, which
+        # enforces that all warps have already read the data.
+        is_inplace = name in self.args.inplace_buffers
+        is_broadcasted = not set.issubset(
+            set(self.range_tree_nodes.keys()), original_index.free_symbols
+        )
+        if is_inplace and is_broadcasted:
+            self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
+
         if mode is None:
             line = f"tl.store({var} + ({index}), {value}, {mask})"
         elif mode == "atomic_add":
@@ -1261,10 +1291,8 @@ class TritonKernel(Kernel):
                 {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
                 """
                 )
-                idx_dtype = self.index_dtype
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
-                updated = value
                 if reduction_type == "min":
                     updated = f"triton_helpers.minimum({accumulator}, {value})"
                 elif reduction_type == "max":
@@ -1626,13 +1654,29 @@ class TritonKernel(Kernel):
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
+            assignment = False
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = pexpr(tree.numel)
             else:
+                assignment = True
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {pexpr(tree.numel)}")
+                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
+                # The real fix here is to revisit our cross language calling convention.
+                code.writeline(
+                    f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
+                )
             if tree.prefix != "r" or self.inside_reduction:
-                call_args.append(expr)
+                if assignment:
+                    # We can get symbolic expressions here, like s0*64
+                    # It is fine to have them here, but we need to handle them correctly as their own type
+                    # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+                    # scalars as well.
+                    # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+                    # constant now, need type info. I agree, this needs type info, and while this is not true type info
+                    # it suffices as a type hint for the purposes of producing the correct code for this type.
+                    call_args.append(SymbolicCallArg(expr))
+                else:
+                    call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
@@ -1642,7 +1686,7 @@ class TritonKernel(Kernel):
             )
         else:
             # TODO: refactor generate_kernel_call
-            call_args_str = ", ".join(call_args)
+            call_args_str = ", ".join(str(item) for item in call_args)
             stream_name = code.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -1952,7 +1996,7 @@ class TritonScheduling:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
-                get_fused_kernel_name(node_schedule)
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names
                 else ""
             )

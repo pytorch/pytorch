@@ -38,6 +38,7 @@ from gitutils import (
     get_git_repo_dir,
     GitRepo,
     patterns_to_regex,
+    retries_decorator,
 )
 from label_utils import (
     gh_add_labels,
@@ -85,6 +86,9 @@ class FlakyRule:
                 capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
+
+    def __repr__(self) -> str:
+        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
 
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -179,6 +183,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nameWithOwner
       }
       baseRefName
+      baseRefOid
       baseRepository {
         nameWithOwner
         isPrivate
@@ -691,27 +696,8 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def fetch(self, branch_name: Optional[str] = None) -> None:
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        if branch_name is None:
-            branch_name = f"__pull-request-{self.pr_num}__init__"
-        try:
-            r = repo._run_git("rev-parse", branch_name)
-            if r.strip() == self.last_commit()["oid"]:
-                return
-        except Exception:
-            pass
-        repo.fetch(f"pull/{self.pr_num}/head", branch_name)
-
     def get_merge_base(self) -> str:
-        if self.merge_base is not None:
-            return self.merge_base
-        self.fetch()
-        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base(
-            REMOTE_MAIN_BRANCH, self.last_commit()["oid"]
-        )
-        return self.merge_base
+        return cast(str, self.info["baseRefOid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -1117,7 +1103,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            self.fetch(pr_branch_name)
+            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
             return []
@@ -1190,6 +1176,7 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
+@lru_cache(maxsize=None)
 def read_flaky_rules() -> List[FlakyRule]:
     # NOTE: This is currently hardcoded, can be extended to do per repo rules
     FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
@@ -1382,16 +1369,12 @@ def checks_to_markdown_bullets(
     ]
 
 
-def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
-    try:
-        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
-    except Exception as e:
-        print(f"Could not download {url} because: {e}.")
-        if num_retries > 0:
-            return _get_flaky_rules(url, num_retries=num_retries - 1)
-        return []
+@retries_decorator(rc=[])
+def _get_flaky_rules(url: str) -> List[FlakyRule]:
+    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
 
 
+@retries_decorator()
 def save_merge_record(
     collection: str,
     comment_id: int,
@@ -1410,7 +1393,6 @@ def save_merge_record(
     ignore_current: bool = False,
     error: str = "",
     workspace: str = "commons",
-    num_retries: int = 3,
 ) -> None:
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
@@ -1456,35 +1438,9 @@ def save_merge_record(
         print("Rockset is missing, no record will be saved")
         return
 
-    except Exception as e:
-        if num_retries > 0:
-            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
-            return save_merge_record(
-                collection=collection,
-                comment_id=comment_id,
-                pr_num=pr_num,
-                owner=owner,
-                project=project,
-                author=author,
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                last_commit_sha=last_commit_sha,
-                merge_base_sha=merge_base_sha,
-                merge_commit_sha=merge_commit_sha,
-                is_failed=is_failed,
-                dry_run=dry_run,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=ignore_current,
-                error=error,
-                workspace=workspace,
-                num_retries=num_retries - 1,
-            )
-        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
-
-def get_rockset_results(
-    head_sha: str, merge_base: str, num_retries: int = 3
-) -> List[Dict[str, Any]]:
+@retries_decorator(rc=[])
+def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     query = f"""
 SELECT
     w.name as workflow_name,
@@ -1510,13 +1466,6 @@ where
         return cast(List[Dict[str, Any]], res.results)
     except ModuleNotFoundError:
         print("Could not use RockSet as rocket dependency is missing")
-        return []
-    except Exception as e:
-        print(f"Could not download rockset data because: {e}.")
-        if num_retries > 0:
-            return get_rockset_results(
-                head_sha, merge_base, num_retries=num_retries - 1
-            )
         return []
 
 
@@ -1735,7 +1684,7 @@ def categorize_checks(
                 failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
-        print(
+        warn(
             f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
             + ", ".join([x[0] for x in ok_failed_checks])
             + (

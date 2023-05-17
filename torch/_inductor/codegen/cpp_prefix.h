@@ -54,8 +54,12 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
   return engine.randn(10);
 }
 
-uint32_t randint_cpu(uint32_t seed, uint32_t offset) {
-  return at::Philox4_32(seed, 0, offset)();
+uint64_t randint64_cpu(uint32_t seed, uint32_t offset, int64_t low, int64_t high) {
+  auto gen = at::Philox4_32(seed, 0, offset);
+  uint64_t r0 = gen();
+  uint64_t r1 = gen();
+  uint64_t result = r0 | (r1 << 32);
+  return (result % static_cast<uint64_t>(high - low)) + low;
 }
 
 template <typename T> struct AsIntegerType { typedef T type; };
@@ -127,8 +131,14 @@ inline void store_float_as_bf16(
   res.store(bf16_buf, at::vec::Vectorized<float>::size());
 }
 
+inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
+  auto zeros = at::vec::Vectorized<float>(0);
+  auto ones = at::vec::Vectorized<float>(1);
+  return at::vec::Vectorized<float>::blendv(zeros, ones, src);
+}
+
 template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+inline at::vec::Vectorized<float> vec_convert_to_mask(at::vec::Vectorized<SRC> src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
@@ -138,10 +148,15 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
 
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+    *(uint32_t*)(dst_tmp + i) = src_tmp[i] ? 0xFFFFFFFF : 0;
   }
 
   return res_vec.loadu(dst_tmp);
+}
+
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+  return vec_convert_to_mask(src);
 }
 
 template <>
