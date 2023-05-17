@@ -17,6 +17,7 @@ from .. import metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
+    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
@@ -25,12 +26,12 @@ from ..utils import (
 )
 from ..virtualized import ops, V
 
-log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def data_type_logger(msg):
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Data type propagation: %s", msg)
+    if schedule_log.isEnabledFor(logging.DEBUG):
+        schedule_log.debug("Data type propagation: %s", msg)
 
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
@@ -261,12 +262,6 @@ class OpOverrides:
         return ops.mul(x, x)
 
     @staticmethod
-    def sign(x):
-        left = ops.where(ops.lt("0", x), "1", "0")
-        right = ops.where(ops.lt(x, "0"), "1", "0")
-        return ops.sub(left, right)
-
-    @staticmethod
     def bitwise_not(x):
         return f"~{ExprPrinter.paren(x)}"
 
@@ -434,10 +429,7 @@ class KernelArgs:
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
-                if val.is_integer:
-                    buffer_types[name] = torch.int64
-                else:
-                    buffer_types[name] = torch.float64
+                buffer_types[name] = get_sympy_Expr_dtype(val)
             else:
                 buffer_types[name] = val.get_dtype()
         buffer_types.update(

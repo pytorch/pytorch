@@ -11,7 +11,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
 
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -299,5 +299,5 @@ class TestSelectAlgorithm(TestCase):
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_CUDA and is_big_gpu(0) and not TEST_WITH_ROCM:
         run_tests()
