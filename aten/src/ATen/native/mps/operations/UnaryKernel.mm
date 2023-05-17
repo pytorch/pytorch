@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/UnaryConstants.h>
 #include <torch/mps.h>
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -31,15 +32,12 @@ const std::string& getMetalType(const c10::ScalarType& t) {
   return it->second;
 }
 
-const std::string& getMetalType(const Tensor& t) {
-  return getMetalType(t.scalar_type());
-}
-
 const std::string& getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
-static inline id<MTLBuffer> getMTLBufferStorage(const Tensor& tensor) {
-  return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());
+
+const std::string& getMetalType(const Tensor& t) {
+  return getMetalType(t.scalar_type());
 }
 
 static id<MTLLibrary> compileUnaryOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
@@ -116,18 +114,17 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
     dispatch_queue_t serialQueue = torch::mps::get_dispatch_queue();
     dispatch_sync(serialQueue, ^() {
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-      id<MTLBuffer> outBuf = getMTLBufferStorage(outputTensor);
-      id<MTLBuffer> inputBuf = getMTLBufferStorage(inputTensor);
+      id<MTLBuffer> outBuf = mps::getMTLBufferStorage(outputTensor);
+      id<MTLBuffer> inputBuf = mps::getMTLBufferStorage(inputTensor);
 
       [computeEncoder setComputePipelineState:cplState];
       [computeEncoder setBuffer:outBuf offset:0 atIndex:0];
       [computeEncoder setBuffer:inputBuf offset:0 atIndex:1];
-      // Set uniform buffer for the erfinv kernel polynomial constants
-      struct ErfinvConstant uniforms;
-      id<MTLBuffer> constantBuffer = [device newBufferWithLength:sizeof(ErfinvConstant)
+
+      id<MTLBuffer> erfinvConstants = [device newBufferWithLength:sizeof(ErfinvConstant)
                                                          options:MTLResourceStorageModePrivate];
-      memcpy([constantBuffer contents], &uniforms, sizeof(ErfinvConstant));
-      [computeEncoder setBuffer:constantBuffer offset:0 atIndex:2];
+      memcpy([erfinvConstants contents], &erfinv_constant, sizeof(ErfinvConstant));
+      [computeEncoder setBuffer:erfinvConstants offset:0 atIndex:2];
 
       MTLSize gridSize = MTLSizeMake(length, 1, 1);
       uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];

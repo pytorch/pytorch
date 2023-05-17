@@ -1,11 +1,24 @@
 #pragma once
 
 struct ErfinvConstant {
-  float a[4] = { 0.886226899, -1.645349621, 0.914624893, -0.140543331 };
-  float b[4] = { -2.118377725, 1.442710462, -0.329097515, 0.012229801 };
-  float c[4] = { -1.970840454, -1.624906493, 3.429567803, 1.641345311 };
-  float d[2] = { 3.543889200, 1.637067800 };
+  float a[4];
+  float b[4];
+  float c[4];
+  float d[2];
+  constexpr ErfinvConstant(
+    float a0, float a1, float a2, float a3,
+    float b0, float b1, float b2, float b3,
+    float c0, float c1, float c2, float c3,
+    float d0, float d1)
+    :a{a0, a1, a2, a3}, b{b0, b1, b2, b3}, c{c0, c1, c2, c3}, d{d0, d1} {}
 };
+
+constexpr ErfinvConstant erfinv_constant(
+  0.886226899, -1.645349621, 0.914624893, -0.140543331,
+  -2.118377725, 1.442710462, -0.329097515, 0.012229801,
+  -1.970840454, -1.624906493, 3.429567803, 1.641345311,
+  3.543889200, 1.637067800
+);
 
 const char* UNARY_KERNEL_TEMPLATE = R"METAL(
 #include <metal_stdlib>
