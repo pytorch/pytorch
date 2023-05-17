@@ -8,7 +8,6 @@ import itertools
 import math
 import os
 import random
-import re
 import subprocess
 import sys
 import time
@@ -6322,9 +6321,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # this should be collapsed to direct indexing, so the index
             # calculation shouldn't contain a `tmp` variable
-            load_line = [line for line in code.split('\n') if "tl.load" in line]
+            load_line = [line for line in code.split("\n") if "tl.load" in line]
             self.assertEqual(len(load_line), 1)
-            load_stmt = load_line[0].split('=')[-1]
+            load_stmt = load_line[0].split("=")[-1]
             self.assertTrue(
                 "tmp" not in load_stmt,
                 msg=f"Found indirect indexing in code:\n{code}",
