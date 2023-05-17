@@ -180,8 +180,8 @@ class IndexPropagation:
 
         return inner
 
-    def indirect_indexing(self, index, size):
+    def indirect_indexing(self, index, size, check=True):
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             return index.value.expr
-        return self.fallback("indirect_indexing", (index, size), {}).value
+        return self.fallback("indirect_indexing", (index, size, check), {}).value
