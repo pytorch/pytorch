@@ -38,7 +38,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   at::Tensor weight_compressed;
   // cupsarselt constructs
   cusparseLtHandle_t handle;
-  cusparseLtMatDescriptor_t weight_descriptor, activation_descriptor, res_descriptor;
+  cusparseLtMatDescriptor_t sparse_input_descriptor, dense_input_descriptor, res_descriptor;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
   float alpha{1.0};
@@ -110,11 +110,11 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   int64_t k = weight.size(1);
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
-  bool isSparse_transposed = !weight.is_contiguous();
-  opA = (isSparse_transposed) ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
+  bool is_sparse_input_transposed = false;
+  opA = (is_sparse_input_transposed) ? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  num_A_rows     = (isSparse_transposed) ? k : m;
-  auto     num_A_cols     = (isSparse_transposed) ? m : k;
+  num_A_rows     = (is_sparse_input_transposed) ? k : m;
+  auto     num_A_cols     = (is_sparse_input_transposed) ? m : k;
   auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
 
   
@@ -123,7 +123,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   CHECK_CUSPARSE(
     cusparseLtStructuredDescriptorInit(
       &handle,
-      &weight_descriptor,
+      &sparse_input_descriptor,
       num_A_rows,
       num_A_cols,
       lda,
@@ -137,7 +137,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   CHECK_CUSPARSE(
     cusparseLtSpMMAPrune2(
       &handle,
-      &weight_descriptor, 
+      &sparse_input_descriptor, 
       true, 
       opA,
       weight.data_ptr(),
@@ -147,7 +147,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   CHECK_CUSPARSE(
     cusparseLtSpMMAPruneCheck2(
       &handle,
-      &weight_descriptor,
+      &sparse_input_descriptor,
       true,
       opA,
       weight.data_ptr(),
@@ -175,7 +175,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   CHECK_CUSPARSE(
     cusparseLtSpMMACompressedSize2(
       &handle,
-      &weight_descriptor,
+      &sparse_input_descriptor,
       &compressed_size,
       &compressed_buffer_size) )
   
@@ -186,7 +186,7 @@ void CusparseLtLinear::set_compressed(const at::Tensor& weight) {
   CHECK_CUSPARSE(
     cusparseLtSpMMACompress2(
       &handle,
-      &weight_descriptor,
+      &sparse_input_descriptor,
       true,
       opA,
       weight.data_ptr(),
@@ -205,20 +205,25 @@ at::Tensor CusparseLtLinear::cusparselt_addmm(const at::Tensor& input, const at:
     return CusparseLtLinear::cusparselt_helper(input, bias.data_ptr(), 0);
 }
 
-
 at::Tensor CusparseLtLinear::cusparselt_helper(const at::Tensor& input, void* dBias, int64_t biasStride) {
   // create tensor
   cusparseLtMatmulDescriptor_t matmul;
+
+  //if (second){
+      //int64_t m = input.size(0);
+      //int64_t k = input.size(1);
+      //auto res = input.new_empty(m, n)
+  //}
   auto res = input.new_empty({num_A_rows, input.size(1)});
 
   int64_t k = input.size(0);
   int64_t n = input.size(1);
 
-  bool isB_transposed = !input.is_contiguous();
-  auto opB = isB_transposed? CUSPARSE_OPERATION_TRANSPOSE: CUSPARSE_OPERATION_NON_TRANSPOSE;
+  bool is_dense_input_transposed = !input.is_contiguous();
+  auto opB = is_dense_input_transposed? CUSPARSE_OPERATION_TRANSPOSE: CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  auto     num_B_rows     = (isB_transposed) ? n : k;
-  auto     num_B_cols     = (isB_transposed) ? k : n;
+  auto     num_B_rows     = (is_dense_input_transposed) ? n : k;
+  auto     num_B_cols     = (is_dense_input_transposed) ? k : n;
   auto     num_C_rows     = num_A_rows;
   auto     num_C_cols     = n;
 
@@ -231,7 +236,7 @@ at::Tensor CusparseLtLinear::cusparselt_helper(const at::Tensor& input, void* dB
   CHECK_CUSPARSE(
     cusparseLtDenseDescriptorInit(
       &handle,
-      &activation_descriptor,
+      &dense_input_descriptor,
       num_B_rows,
       num_B_cols,
       ldb,
@@ -258,8 +263,8 @@ at::Tensor CusparseLtLinear::cusparselt_helper(const at::Tensor& input, void* dB
       &matmul,
       opA,
       opB,
-      &weight_descriptor,
-      &activation_descriptor,
+      &sparse_input_descriptor,
+      &dense_input_descriptor,
       &res_descriptor,
       &res_descriptor,
       compute_type) )
@@ -351,7 +356,7 @@ at::Tensor CusparseLtLinear::cusparselt_helper(const at::Tensor& input, void* dB
       num_streams) )
 
   
-  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&activation_descriptor) )
+  CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&dense_input_descriptor) )
   CHECK_CUSPARSE( cusparseLtMatDescriptorDestroy(&res_descriptor) )
   CHECK_CUSPARSE( cusparseLtMatmulPlanDestroy(&plan) )
 

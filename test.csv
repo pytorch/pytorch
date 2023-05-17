@@ -1,2 +1,0 @@
-,m,k,n,dtype,sparse_latency (ms),dense_latency (ms),speedup (d/s),correct
-0,64,128,64,torch.float16,0.05036855730954558,0.011146782012656332,0.22152567773773416,True
