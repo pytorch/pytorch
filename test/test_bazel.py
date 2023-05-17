@@ -19,7 +19,7 @@ def test_simple_compile_eager() -> None:
         b = torch.cos(y)
         return a + b
 
-    opt_foo1 = torch.compile(foo(), backend="eager")
+    opt_foo1 = torch.compile(foo, backend="eager")
     # just check that we can run without raising an Exception
     assert opt_foo1(torch.randn(10, 10), torch.randn(10, 10)) is not None
 
