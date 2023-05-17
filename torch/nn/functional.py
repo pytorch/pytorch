@@ -788,6 +788,7 @@ def _max_pool2d(
         )
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
+    print("in python _max_pool2d kernel_size is: {}".format(kernel_size), flush=True)
     return torch.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
 
 

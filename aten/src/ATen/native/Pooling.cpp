@@ -23,9 +23,11 @@
 #include <ATen/ops/mkldnn_max_pool2d.h>
 #include <ATen/ops/mkldnn_max_pool3d.h>
 #include <ATen/ops/quantized_max_pool2d.h>
+#include <ATen/ops/quantized_max_pool3d.h>
 #endif
 
 #include <tuple>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -147,6 +149,7 @@ Tensor max_pool2d(
         self, kernel_size, padding, stride, dilation, ceil_mode);
   }
 #endif
+  std::cout<<"kernel_size in c++ max_pool2d is: "<<kernel_size<<std::endl;
   auto output_and_indices = at::max_pool2d_with_indices(
       self, kernel_size, stride, padding, dilation, ceil_mode);
   return std::get<0>(output_and_indices);
@@ -159,6 +162,10 @@ Tensor max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  if (self.is_quantized()) {
+    return at::quantized_max_pool3d(self, kernel_size, stride, padding,
+                                    dilation, ceil_mode);
+  }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);

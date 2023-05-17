@@ -3655,6 +3655,11 @@
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
 
+- func: quantized_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_max_pool3d
+  autogen: quantized_max_pool3d.out
+
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there

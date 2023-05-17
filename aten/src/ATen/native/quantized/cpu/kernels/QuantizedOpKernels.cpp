@@ -1503,6 +1503,7 @@ void qmaxpool_2d_nhwc_kernel(
 
         // Interleaved vector loop 4x
         constexpr auto vec_width = Vectorized<scalar_t>::size();
+        std::cout<<"fp32 maxpool channel last vec_width is: "<<vec_width<<std::endl;
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
               scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
@@ -1559,6 +1560,115 @@ void qmaxpool_2d_nhwc_kernel(
         data_index_step(b, nBatch, row, oH, col, oW);
       }
     });
+  });
+}
+
+void qmaxpool_3d_nthwc_kernel(
+    const Tensor& qx,
+    int64_t iC, // input/output channels
+    int64_t iT,
+    int64_t iH,
+    int64_t iW, // input sizes
+    int64_t oT,
+    int64_t oH,
+    int64_t oW, // output sizes
+    int64_t kT,
+    int64_t kH,
+    int64_t kW, // kernel size
+    int64_t sT,
+    int64_t sH,
+    int64_t sW, // strides
+    int64_t pT,
+    int64_t pH,
+    int64_t pW, // padding
+    int64_t dT,
+    int64_t dH,
+    int64_t dW, // dilation
+    Tensor& qy) {
+  std::cout<<"inside qmaxpool_3d_nthwc_kernel"<<std::endl;
+  std::cout<<"qx.scalar_type() is: "<<qx.scalar_type()<<std::endl;
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool3d_nthwc", [&]() {
+    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
+    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
+    int64_t nBatch = qx.size(0);
+    at::parallel_for(0, nBatch * oT * oH * oW, 0, [&](int64_t begin, int64_t end) {
+      int64_t b{0}, time{0}, row{0}, col{0};
+
+      data_index_init(begin, b, nBatch, time, oT, row, oH, col, oW);
+
+      for (const auto i : c10::irange(begin, end)) {
+        auto* i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iT * iW * iH * iC);
+        auto* o_p = reinterpret_cast<scalar_t::underlying*>(odata + i * iC);
+
+        // Loop over reduction block
+        int64_t t_start = time * sT - pT;
+        int64_t h_start = row * sH - pH;
+        int64_t w_start = col * sW - pW;
+        int64_t t_end = std::min(t_start + (kT - 1) * dT + 1, iT);
+        int64_t h_end = std::min(h_start + (kH - 1) * dH + 1, iH);
+        int64_t w_end = std::min(w_start + (kW - 1) * dW + 1, iW);
+        while (t_start < 0)
+          t_start += dT;
+        while (h_start < 0)
+          h_start += dH;
+        while (w_start < 0)
+          w_start += dW;
+
+        int64_t c = 0;
+        constexpr auto vec_width = Vectorized<scalar_t>::size();
+        // std::cout<<"scalar_t is: "<<scalar_t<<std::endl;
+#if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
+        std::cout<<"define windows"<<std::endl;
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+        std::cout<<"avx512"<<std::endl;
+#endif
+#if defined(CPU_CAPABILITY_AVX2)
+        std::cout<<"avx2"<<std::endl;
+#endif
+        std::cout<<"vec_width is: "<<vec_width<<std::endl;
+        std::cout<<"iC is: "<<iC<<std::endl;
+        // Vector loop
+        for (; c + vec_width <= iC; c += vec_width) {
+          Vectorized<scalar_t> acc{
+              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+          int64_t tcntr = 0;
+          int64_t t, x, y;
+          for (t = t_start; t < t_end; t += dT) {
+            for (y = h_start; y < h_end; y += dH) {
+              for (x = w_start; x < w_end; x += dW) {
+                tcntr = t * iH * iW + y * iW + x;
+                auto vals = Vectorized<scalar_t>::loadu(i_p + tcntr * iC + c);
+                acc = vec::maximum(acc, vals);
+              } // for x
+            } // for y
+          } // for t
+          std::cout<<"hit the vec loop"<<std::endl;
+          acc.store(o_p + c);
+        } // for c        
+
+        for (; c < iC; ++c) {
+          auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
+          int64_t tcntr = 0;
+          int64_t t, x, y;
+          for (t = t_start; t < t_end; t += dT) {
+            for (y = h_start; y < h_end; y += dH) {
+              for (x = w_start; x < w_end; x += dW) {
+                tcntr = t * iH * iW + y * iW + x;
+                auto val = *(i_p + tcntr * iC + c);
+                max_val = std::max(max_val, val);
+              } // for x
+            } // for y
+          } // for t
+          std::cout<<"hit the tail loop"<<std::endl;
+          o_p[c] = max_val;
+        } // for c
+
+        data_index_step(b, nBatch, time, oT, row, oH, col, oW);
+      }
+
+    });
+
   });
 }
 
@@ -4144,6 +4254,7 @@ void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size
 // So, until Quantization support for Windows is fixed for AVX512,
 // AVX2 kernels would be used instead. Ref: GH 56992.
 #if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
+std::cout<<"define avx512 and winsows"<<std::endl;
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
@@ -4170,6 +4281,7 @@ REGISTER_NO_AVX512_DISPATCH(qelu_stub);
 REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub);
 REGISTER_NO_AVX512_DISPATCH(qhardswish_stub);
 REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub);
+REGISTER_NO_AVX512_DISPATCH(qmaxpool_3d_nthwc_stub);
 REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
@@ -4228,6 +4340,7 @@ REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
 REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
 REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qmaxpool_3d_nthwc_stub, &qmaxpool_3d_nthwc_kernel);
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
