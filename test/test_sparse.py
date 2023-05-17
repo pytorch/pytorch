@@ -4821,34 +4821,41 @@ class TestSparseAny(TestCase):
                 i = random.randint(0, len(choices) - 1)
             return choices[i]
 
-        def run_test(m, n, k, device, dtype):
-            a = make_tensor((m, k), dtype).to(device)
-            b = make_tensor((n, k), dtype).to(device).T
+        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias):
+            weight = make_tensor((m, k), dtype).to(device)
+            input = make_tensor((*batch_shape, n, k), dtype).to(device)
+            bias = make_tensor((m,), dtype_out).to(device) if add_bias else None
 
             for meta_choice in (list(range(6)) + [None]):
                 mask_entries = [random_mask_choice(meta_choice) for i in range(m * (k // 4))]
                 mask = torch.tensor(mask_entries, dtype=torch.bool).view(m, k).to(device)
-
-                a_sparse = a.masked_select(mask).view(m, k // 2)
-                a_dense = a.masked_fill(~mask, 0)
+                weight = weight.masked_fill(~mask, 0)
 
                 dtype_dense = torch.float
-                c1 = torch.mm(a_dense.to(dtype_dense), b.to(dtype_dense))
+                input_dense = input.to(dtype_dense)
+                weight_dense = weight.to(dtype_dense)
+                bias_dense = bias.to(dtype_dense) if add_bias else None
+                output0 = torch.nn.functional.linear(input_dense, weight_dense, bias=bias_dense)
 
-                c0, meta = torch._structured_sparse_linear(a_sparse, b, mask)
-                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+                weight_sparse = weight.masked_select(mask).view(m, k // 2)
 
-                c0, _ = torch._structured_sparse_linear(a_sparse, b, meta)
-                torch.testing.assert_close(c0.to(dtype_dense), c1, rtol=1e-3, atol=1e-3)
+                output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias)
+                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
+
+                output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias)
+                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
 
         is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
         if not is_sm8x:
             return
-        for (m, n, k) in itertools.product(range(4), range(4), range(4)):
-            m = (m + 1) * 32
-            n = (n + 1) * 32
-            k = (k + 1) * 128
-            run_test(m, n, k, device, dtype)
+
+        batch_shapes = [[], [3], [3, 1]]
+        dtype_out = {torch.int8: torch.int32, torch.half: torch.half}
+        for (batch_shape, m, n, k, add_bias) in itertools.product(batch_shapes, range(3), range(3), range(3), (False, True)):
+            m = 2 ** m * 32
+            n = 2 ** n * 32
+            k = 2 ** k * 128
+            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
