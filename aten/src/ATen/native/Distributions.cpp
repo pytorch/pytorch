@@ -628,12 +628,19 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = (at::empty_like(self).exponential_(1, std::move(gen))) + 0.1;
+
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
-    // exponential<double>. The probability is about 2^(-DBL_MANT_DIG). We just
-    // ignore it here, but there may be some risk to get invalid output on CPU.
+    // exponential<double>. The probability is about 2^(-DBL_MANT_DIG).
+    // On CPU, MKL exponential distribution kernel is defined for q >= 0.
+    // (i.e., CPU MKL exponential variate, q, does not exclude 0)
+    // To ensure that the denominator should not be zero when q = 0.0,
+    // we add a small constant, c, to the denominator.
+    // s =  argmax( p / (q+c) ) where c > 0.
+    // Here we use c=1.0 for conveninence.
+
+    Tensor q = (at::empty_like(self).exponential_(1, std::move(gen))) + 1.0;
     at::div_out(q, self, q);
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
