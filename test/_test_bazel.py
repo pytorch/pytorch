@@ -5,6 +5,8 @@ This test module contains a minimalistic "smoke tests" for the bazel build.
 
 Currently it doesn't use any testing framework (i.e. pytest)
 TODO: integrate this into the existing pytorch testing framework.
+
+The name uses underscore `_test_bazel.py` to avoid globbing into other non-bazel configurations.
 """
 
 import torch
