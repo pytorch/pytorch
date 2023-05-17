@@ -77,6 +77,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'aminmax': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -394,7 +395,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_3': None,
         'rounddecimals_0': None,
         '__rsub__': None,
-        'aminmax': None,
         'angle': None,
         'bucketize': None,
         'cauchy_': None,

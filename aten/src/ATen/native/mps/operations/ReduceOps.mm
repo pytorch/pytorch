@@ -15,6 +15,7 @@
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
+#include <ATen/ops/aminmax_native.h>
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/argmax_native.h>
 #include <ATen/ops/argmin_native.h>
@@ -987,6 +988,24 @@ TORCH_IMPL_FUNC(amax_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepd
 
 TORCH_IMPL_FUNC(amin_out_mps)(const Tensor& input_t, IntArrayRef dim, bool keepdim, const Tensor& output_t) {
   mps::reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, mps::MPSReductionType::AMIN, "amin_out_mps");
+}
+
+TORCH_IMPL_FUNC(aminmax_out_mps)
+(const Tensor& input_t, c10::optional<int64_t> dim_opt, bool keepdim, const Tensor& min_t, const Tensor& max_t) {
+  mps::reduction_out_mps(input_t,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         keepdim,
+                         c10::nullopt,
+                         min_t,
+                         mps::MPSReductionType::AMIN,
+                         "aminmax_out_mps_min");
+  mps::reduction_out_mps(input_t,
+                         dim_opt.has_value() ? OptionalIntArrayRef({*dim_opt}) : c10::nullopt,
+                         keepdim,
+                         c10::nullopt,
+                         max_t,
+                         mps::MPSReductionType::AMAX,
+                         "aminmax_out_mps_max");
 }
 
 Tensor prod_mps(const Tensor& self, c10::optional<ScalarType> opt_dtype) {

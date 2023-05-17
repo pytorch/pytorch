@@ -3558,6 +3558,7 @@
   structured: True
   dispatch:
     CPU, CUDA: aminmax_out
+    MPS: aminmax_out_mps
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
