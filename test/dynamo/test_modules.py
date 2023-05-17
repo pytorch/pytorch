@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import os
+import tempfile
 import traceback
 import types
 import unittest
@@ -8,8 +10,7 @@ from copy import deepcopy
 from functools import partial
 from typing import Tuple
 from unittest.mock import patch
-import tempfile
-import os
+
 import torch
 
 import torch._dynamo.test_case
