@@ -285,7 +285,6 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(sfdp_pattern_10, args)
 
-    @config.patch(fallback_random=True, lowmem_dropout=False)
     def test_pattern_fails_with_tensor_factor(self):
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):
