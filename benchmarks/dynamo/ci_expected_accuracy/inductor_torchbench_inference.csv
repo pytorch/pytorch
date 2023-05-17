@@ -5,6 +5,11 @@ LearningToPaint,pass,0
 Super_SloMo,pass,0
 alexnet,pass,0
 attention_is_all_you_need_pytorch,pass,0
+basic_gnn_edgecnn,pass,0
+basic_gnn_gcn,pass,6
+basic_gnn_gin,pass,0
+basic_gnn_sage,pass,0
+cm3leon_generate,pass,67
 dcgan,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,4
@@ -20,6 +25,7 @@ hf_Bert_large,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
 hf_Reformer,pass,27
+hf_T5_generate,fail_to_run,48
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,0
 llama,pass,0
@@ -27,6 +33,7 @@ maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
+nanogpt_generate,fail_to_run,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,45
 phlippe_densenet,pass,0
@@ -51,4 +58,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
 tts_angular,pass,2
 vgg16,pass,0
+vision_maskrcnn,infra_error,0
 yolov3,pass,2

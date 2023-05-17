@@ -298,6 +298,17 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave(self):
+        def fn(y):
+            return torch.repeat_interleave(y, 2, output_size=8)
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        self.common(
+            fn,
+            (a,),
+        )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -345,6 +356,16 @@ class CPUReproTests(TestCase):
         a = torch.randn([2])
         b = torch.randn([2])
         self.common(fn, (a, b))
+
+    def test_scalar_sign_with_min(self):
+        # https://github.com/pytorch/pytorch/issues/101340
+        def fn(a):
+            t1 = torch.tanh(a)
+            t2 = torch.sign(t1)
+            return torch.min(t1, t2)
+
+        a = torch.randn(1, 3)
+        self.common(fn, (a,))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -668,7 +689,7 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
-            "randint",
+            "randint64",
             "bitwise_and",
             "bitwise_or",
             "bitwise_xor",
@@ -1316,6 +1337,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
+    @config.patch({"cpp.descriptive_names": "original_aten"})
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
@@ -1330,7 +1352,7 @@ class CPUReproTests(TestCase):
 
         kernel_profile_events = []
         for e in prof.profiler.function_events:
-            if "kernel_cpp_0" in e.name:
+            if "cpp_fused_add_0" in e.name:
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 

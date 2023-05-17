@@ -16,7 +16,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -63,6 +63,8 @@ current_device = ""
 current_batch_size = None
 output_filename = None
 
+MAX_DOWNLOAD_ATTEMPTS = 5
+
 
 class CI(NamedTuple):
     backend: str  # aot_eager or inductor
@@ -84,13 +86,9 @@ CI_SKIP[CI("eager", training=False)] = [
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
+    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
-    # KeyError: '_ignore_torch_cuda_oom'
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
@@ -100,7 +98,8 @@ CI_SKIP[CI("eager", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
-    "vision_maskrcnn",  # eager_two_runs_differ
+    "llama",  # Accuracy failed: allclose not within tol=0.001
+    "vision_maskrcnn",  # shape mismatch in accuracy check!
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -146,7 +145,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "resnet50_quantized_qat",  # fp64_OOM
     "moco",
     "pytorch_struct",
-    "vision_maskrcnn",
+    "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -191,7 +190,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
-    "vision_maskrcnn",  # accuracy
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -217,7 +215,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
-    "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -243,17 +240,29 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
+    "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
+    "mobilevit_s",
+    "pit_b_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "vit_base_patch16_224",
+    "xcit_large_24_p8_224",
 ]
 
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    "cm3leon_generate",  # Could not validate constraint UnspecConstraint
+    "hf_T5_generate",  # Could not validate constraint UnspecConstraint
+    "vision_maskrcnn",  # nothing in example_inputs had a dim with 4
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "llama",  # AssertionError: cannot compute free_symbols of True
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -935,6 +944,44 @@ def try_script(model, example_inputs):
         return None
 
 
+def download_retry_decorator(download_fn):
+    """
+    Decorator function for applying retry logic to a download function.
+
+    The wrapped function will be called up to 5 times and raises an exception if the function fails each time.
+    After each unsuccessful attempt, there is a delay before the next attempt, which is increased linearly with the number of tries.
+
+    Usage:
+    @download_retry_decorator
+    def download_function(model_name: str):
+        # download logic goes here
+    """
+
+    @functools.wraps(download_fn)
+    def wrapper(self, *args, **kwargs) -> Any:
+        tries = 0
+        model = None
+        total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
+        while tries <= total_allowed_tries:
+            try:
+                model = download_fn(self, *args, **kwargs)
+                return model
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError(
+                        f"Failed to load model '{model_name}' with following error(s): {str(e)}."
+                    )
+
+    return wrapper
+
+
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -1157,6 +1204,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cuda(self):
+        return set()
+
+    @property
+    def skip_models_for_cpu(self):
         return set()
 
     @property
@@ -2205,7 +2256,6 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
-            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -2298,6 +2348,7 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+        runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
