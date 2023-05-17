@@ -8474,6 +8474,13 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
+
+    ForeachFuncInfo(
+        'zero',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
