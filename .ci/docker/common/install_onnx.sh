@@ -16,7 +16,7 @@ pip_install \
 
 # TODO: use official onnx package once it's released
 # for now, use the commit from 1.13.1-protobuf4.21 branch
-pip_install "onnx@git+https://github.com/onnx/onnx@389b6bcb05b9479d149d29b2461fbffe8472ed14"
+pip_install "onnx@git+https://github.com/onnx/onnx@213b525a51ead28961d9b4f2764b08c7e336bf2c"
 
 pip_install \
   onnxruntime==1.14.0 \
