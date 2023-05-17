@@ -337,7 +337,7 @@ class profile:
         assert self.function_events is not None
         return self.function_events.self_cpu_time_total
 
-    def _parse_kineto_results(self, result):
+    def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
@@ -388,6 +388,7 @@ class profile:
                 end_us=rel_end_us,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
+                concrete_inputs=kineto_event.concrete_inputs(),
                 stack=[entry for entry in kineto_event.stack() if _filter_stack_entry(entry)],
                 scope=kineto_event.scope(),
                 cpu_memory_usage=cpu_memory_usage,

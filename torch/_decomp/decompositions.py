@@ -998,7 +998,9 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train:
+    if train and p != 0:
+        if p == 1:
+            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -1137,12 +1139,12 @@ def split_with_sizes(
 
 
 @register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
-def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
+def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return [self]
+        return (self,)
     chunks = (dim_size + split_size - 1) // split_size
     chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
@@ -1418,9 +1420,13 @@ def native_batch_norm_helper(
 
     if weight is None:
         weight = input.new_ones(())
+    else:
+        weight = weight.flatten()
 
     if bias is None:
         bias = input.new_zeros(())
+    else:
+        bias = bias.flatten()
 
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)

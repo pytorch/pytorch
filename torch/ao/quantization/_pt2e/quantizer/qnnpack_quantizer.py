@@ -41,13 +41,23 @@ def _mark_nodes_as_annotated(nodes: List[Node]):
         if node is not None:
             if "target_dtype_info" not in node.meta:
                 node.meta["target_dtype_info"] = {
-                    "input_act_obs_or_fq_ctr": None,
-                    "output_act_obs_or_fq_ctr": None,
-                    "weight_obs_or_fq_ctr": None,
-                    "bias_obs_or_fq_ctr": None,
                     "_annotated": True,
                 }
             node.meta["target_dtype_info"]["_annotated"] = True
+
+
+def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
+    target_dtype_info = node.meta.get("target_dtype_info", {})
+    input_qspec_map = target_dtype_info.get("input_act_obs_or_fq_ctr_map", {})
+    input_qspec_map[input_node] = qspec
+    target_dtype_info["input_act_obs_or_fq_ctr_map"] = input_qspec_map
+    node.meta["target_dtype_info"] = target_dtype_info
+
+
+def _annotate_output_qspec(node: Node, qspec):
+    target_dtype_info = node.meta.get("target_dtype_info", {})
+    target_dtype_info["output_act_obs_or_fq_ctr"] = qspec
+    node.meta["target_dtype_info"] = target_dtype_info
 
 
 def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
@@ -489,48 +499,40 @@ class QNNPackQuantizer(Quantizer):
                 if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
                     bias_node = ph
 
+            if act_node is None and weight_node is None and bias_node is None:
+                raise ValueError(
+                    "Could not find any act, weight or bias node in linear pattern"
+                )
             # bias and output act
-            if _is_annotated([act_node]) is False:  # type: ignore[list-item]
-                act_node.meta["target_dtype_info"] = {  # type: ignore[union-attr]
-                    "input_act_obs_or_fq_ctr": None,
-                    "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(
-                        quantization_config
-                    ),
-                    "weight_obs_or_fq_ctr": None,
-                    "bias_obs_or_fq_ctr": None,
-                    "_annotated": True,
-                }
+            # find use of act node within the matched pattern
+            act_use_node = None
+            for node in match.nodes_map.values():
+                if node in act_node.users:  # type: ignore[union-attr]
+                    act_use_node = node
+                    break
+            if act_use_node is None:
+                raise ValueError(
+                    "Could not find an user of act node within matched pattern."
+                )
+            if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
+                _annotate_input_qspec_map(
+                    act_use_node, act_node, get_act_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
+                )
             if bias_node and _is_annotated([bias_node]) is False:
-                bias_node.meta["target_dtype_info"] = {
-                    "input_act_obs_or_fq_ctr": None,
-                    "output_act_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(
-                        quantization_config
-                    ),
-                    "weight_obs_or_fq_ctr": None,
-                    "bias_obs_or_fq_ctr": None,
-                    "_annotated": True,
-                }
+                _annotate_output_qspec(
+                    bias_node, get_bias_obs_or_fq_ctr(quantization_config)
+                )
             if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                weight_node.meta["target_dtype_info"] = {  # type: ignore[union-attr]
-                    "input_act_obs_or_fq_ctr": None,
-                    "output_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(
-                        quantization_config
-                    ),
-                    "weight_obs_or_fq_ctr": None,
-                    "bias_obs_or_fq_ctr": None,
-                    "_annotated": True,
-                }
+                _annotate_output_qspec(
+                    weight_node, get_weight_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
+                )
             if _is_annotated([output_node]) is False:
-                output_node.meta["target_dtype_info"] = {
-                    "input_act_obs_or_fq_ctr": None,
-                    "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(
-                        quantization_config
-                    ),
-                    "weight_obs_or_fq_ctr": None,
-                    "bias_obs_or_fq_ctr": None,
-                    "_annotated": True,
-                }
-            _mark_nodes_as_annotated(list(match.nodes_map.values()))
+                _annotate_output_qspec(
+                    output_node, get_act_obs_or_fq_ctr(quantization_config)
+                )
+            nodes_to_mark_annotated = list(match.nodes_map.values())
+            nodes_to_mark_annotated.remove(act_node)  # type: ignore[arg-type]
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     # TODO: move to `_pt2e/_propagate_annotation.py` after we have
     # decided on the how we want to use pattern matching for annotation
