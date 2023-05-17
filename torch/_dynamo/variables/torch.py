@@ -208,6 +208,7 @@ class TorchVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.func.vmap:
+            self.value._vmap_info = {'args': args, 'kwargs': kwargs}
             return TorchHigherOrderOperator(self.value)
         elif self.value in config.constant_functions:
             assert not args and not kwargs
@@ -1178,6 +1179,31 @@ class TorchHigherOrderOperator(VariableTracker):
             p_args = (
                 body_node,
                 *(arg.as_proxy() for arg in args[1:]),
+                *(arg for arg in body_lifted_freevars),
+            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
+        elif self.value is torch.func.vmap:
+            checkpoint = tx.copy_graphstate()
+            graph_checkpoint = tx.output.graph
+            vmap_args = self.value._vmap_info['args']
+            vmap_kwargs = self.value._vmap_info['kwargs']
+            fn = vmap_args[0]
+            self.source = fn.source
+            body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+                fn,
+                args,
+                graph_checkpoint,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "vmap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+            body_node = make_attr(body_name)
+            p_args = (
+                body_node,
+                *(arg.as_proxy() for arg in vmap_args[1:]),
                 *(arg for arg in body_lifted_freevars),
             )
             r = body_r.as_proxy().node.meta["example_value"]
