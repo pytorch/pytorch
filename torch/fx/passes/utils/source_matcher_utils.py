@@ -7,7 +7,7 @@ import logging
 import os
 
 
-__all__ = ['get_source_partitions', 'check_subgraphs_connected']
+__all__ = ['get_source_partitions', 'check_subgraphs_connected', 'SourcePartition']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():

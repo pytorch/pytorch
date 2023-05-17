@@ -18,7 +18,7 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
 from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
-from torch.fx.passes.utils.matcher_utils import InternalMatch, SubgraphMatcher
+from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 from .quantizer import (
     OperatorConfig,
@@ -461,78 +461,54 @@ class QNNPackQuantizer(Quantizer):
     def _annotate_linear(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        graph = gm.graph
-        patterns = []
-        """
-        Annotate linear nodes:
-        This is done by tracing linear patterns for various input shapes that give
-        distinct pattern graph.
-        Order matters here since without that we get overlapping matches, resulting
-        in wrong annotations.
-        We will really plan to move this as graph matching utils supported by compiler/core team.
-        More details can be found here: (put doc link)
-        """
-        patterns.extend(_get_linear_patterns([8, 8, 8, 8]))
-        patterns.extend(_get_linear_patterns([8, 8, 8]))
-        patterns.extend(_get_linear_patterns([8, 8]))
-        matches: List[InternalMatch] = []
-        for pattern in patterns:
-            subgraph_matcher = SubgraphMatcher(pattern, ignore_literals=True)
-            matches.extend(subgraph_matcher.match(graph))
-        for match in matches:
-            weight_or_bias = []
-            act_node = None
-            if len(match.returning_nodes) != 1:
-                raise ValueError("Linear pattern must have only one returning node")
-            output_node = match.returning_nodes[0]
-            for ph in match.placeholder_nodes:
-                if ph.op == "get_attr":
-                    weight_or_bias.append(ph)
-                else:
-                    act_node = ph
-            weight_node = None
-            bias_node = None
-            for ph in weight_or_bias:
-                weight_or_bias = getattr(gm, ph.target)  # type: ignore[arg-type]
-                if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
-                    weight_node = ph
-                if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
-                    bias_node = ph
-
-            if act_node is None and weight_node is None and bias_node is None:
-                raise ValueError(
-                    "Could not find any act, weight or bias node in linear pattern"
-                )
-            # bias and output act
-            # find use of act node within the matched pattern
-            act_use_node = None
-            for node in match.nodes_map.values():
-                if node in act_node.users:  # type: ignore[union-attr]
-                    act_use_node = node
-                    break
-            if act_use_node is None:
-                raise ValueError(
-                    "Could not find an user of act node within matched pattern."
-                )
-            if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
-                _annotate_input_qspec_map(
-                    act_use_node, act_node, get_act_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
-                )
-            if bias_node and _is_annotated([bias_node]) is False:
-                _annotate_output_qspec(
-                    bias_node, get_bias_obs_or_fq_ctr(quantization_config)
-                )
-            if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                _annotate_output_qspec(
-                    weight_node, get_weight_obs_or_fq_ctr(quantization_config)  # type: ignore[arg-type]
-                )
-            if _is_annotated([output_node]) is False:
-                _annotate_output_qspec(
-                    output_node, get_act_obs_or_fq_ctr(quantization_config)
-                )
-            nodes_to_mark_annotated = list(match.nodes_map.values())
-            nodes_to_mark_annotated.remove(act_node)  # type: ignore[arg-type]
-            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
+        )
+        for module_or_fn_type, partitions in module_partitions.items():
+            if module_or_fn_type == torch.nn.Linear:
+                for p in partitions:
+                    act_node = p.input_nodes[0]
+                    output_node = p.output_nodes[0]
+                    weight_node = None
+                    bias_node = None
+                    for node in p.params:
+                        weight_or_bias = getattr(gm, node.target)  # type: ignore[arg-type]
+                        if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
+                            weight_node = node
+                        if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
+                            bias_node = node
+                    if weight_node is None:
+                        raise ValueError("No weight found in Linear pattern")
+                    # find use of act node within the matched pattern
+                    act_use_node = None
+                    for node in p.nodes:
+                        if node in act_node.users:  # type: ignore[union-attr]
+                            act_use_node = node
+                            break
+                    if act_use_node is None:
+                        raise ValueError(
+                            "Could not find an user of act node within matched pattern."
+                        )
+                    if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
+                        _annotate_input_qspec_map(
+                            act_use_node,
+                            act_node,
+                            get_act_obs_or_fq_ctr(quantization_config),
+                        )
+                    if bias_node and _is_annotated([bias_node]) is False:
+                        _annotate_output_qspec(
+                            bias_node, get_bias_obs_or_fq_ctr(quantization_config)
+                        )
+                    if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
+                        _annotate_output_qspec(
+                            weight_node, get_weight_obs_or_fq_ctr(quantization_config)
+                        )
+                    if _is_annotated([output_node]) is False:
+                        _annotate_output_qspec(
+                            output_node, get_act_obs_or_fq_ctr(quantization_config)
+                        )
+                    nodes_to_mark_annotated = list(p.nodes)
+                    _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     # TODO: move to `_pt2e/_propagate_annotation.py` after we have
     # decided on the how we want to use pattern matching for annotation
