@@ -24,7 +24,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics
+from . import config, metrics, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
@@ -711,12 +711,12 @@ def compile_fx(
                 boxed_forward_device_index=forward_device,
             )
 
-    if decompositions is None:
-        decompositions = select_decomp_table()
-    # TODO: can add logging before/after the call to create_aot_dispatcher_function
-    # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-    # once torchdynamo is merged into pytorch
-    with V.set_fake_mode(detect_fake_mode(example_inputs_)):
+    with overrides.patch_functions():
+        if decompositions is None:
+            decompositions = select_decomp_table()
+        # TODO: can add logging before/after the call to create_aot_dispatcher_function
+        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+        # once torchdynamo is merged into pytorch
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

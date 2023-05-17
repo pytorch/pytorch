@@ -111,6 +111,7 @@ def validate_ir(node_or_nodes):
                 (
                     DynamicScalar,
                     TensorBox,
+                    RandSeedBuffer,
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
@@ -2147,6 +2148,13 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
+
+
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return V.graph.wrapper_code.none_str
@@ -2912,21 +2920,6 @@ class ExternKernelOut(ExternKernel):
 
     def should_allocate(self):
         return True
-
-
-class RandomSeeds(ExternKernelOut):
-    def __init__(self, count: int, device: torch.device):
-        limits = torch.iinfo(torch.int64)
-        super().__init__(
-            layout=FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[count],
-            ),
-            inputs=[],
-            constant_args=[limits.min, limits.max, [count]],
-            kernel="aten.randint.low_out",
-        )
 
 
 class ExternKernelAlloc(ExternKernel):

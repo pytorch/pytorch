@@ -998,9 +998,7 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train and p != 0:
-        if p == 1:
-            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    if train:
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)

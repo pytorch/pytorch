@@ -105,6 +105,9 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = True
+
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 
