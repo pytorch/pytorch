@@ -175,8 +175,12 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        inplace = [ADD_TRACE_INPUT.substitute(name=f.func.arguments.out[i].name,
-            input=f.func.arguments.out[i].name) for i in range(num_out_args)]
+        inplace = [
+            ADD_TRACE_INPUT.substitute(
+                name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
+            )
+            for i in range(num_out_args)
+        ]
 
         # for outplace: do nothing, except if the function is a factory.
         # Factories are a bit special because their out-of-place overloads
