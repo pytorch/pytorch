@@ -104,14 +104,16 @@ SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algo
     update the first moment, the second moment, and the parameter based on all values
     of the gradients, SparseAdam only updates the moments and parameters corresponding
     to the non-zero values of the gradients.
-    
+
     A simplified way of thinking about the implementation is as such:
+
     1. Create a mask of the non-zero values in the sparse gradients. For example,
-    if your gradient is [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
-    2. Apply this mask over the running moments and do computation on only the
+    2. f your gradient is [0, 5, 0, 0, 9], the mask would be [0, 1, 0, 0, 1].
+    3. Apply this mask over the running moments and do computation on only the
+
     non-zero values.
     3. Apply this mask over the parameters and only apply an update on non-zero values.
-    
+
     We use sparse layout Tensors to optimize this approximation, which means the more
     gradients that are masked by not being materialized, the more performant the optimization.
     Since we rely on using sparse layout tensors, we infer that any materialized value in the
