@@ -377,12 +377,10 @@ class CallMethod(_TargetArgsExpr):
     op = "call_method"
 
 
-class CallFunctionVarArgs(_TargetExpr):
+class _TargetExprVarArgs(_TargetExpr):
     """
     Matches a call_function node with any arguments which are passed into the pattern
     """
-
-    op = "call_function"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if not self._match_fns(node):
@@ -394,9 +392,14 @@ class CallFunctionVarArgs(_TargetExpr):
         m = Match(self)
         m.nodes.append(node)
         m.targets[self] = node.target
-        m.args.extend(node.args)
-        m.kwargs.update(node.kwargs)
         return m
+
+class CallFunctionVarArgs(_TargetExprVarArgs):
+    op = "call_function"
+
+
+class CallMethodVarArgs(_TargetExprVarArgs):
+    op = "call_method"
 
 
 class ListOf(PatternExpr):

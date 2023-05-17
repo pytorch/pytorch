@@ -35,14 +35,8 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
 
 @init_once_fakemode
 def lazy_init():
-    from .split_cat import _split_cat_init
-
-    _split_cat_init()
-
     if config.is_fbcode():
-        from .fb.split_cat import _split_cat_init as _fb_split_cat_init
-
-        _fb_split_cat_init()
+        from .fb import split_cat # noqa
 
 
 def pre_grad_passes(gm, example_inputs):
