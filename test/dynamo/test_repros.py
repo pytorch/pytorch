@@ -1636,6 +1636,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIs(act.act, nn.functional.gelu)
         self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
+    def test_dropout_inline(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            return torch.nn.Dropout(0.1)(x)
+
+        y = torch.randn(10)
+        torch.manual_seed(1337)
+        ref = nn.functional.dropout(y, 0.1)
+        torch.manual_seed(1337)
+        res = fn(y)
+        self.assertTrue(same(ref, res))
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
@@ -1880,17 +1892,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from .test_functions import tensor_for_import_testing
+                from .utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                from test_functions import tensor_for_import_testing
+                from utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
@@ -1903,19 +1915,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import_no_modulename(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from . import test_functions
+                from . import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                import test_functions
+                import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)

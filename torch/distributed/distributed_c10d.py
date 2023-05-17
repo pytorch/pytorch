@@ -453,7 +453,7 @@ class _World:
     def __init__(self):
         self._default_pg = None
         self._pg_coalesce_state: Dict[ProcessGroup, List[Union[_CollOp, P2POp]]] = {}
-        self._pg_object_coll_device: Dict[ProcessGroup, torch.device] = {}
+        self._pg_default_device: Dict[ProcessGroup, torch.device] = {}
 
     @property
     def default_pg(self):
@@ -540,8 +540,8 @@ class _World:
         return self._pg_coalesce_state
 
     @property
-    def pg_object_coll_device(self) -> Dict[ProcessGroup, torch.device]:
-        return self._pg_object_coll_device
+    def pg_default_device(self) -> Dict[ProcessGroup, torch.device]:
+        return self._pg_default_device
 
 _world = _World()
 """Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
@@ -573,11 +573,28 @@ _default_pg_init_method = None
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
 
 
-def _get_object_coll_device(group: Optional[ProcessGroup] = None):
+def _get_pg_default_device(group: Optional[ProcessGroup] = None):
+    """
+    Returns the device to use with ``group`` for control flow usage (object collectives, barrier).
+    There are selection rules:
+        1. If user specifies exactly one backend in ``init_process_group`` call:
+            use that backend
+        2. Else if user specifies multiple "device:backend" pairs in init_process_group:
+            If "cpu" is among those pairs, use "cpu" (because the object is in cpu memory);
+            Otherwise, use the first backend (sort of a random pick).
+
+    Args:
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Returns:
+        torch.device: The device to use with ``group``.
+
+    """
     group = group or _get_default_group()
-    if group in _world.pg_object_coll_device:
+    if group in _world.pg_default_device:
         # Previously searched and cached; just return
-        return _world.pg_object_coll_device[group]
+        return _world.pg_default_device[group]
 
     if not isinstance(group, ProcessGroup):
         # Provide backward compatibility to cases where `group` passed in is
@@ -589,8 +606,8 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
             "of PyTorch Distributed instead."
         )
         # Most users create Gloo with private API for object collectives
-        _world.pg_object_coll_device[group] = torch.device("cpu")
-        return _world.pg_object_coll_device[group]
+        _world.pg_default_device[group] = torch.device("cpu")
+        return _world.pg_default_device[group]
 
     """
     ``group._device_types`` is a property pybind that returns the devices
@@ -601,26 +618,26 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
 
     if len(devices) == 1:
         # User fixed exactly one backend in `init_process_group`
-        _world.pg_object_coll_device[group] = devices[0]
+        _world.pg_default_device[group] = devices[0]
     elif len(devices) == 0:
         # No backend has been registered with this PG (maybe because no
         # collective has been run?) We pick cpu as the default and hopefully
         # this would lazily init Gloo or other available cpu backend.
-        _world.pg_object_coll_device[group] = torch.device("cpu")
+        _world.pg_default_device[group] = torch.device("cpu")
     elif torch.device("cpu") in devices:
         # There are multiple backends in this PG and cpu is among them.
         # cpu is preferred as the object is in cpu memory. No need for device
         # copy.
-        _world.pg_object_coll_device[group] = torch.device("cpu")
+        _world.pg_default_device[group] = torch.device("cpu")
     else:
         # No cpu in the backend list. Randomly pick the first backend
-        _world.pg_object_coll_device[group] = devices[0]
+        _world.pg_default_device[group] = devices[0]
 
     logger.info(
-        f"Using device {_world.pg_object_coll_device[group]} for object "  # noqa: G004
+        f"Using device {_world.pg_default_device[group]} for object "  # noqa: G004
         "collectives."
     )
-    return _world.pg_object_coll_device[group]
+    return _world.pg_default_device[group]
 
 
 # Environment variable to control whether we do a barrier after process group
@@ -1363,7 +1380,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.pg_to_tag.clear()
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
-        _world.pg_object_coll_device.clear()
+        _world.pg_default_device.clear()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1379,8 +1396,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
         del _world.pg_backend_config[pg]
-        if pg in _world.pg_object_coll_device:
-            del _world.pg_object_coll_device[pg]
+        if pg in _world.pg_default_device:
+            del _world.pg_default_device[pg]
         if pg in _world.pg_coalesce_state.keys():
             warnings.warn(
                 "Some coalesced collectives haven't been launched when "
@@ -1668,7 +1685,8 @@ def _coalescing_manager(
             # Collectives supporting "Fast Path" coalescing are captured.
             # See implementation in corresponding collective APIs.
             # Currently supported:
-            # - allreduce_coalesced
+            # - coalesced `all_reduce`
+            # - coalesced `all_gather_into_tensor`
             op0 = op_list[0].op
             if op0 == all_reduce:
                 tensors = []
@@ -1677,6 +1695,13 @@ def _coalescing_manager(
                 opts = AllreduceCoalescedOptions()
                 opts.reduceOp = op_list[0].redop
                 work = group.allreduce_coalesced(tensors, opts)
+            elif op0 == all_gather_into_tensor:
+                inputs = []
+                outputs = []
+                for op in op_list:
+                    inputs.append(op.tensor)
+                    outputs.append(op.dst_tensor)
+                work = group.allgather_into_tensor_coalesced(outputs, inputs)
             else:
                 raise AssertionError(
                     f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -2331,7 +2356,7 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    current_device = _get_object_coll_device(group)
+    current_device = _get_pg_default_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2432,7 +2457,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appropriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    current_device = _get_object_coll_device(group)
+    current_device = _get_pg_default_device(group)
     input_tensor, local_size = _object_to_tensor(obj, current_device)
 
     # Gather all local sizes. This is so that we can find the max size, and index
@@ -2546,7 +2571,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    current_device = device or _get_object_coll_device(group)
+    current_device = device or _get_pg_default_device(group)
     my_rank = get_rank()
     # Serialize object_list elements to tensors on src rank.
     if my_rank == src:
@@ -2651,7 +2676,7 @@ def scatter_object_list(
         )
 
     my_rank = get_rank()
-    pg_device = _get_object_coll_device(group)
+    pg_device = _get_pg_default_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
             *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
@@ -2834,11 +2859,18 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         else torch.view_as_real(input_tensor)
     )
 
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg._allgather_base(output_tensor, input_tensor)
-    else:
-        work = group._allgather_base(output_tensor, input_tensor)
+    group = group or _get_default_group()
+
+    if group in _world.pg_coalesce_state.keys():
+        # We are in coalescing context, do not issue single operation, just append a collective representation
+        coll = _CollOp(all_gather_into_tensor, input_tensor, output_tensor)
+        _world.pg_coalesce_state[group].append(coll)
+        if async_op:
+            return _IllegalWork()
+        else:
+            return None
+
+    work = group._allgather_base(output_tensor, input_tensor)
 
     if async_op:
         return work
@@ -3608,7 +3640,6 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         device_ids ([int], optional): List of device/GPU ids.
-                                      Valid only for NCCL backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -3619,11 +3650,8 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         return
 
     opts = BarrierOptions()
+    opts.device = _get_pg_default_device(group)
     if device_ids is not None:
-        if get_backend(group) != Backend.NCCL:
-            raise RuntimeError(
-                f"Function argument device_ids not supported for the selected backend {get_backend(group)}"
-            )
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
         else:

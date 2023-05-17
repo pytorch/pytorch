@@ -4,6 +4,10 @@ LearningToPaint,pass,9
 Super_SloMo,pass,9
 alexnet,pass,9
 attention_is_all_you_need_pytorch,pass,9
+basic_gnn_edgecnn,pass,24
+basic_gnn_gcn,pass,15
+basic_gnn_gin,pass,9
+basic_gnn_sage,pass,9
 dcgan,pass,9
 drq,pass,8
 fastNLP_Bert,pass,14
@@ -18,7 +22,7 @@ hf_GPT2,pass,8
 hf_Reformer,pass,67
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,9
-llama,eager_1st_run_fail,0
+llama,fail_accuracy,12
 maml_omniglot,pass,9
 mnasnet1_0,pass,9
 mobilenet_v2,pass,9
@@ -44,4 +48,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,9
 tts_angular,pass,11
 vgg16,pass,9
+vision_maskrcnn,infra_error,0
 yolov3,pass,13
