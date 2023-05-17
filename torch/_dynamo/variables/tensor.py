@@ -261,19 +261,7 @@ class TensorVariable(VariableTracker):
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
     def _strict_mode_banned_ops(self):
-        return [
-            "stride",
-            "requires_grad",
-            "storage_offset",
-            "device",
-            "layout",
-            "is_cuda",
-            "is_quantized",
-            "is_meta",
-            "data",
-            "is_sparse",
-            "ndim",
-        ]
+        return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
 
     def call_method(
         self,

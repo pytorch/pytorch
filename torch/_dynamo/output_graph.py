@@ -1048,7 +1048,7 @@ class SubgraphTracer(fx.Tracer):
                     continue
                 if arg.node.name in self.input_name_to_proxy:
                     continue
-                if "whitelisted" in arg.node.meta:
+                if "saved_tensor_marked" in arg.node.meta:
                     continue
 
                 self.lift_tracked_freevar_to_input(arg)
@@ -1098,7 +1098,7 @@ class SubgraphTracer(fx.Tracer):
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         if len(node.users) > 0:
-            user_graph_nodes = []
+            user_graph_nodes : List[torch.fx.Node] = []
             for user in node.users.keys():
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.

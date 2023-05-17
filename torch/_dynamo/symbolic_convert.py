@@ -2146,6 +2146,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 produce_trampoline_autograd_fwd,
             )
 
+            # _origin marks this as coming from an internal dynamo known function that is safe to
+            # trace through.
             if hasattr(func.fn, "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,

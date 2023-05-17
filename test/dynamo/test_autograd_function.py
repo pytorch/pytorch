@@ -18,16 +18,6 @@ class CustomFunc1(torch.autograd.Function):
         return grad_output
 
 
-class CustomFunc2(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, foo):
-        return foo + foo
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output
-
-
 class CustomFunc3(torch.autograd.Function):
     # Test there is graph break in forward function
     @staticmethod
@@ -60,13 +50,13 @@ class Module2(torch.nn.Module):
 
 class Module3(torch.nn.Module):
     def forward(self, foo):
-        return CustomFunc2().apply(foo)
+        return CustomFunc1().apply(foo)
 
 
 class Module4(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.fn = CustomFunc2.apply
+        self.fn = CustomFunc1.apply
 
     def forward(self, foo):
         return self.fn(foo)
@@ -221,13 +211,18 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("eager")(model)
         input = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         weight = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
-        opt_model(input, weight)
+        optim_result = opt_model(input, weight)
+        eager_result = model(input, weight)
+        self.assertEqual(optim_result, eager_result)
+
 
     def test_materialize_grad(self):
         model = MaterializingGradModule()
         opt_model = torch._dynamo.optimize("eager")(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        opt_model(x)
+        optim_result = opt_model(x)
+        eager_result = model(x)
+        self.assertEqual(optim_result, eager_result)
 
     def test_print_in_bwd(self):
         model = CustomFuncBwdPrintModule()
@@ -244,7 +239,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Illegal method invocation stride in strict mod",
+            "Illegal getattr invocation stride in strict mod",
         ):
             opt_model(x)
 

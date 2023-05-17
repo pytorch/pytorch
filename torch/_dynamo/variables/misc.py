@@ -261,7 +261,7 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx)
         args = [ctx, *args]
 
-        if requires_grad and torch.is_grad_enabled():
+        if requires_grad and torch.is_grad_enabled() and torch._dynamo.config.capture_autograd_function:
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
             if (
@@ -275,6 +275,10 @@ class AutogradFunctionVariable(VariableTracker):
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
                 unimplemented("NYI - User defind vjp")
+
+            jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
+            if jvp_fn is not torch.autograd.Function.jvp:
+                unimplemented("NYI - User defind jvp")
 
             from .torch import safe_or_raise_always_restore, TorchHigherOrderOperator
 
@@ -305,19 +309,17 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            trampoline_autograd_fwd._source = AttrSource(module_source, "forward")
-            higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd)
+            higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd, source=AttrSource(module_source, "forward"))
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
             )
 
             bwd_args = [ctx, speculated_fwd_result]
-            trampoline_autograd_bwd._source = AttrSource(module_source, "backward")
             safe_or_raise_always_restore(
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperator(trampoline_autograd_bwd),
+                TorchHigherOrderOperator(trampoline_autograd_bwd, source=AttrSource(module_source, "backward")),
                 bwd_args,
             )
             # If fwd and backward are sound, we want apply in the graph.
@@ -354,12 +356,14 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
+        if name not in ["backward", "forward"]:
+            unimplemented(f"Unsupported method: {name}")
+
         if name == "backward":
             with tx.strict_translation_mode():
                 return tx.inline_call(
                     tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
                 )
-        assert name == "forward"
         return tx.inline_call(
             tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
         )
@@ -413,7 +417,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         for arg in args:
             # as_proxy can return constant values or other non proxy values
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
-                arg.as_proxy().node.meta["whitelisted"] = True
+                arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
         return variables.ConstantVariable(None, **options)
 

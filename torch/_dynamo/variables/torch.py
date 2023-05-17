@@ -3,7 +3,7 @@ import logging
 import math
 import re
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -18,6 +18,7 @@ from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
+from torch._guards import Source
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -808,9 +809,10 @@ def speculate_subgraph(
 
 
 class TorchHigherOrderOperator(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, source: Optional[Source] = None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.source = source
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1216,7 +1218,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 self.value.__name__ == "trampoline_autograd_bwd"
                 or self.value.__name__ == "trampoline_autograd_fwd"
             ):
-                fn = UserFunctionVariable(self.value, source=self.value._source)
+                fn = UserFunctionVariable(self.value, source=self.source)
             else:
                 fn = TorchVariable(self.value)
             checkpoint = tx.copy_graphstate()
@@ -1240,7 +1242,7 @@ class TorchHigherOrderOperator(VariableTracker):
             post_guards = tx.output.guards
             if body_lifted_freevars:
                 for freevar in body_lifted_freevars:
-                    if "whitelisted" not in freevar.node.meta:
+                    if "saved_tensor_marked" not in freevar.node.meta:
                         unimplemented("NYI - freevars in autograd function.")
 
             post_side_effects = tx.output.side_effects

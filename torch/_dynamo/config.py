@@ -258,6 +258,20 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+capture_autograd_function = True
+
+_autograd_backward_strict_mode_banned_ops = [
+    "stride",
+    "requires_grad",
+    "storage_offset",
+    "layout",
+    "is_cuda",
+    "is_quantized",
+    "is_meta",
+    "data",
+    "is_sparse",
+]
+
 
 from .config_utils import install_config_module
 
