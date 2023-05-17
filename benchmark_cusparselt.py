@@ -14,15 +14,17 @@ import pandas as pd
 import argparse
 import gc
 
+
 DEVICE = "cuda"
 torch.set_printoptions(
-    precision=3,
+    precision=2,
     threshold=None,
-    edgeitems=32,
+    edgeitems=16,
     linewidth=480,
     profile=None,
     sci_mode=False,
 )
+oldA = None
 
 
 # helper model definition for pruner
@@ -49,7 +51,7 @@ def gen_two_four_sparse_mask(m, k, dtype):
             [1, 0, 0, 1],
             [0, 1, 1, 0],
             [0, 1, 0, 1],
-            [0, 0, 1, 1],
+            [1, 0, 1, 0],
         ]
         if i is None:
             i = random.randint(0, len(choices) - 1)
@@ -58,15 +60,196 @@ def gen_two_four_sparse_mask(m, k, dtype):
 
     mask_entries = []
     for i in range(m * (k // 4)):
-        choice = 5 if i == 33 else 0
-        mask_entries += random_mask_choice()
+        mask_entries += random_mask_choice(i=1)
 
-    weight = torch.tensor(mask_entries, dtype=dtype, device=DEVICE).view(m, k).cuda()
+    weight = torch.tensor(mask_entries, dtype=dtype, device=DEVICE).view(m, k).contiguous()
     return weight
 
-# function to compare dense vs cusparselt linear for given m, k, n, batch_size
-def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=False):
+"""
+torch/csrc
+third party tp2:
+"""
 
+
+class SemiSparseTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, wrapped_data, compress=False, transposed=False):
+        kwargs = {}
+        kwargs["device"] = wrapped_data.device
+        kwargs["dtype"] = wrapped_data.dtype
+        kwargs["layout"] = wrapped_data.layout
+        kwargs["requires_grad"] = wrapped_data.requires_grad
+
+        return torch.Tensor._make_wrapper_subclass(cls, wrapped_data.shape, **kwargs)
+
+    def __init__(self, original_tensor, compress=True, transposed=False):
+        self.original_tensor = original_tensor
+        self.is_2x4sparse = False
+        self.transposed = transposed
+
+        if compress:
+            num_bytes = (
+                original_tensor.nelement() * original_tensor.element_size()
+            )
+            compressed_size_bytes = num_bytes * 9 // 16
+            compressed_size = compressed_size_bytes // original_tensor.element_size()
+
+            self.compressed_weight = torch.empty(
+                (compressed_size,), 
+                dtype=original_tensor.dtype,
+                device=original_tensor.device,
+            )
+
+            self.cslt = torch.classes.cusparselt.CusparseLtLinear(self.compressed_weight)
+
+
+            self.cslt.set_compressed(original_tensor)
+            self.is_2x4sparse = True
+    
+
+    def __repr__(self):
+        return f"SemiSparseTensor(shape={self.shape} "
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+
+        if func is torch.ops.aten.detach.default:
+            res = SemiSparseTensor(args[0].original_tensor.detach(), compress=False, transposed=args[0].transposed)
+            res.cslt = args[0].cslt
+            return res
+
+        if func is torch.ops.aten.t.default:
+            res = SemiSparseTensor(args[0].original_tensor.t(), compress=False, transposed=(not args[0].transposed))
+            res.cslt = args[0].cslt
+            return res
+
+        if func is torch.ops.aten.addmm.default and args[0].is_floating_point() and args[0].is_cuda:
+            bias, a, b = args
+            # b must be transposed so we can undo it
+            if isinstance(b, SemiSparseTensor) and b.transposed:
+                return b.t().cslt.cusparselt_addmm(a.T, bias).T
+            elif isinstance(a, SemiSparseTensor) and not a.transposed:
+                # CURRENTLY BIAS is broadcasted the wrong way in cuSPARSELT
+                a.set_compressed(a.transpose)
+                return a.cslt.cusparselt_addmm(b, bias)
+
+        if func is torch.ops.aten.mm.default:
+            a, b = args
+            if isinstance(a, SemiSparseTensor) and not a.transposed:
+                return a.cslt.cusparselt_mm(b)
+            elif isinstance(b, SemiSparseTensor) and not b.transposed:
+                return b.t().cslt.cusparselt_mm(a.T).T
+
+        raise NotImplementedError(f"bruh i aint implementing {func}({args}) gluck with that")
+
+
+def test_linear(m, k, n, dtype):
+    A = torch.rand(m, k).half().cuda() * gen_two_four_sparse_mask(m, k, torch.float16)
+    B = torch.zeros(n, k).half().cuda()
+
+    sA = SemiSparseTensor(A)
+
+    model = Model(m, k).half().cuda().eval()
+    model.weight = A
+    # print(model.linear.weight.shape)
+    # print(model.linear.bias.shape)
+    # get latency
+    dense_measurement = benchmark.Timer(
+        stmt="model(input_tensor)",
+        globals={"input_tensor": B, "model": model},
+    ).blocked_autorange()
+
+    temp = model(B)
+
+
+    model.linear.weight = nn.Parameter(SemiSparseTensor(model.linear.weight))
+    res = model(B)
+
+    sparse_measurement = benchmark.Timer(
+        stmt="model(input_tensor)",
+        globals={"input_tensor": B, "model": model},
+    ).blocked_autorange()
+
+    addmm_measurement = benchmark.Timer(
+        stmt="torch.addmm(bias, input_tensor, weight.t())",
+        globals={"input_tensor": B, "weight": model.linear.weight, "bias": model.linear.bias},
+    ).blocked_autorange()
+
+    # import cProfile
+    # import re
+    # cProfile.runctx('sparse_measurement.blocked_autorange()', globals=globals(), locals=locals(), sort="")
+
+    # sparse_measurement = sparse_measurement.blocked_autorange()
+
+    correct = torch.allclose(temp, res, rtol=1e-3, atol=1e-3)
+    # print("sanity check", correct)
+
+    return {
+        "m": m,
+        "k": k,
+        "n": n,
+        # "eval_batch_size": batch_size,
+        # "init_batch_size": init_batch_size,
+        "dtype": str(dtype),
+        "sparse_latency (ms)": sparse_measurement.median * 1001,
+        "dense_latency (ms)": dense_measurement.median * 1000,
+        "addmm_latency(ms)": addmm_measurement.median * 1000,
+        "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
+        "correct": correct,
+    }
+
+
+def test_tensor(m, k, n, dtype):
+    A = gen_two_four_sparse_mask(m, k, torch.float16)
+    B = torch.zeros(k, n).half().cuda()
+    bias = torch.rand(n).half().cuda()
+
+    sA = SemiSparseTensor(A)
+
+
+    # torch.mm calculation
+    sparse_output_addmm = torch.addmm(bias, sA, B)
+    dense_output_addmm = torch.addmm(bias, A, B)
+    correct_addmm = torch.allclose(sparse_output_addmm,
+                                   dense_output_addmm, rtol=1e-3, atol=1e-3)
+    # print(dense_output_addmm)
+    # print(sparse_output_addmm)
+
+    dense_output = torch.mm(A, B)
+    dense_measurement = benchmark.Timer(
+        stmt="torch.addmm(bias, A, B)",
+        globals={"A": A, "B": B, "bias": bias},
+    ).blocked_autorange()
+
+    sparse_output = torch.mm(sA, B)
+
+    correct = torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3)
+
+    print(correct, correct_addmm)
+
+    sparse_measurement = benchmark.Timer(
+        stmt="torch.addmm(bias, sA, B)",
+        globals={"sA": sA, "B": B, "bias": bias},
+    ).blocked_autorange()
+
+    return {
+        "m": m,
+        "k": k,
+        "n": n,
+        # "eval_batch_size": batch_size,
+        # "init_batch_size": init_batch_size,
+        "dtype": str(dtype),
+        "sparse_latency (ms)": sparse_measurement.median * 1001,
+        "dense_latency (ms)": dense_measurement.median * 1000,
+        "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
+        "correct": correct,
+    }
+
+
+def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=False):
+# function to compare dense vs cusparselt linear for given m, k, n, batch_size
     temp = cuSPARSELtLinear if dtype is torch.float16 else cuSPARSELtLinearInt8
 
     # print(m, k, n, batch_size, init_batch_size, dtype, temp)
@@ -81,7 +264,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
 
     # create input tensor
     input_tensor = torch.randint(
-        2, 
+        2,
         (init_batch_size, n, k),
         device=DEVICE,
         dtype=dtype,
@@ -94,11 +277,11 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
 
     pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
     pruner.step()
-    sparse_model = pruner.convert(model, mapping={nn.Linear: temp})
+    # sparse_model = pruner.convert(model, mapping={nn.Linear: temp})
     pruner.squash_mask()
+    model.linear.weight = nn.Parameter(SemiSparseTensor(model.linear.weight))
 
     # print(input_tensor)
-
 
     sparse_output = sparse_model(input_tensor)
     dense_output = model(input_tensor.half()).to(dtype)
@@ -108,19 +291,12 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
     # print(sparse_model.linear.weight)
     # print(model.linear.weight)
 
-    correct = torch.allclose(
-        dense_output,
-        sparse_output,
-        rtol=1e-3,
-        atol=1e-3
-    )
-
-    # assert correct
+    correct = torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3)
 
     input_tensor = torch.randint(
-        2, 
+        2,
         (batch_size, n, k),
-        device=DEVICE, 
+        device=DEVICE,
         dtype=dtype,
     )
     # get latency
@@ -158,6 +334,7 @@ if __name__ == "__main__":
             "nvidia-fixed-mn",
             "llama-shapes",
             "int8",
+            "test",
         ],
     )
     args = parser.parse_args()
@@ -171,7 +348,10 @@ if __name__ == "__main__":
             (1024, 1024, 16384),
             (1024, 4096, 16384),
         ]
-        results = (compare_linear(m, k, n, 1, 1, torch.float16) for (m, k, n) in tqdm(bert_shapes))
+        results = (
+            test_linear(m, k, n, torch.float16)
+            for (m, k, n) in tqdm(bert_shapes)
+        )
 
     elif args.mode == "nvidia-fixed-k":
         mn_vals = [
@@ -194,7 +374,9 @@ if __name__ == "__main__":
             19456,
             20480,
         ]
-        results = (compare_linear(mn, 10240, mn, 1, 1, torch.float16) for mn in tqdm(mn_vals))
+        results = (
+            test_linear(mn, 10240, mn, torch.float16) for mn in tqdm(mn_vals)
+        )
 
     elif args.mode == "nvidia-fixed-mn":
         k_vals = [
@@ -214,7 +396,9 @@ if __name__ == "__main__":
             19200,
             20480,
         ]
-        results = (compare_linear(10240, k, 10240, 1, 1, torch.float16) for k in tqdm(k_vals))
+        results = (
+            test_linear(10240, k, 10240, torch.float16) for k in tqdm(k_vals)
+        )
 
     elif args.mode == "llama-shapes":
         MP = 8
@@ -231,7 +415,8 @@ if __name__ == "__main__":
         results = (
             compare_linear(m, k, n, batch_size, batch_size, dtype)
             for dtype, batch_size, (m, k, n) in tqdm(
-                product(dtypes, batch_sizes, shapes), total=len(dtypes) * len(batch_sizes) * len(shapes)
+                product(dtypes, batch_sizes, shapes),
+                total=len(dtypes) * len(batch_sizes) * len(shapes),
             )
         )
 
@@ -242,11 +427,15 @@ if __name__ == "__main__":
         results = (
             compare_linear(m, k, n, batch_size, batch_size, dtype)
             for dtype, batch_size, (m, k, n) in tqdm(
-                product(dtypes, batch_sizes, shapes), total=len(dtypes) * len(batch_sizes) * len(shapes)
+                product(dtypes, batch_sizes, shapes),
+                total=len(dtypes) * len(batch_sizes) * len(shapes),
             )
         )
 
+    elif args.mode == "test":
+        results = [test_tensor(64, 128, 64, torch.float16)]
     save_file = f"{args.mode}.csv"
+
     df = pd.DataFrame.from_records(results)
     df.to_csv(save_file)
     print(f"Finished benchmark: {args.mode} saved results to {save_file}")
