@@ -8,7 +8,8 @@ from copy import deepcopy
 from functools import partial
 from typing import Tuple
 from unittest.mock import patch
-
+import tempfile
+import os
 import torch
 
 import torch._dynamo.test_case
@@ -1405,12 +1406,11 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         inp = torch.randn(10, 10)
         opt_mod(inp)
 
-        torch.save(opt_mod, "opt_mod.pt")
-
-        loaded_model = torch.load("opt_mod.pt")
-        loaded_model(inp)
-
-        self.assertTrue(same_two_models(loaded_model, mod, [inp]))
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            loaded_model(inp)
+            self.assertTrue(same_two_models(loaded_model, mod, [inp]))
 
     def test_composition(self):
         class InnerModule(torch.nn.Module):
