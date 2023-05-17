@@ -1629,7 +1629,7 @@ void qmaxpool_3d_nthwc_kernel(
             } // for y
           } // for t
           acc.store(o_p + c);
-        } // for c        
+        } // for c
 
         for (; c < iC; ++c) {
           auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
