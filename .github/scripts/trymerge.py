@@ -1264,7 +1264,7 @@ def find_matching_merge_rule(
                     (
                         f"Not all files match rule `{rule_name}`.",
                         f"{num_matching_files} files matched, but there are still non-matching files:",
-                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
                     )
                 )
             continue
