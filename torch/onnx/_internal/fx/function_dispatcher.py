@@ -41,16 +41,6 @@ class _TensorLike(Protocol):
         ...
 
 
-_SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
-    Union[Callable[..., Any], str], torch._ops.OpOverload
-] = {
-    operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
-    operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
-    operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
-    operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
-}
-
-
 class OnnxDispatcher:
     """
     The OnnxDispatcher class finds the nearest matched function for a given aten operation
@@ -205,7 +195,7 @@ class OnnxDispatcher:
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
             return aten_op_default.name()  # type: ignore[attr-defined]
-        if node.target in _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE:
+        if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
@@ -225,8 +215,8 @@ class OnnxDispatcher:
                     )
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-            aten_op = _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[node.target]
-            return aten_op.name()
+            aten_op = _symint_symfloat_builtin_to_exporter_key_table(node.target)
+            return aten_op.name()  # type: ignore[attr-defined]
         if isinstance(node.target, torch._ops.OpOverload):
             return node.target.name()
 
@@ -281,6 +271,23 @@ class OnnxDispatcher:
         )
         diagnostic_context.log(diagnostic)
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+
+
+@_beartype.beartype
+def _symint_symfloat_builtin_to_exporter_key_table(
+    target,
+) -> Optional[torch._ops.OpOverload]:
+    """Maps builtin ops to exporter key table."""
+
+    _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
+        Union[Callable[..., Any], str], torch._ops.OpOverload
+    ] = {
+        operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
+        operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
+        operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
+        operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
+    }
+    return _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE.get(target)
 
 
 @_beartype.beartype

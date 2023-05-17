@@ -20,7 +20,7 @@ try:
         graph_building,
     )
 except ImportError as e:
-    raise ImportError("onnxscript is required to use diagnostics.") from e
+    pass
 
 _LENGTH_LIMIT: int = 89
 
