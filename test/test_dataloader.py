@@ -373,7 +373,7 @@ class TestStackDataset(TestCase):
             StackDataset()
 
     def test_mixed(self):
-        with self.assertRaisesRegex(ValueError, "Supported only tuple or dict like output setup, but both given"):
+        with self.assertRaisesRegex(ValueError, "Supported either"):
             StackDataset(TensorDataset(torch.randn(15, 10)), a=TensorDataset(torch.randn(10, 15)))
 
     def test_size_mismatch(self):
