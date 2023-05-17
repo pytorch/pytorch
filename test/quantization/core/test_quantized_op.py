@@ -1523,7 +1523,6 @@ class TestQuantizedOps(TestCase):
         # 16 hits the scalar path
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
-        print("X is: {}".format(X.dtype), flush=True)
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
@@ -1566,6 +1565,7 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool2d results are off")
 
+    """Tests 3D max pool operation on quantized channel_last tensors."""
     def test_max_pool3d_nhwc(self):
         torch_types = [torch.qint8, torch.quint8]
         kernels = [1, 3, 5]

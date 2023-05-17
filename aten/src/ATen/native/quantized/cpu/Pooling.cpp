@@ -119,7 +119,6 @@ void spatial_dilated_max_pooling3d(
     int64_t dW, // dilation
     T* oData) { // output arrays (data and max-index)
   // Handle each bs
-  std::cout<<"---- Inside spatial_dilated_max_pooling3d kernel ----"<<std::endl;
   at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
       // Handle each Channel
@@ -371,7 +370,6 @@ Tensor q_maxpool_3d(
 
   std::vector<int64_t> oSizes = {nbatch, oC, oT, oH, oW};
 
-  std::cout<<"qx.is_contiguous(c10::MemoryFormat::ChannelsLast3d) is: "<<qx.is_contiguous(c10::MemoryFormat::ChannelsLast3d)<<std::endl;
   if (qx.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     // Fast path case for channels-last case.
     // In this case, we can preserve the data layout in memory
@@ -385,7 +383,6 @@ Tensor q_maxpool_3d(
         qx.q_scale(),
         qx.q_zero_point(),
         c10::nullopt);
-    std::cout<<"Use the channel_last path"<<std::endl;
     qmaxpool_3d_nthwc_stub(qx.device().type(), qx, iC, iT, iH, iW, oT, oH, oW, kT, kH, kW, sT, sH, sW, pT, pH, pW, dT, dH, dW, qy);
     return qy;
   } else {
@@ -397,8 +394,6 @@ Tensor q_maxpool_3d(
     auto qx_contig = qx.contiguous();
     auto qxd = qx_contig.data_ptr<Q>();
     auto qyd = qy.data_ptr<Q>();
-
-    std::cout<<"nbatch is: "<<nbatch<<std::endl;
 
     at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
       for (const auto p : c10::irange(start, end)) {
@@ -593,13 +588,6 @@ Tensor quantized_max_pool2d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  std::cout<<"kernel_size is: "<<kernel_size<<std::endl;
-  std::cout<<"stride is: "<<stride<<std::endl;
-  std::cout<<"padding is: "<<padding<<std::endl;
-  std::cout<<"dilation is: "<<dilation<<std::endl;
-  std::cout<<"ceil_mode is: "<<ceil_mode<<std::endl;
-
-  std::cout<<"Use QNNPACK Qengine is: "<<(at::globalContext().qEngine() == at::QEngine::QNNPACK)<<std::endl;
   check_maxpool2d_params(
       kernel_size,
       stride,
@@ -637,15 +625,6 @@ Tensor quantized_max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-
-  std::cout<<"kernel_size is: "<<kernel_size<<std::endl;
-  std::cout<<"stride is: "<<stride<<std::endl;
-  std::cout<<"padding is: "<<padding<<std::endl;
-  std::cout<<"dilation is: "<<dilation<<std::endl;
-  std::cout<<"ceil_mode is: "<<ceil_mode<<std::endl;
-
-  std::cout<<"Use QNNPACK Qengine is: "<<(at::globalContext().qEngine() == at::QEngine::QNNPACK)<<std::endl;
-
   check_maxpool3d_params(
       kernel_size,
       stride,

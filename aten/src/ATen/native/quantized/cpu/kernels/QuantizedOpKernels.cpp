@@ -1503,7 +1503,6 @@ void qmaxpool_2d_nhwc_kernel(
 
         // Interleaved vector loop 4x
         constexpr auto vec_width = Vectorized<scalar_t>::size();
-        std::cout<<"fp32 maxpool channel last vec_width is: "<<vec_width<<std::endl;
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
               scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
@@ -1585,8 +1584,6 @@ void qmaxpool_3d_nthwc_kernel(
     int64_t dH,
     int64_t dW, // dilation
     Tensor& qy) {
-  std::cout<<"inside qmaxpool_3d_nthwc_kernel"<<std::endl;
-  std::cout<<"qx.scalar_type() is: "<<qx.scalar_type()<<std::endl;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool3d_nthwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
@@ -1616,18 +1613,6 @@ void qmaxpool_3d_nthwc_kernel(
 
         int64_t c = 0;
         constexpr auto vec_width = Vectorized<scalar_t>::size();
-        // std::cout<<"scalar_t is: "<<scalar_t<<std::endl;
-#if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
-        std::cout<<"define windows"<<std::endl;
-#endif
-#if defined(CPU_CAPABILITY_AVX512)
-        std::cout<<"avx512"<<std::endl;
-#endif
-#if defined(CPU_CAPABILITY_AVX2)
-        std::cout<<"avx2"<<std::endl;
-#endif
-        std::cout<<"vec_width is: "<<vec_width<<std::endl;
-        std::cout<<"iC is: "<<iC<<std::endl;
         // Vector loop
         for (; c + vec_width <= iC; c += vec_width) {
           Vectorized<scalar_t> acc{
@@ -1643,7 +1628,6 @@ void qmaxpool_3d_nthwc_kernel(
               } // for x
             } // for y
           } // for t
-          std::cout<<"hit the vec loop"<<std::endl;
           acc.store(o_p + c);
         } // for c        
 
@@ -1660,7 +1644,6 @@ void qmaxpool_3d_nthwc_kernel(
               } // for x
             } // for y
           } // for t
-          std::cout<<"hit the tail loop"<<std::endl;
           o_p[c] = max_val;
         } // for c
 
@@ -4254,7 +4237,6 @@ void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size
 // So, until Quantization support for Windows is fixed for AVX512,
 // AVX2 kernels would be used instead. Ref: GH 56992.
 #if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
-std::cout<<"define avx512 and winsows"<<std::endl;
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
 REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
