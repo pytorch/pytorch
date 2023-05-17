@@ -5182,10 +5182,11 @@ def fn():
         compile_out = torch._dynamo.optimize("eager")(func)(torch.ones(10, 10, 3))
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
-    
+
     @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
     def test_cuda_set_device(self):
         torch.cuda.set_device(0)
+
         def fn():
             a = torch.ones(2, device="cuda")
             torch.cuda.set_device(1)
