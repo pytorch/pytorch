@@ -4821,7 +4821,7 @@ class TestSparseAny(TestCase):
                 i = random.randint(0, len(choices) - 1)
             return choices[i]
 
-        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias):
+        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation):
             weight = make_tensor((m, k), dtype).to(device)
             input = make_tensor((*batch_shape, n, k), dtype).to(device)
             bias = make_tensor((m,), dtype_out).to(device) if add_bias else None
@@ -4836,13 +4836,19 @@ class TestSparseAny(TestCase):
                 weight_dense = weight.to(dtype_dense)
                 bias_dense = bias.to(dtype_dense) if add_bias else None
                 output0 = torch.nn.functional.linear(input_dense, weight_dense, bias=bias_dense)
+                if activation == "relu":
+                    relu = torch.nn.ReLU()
+                    output0 = relu(output0)
+                elif activation == "silu":
+                    silu = torch.nn.SiLU()
+                    output0 = silu(output0)
 
                 weight_sparse = weight.masked_select(mask).view(m, k // 2)
 
-                output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias)
+                output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias, activation=activation)
                 torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
 
-                output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias)
+                output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias, activation=activation)
                 torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
 
         is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
@@ -4851,11 +4857,16 @@ class TestSparseAny(TestCase):
 
         batch_shapes = [[], [3], [3, 1]]
         dtype_out = {torch.int8: torch.int32, torch.half: torch.half}
-        for (batch_shape, m, n, k, add_bias) in itertools.product(batch_shapes, range(3), range(3), range(3), (False, True)):
+        activations = [None, "relu", "silu"]
+        for (batch_shape, m, n, k, add_bias, activation) in \
+                itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
+            if activation == "silu" and dtype == torch.int8:
+                continue  # SiLU not supported for integer inputs
+
             m = 2 ** m * 32
             n = 2 ** n * 32
             k = 2 ** k * 128
-            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias)
+            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
