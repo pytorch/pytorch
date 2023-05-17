@@ -5263,7 +5263,6 @@ def fn():
             testcase(expr="self.g(a, b).k", expected="_var6"),
             testcase(expr="self.g(a, b).k", expected="_var6"),
         ]
-
         csepass = PyExprCSEPass()
         csepass.count([t.expr for t in testcases])
 
