@@ -110,6 +110,9 @@ lowmem_dropout = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
+# Enable constant and index_expr folding
+constant_and_index_propagation = True
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")

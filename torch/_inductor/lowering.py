@@ -2478,6 +2478,10 @@ def upsample_nearest3d(
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
+def _create_constants(*args, dtype):
+    return tuple(ops.constant(a, dtype) for a in args)
+
+
 @register_lowering(aten.upsample_bicubic2d.default)
 def upsample_bicubic2d_default(
     x,
@@ -2508,37 +2512,39 @@ def upsample_bicubic2d_default(
 
     def compute_source_index(scale, dst_index, align_corners):
         dst_index_ie = ops.index_expr(dst_index, torch.float32)
+        scale = ops.constant(scale, torch.float32)
         if align_corners:
             return ops.mul(scale, dst_index_ie)
         else:
+            half = ops.constant(0.5, torch.float32)
             return ops.sub(
-                ops.mul(scale, ops.add(dst_index_ie, 0.5)), 0.5
+                ops.mul(scale, ops.add(dst_index_ie, half)), half
             )  # scale * (dst_index + 0.5) - 0.5
 
     def cubic_convolution1(x, A):
+        _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
         # ((A + 2) * x - (A+3)) * x * x + 1
-        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(A + 2, x), A + 3), x), x), 1.0)
+        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
 
     def cubic_convolution2(x, A):
+        _A, _4A, _5A, _8A = _create_constants(
+            A, 4 * A, 5 * A, 8 * A, dtype=torch.float32
+        )
         # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
         return ops.sub(
-            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(A, x), 5 * A), x), 8 * A), x), 4 * A
+            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(_A, x), _5A), x), _8A), x), _4A
         )
 
     def get_cubic_upsample_coefficients(t):
         A = -0.75
-        c0 = cubic_convolution2(ops.add(t, 1.0), A)
+        _1 = ops.constant(1.0, torch.float32)
+        c0 = cubic_convolution2(ops.add(t, _1), A)
         c1 = cubic_convolution1(t, A)
 
-        x2 = ops.sub(1.0, t)
+        x2 = ops.sub(_1, t)
         c2 = cubic_convolution1(x2, A)
-        c3 = cubic_convolution2(ops.add(x2, 1.0), A)
-        return (
-            c0,
-            c1,
-            c2,
-            c3,
-        )
+        c3 = cubic_convolution2(ops.add(x2, _1), A)
+        return (c0, c1, c2, c3)
 
     def cubic_interp1d(xs, t):
         cs = get_cubic_upsample_coefficients(t)
@@ -2570,8 +2576,11 @@ def upsample_bicubic2d_default(
 
         def load_bounded(fy, fx):
             # TODO(Lezcano) Here we may not need to set-up a device_size
-            iy = ops.indirect_indexing(clamp(fy, 0, iH - 1), iH)
-            ix = ops.indirect_indexing(clamp(fx, 0, iW - 1), iW)
+            _0 = ops.constant(0, torch.int32)
+            iHm1 = ops.constant(iH - 1, torch.int32)
+            iWm1 = ops.constant(iW - 1, torch.int32)
+            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH)
+            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW)
             return x_loader([n, c, iy, ix])
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))

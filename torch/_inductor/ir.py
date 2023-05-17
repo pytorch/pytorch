@@ -4196,7 +4196,7 @@ class LoopBodyBlock:
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
-                    return ops.constant(int(index), dtype)
+                    return self._inner.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -4237,15 +4237,25 @@ class LoopBodyBlock:
                 )
                 return var
 
+            @staticmethod
+            def output(result):
+                tracer.create_proxy("output", "output", (result,), {})
+
         tracer = torch.fx.Tracer()
         tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
+
+        from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        with V.set_ops_handler(
-            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
-        ):
-            tracer.create_proxy("output", "output", (fn(*args),), {})
+        handler = SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        if config.constant_and_index_propagation:
+            handler = IndexPropagation(handler)
+
+        with V.set_ops_handler(handler):
+            # This indirection is just a cute way to get IndexPropagation to
+            # unwrap the return value.
+            ops.output(fn(*args))
         self.graph = tracer.graph
 
     def __call__(self):
