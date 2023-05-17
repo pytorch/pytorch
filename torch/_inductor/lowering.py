@@ -2090,13 +2090,9 @@ def check_and_broadcast_indices(indices, device):
 def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    try:
-        indices, start_offset, end_offset = check_and_broadcast_indices(
-            indices, x.get_device()
-        )
-    except NotImplementedError:
-        x.realize()
-        return fallback_handler(aten.index)(x, indices)
+    indices, start_offset, end_offset = check_and_broadcast_indices(
+        indices, x.get_device()
+    )
 
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
@@ -2138,7 +2134,12 @@ def index_impl(x, indices, check):
 
 @register_lowering(aten.index, type_promotion_kind=None)
 def index(x, indices):
-    return index_impl(x, indices, check=True)
+    try:
+        return index_impl(x, indices, check=True)
+    except NotImplementedError:
+        # Fallback to ATen for boolean indexing
+        x.realize()
+        return fallback_handler(aten.index)(x, indices)
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
