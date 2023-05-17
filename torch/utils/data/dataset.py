@@ -235,7 +235,7 @@ class StackDataset(Dataset[T_stack]):
         if args:
             if kwargs:
                 raise ValueError("Supported either ``tuple``- (via ``args``) or"
-                                             "``dict``- (via ``kwargs``) like input/output, but both types are given.")
+                                 "``dict``- (via ``kwargs``) like input/output, but both types are given.")
             self._length = len(args[0])  # type: ignore[arg-type]
             if any(self._length != len(dataset) for dataset in args):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
