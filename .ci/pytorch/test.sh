@@ -303,10 +303,6 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
-if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-  export TORCHINDUCTOR_MAX_AUTOTUNE=1
-fi
-
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -314,62 +310,52 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  dtype=amp
-  backend=inductor
-  for mode in inference training; do
-    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    # Run accuracy test for inductor with different configs
-    # --disable-cudagraphs is the default inductor behavior
-    # TODO: update here once cudagraphs is turned on as default
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      fi
-    fi
+  local dtype=amp
+  local backend=inductor
+  local modes=()
+  if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
+    modes+=(training)
+  fi
+  if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
+    modes+=(inference)
+  fi
+  # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
+  local targets=(accuracy performance)
 
-    # Run performance test
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" \
-            --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_performance.csv"
+  for mode in "${modes[@]}"; do
+    for target in "${targets[@]}"; do
+      local target_flag=("--${target}")
+      if [[ "$target" == "performance" ]]; then
+        target_flag+=( --cold-start-latency)
       fi
-    fi
+
+      if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            --dynamic-batch-only --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+    done
   done
 }
 
@@ -541,7 +527,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
 fi
 
 test_libtorch() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  # The slow test config corresponds to a default test config that should run
+  # the libtorch tests instead.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
@@ -586,7 +574,7 @@ test_libtorch() {
     # Wait for background download to finish
     wait
 
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
         TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
         mkdir -p $TEST_REPORTS_DIR
 
@@ -889,6 +877,7 @@ test_bazel() {
       //:torch_dist_autograd_test \
       //:torch_include_test \
       //:transformer_test \
+      //:test_bazel \
       //c10/cuda/test:test \
       //c10/test:core_tests \
       //c10/test:typeid_test \

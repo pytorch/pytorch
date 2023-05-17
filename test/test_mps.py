@@ -89,6 +89,10 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
@@ -409,9 +413,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'histc': None,
-        'histogram': None,
-        'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -709,6 +710,7 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
@@ -7236,8 +7238,7 @@ class TestNLLLoss(TestCaseMPS):
             # Check that output is not all zeros or ones
             if product_version > 13.0:
                 uniq = mps_out.unique()
-                # TODO: remove cast after arange is fixed for integral types
-                self.assertEqual(uniq.to(dtype=torch.float32), torch.arange(2, device='mps', dtype=torch.float32))
+                self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
             else:
                 self.assertEqual(mps_out.min().item(), 0.)
                 self.assertEqual(mps_out.max().item(), 1.)
@@ -7324,6 +7325,25 @@ class TestNLLLoss(TestCaseMPS):
         # grown at this point
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
+
+    # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
+    # press record, then run this python test, and press stop. Next expand
+    # the os_signposts->PyTorchMPS and check if events or intervals are logged
+    # like this example:
+    # "aten::mps_convolution_backward_input:f32[1,128,6,6]:f32[128,64,3,3]:1,128,6,6 (id=G2, run=2)"
+    def test_mps_profiler_module(self):
+        with torch.mps.profiler.profile(mode="event", wait_until_completed=False) as p:
+            # just running some ops to capture the OS Signposts traces for profiling
+            net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+                .to(device='mps', dtype=torch.float)
+            x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+            x = net1(x)
+
+        torch.mps.profiler.start(mode="interval", wait_until_completed=True)
+        # just running some ops to capture the OS Signposts traces for profiling
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        torch.mps.profiler.stop()
 
     # Test random_, random_.to and random_.from
     def test_random(self):
@@ -10225,11 +10245,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement `torch.lgamma`
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
+        return (torch.lgamma,
                 torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
