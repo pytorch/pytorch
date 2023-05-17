@@ -279,7 +279,7 @@ def checkpoint(
           Reentrant checkpoint always recomputes :attr:`function` in its
           entirety during the backward pass.
 
-       * The reentrant variant does not record the autograd graph during the
+        * The reentrant variant does not record the autograd graph during the
           forward pass, as it runs with the forward pass under
           :func:`torch.no_grad`. The non-reentrant version does record the
           autograd graph, allowing one to perform backward on the graph within
