@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main, reset_rng_state
+from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -382,16 +382,7 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_for_cpu(self):
         return SKIP_FOR_CPU
 
-    def load_model(
-        self,
-        device,
-        model_name,
-        batch_size=None,
-    ):
-        is_training = self.args.training
-        use_eval_mode = self.args.use_eval_mode
-        dtype = torch.float32
-        reset_rng_state()
+    def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -413,12 +404,31 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             config, model_cls = EXTRA_MODELS[model_name]
 
+        return model_cls, config
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model_cls, config = self._get_model_cls_and_config(model_name)
         if "auto" in model_cls.__module__:
             # Handle auto classes
-            model = model_cls.from_config(config).to(device, dtype=dtype)
+            model = model_cls.from_config(config)
         else:
-            model = model_cls(config).to(device, dtype=dtype)
+            model = model_cls(config)
+        return model
 
+    def load_model(
+        self,
+        device,
+        model_name,
+        batch_size=None,
+    ):
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dtype = torch.float32
+        reset_rng_state()
+        model_cls, config = self._get_model_cls_and_config(model_name)
+        model = self._download_model(model_name)
+        model = model.to(device, dtype=dtype)
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:

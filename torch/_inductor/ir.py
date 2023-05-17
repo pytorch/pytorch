@@ -52,6 +52,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    pad_listlike,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -1406,16 +1407,12 @@ class View(BaseView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        if 0 in new_size and is_storage_and_layout(x):
-            storage, old_layout = as_storage_and_layout(x, freeze=False)
-            new_layout = FixedLayout(
-                old_layout.device,
-                old_layout.dtype,
-                new_size,
-                FlexibleLayout.contiguous_strides(new_size),
-                old_layout.offset,
-            )
-            return ReinterpretView(storage, new_layout)
+        if 0 in new_size:
+
+            def fake_reindex(index):
+                return tuple([0] * len(old_size))
+
+            return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x) and not isinstance(
             x.data, ExternKernelAlloc
@@ -3333,12 +3330,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding_: List[int],
-    stride_: List[int],
-    dilation_: List[int],
+    padding: List[int],
+    stride: List[int],
+    dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding_: List[int] = None,
+    output_padding: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3393,16 +3390,24 @@ def _prepare_convolution_fusion_create(
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
 
-    stride = tuple(stride_)
-    padding = tuple(padding_)
-    dilation = tuple(dilation_)
-    assert isinstance(groups, int)
-    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     x.realize()
     weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        dims = len(x_fake.size()) - 2
+        assert 0 < len(padding) <= dims
+        assert 0 < len(dilation) <= dims
+        assert 0 < len(stride) <= dims
+        padding = pad_listlike(padding, dims)
+        dilation = pad_listlike(dilation, dims)
+        stride = pad_listlike(stride, dims)
+        if output_padding is None:
+            output_padding = pad_listlike([0], dims)
+        else:
+            assert 0 < len(output_padding) <= dims
+            output_padding = pad_listlike(output_padding, dims)
+        assert isinstance(groups, int)
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such

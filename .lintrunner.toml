@@ -705,6 +705,25 @@ command = [
 ]
 
 [[linter]]
+code = 'DEPLOY_DETECTION'
+include_patterns = [
+    '**/*.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=sys\.executable == .torch_deploy.',
+    '--replace-pattern=s/sys\.executable == .torch_deploy./torch._running_with_deploy\(\)/',
+    '--linter-name=DEPLOY_DETECTION',
+    '--error-name=properly detect deploy runner',
+    """--error-description=\
+        Do not use sys.executable to detect if running within deploy/multipy, use torch._running_with_deploy().
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'CMAKE'
 include_patterns = [
     "**/*.cmake",
