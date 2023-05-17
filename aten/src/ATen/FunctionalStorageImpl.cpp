@@ -80,6 +80,11 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     // and lazy tensor (LTC/XLA).
     // LTC hasn't implemented SymInt support yet though
     // Once it does, we should remove this check.
+
+    // TODO(vanbasten23): force fail to find out where I can add a test for my
+    // change. Should remove the TORCH_CHECK before merging the PR.
+    TORCH_CHECK(false, "fails right before calling symint version of computeStorageNbytes")
+
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
