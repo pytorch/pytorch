@@ -14,6 +14,7 @@ from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 from torch.utils import _pytree as pytree
 
+from ..guards import GuardBuilder
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
@@ -206,7 +207,9 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value in config.constant_functions:
+        if self.value is torch.func.vmap:
+            return TorchHigherOrderOperator(self.value)
+        elif self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
