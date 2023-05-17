@@ -11,7 +11,6 @@ from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
 from torch._decomp.decompositions_for_rng import extra_random_decomps
-from torch.utils._mode_utils import no_dispatch
 
 from . import config, utils
 
@@ -171,6 +170,13 @@ def pad_addmm(input, mat1, mat2, m_padded_length, k_padded_length, n_padded_leng
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
+    try:
+        return should_pad_bench_impl(mat1, mat2, op, input=input)
+    except Exception as e:
+        raise Exception("error padding") from e
+
+
+def should_pad_bench_impl(mat1, mat2, op, input=None):
     if not utils.has_triton():
         return False
 
@@ -184,10 +190,12 @@ def should_pad_bench(mat1, mat2, op, input=None):
     )
 
     def randn_like(t):
-        tmp = torch.empty_strided(size=t.shape, stride=t.stride(), dtype=t.dtype, device=t.device)
+        tmp = torch.empty_strided(
+            size=t.shape, stride=t.stride(), dtype=t.dtype, device=t.device
+        )
         return torch.randn_like(tmp)
 
-    with no_dispatch(), torch.utils._python_dispatch._disable_current_modes():
+    with torch.utils._python_dispatch._disable_current_modes():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
             k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
