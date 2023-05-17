@@ -366,6 +366,54 @@ class _FxPass(infra.Rule):
         return self, level, self.format_message()
 
 
+class _NoSymbolicFunctionForCallFunction(infra.Rule):
+    """Cannot find symbolic function to convert the "call_function" FX node to ONNX."""
+
+    def format_message(self, target) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'No symbolic function to convert the "call_function" node {target} to ONNX. '
+        """
+        return self.message_default_template.format(target=target)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, target
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'No symbolic function to convert the "call_function" node {target} to ONNX. '
+        """
+        return self, level, self.format_message(target=target)
+
+
+class _UnsupportedFxNodeAnalysis(infra.Rule):
+    """Result from FX graph analysis to reveal unsupported FX nodes."""
+
+    def format_message(  # type: ignore[override]
+        self, node_op_to_target_mapping
+    ) -> str:
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'Unsupported FX nodes: {node_op_to_target_mapping}. '
+        """
+        return self.message_default_template.format(
+            node_op_to_target_mapping=node_op_to_target_mapping
+        )
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, node_op_to_target_mapping
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'Unsupported FX nodes: {node_op_to_target_mapping}. '
+        """
+        return (
+            self,
+            level,
+            self.format_message(node_op_to_target_mapping=node_op_to_target_mapping),
+        )
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -745,6 +793,56 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """FX graph transformation before ONNX export."""
+
+    no_symbolic_function_for_call_function: _NoSymbolicFunctionForCallFunction = dataclasses.field(
+        default=_NoSymbolicFunctionForCallFunction.from_sarif(
+            **{
+                "id": "FXE0011",
+                "name": "no-symbolic-function-for-call-function",
+                "short_description": {
+                    "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX.'
+                },
+                "full_description": {
+                    "text": 'Cannot find symbolic function to convert the "call_function" FX node to ONNX. ',
+                    "markdown": 'This error occurs when the ONNX converter is unable to find a corresponding symbolic function\nto convert a "call_function" node in the input graph to its equivalence in ONNX. The "call_function"\nnode represents a normalized function call in PyTorch, such as "torch.aten.ops.add".\n\nTo resolve this error, you can try one of the following:\n\n- If exists, apply the auto-fix suggested by the diagnostic. TODO: this part is not available yet.\n- Rewrite the model using only supported PyTorch operators or functions.\n- Follow this [guide](https://pytorch.org/docs/stable/onnx.html#onnx-script-functions) to write and\n  register a custom symbolic function for the unsupported call_function FX node.\n\nTODO: Replace above link once docs for `dynamo_export` custom op registration are available.\n',
+                },
+                "message_strings": {
+                    "default": {
+                        "text": 'No symbolic function to convert the "call_function" node {target} to ONNX. '
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Cannot find symbolic function to convert the "call_function" FX node to ONNX."""
+
+    unsupported_fx_node_analysis: _UnsupportedFxNodeAnalysis = dataclasses.field(
+        default=_UnsupportedFxNodeAnalysis.from_sarif(
+            **{
+                "id": "FXE0012",
+                "name": "unsupported-fx-node-analysis",
+                "short_description": {
+                    "text": "Result from FX graph analysis to reveal unsupported FX nodes."
+                },
+                "full_description": {
+                    "text": "Result from FX graph analysis to reveal unsupported FX nodes.",
+                    "markdown": "This error indicates that an FX graph contains one or more unsupported nodes. The error message\nis typically accompanied by a list of the unsupported nodes found during analysis.\n\nTo resolve this error, you can try resolving each individual unsupported node error by following\nthe suggestions by its diagnostic. Typically, options include:\n\n- If exists, apply the auto-fix suggested by the diagnostic. TODO: this part is not available yet.\n- Rewrite the model using only supported PyTorch operators or functions.\n- Follow this [guide](https://pytorch.org/docs/stable/onnx.html#onnx-script-functions) to write and\n  register a custom symbolic function for the unsupported call_function FX node.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "Unsupported FX nodes: {node_op_to_target_mapping}. "
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Result from FX graph analysis to reveal unsupported FX nodes."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(

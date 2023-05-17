@@ -232,8 +232,8 @@ def reshard_local_shard(
             rearrange_output_list = True
 
     # Perform autograd enabled all2all.
-    input_tensor_list = torch.split(local_tensor, input_split_sizes, dim=reshard_dim)
-    input_tensor_list = [tensor.contiguous() for tensor in input_tensor_list]
+    input_tensor_tuple = torch.split(local_tensor, input_split_sizes, dim=reshard_dim)
+    input_tensor_list = [tensor.contiguous() for tensor in input_tensor_tuple]
     output_tensor_list = all_to_all(
         output_tensor_list,
         input_tensor_list,

@@ -3005,13 +3005,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::histc, aten_histc, [](Node* n) -> SROperator {
       const auto min = p_node->Input(2).toScalar();
       const auto max = p_node->Input(3).toScalar();
       if (p_node->Output(0).isNone()) {
-        p_node->Output(0) =
-            at::native::histogram_histc_cpu(self, bins, min, max);
+        p_node->Output(0) = at::native::histogram_histc(self, bins, min, max);
         return;
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::histogram_histc_cpu_out(self, bins, min, max, out);
+      at::native::histogram_histc_out(self, bins, min, max, out);
     };
   }
   LogAndDumpSchema(n);
