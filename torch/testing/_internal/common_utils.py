@@ -1152,6 +1152,15 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def runOnRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            fn(*args, **kwargs)
+        else:
+            raise unisttest.SkipTest("test currently only works on the ROCm stack")
+    return wrapper
+
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
