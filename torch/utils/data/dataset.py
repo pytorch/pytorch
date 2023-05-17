@@ -33,7 +33,9 @@ __all__ = [
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
-T_stack = TypeVar('T_stack', Tuple[T_co, ...], Dict[str, T_co])
+T_dict = Dict[str, T_co]
+T_tuple = Tuple[T_co, ...]
+T_stack = TypeVar('T_stack', T_tuple, T_dict)
 
 
 class Dataset(Generic[T_co]):
@@ -227,7 +229,6 @@ class StackDataset(Dataset[T_stack]):
         *args (Dataset): Datasets for stacking returned as tuple.
         **kwargs (Dataset): Datasets for stacking returned as dict.
     """
-    datasets: Union[Tuple[Dataset[T_co], ...], Dict[str, Dataset[T_co]]]
 
     def __init__(self, *args: Dataset[T_co], **kwargs: Dataset[T_co]) -> None:
         if args:
@@ -236,13 +237,13 @@ class StackDataset(Dataset[T_stack]):
             self._length = len(args[0])  # type: ignore[arg-type]
             if any(self._length != len(dataset) for dataset in args):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
-            self.datasets = args
+            self.datasets = args  # type: ignore
         elif kwargs:
             tmp = list(kwargs.values())
             self._length = len(tmp[0])  # type: ignore[arg-type]
             if any(self._length != len(dataset) for dataset in tmp):  # type: ignore[arg-type]
                 raise ValueError("Size mismatch between datasets")
-            self.datasets = kwargs
+            self.datasets = kwargs  # type: ignore
         else:
             raise ValueError("At least one dataset should be passed")
 
