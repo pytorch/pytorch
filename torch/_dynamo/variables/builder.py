@@ -864,6 +864,7 @@ class VariableBuilder:
         )
         source = self.get_source()
         tensor_value = torch.from_numpy(value)
+        options = {"source": source}
 
         numpy_ndarray_variable = wrap_fx_proxy_cls(
             target_cls=NumpyNdarrayVariable,
@@ -875,7 +876,7 @@ class VariableBuilder:
                 {},
             ),
             example_value=tensor_value,
-            source=source,
+            **options,
         )
         self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
         example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]

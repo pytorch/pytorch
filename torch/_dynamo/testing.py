@@ -222,9 +222,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
     val1b = opt_fn(*args1)
     val2b = opt_fn(*args2)
     reset()
-    import pdb
-
-    pdb.set_trace()
     self.assertTrue(same(val1a, correct1))
     self.assertTrue(same(val1b, correct1))
     self.assertTrue(same(val2a, correct2))

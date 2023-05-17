@@ -676,13 +676,13 @@ class NumpyNdarrayVariable(VariableTracker):
         self,
         proxy: torch.fx.Proxy,
         class_type=torch.Tensor,
-        specialized_value=None,
         **kwargs,
     ):
+        if "specialized_value" in kwargs:
+            kwargs.pop("specialized_value")
         super().__init__(**kwargs)
         self.proxy = proxy
         self.class_type = class_type
-        self.specialized_value = specialized_value
 
     def python_type(self):
         return self.class_type

@@ -898,10 +898,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
-                    from .utils import HAS_NUMPY, np
 
-                    if HAS_NUMPY and isinstance(arg.example, np.ndarray):
-                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
