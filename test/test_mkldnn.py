@@ -91,8 +91,8 @@ class TestMkldnn(TestCase):
                     else:
                         self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size() * 2)
                     self.assertRaisesRegex(RuntimeError,
-                                        "Cannot access data pointer of Tensor that doesn't have storage",
-                                        lambda: mkldnn_tensor.data_ptr() != 0)
+                                           "Cannot access data pointer of Tensor that doesn't have storage",
+                                           lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_copy(self):
         x = torch.randn(4, 5, dtype=torch.float32)
@@ -264,16 +264,16 @@ class TestMkldnn(TestCase):
             x = torch.randn(x_shape, dtype=torch.float32)
             # TODO: remove this when group depthwise is supported:
             if conv_module in [torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d,
-                torch.nn.ConvTranspose3d] and groups > 1 and C == groups:
+                               torch.nn.ConvTranspose3d] and groups > 1 and C == groups:
                 continue
             conv = conv_module(in_channels=C,
-                                    out_channels=M,
-                                    kernel_size=3,
-                                    stride=2,
-                                    padding=1,
-                                    dilation=dilation,
-                                    bias=bias,
-                                    groups=groups).float()
+                               out_channels=M,
+                               kernel_size=3,
+                               stride=2,
+                               padding=1,
+                               dilation=dilation,
+                               bias=bias,
+                               groups=groups).float()
             x_lower = x.to(dtype=dtype)
             if (dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()) or \
                (dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()):
