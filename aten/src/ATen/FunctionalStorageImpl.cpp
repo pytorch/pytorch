@@ -83,6 +83,9 @@ static c10::SymInt get_nbytes(const Tensor& value) {
     if (value.key_set().has(c10::DispatchKey::Python)) {
       return value.storage().sym_nbytes();
     }
+    // TODO(vanbasten23): force fail to find out where I can add a test for my
+    // change. Should remove the TORCH_CHECK before merging the PR.
+    TORCH_CHECK(false, "fails right before calling symint version of computeStorageNbytes")
     return at::detail::computeStorageNbytes(value.sym_sizes(), value.sym_strides(), value.dtype().itemsize(), value.sym_storage_offset());
   }
   // XLA storage objects also do not properly track nbytes.
