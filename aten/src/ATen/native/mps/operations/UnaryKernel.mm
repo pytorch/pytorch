@@ -23,6 +23,7 @@ const std::string& getMetalType(const c10::ScalarType& t) {
       {c10::ScalarType::Short, "short"},
       {c10::ScalarType::Bool, "bool"},
       {c10::ScalarType::Char, "int8_t"},
+      {c10::ScalarType::Byte, "uint8_t"},
   };
 
   auto it = scalar_to_metal_type.find(t);
