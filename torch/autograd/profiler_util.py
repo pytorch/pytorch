@@ -5,7 +5,7 @@ from torch.autograd import DeviceType
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 import bisect
 import math
@@ -388,7 +388,7 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None, trace_name=None):
+            is_legacy=False, flops=None, trace_name=None, concrete_inputs=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
@@ -401,6 +401,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cpu_children: List[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
         self.input_shapes: Tuple[int, ...] = input_shapes
+        self.concrete_inputs: List[Any] = concrete_inputs
         self.stack: List = stack
         self.scope: int = scope
         self.cpu_memory_usage: int = cpu_memory_usage
