@@ -623,11 +623,12 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
 
 Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices) {
   // Disallow boolean indexing
-  for (auto index: indices) {
+  for (auto i : c10::irange(indices.size())) {
+    auto index = indices.get(i);
     if (index.has_value()) {
       auto dtype = index->scalar_type();
-      TORCH_CHECK(dtype == kInt64 || dtype == kInt32,
-                  "_insafe_inde found unexpected index type ", dtype);
+      TORCH_CHECK(dtype == kLong || dtype == kInt,
+                  "_unsafe_index found unexpected index type ", dtype);
     }
   }
   return at::index(self, indices);
