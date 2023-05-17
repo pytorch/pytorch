@@ -91,7 +91,7 @@ class SelectiveBuilder:
             di_list = data["debug_info"]
             assert isinstance(di_list, list)
 
-            debug_info = tuple((str(x) for x in di_list))
+            debug_info = tuple(str(x) for x in di_list)
 
         operators = {}
         operators_dict = data.get("operators", {})

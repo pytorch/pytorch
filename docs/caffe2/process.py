@@ -30,7 +30,7 @@ for root, dirs, files in os.walk("."):
     for file in files:
         if (file.endswith(".py") and not file.endswith("_test.py") and not file.endswith("__.py")):
             filepath = os.path.join(root, file)
-            print(("filepath: " + filepath))
+            print("filepath: " + filepath)
             directory = os.path.dirname(filepath)[2:]
             directory = directory.replace("/", ".")
             print("directory: " + directory)

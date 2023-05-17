@@ -1261,11 +1261,9 @@ def find_matching_merge_rule(
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
                 reject_reason = "\n".join(
-                    (
-                        f"Not all files match rule `{rule_name}`."
-                        f"{num_matching_files} files matched, but there are still non-matching files:"
-                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
-                    )
+                    f"Not all files match rule `{rule_name}`."
+                    f"{num_matching_files} files matched, but there are still non-matching files:"
+                    f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
                 )
             continue
 
@@ -1551,10 +1549,8 @@ def validate_revert(
         allowed_reverters.append("CONTRIBUTOR")
     if author_association not in allowed_reverters:
         raise PostCommentError(
-            (
-                f"Will not revert as @{author_login} is not one of "
-                f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
-            )
+            f"Will not revert as @{author_login} is not one of "
+            f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
