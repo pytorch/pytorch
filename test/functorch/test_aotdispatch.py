@@ -27,6 +27,7 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -2975,12 +2976,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
