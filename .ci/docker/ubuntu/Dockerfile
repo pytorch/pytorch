@@ -166,6 +166,12 @@ COPY ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
 
+# [Optional] Install torch inductor benchmark deps
+ARG INDUCTOR_BENCHMARK
+COPY ./common/install_inductor_benchmark_deps.sh ./common/common_utils.sh ./
+RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

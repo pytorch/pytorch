@@ -134,7 +134,7 @@ COPY ./common/install_cudnn.sh install_cudnn.sh
 RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
 
-# Install torch inductor benchmark deps
+# [Optional] Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
 COPY ./common/install_inductor_benchmark_deps.sh ./common/common_utils.sh ./
 RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
