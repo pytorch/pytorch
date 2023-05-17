@@ -203,18 +203,8 @@ class _StorageBase:
         Returns:
             A boolean variable.
         """
-        device_str = None
-        if isinstance(device, str):
-            device_str = device
-        elif isinstance(device, torch.device):
-            device_str = device.type
-
-        if device_str == "cuda" or device_str == torch._C._get_privateuse1_backend_name():
-            return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
-                cast(Storage, self)).is_pinned(device)
-        else:
-            # Currently, cannot pin CPU storage memory to other device, except for cuda and privateuse1.
-            return False
+        return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+            cast(Storage, self)).is_pinned(device)
 
     def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
         r"""Copies the CPU storage to pinned memory, if it's not already pinned.

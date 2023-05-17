@@ -256,13 +256,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(cpu_tensor.is_pinned("foo"))
             cpu_tensor_pin = cpu_tensor.pin_memory("foo")
             self.assertTrue(cpu_tensor_pin.is_pinned("foo"))
-            # Test storage pin_memory on custom device
+            # Test storage pin_memory on custom device string
             cpu_storage = cpu_tensor.storage()
             foo_device = torch.device("foo")
             self.assertFalse(cpu_storage.is_pinned("foo"))
             cpu_storage_pin = cpu_storage.pin_memory("foo")
+            self.assertFalse(cpu_storage.is_pinned())
             self.assertFalse(cpu_storage.is_pinned("foo"))
             self.assertFalse(cpu_storage.is_pinned(foo_device))
+            self.assertFalse(cpu_storage_pin.is_pinned())
             self.assertTrue(cpu_storage_pin.is_pinned("foo"))
             self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             cpu_storage_pin_already = cpu_storage_pin.pin_memory("foo")
@@ -270,25 +272,44 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertTrue(cpu_storage_pin.is_pinned(foo_device))
             self.assertTrue(cpu_storage_pin_already.is_pinned("foo"))
             self.assertTrue(cpu_storage_pin_already.is_pinned(foo_device))
-            # Test storage pin_memory on error device
+
+            # Test storage pin_memory on torch.device
             self.assertFalse(cpu_storage.is_pinned("foo"))
-            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
-                cpu_storage_pin = cpu_storage.pin_memory("hpu")
-            self.assertFalse(cpu_storage.is_pinned("hpu"))
+            cpu_storage_pinned = cpu_storage.pin_memory(foo_device)
             self.assertFalse(cpu_storage.is_pinned())
+            self.assertFalse(cpu_storage.is_pinned("foo"))
+            self.assertFalse(cpu_storage.is_pinned(foo_device))
+            self.assertFalse(cpu_storage_pinned.is_pinned())
+            self.assertTrue(cpu_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_storage_pinned.is_pinned(foo_device))
 
             # Test untyped storage pin_memory and is_pin
             cpu_tensor = torch.randn([3, 2, 1, 4])
             cpu_untyped_storage = cpu_tensor.untyped_storage()
             self.assertFalse(cpu_untyped_storage.is_pinned())
-            self.assertFalse(cpu_untyped_storage.is_pinned("hpu"))
             self.assertFalse(cpu_untyped_storage.is_pinned("foo"))
             cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory("foo")
             self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
             self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
             self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
+            cpu_untyped_storage_pinned = cpu_untyped_storage.pin_memory(foo_device)
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned())
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned("foo"))
+            self.assertTrue(cpu_untyped_storage_pinned.is_pinned(foo_device))
             with self.assertRaisesRegex(TypeError, "positional arguments but 3 were given"):
                 cpu_untyped_storage_pinned.is_pinned("foo1", "foo2")
+
+            # Test storage pin_memory on error device
+            self.assertFalse(cpu_storage_pinned.is_pinned("hpu"))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_storage.pin_memory("hpu")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned("hpu"))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_untyped_storage.pin_memory("hpu")
+            invalid_device = torch.device("hpu")
+            self.assertFalse(cpu_untyped_storage_pinned.is_pinned(invalid_device))
+            with self.assertRaisesRegex(NotImplementedError, "with arguments from the 'HPU' backend"):
+                cpu_untyped_storage.pin_memory(invalid_device)
 
         def test_open_device_serialization():
             self.module.set_custom_device_index(-1)
