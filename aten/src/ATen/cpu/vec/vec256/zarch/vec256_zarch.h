@@ -1104,12 +1104,28 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_i0e);
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> minimum(const Vectorized<T>& other) const {
-    return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> maximum(const Vectorized<T>& other) const {
-    return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T> {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T> {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
   }
 
   template <
@@ -1232,21 +1248,21 @@ inline Vectorized<uint8_t> operator~(const Vectorized<uint8_t>& a) {
 #define DEFINE_CLAMP_MAXMIN_FUNCS(typex)                          \
   DEFINE_MAXMIN_FUNCS(typex)                                      \
   template <>                                                     \
-  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
-      const Vectorized<typex>& a,                                 \
-      const Vectorized<typex>& min,                               \
-      const Vectorized<typex>& max) {                             \
-    return minimum(maximum(a, min), max);                         \
-  }                                                               \
-  template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_min(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& min) { \
-    return maximum(a, min);                                       \
+    return a.clamp_min(min);                                      \
   }                                                               \
   template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_max(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& max) { \
-    return minimum(a, max);                                       \
+    return a.clamp_max(max);                                      \
+  }                                                               \
+  template <>                                                     \
+  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
+      const Vectorized<typex>& a,                                 \
+      const Vectorized<typex>& min,                               \
+      const Vectorized<typex>& max) {                             \
+    return clamp_min(clamp_max(a, max), min);                     \
   }
 
 DEFINE_CLAMP_MAXMIN_FUNCS(int8_t)
@@ -1788,6 +1804,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   }
   Vectorized<T> C10_ALWAYS_INLINE le(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec.le(other._vec)};
+  }
+
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T>{_vec.clamp_min(min._vec)};
+  }
+
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T>{_vec.clamp_max(max._vec)};
   }
 
   Vectorized<T> minimum(const Vectorized<T>& other) const {
