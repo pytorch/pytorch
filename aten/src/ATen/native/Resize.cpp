@@ -12,6 +12,7 @@
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/_resize_output.h>
+#include <ATen/ops/_resize_output_native.h>
 #endif
 
 namespace at { namespace native {

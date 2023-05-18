@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
@@ -11,8 +12,6 @@
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
-void neg_kernel(TensorIteratorBase &iter);
-void conj_kernel(TensorIteratorBase &iter);
 
 static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   auto strides_out = iter.strides(0);
@@ -222,7 +221,7 @@ static void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool r
   }
 }
 
-static void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
+void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
       isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
