@@ -301,7 +301,7 @@ static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
 				 (params.value.stride(2) == 3 * h * d) &&
 				 (params.value.stride(3) == 1);
   if (debug) {
-    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout"); }
+    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout", params.query.strides()); }
     if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
     if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
   }
@@ -326,7 +326,7 @@ inline bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }
-  return ok; 
+  return ok;
 }
 
 bool use_flash_attention(sdp_params params, bool debug) {

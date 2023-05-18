@@ -14305,7 +14305,7 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
-- func: _cudnn_mha(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- func: _cudnn_mha(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset)
   dispatch:
     CUDA: _cudnn_mha
   tags: nondeterministic_seeded

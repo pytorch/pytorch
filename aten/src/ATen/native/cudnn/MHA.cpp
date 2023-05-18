@@ -59,12 +59,12 @@ struct MHAParams {
 };
 
 void setMHAParams(MHAParams& params,
-		  int64_t b,
+          int64_t b,
                   int64_t h,
                   int64_t s_q,
                   int64_t s_kv,
                   int64_t d,
-		  MHA_Layout layout,
+          MHA_Layout layout,
                   bool is_training,
                   cudnnDataType_t dataType) {
   memset(&params, 0, sizeof(params));
@@ -813,17 +813,17 @@ createSVBMM(int64_t b,
 } // namespace
 
 void run_mha_plan(cudnnHandle_t handle,
-		  cudnn_frontend::ExecutionPlan& plan,
-		  void* devPtrQ,
-		  void* devPtrK,
-		  void* devPtrV,
-		  void* devPtrO,
-		  void* devPtrDropoutSeed,
+          cudnn_frontend::ExecutionPlan& plan,
+          void* devPtrQ,
+          void* devPtrK,
+          void* devPtrV,
+          void* devPtrO,
+          void* devPtrDropoutSeed,
           void* devPtrDropoutOffset,
-		  void* devPtrSoftmaxStats,
-		  float scale_dropout,
-		  float scaling_factor,
-		  bool is_training) {
+          void* devPtrSoftmaxStats,
+          float scale_dropout,
+          float scaling_factor,
+          bool is_training) {
 
     auto workspace_size = plan.getWorkspaceSize();
 
@@ -881,84 +881,84 @@ run_bf16_LLM_fprop(int64_t b,
 
     try {
         cudnnHandle_t handle_ = getCudnnHandle();
-	MHAParams params;
-	setMHAParams(params, b, h, s_q, s_kv, d, layout, is_training, tensorType);
-	// needs to be bf16 (Please change)
-	__half scale_dropout = cpu_float2half_rn(static_cast<float>(1/(1 - dropout_probability)));
+    MHAParams params;
+    setMHAParams(params, b, h, s_q, s_kv, d, layout, is_training, tensorType);
+    // needs to be bf16 (Please change)
+    __half scale_dropout = cpu_float2half_rn(static_cast<float>(1/(1 - dropout_probability)));
 
-	auto search = benchmark_cache.find(params);
-	if (!search) {
-		std::vector<cudnn_frontend::Operation const*> all_ops;
-		std::vector<cudnn_frontend::Operation> ops;
+    auto search = benchmark_cache.find(params);
+    if (!search) {
+        std::vector<cudnn_frontend::Operation const*> all_ops;
+        std::vector<cudnn_frontend::Operation> ops;
 
-		// Q * K^T
-		auto sTensor = createQKBMM(b, h, s_q, s_kv, d, layout, tensorType, ops);
+        // Q * K^T
+        auto sTensor = createQKBMM(b, h, s_q, s_kv, d, layout, tensorType, ops);
 
-		// Q * K^T * bmmScale
-		auto sScaleTensor = createScale(b, h, s_q, s_kv, d, layout, CUDNN_DATA_FLOAT, sTensor, ops);
+        // Q * K^T * bmmScale
+        auto sScaleTensor = createScale(b, h, s_q, s_kv, d, layout, CUDNN_DATA_FLOAT, sTensor, ops);
 
-		auto sAfterMaskTensor = createCausalMask(b, h, s_q, s_kv, d, layout, tensorType, ops, sScaleTensor);
+        auto sAfterMaskTensor = createCausalMask(b, h, s_q, s_kv, d, layout, tensorType, ops, sScaleTensor);
 
-		// cudnn_frontend::throw_if(dropout_probability != 0.0f && !is_training, "Dropout probability should be 0.0f for inference mode", CUDNN_STATUS_BAD_PARAM);
-		cudnn_frontend::throw_if(dropout_probability == 1.0f, "Dropout probability cannot be 1.0", CUDNN_STATUS_BAD_PARAM);
+        // cudnn_frontend::throw_if(dropout_probability != 0.0f && !is_training, "Dropout probability should be 0.0f for inference mode", CUDNN_STATUS_BAD_PARAM);
+        cudnn_frontend::throw_if(dropout_probability == 1.0f, "Dropout probability cannot be 1.0", CUDNN_STATUS_BAD_PARAM);
 
-		auto softmax_output = createSoftmaxForward(b, h, s_q, s_kv, is_training, ops, sAfterMaskTensor);
+        auto softmax_output = createSoftmaxForward(b, h, s_q, s_kv, is_training, ops, sAfterMaskTensor);
 
-		// Dropout(softmax)
-		auto dropout_output = createDropoutForward(b, h, s_q, s_kv, d, dropout_probability, tensorType, ops, softmax_output);
-		createSVBMM(b, h, s_q, s_kv, d, layout, tensorType, ops, dropout_output);
+        // Dropout(softmax)
+        auto dropout_output = createDropoutForward(b, h, s_q, s_kv, d, dropout_probability, tensorType, ops, softmax_output);
+        createSVBMM(b, h, s_q, s_kv, d, layout, tensorType, ops, dropout_output);
 
-		for (unsigned int i = 0; i < ops.size(); i++) {
-		    all_ops.push_back(&ops[i]);
-		}
+        for (unsigned int i = 0; i < ops.size(); i++) {
+            all_ops.push_back(&ops[i]);
+        }
 
-		// Create an Operation Graph
-		auto opGraph = cudnn_frontend::OperationGraphBuilder()
-				   .setHandle(handle_)
-				   .setOperationGraph(all_ops.size(), all_ops.data())
-				   .build();
+        // Create an Operation Graph
+        auto opGraph = cudnn_frontend::OperationGraphBuilder()
+                   .setHandle(handle_)
+                   .setOperationGraph(all_ops.size(), all_ops.data())
+                   .build();
 
 
-		cudnn_frontend::EngineConfigList filtered_configs;
-		auto statuses = cudnn_frontend::get_heuristics_list<1>({"heuristics_instant"}, opGraph, allowAllConfig, filtered_configs, true);
+        cudnn_frontend::EngineConfigList filtered_configs;
+        auto statuses = cudnn_frontend::get_heuristics_list<1>({"heuristics_instant"}, opGraph, allowAllConfig, filtered_configs, true);
 
-		if (filtered_configs.size() == 0) {
-		    cudnn_frontend::set_error_and_throw_exception(
-			    nullptr,
-			    CUDNN_STATUS_NOT_SUPPORTED,
-			    "run_mha_fprop: No config returned by the heuristics");
-		}
-            auto plan = cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
-	    run_mha_plan(handle_,
-		         plan,
-		         devPtrQ,
-		         devPtrK,
-		         devPtrV,
-		         devPtrO,
-		         devPtrDropoutSeed,
-                         devPtrDropoutOffset,
-			 devPtrSoftmaxStats,
-		         scale_dropout,
-		         scaling_factor,
-			 is_training);
-	    benchmark_cache.update(params, plan);
-	} else {
-	    run_mha_plan(handle_,
-		         *search,
-		         devPtrQ,
-		         devPtrK,
-		         devPtrV,
-		         devPtrO,
-		         devPtrDropoutSeed,
-                         devPtrDropoutOffset,
-			 devPtrSoftmaxStats,
-		         scale_dropout,
-		         scaling_factor,
-			 is_training);
-       }
-    } catch (cudnn_frontend::cudnnException& e) {
-        TORCH_WARN("cudnnException ", e.what());
+        if (filtered_configs.size() == 0) {
+            cudnn_frontend::set_error_and_throw_exception(
+                nullptr,
+                CUDNN_STATUS_NOT_SUPPORTED,
+                "run_mha_fprop: No config returned by the heuristics");
+        }
+        auto plan = cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
+        run_mha_plan(handle_,
+                 plan,
+                 devPtrQ,
+                 devPtrK,
+                 devPtrV,
+                 devPtrO,
+                 devPtrDropoutSeed,
+    	 devPtrDropoutOffset,
+                 devPtrSoftmaxStats,
+                 scale_dropout,
+                 scaling_factor,
+                 is_training);
+        benchmark_cache.update(params, plan);
+    } else {
+        run_mha_plan(handle_,
+                 *search,
+                 devPtrQ,
+                 devPtrK,
+                 devPtrV,
+                 devPtrO,
+                 devPtrDropoutSeed,
+                 devPtrDropoutOffset,
+                 devPtrSoftmaxStats,
+                 scale_dropout,
+                 scaling_factor,
+                 is_training);
     }
+  } catch (cudnn_frontend::cudnnException& e) {
+      TORCH_WARN("cudnnException ", e.what());
+  }
 }
 
 // END COPY-PASTE FRO CUDNN-FRONTEND SAMPLE
@@ -992,18 +992,18 @@ run_cudnn_LLM_fprop(int64_t b,
                    s_q,
                    s_kv,
                    d,
-                  MHA_Layout::QKV_INTERLEAVED,
-                  scaling_factor,
-                  return_softmaxstats,
-                  dropout_probability,
-                  q.data_ptr(),
-                  k.data_ptr(),
-                  v.data_ptr(),
-                  return_softmaxstats ? softmaxstats.data_ptr() : nullptr,
-                  o.data_ptr(),
-                  dropoutseed.data_ptr(),
-                  dropoutoffset.data_ptr(),
-                  tensorType);
+                   MHA_Layout::QKV_INTERLEAVED,
+                   scaling_factor,
+                   return_softmaxstats,
+                   dropout_probability,
+                   q.data_ptr(),
+                   k.data_ptr(),
+                   v.data_ptr(),
+                   return_softmaxstats ? softmaxstats.data_ptr() : nullptr,
+                   o.data_ptr(),
+                   dropoutseed.data_ptr(),
+                   dropoutoffset.data_ptr(),
+                   tensorType);
 }
 
 Tensor cudnn_mha(const Tensor& self, const Tensor& qkv_weight, const Tensor& out_weight, const Tensor& qkv_bias, const Tensor& out_bias, const long inputSize, const long seqLength, const long batchSize, const long outputSize, const long head_size, const long num_heads) {
