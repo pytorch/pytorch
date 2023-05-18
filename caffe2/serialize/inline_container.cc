@@ -14,6 +14,7 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/uuid.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/serialize/file_adapter.h"
@@ -21,6 +22,7 @@
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
+#include "caffe2/serialize/versions.h"
 #include "miniz.h"
 
 namespace caffe2 {
@@ -131,6 +133,14 @@ void PyTorchStreamReader::init() {
   }
   archive_name_ = buf.substr(0, pos);
   archive_name_plus_slash_ = archive_name_ + "/";
+
+  // read serialization id
+  if (hasRecord(kSerializationIdRecordName)) {
+    at::DataPtr serialization_id_ptr;
+    size_t serialization_id_size;
+    std::tie(serialization_id_ptr, serialization_id_size) = getRecord(kSerializationIdRecordName);
+    serialization_id_.assign(static_cast<const char*>(serialization_id_ptr.get()), serialization_id_size);
+  }
 
   // version check
   at::DataPtr version_ptr;
@@ -426,6 +436,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   ar_ = std::make_unique<mz_zip_archive>();
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
   archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
+  serialization_id_ = uuid::generate_uuid_v4();
 
   if (archive_name_.size() == 0) {
     CAFFE_THROW("invalid file name: ", file_name);
@@ -469,6 +480,15 @@ void PyTorchStreamWriter::writeRecord(
   AT_ASSERT(!archive_name_plus_slash_.empty());
   TORCH_INTERNAL_ASSERT(
       files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
+  if (name == kSerializationIdRecordName) {
+    std::string serialization_id_str(static_cast<const char*>(data), size);
+    if(serialization_id_str != serialization_id_) {
+      // In case of copying records from another file, skip writing a different
+      // serialization_id than the one set up in this writer.
+      // This is to ensure serialization_id stays unique per serialization.
+      return;
+    }
+  }
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
@@ -518,6 +538,11 @@ void PyTorchStreamWriter::writeEndOfFile() {
     } else {
       writeRecord("version", version.c_str(), version.size());
     }
+  }
+  // In setup(), the value of serialization_id_ is initialized.
+  // Here, after done with writing all records, the serialization_id record is written.
+  if (allRecords.find(kSerializationIdRecordName) == allRecords.end()) {
+    writeRecord(kSerializationIdRecordName, serialization_id_.c_str(), serialization_id_.size());
   }
 
   AT_ASSERT(!finalized_);

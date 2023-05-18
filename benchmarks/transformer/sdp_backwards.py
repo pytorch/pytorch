@@ -151,7 +151,7 @@ def run_timing(
             with record_function("Fused SDP forward and backward"):
                 for _ in range(20):
                     forw_back(cpt, (x, x, x, mask), rand_fused_upward)
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
     print("Profile for eager".center(200, "-"))
     with torch.backends.cuda.sdp_kernel(enable_math=True, enable_mem_efficient=False):
@@ -161,7 +161,7 @@ def run_timing(
             with record_function("Fused SDP forward and backward"):
                 for _ in range(20):
                     forw_back(cpt, (x, x, x, mask), rand_eager_upward)
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
 
 def main():

@@ -8,7 +8,10 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FUSED_SDPA,
+    SM80OrLater,
+)
 from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -214,7 +217,7 @@ class TestSDPAPatternRewriter(TestCase):
             torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
         )
 
-        self._check_common(sfdp_pattern_7, args)
+        self._check_common(sfdp_pattern_7, args, contains=SM80OrLater)
 
     def test_sdpa_rewriter_8(self):
         def sfdp_pattern_8(query, key, value):
@@ -255,7 +258,7 @@ class TestSDPAPatternRewriter(TestCase):
             torch.empty((2, 8, 4, 16), device="cuda", dtype=torch.half),
         )
 
-        self._check_common(sfdp_pattern_9, args)
+        self._check_common(sfdp_pattern_9, args, contains=SM80OrLater)
 
     def test_sdpa_rewriter_10(self):
         def sfdp_pattern_10(query, key, value):
