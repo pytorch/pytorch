@@ -41,24 +41,6 @@ class ForeachTests(TestCase):
         self.check_model(
             fn,
             (
-                torch.ones(10, 10, device="cuda:0"),
-                torch.ones(20, 20, device="cuda:0"),
-                torch.zeros(10, 10, device="cuda:0"),
-                torch.zeros(20, 20, device="cuda:0"),
-            ),
-        )
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
-
-    @requires_cuda()
-    def test_lowering_fusion(self):
-        def fn(a0, a1, b0, b1):
-            c = torch._foreach_add([a0, a1], [b0, b1])
-            return torch._foreach_add([a0, a1], c)
-
-        self.check_model(
-            fn,
-            (
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(20, 20, device="cuda:0"),
                 torch.rand(10, 10, device="cuda:0"),
@@ -72,9 +54,7 @@ class ForeachTests(TestCase):
     def test_scheduler_fusion(self):
         def fn(a0, a1, b0, b1):
             c = torch._foreach_add([a0, a1], [b0, b1])
-            return c, torch._foreach_add(
-                [a0, a1], c
-            )  # return c forces it to be realized
+            return c, torch._foreach_add([a0, a1], c)
 
         self.check_model(
             fn,

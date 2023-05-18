@@ -1,6 +1,6 @@
 import itertools
 
-from .. import config
+from .. import config, metrics
 from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
@@ -80,6 +80,7 @@ class ForeachKernel(Kernel):
             pid_cache={"tl.program_id(0)": "pid_offset"},
             reduction_hint=reduction_hint,
         )
+        metrics.generated_kernel_count -= 1
         sub_kernel.args = self.args
         sub_kernel.iter_vars_count = self.iter_vars_count
         sub_kernel.cse.iter_buffer_ids = self.cse.iter_buffer_ids

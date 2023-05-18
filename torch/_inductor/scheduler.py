@@ -49,6 +49,14 @@ class OutputNode:
     __repr__ = get_name
 
 
+def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
+    if node1.is_foreach():
+        assert node2.is_foreach()
+        return ForeachKernelSchedulerNode.fuse(node1, node2)
+    else:
+        return FusedSchedulerNode.fuse(node1, node2)
+
+
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler: "Scheduler" = scheduler
@@ -594,15 +602,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
+    """Scheduler node which consists of a list of scheduler nodes that each operate on a
+    distinct tensor in a list of tensors."""
+
+    @classmethod
+    def fuse(cls, node1, node2):
+        fused_nodes = [
+            FusedSchedulerNode.fuse(left, right)
+            for left, right in zip(node1.snodes, node2.snodes)
+        ]
+        return cls(node1.scheduler, fused_nodes)
+
     def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
         super().__init__(scheduler, nodes)
         # TODO: ensure all buffers are on the same device in lowerings
-        self.group = (nodes[0].node.get_device(), 0)
+        self.group = (nodes[0].get_device(), 0)
         self.snodes = nodes
-        self.origins = nodes[0].node.origins
-
-    def prune_deps(self):
-        pass
+        self.origins = set()
 
     def mark_run(self):
         if isinstance(self.node, ir.ListElemBuffer):
@@ -621,6 +637,18 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def is_foreach(self):
         return True
+
+    def get_subkernel_nodes(self):
+        """Returns a list of nodes which comprise the foreach kernel, operating on corresponding elements of our input lists.
+        These nodes may be vertically fused."""
+        return list(self.snodes)
+
+    def get_nodes(self):
+        """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
+        return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+
+    def get_first_name(self):
+        return self.get_name()
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -710,8 +738,8 @@ class Scheduler:
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -948,7 +976,7 @@ class Scheduler:
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
-                node3 = FusedSchedulerNode.fuse(node1, node2)
+                node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
                 fused_nodes.add(node3)
@@ -1048,6 +1076,12 @@ class Scheduler:
             or not config.epilogue_fusion
         ):
             return False
+
+        if isinstance(node1, ForeachKernelSchedulerNode) ^ isinstance(
+            node2, ForeachKernelSchedulerNode
+        ):
+            return False
+
         if isinstance(node1.node, ir.ListElemBuffer) or isinstance(
             node2.node, ir.ListElemBuffer
         ):

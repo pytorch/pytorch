@@ -1354,7 +1354,9 @@ class TritonScheduling:
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
 
-        for node_group in ForeachKernel.horizontal_partition(foreach_node.get_nodes()):
+        for node_group in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes()
+        ):
             fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ForeachKernel()
 
