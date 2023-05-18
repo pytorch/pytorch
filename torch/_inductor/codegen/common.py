@@ -23,7 +23,7 @@ from ..utils import (
     sympy_subs,
     unique,
 )
-from ..virtualized import ops, V, OpsValue
+from ..virtualized import ops, OpsValue, V
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
