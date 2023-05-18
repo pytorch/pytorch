@@ -133,16 +133,6 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
         return props
 
     def var_getattr(self, tx, name):
