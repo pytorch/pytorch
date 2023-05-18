@@ -239,12 +239,9 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    # TODO: Delete this assert, and just attempt making the
-                    # sparse tensor anyway; even if there is a shape_env, this
-                    # tensor might be all static
-                    import sympy
-
-                    static = all(isinstance(s, (int, sympy.Integer)) for s in t.size())
+                    static = all(isinstance(s, int) for s in t.size()) and all(
+                        isinstance(s, int) for s in t.stride()
+                    )
                     assert static, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(

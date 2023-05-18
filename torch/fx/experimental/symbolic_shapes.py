@@ -1743,6 +1743,11 @@ class DimConstraints:
         def unwrap_local_source(source_name):
             return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
 
+        # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
+        # There is no change in behavior since 2 is the default lower bound.
+        def remove_default_lower_bound(dc):
+            return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
+
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
 
         buf = ""
@@ -1761,7 +1766,7 @@ class DimConstraints:
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{unwrap_local_source(result)},"
+                buf += f"\n{indent*2}{remove_default_lower_bound(unwrap_local_source(result))},"
             buf += f"\n{indent}]\n```\n"
         return buf
 
