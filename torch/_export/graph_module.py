@@ -15,7 +15,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 
 from . import error
-from torch._functorch.aot_autograd import GraphSignature
+from torch._functorch.aot_autograd import GraphSignature, FQN, GraphInputName, GraphOutputName
 
 ExportGraphModule = fx.GraphModule
 
@@ -46,13 +46,22 @@ class ExportMetadata:
     out_spec: Optional[pytree.TreeSpec] = None
     update_spec: int = 0  # TODO more information here.
     # TODO(gmagogsfm): Expose constraints in Metadata
-    # Mapping from output name to mutated buffer names.
-    mutation: List[Tuple[str, List[str]]] = dataclasses.field(default_factory=list)
     input_shape_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
     inline_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
     input_name_to_example_inputs: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    graph_signature: GraphSignature = None
+    mutation_data: "MutationData" = None
 
+@dataclass.dataclass
+class MutationData:
+    parameters: List[FQN]
+    buffers: List[FQN]
+
+    user_inputs: List[GraphInputName]
+    user_outputs: List[GraphOutputName]
+    inputs_to_parameters: Dict[GraphInputName, FQN]
+    inputs_to_buffers: Dict[GraphInputName, FQN]
+
+    buffers_to_mutate: Dict[GraphOutputName, FQN]
 
 EXPORT_METADATA = "_export_metadata_key"
 
@@ -236,7 +245,6 @@ def make_export_graph_module(
     graph: fx.Graph,
     in_spec: Optional[pytree.TreeSpec] = None,
     out_spec: Optional[pytree.TreeSpec] = None,
-    mutation: Optional[List[Tuple[str, List[str]]]] = None,
     example_inputs: Any = None,
     graph_signature: GraphSignature = None,
     class_name: str = "ExportGraphModule",
@@ -273,7 +281,6 @@ def make_export_graph_module(
         in_spec=in_spec,
         out_spec=out_spec,
         update_spec=0,
-        mutation=mutation if mutation else [],
         input_shape_constraints=input_shape_constraints_by_src_name,
         inline_constraints=inline_constraints,
         input_name_to_example_inputs=input_name_to_example_inputs,

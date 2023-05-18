@@ -16,7 +16,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 
 import torch.utils._pytree as pytree
-from torch._export.graph_module import EXPORT_METADATA
+from torch._export.graph_module import EXPORT_METADATA, MutationData
 from torch._export.pass_base import PassType
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -113,7 +113,6 @@ def _export(
             gm_torch_level, _ = torch._dynamo.export(
                 f,
                 *args,
-                aten_graph=False,
                 constraints=constraints,
                 assume_static_by_default=True,
             )
@@ -149,6 +148,21 @@ def _export(
             gm_torch_level.recompile()
 
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+            mutation_data = MutationData(
+                parameters=graph_signature.parameters,
+                buffers=graph_signature.buffers,
+                user_inputs=graph_signature.user_inputs,
+                user_outputs=graph_signature.user_outputs,
+                inputs_to_parameters = graph_signature.inputs_to_parameters,
+                inputs_to_buffers=graph_signature.inputs_to_buffers,
+                buffers_to_mutate=graph_signature.buffers_to_mutate
+            )
+
+            flat_args, in_spec = pytree.tree_flatten(args)
+            export_graph_module = graph_module.make_export_graph_module(
+                gm, gm.graph, in_spec, orig_out_spec, flat_args, mutation_data
+            )
+            return export_graph_module
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
@@ -156,14 +170,6 @@ def _export(
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
-
-    flat_args, in_spec = pytree.tree_flatten(args)
-    # TODO: Track mutation
-    mutation = None
-    export_graph_module = graph_module.make_export_graph_module(
-        gm, gm.graph, in_spec, orig_out_spec, mutation, flat_args, graph_signature
-    )
-    return export_graph_module
 
 
 # MultiMethodExportedProgram represents an exported program that contains
@@ -259,7 +265,6 @@ class MultiMethodExportedProgram:
         params_flat = tuple(params_flat)
 
         user_flat_args = pytree.tree_flatten(args)[0]
-        print("SIG", meta.graph_signature)
 
         output = gm(*params_flat, *user_flat_args)
 
