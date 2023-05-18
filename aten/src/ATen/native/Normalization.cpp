@@ -25,6 +25,8 @@
 #include <ATen/ops/_batch_norm_impl_index.h>
 #include <ATen/ops/_batch_norm_impl_index_backward_native.h>
 #include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
@@ -792,30 +794,30 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 }
 
 
-static std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cpu(
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
   return batch_norm_cpu(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
 }
 
-static std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     bool train, double momentum, double eps) {
   return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
 }
-static std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_training(
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_training(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const Tensor& running_mean, const Tensor& running_var, double momentum, double eps) {
   return at::_native_batch_norm_legit(self, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*train=*/false, momentum, eps);
 }
 
 
-static std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
   return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps, out, save_mean, save_var);
 }
 
 
-static std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cpu_out(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
   return batch_norm_cpu_out(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps, out, save_mean, save_var);
 }
 
