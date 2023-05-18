@@ -5230,7 +5230,7 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
-    @unittest.skipIf(not IS_LINUX, 'cpp traces only on linux')
+    @unittest.skipIf(not (IS_LINUX and os.uname().machine == "x86_64"), 'cpp traces only on linux')
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_cpp_memory_snapshot_pickle(self):
         from torch.utils.cpp_extension import load_inline
