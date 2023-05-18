@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import operator
 import logging
 import math
 from typing import Any, Dict, Iterable, List, Set
@@ -14,6 +15,7 @@ import torch
 import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
@@ -1955,19 +1957,26 @@ class TritonScheduling:
 
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
-        if config.generate_intermediate_hooks:
+        if (
+            V.graph.wrapper_code.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+        ):
+            # Not every node in the schedule will actually be live on output;
+            # we can't check dead buffers.
+            live_outs = kernel.args.live_output_buffers()
             for node in node_schedule:
                 if not isinstance(node, scheduler.BaseSchedulerNode):
                     continue
-                # TODO: not sure if this is the right thing to do
                 name = node.get_name()
-                if kernel.args.is_removed(name):
+                if name not in live_outs:
                     continue
                 origin_node = node.node.get_origin_node()
                 if origin_node is not None:
+                    counters["inductor"]["intermediate_hooks"] += 1
                     V.graph.wrapper_code.writeline(
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )
+
 
         self.scheduler.free_buffers()
 
