@@ -1,6 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDAUtils.h>
+//include <ATen/cuda/CUDAUtils.h>
+#include <torch/torch.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <cusparse.h>
@@ -39,11 +40,10 @@ struct CusparseLt : torch::CustomClassHolder {
   cusparseLtHandle_t handle;
   cusparseLtMatDescriptor_t sparse_input_descriptor, dense_input_descriptor,
       res_descriptor;
-  unsigned alignment{16};
-
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
 
+  unsigned alignment{16};
   float alpha{1.0};
   float beta{0.0};
   int num_streams{0};
@@ -51,7 +51,6 @@ struct CusparseLt : torch::CustomClassHolder {
   cudaStream_t* streams{nullptr};
   void* d_workspace{nullptr};
   int alg_id{7777};
-  // int* d_valid;
   int64_t num_A_rows;
 
   cusparseLtPruneAlg_t pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP};
@@ -96,9 +95,6 @@ struct CusparseLt : torch::CustomClassHolder {
     if (sparse_compressed.dtype() == torch::kInt8) {
       type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
-    } else if (sparse_compressed.dtype() == torch::bFloat16) {
-      type = CUDA_R_B16F;
-      compute_type = CUSPARSE_COMPUTE_32I;
     }
   };
 };
@@ -119,7 +115,6 @@ void CusparseLt::compress(
   auto num_A_cols = (is_sparse_input_transposed) ? m : k;
   auto lda = (is_rowmajor) ? num_A_cols : num_A_rows;
 
-  // CHECK_CUDA( cudaMalloc((void**)&d_valid, sizeof(*d_valid)) )
 
   CHECK_CUSPARSE(cusparseLtStructuredDescriptorInit(
       &handle,
@@ -131,43 +126,6 @@ void CusparseLt::compress(
       type,
       order,
       CUSPARSELT_SPARSITY_50_PERCENT))
-
-  // prune weights
-  //--------------------------------------------------------------------------
-  // CHECK_CUSPARSE(
-  // cusparseLtSpMMAPrune2(
-  //&handle,
-  //&sparse_input_descriptor,
-  // true,
-  // opA,
-  // sparse_input.data_ptr(),
-  // sparse_input.data_ptr(),
-  // pruning_algo,
-  // stream) )
-  // CHECK_CUSPARSE(
-  // cusparseLtSpMMAPruneCheck2(
-  //&handle,
-  //&sparse_input_descriptor,
-  // true,
-  // opA,
-  // sparse_input.data_ptr(),
-  // d_valid,
-  // stream) )
-
-  // int is_valid;
-  // cudaDeviceSynchronize();
-  // CHECK_CUDA(
-  // cudaMemcpyAsync(
-  //&is_valid,
-  // d_valid,
-  // sizeof(is_valid),
-  // cudaMemcpyDeviceToHost,
-  // stream) )
-
-  // CHECK_CUDA( cudaStreamSynchronize(stream) )
-
-  // TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way.
-  // " "cusparseLtMatmul will not provide correct results");
 
   // compress weight
   //--------------------------------------------------------------------------
@@ -247,10 +205,9 @@ at::Tensor CusparseLt::cusparselt_helper(
       ldc,
       alignment,
       type,
-      CUSPARSE_ORDER_ROW))
+      order))
 
-  // matmul, algorithm selection, and plan initialization
-  //--------------------------------------------------------------------------
+  // intialize matmul
   CHECK_CUSPARSE(cusparseLtMatmulDescriptorInit(
       &handle,
       &matmul,
@@ -262,11 +219,10 @@ at::Tensor CusparseLt::cusparselt_helper(
       &res_descriptor,
       compute_type))
 
-  // SET BIAS POINTER
-  // --------------------------------------------------------------------------
+  // set bias pointer for matmul
   CHECK_CUSPARSE(cusparseLtMatmulDescSetAttribute(
       &handle, &matmul, CUSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias)))
-
+  // set bias stride
   CHECK_CUSPARSE(cusparseLtMatmulDescSetAttribute(
       &handle,
       &matmul,
@@ -288,7 +244,7 @@ at::Tensor CusparseLt::cusparselt_helper(
         &handle,
         &plan,
         &alpha,
-        weight_compressed.data_ptr(),
+        sparse_compressed.data_ptr(),
         input.data_ptr(),
         &beta,
         res.data_ptr(),
@@ -303,18 +259,11 @@ at::Tensor CusparseLt::cusparselt_helper(
         &alg_id,
         sizeof(alg_id)))
   } else {
-    CHECK_CUSPARSE(cusparseLtMatmulAlgSetAttribute(
-        &handle,
-        &alg_sel,
-        CUSPARSELT_MATMUL_ALG_CONFIG_ID,
-        &alg_id,
-        sizeof(alg_id)))
-
     CHECK_CUSPARSE(cusparseLtMatmul(
         &handle,
         &plan,
         &alpha,
-        weight_compressed.data_ptr(),
+        sparse_compressed.data_ptr(),
         input.data_ptr(),
         &beta,
         res.data_ptr(),

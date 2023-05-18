@@ -2,7 +2,7 @@ from itertools import product, combinations, combinations_with_replacement, perm
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.ao.pruning import WeightNormPruner
+from torch.ao.pruning import WeightNormSparsifier
 from torch.ao.nn.sparse.cusparselt_linear import cuSPARSELtLinear, cuSPARSELtLinearInt8
 from tqdm import tqdm
 import pandas as pd
@@ -115,8 +115,8 @@ class SemiSparseTensor(torch.Tensor):
                 device=original_tensor.device,
             )
 
-            self.cslt = torch.cusparselt.CusparseLt(self.compressed_tensor)
-            self.cslt.set_compressed(original_tensor, self.transposed)
+            self.cslt = torch.classes.cusparselt.CusparseLt(self.compressed_tensor)
+            self.cslt.compress(original_tensor, self.transposed)
             self.original_tensor = None
 
     def __repr__(self):
@@ -157,7 +157,7 @@ class SemiSparseTensor(torch.Tensor):
                 return a.cslt.cusparselt_addmm(b, bias)
             # b must be transposed so we can undo it
             elif isinstance(b, SemiSparseTensor) and b.transposed:
-                return b.t().cslt.cusparselt_addmm(a.T, bias)
+                return b.t().cslt.cusparselt_addmm(a.T, bias).T
 
         if func is torch.ops.aten.mm.default:
             a, b = args
@@ -286,7 +286,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
     )
 
     # get sparse model
-    pruner = WeightNormPruner(
+    pruner = WeightNormSparsifier(
         sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2
     )
 

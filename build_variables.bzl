@@ -120,6 +120,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
+    "torch/csrc/sparse/CusparseLtKernels.cpp",
 ]
 
 torch_unpickler_common = [
@@ -1434,6 +1435,7 @@ aten_cuda_with_sort_by_key_source_list = [
 aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
+
 
 # Followings are source code for xnnpack delegate
 
