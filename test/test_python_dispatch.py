@@ -93,6 +93,19 @@ class TestPythonRegistration(TestCase):
             my_lib = Library("aten", "IMPL")
             my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
+    def test_finalizer(self):
+        lib = Library("_torch_testing", "FRAGMENT")
+        lib.define("foo123(Tensor x) -> Tensor")
+
+        def foo123(x):
+            pass
+
+        lib.impl("_torch_testing::foo123", foo123, "CPU")
+        key = '_torch_testing/foo123/CPU'
+        self.assertTrue(key in torch.library._impls)
+        del lib
+        self.assertTrue(key not in torch.library._impls)
+
     def test_override_cpu_sum(self) -> None:
         # Example 1
         run = [False]

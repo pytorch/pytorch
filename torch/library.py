@@ -2,6 +2,7 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
+import weakref
 
 __all__ = ['Library', 'impl', 'define']
 
@@ -47,6 +48,11 @@ class Library:
         self._op_impls = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
+        # Use a finalizer to setup the "destructor" instead of __del__.
+        # Python __del__ can lead to weird things (globals and locals may already
+        # be gone when __del__ actually gets called!). finalizers help the
+        # situation because it lets us capture references and keeps them alive
+        weakref.finalize(self, _del_library, _impls, self._op_impls)
 
     def __repr__(self):
         return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
@@ -131,13 +137,10 @@ class Library:
         _impls.add(key)
         self._op_impls.add(key)
 
-    def __del__(self):
-        # _op_impls might not have been initialized if an error was thrown in __init__
-        _op_impls_ = getattr(self, '_op_impls', None)
-        if _op_impls_:
-            for key in self._op_impls:
-                _impls.remove(key)
-            del self.m
+
+def _del_library(captured_impls, op_impls):
+    for key in op_impls:
+        captured_impls.remove(key)
 
 
 # decorator to register python functions for library ops
