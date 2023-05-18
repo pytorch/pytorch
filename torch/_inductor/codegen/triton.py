@@ -695,10 +695,9 @@ class TritonKernel(Kernel):
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
-        if dynamo_config.dynamic_shapes:
-            if not isinstance(last_numel, (int, sympy.Integer)):
-                # Not static
-                return False
+        if not isinstance(last_numel, (int, sympy.Integer)):
+            # Not static
+            return False
         hint = V.graph.sizevars.size_hint(last_numel)
         if hint > threshold:
             return False
@@ -752,6 +751,73 @@ class TritonKernel(Kernel):
             for length, ranges in zip(lengths, self.range_trees)
         ]
 
+    @staticmethod
+    def _split_iteration_ranges(
+        groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
+    ):
+        sv = V.graph.sizevars
+        new_ranges = [[] for _ in groups]
+        remaining = [sv.simplify(g) for g in groups]
+        var_count = itertools.count()
+
+        def add_range(i, expr):
+            expr = sv.simplify(expr)
+            if not sv.statically_known_multiple_of(remaining[i], expr):
+                raise CantSplit()
+            # guard on the last item out
+            remaining[i] = ir.FloorDiv(remaining[i], expr)
+            new_ranges[i].append(expr)
+            return next(var_count)
+
+        def make_combined(size, idx1, idx2):
+            def getter(flat_vars):
+                return size * flat_vars[idx1] + flat_vars[idx2]
+
+            return getter
+
+        return_getters_groups = []
+        current_group = 0
+        for length_group in lengths:
+            return_getters = []
+            for size in length_group:
+                if sv.statically_known_equals(size, 1):
+                    return_getters.append(lambda _: sympy.Integer(0))
+                    continue
+
+                while (
+                    current_group < len(remaining)
+                    and sv.size_hint(remaining[current_group]) == 1
+                ):
+                    # scroll to next group with remaining elements
+                    current_group += 1
+
+                if sv.size_hint(size) > sv.size_hint(remaining[current_group]):
+                    # need to break size in two
+                    if not sv.statically_known_multiple_of(
+                        size, remaining[current_group]
+                    ):
+                        raise CantSplit()
+                    size1 = remaining[current_group]
+                    size2 = ir.FloorDiv(size, remaining[current_group])
+                    return_getters.append(
+                        make_combined(
+                            size2,
+                            add_range(current_group, size1),
+                            add_range(current_group + 1, size2),
+                        )
+                    )
+                else:
+                    return_getters.append(
+                        operator.itemgetter(add_range(current_group, size))
+                    )
+            return_getters_groups.append(return_getters)
+
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
+
+        return new_ranges, return_getters_groups
+
     @classmethod
     def is_compatible(cls, groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]):
         try:
@@ -783,7 +849,9 @@ class TritonKernel(Kernel):
         ):
             return self.set_ranges(*lengths)
 
-        new_ranges, return_getters_groups = split_iteration_ranges(groups, lengths)
+        new_ranges, return_getters_groups = self._split_iteration_ranges(
+            groups, lengths
+        )
         itervars = list(itertools.chain(*self.set_ranges(*new_ranges)))
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 
@@ -880,20 +948,18 @@ class TritonKernel(Kernel):
 
         expand_str = None
 
-        if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
-            if copy_shape:
-                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
-                expand_str = f"{copy_shape}.shape"
-            else:
-                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
-                expand_str = self.dense_size_str()
-            if isinstance(index, sympy.Integer):
-                return index_str, set(), "None", expand_str
-            else:
-                mask_vars = dense_mask_vars
-        elif not have_loop_vars and copy_shape:
+        if isinstance(index, sympy.Integer):
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
+            return index_str, set(), "None", expand_str
+
+        if need_dense and not have_dense:
+            expand_str = f"{copy_shape}.shape" if copy_shape else self.dense_size_str()
+            index_str = f"tl.broadcast_to({index_str}, {expand_str})"
             mask_vars = dense_mask_vars
-            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+        elif not have_loop_vars and copy_shape:
+            index_str = f"tl.broadcast_to({index_str}, {copy_shape}.shape)"
+            mask_vars = dense_mask_vars
 
         if override_mask:
             mask_vars = {override_mask}
@@ -1137,8 +1203,10 @@ class TritonKernel(Kernel):
             reduction_type = "max"
 
         def final_reduction(value):
-            use_helper = reduction_type in {"argmax", "argmin", "max", "min", "prod"}
+            use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
+            if reduction_type in {"max", "min"}:
+                return f"{module}.{reduction_type}2({value}, {dim})[{', '.join(sizes)}]"
             return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
 
         def final_argreduce(buffer, result_var, value, index):
@@ -1175,13 +1243,8 @@ class TritonKernel(Kernel):
         elif (src_dtype, reduction_type, value) not in self.cse.reduction_cache:
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
-            # NOTE: We should be using tl.full here, but this also does type
-            # promotion e.g. bool to int32, which is sometimes necessary if
-            # similar promotion happened elsewhere in the pre-reduction
-            # operation. We should identify any such cases and fix them.
-            default_value = f" + {default}" if default != 0 else ""
             self.body.writeline(
-                f"{accumulator} = tl.zeros({self.dense_size_str()}, {triton_compute_type(src_dtype)}){default_value}"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_acc_type(src_dtype)})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1221,7 +1284,23 @@ class TritonKernel(Kernel):
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
-                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
+
+                if src_dtype == torch.bool:
+                    # This is only really used for aten.any. It changes the
+                    # final reduction of a non-persistent reduction from
+                    #     tmp5 = triton_helpers.max(_tmp5, 1)[:, None]
+                    # to
+                    #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
+                    # which is needed because tl.reduce doesn't support tl.int1
+                    accumulator = f"{accumulator}.to(tl.int8)"
+                    result_type = triton_compute_type(dtype)
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
+                    )
+                else:
+                    self.suffix.writeline(
+                        f"{result_var} = {final_reduction(accumulator)}"
+                    )
         else:
             var_name = self.cse.reduction_cache[(src_dtype, reduction_type, value)]
             self.suffix.writeline(f"{result_var} = {var_name}")
@@ -1513,24 +1592,16 @@ class TritonKernel(Kernel):
         """
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
-                postfix = (
-                    "# dynamic_shapes=False" if not dynamo_config.dynamic_shapes else ""
-                )
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
                 if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    code.writeline(
-                        f"{tree.prefix}numel = {int(simplified_tree_numel)} {postfix}"
-                    )
+                    code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
                 simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if dynamo_config.dynamic_shapes:
-                    if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                        val = int(simplified_tree_numel)
-                    else:
-                        continue
-                else:
+                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
                     val = int(simplified_tree_numel)
+                else:
+                    continue
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
