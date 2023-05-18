@@ -4385,6 +4385,7 @@ else:
 
     # FIXME: move to test distributions
     @onlyCUDA
+    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_device_constrain(self, device):
         x = torch.empty(3, device="cpu")
         y = torch.empty(3, device=device)
@@ -4395,7 +4396,7 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
-    @skipIfTorchInductor("FIXME")
+    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
         y = torch.empty(3, device=devices[1])
