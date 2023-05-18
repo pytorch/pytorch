@@ -303,6 +303,17 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave(self):
+        def fn(y):
+            return torch.repeat_interleave(y, 2, output_size=8)
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        self.common(
+            fn,
+            (a,),
+        )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -350,6 +361,16 @@ class CPUReproTests(TestCase):
         a = torch.randn([2])
         b = torch.randn([2])
         self.common(fn, (a, b))
+
+    def test_scalar_sign_with_min(self):
+        # https://github.com/pytorch/pytorch/issues/101340
+        def fn(a):
+            t1 = torch.tanh(a)
+            t2 = torch.sign(t1)
+            return torch.min(t1, t2)
+
+        a = torch.randn(1, 3)
+        self.common(fn, (a,))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1321,6 +1342,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
+    @config.patch({"cpp.descriptive_names": "original_aten"})
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
@@ -1335,7 +1357,7 @@ class CPUReproTests(TestCase):
 
         kernel_profile_events = []
         for e in prof.profiler.function_events:
-            if "kernel_cpp_0" in e.name:
+            if "cpp_fused_add_0" in e.name:
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 
@@ -1462,6 +1484,19 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_non_contiguous_index_with_constant_stride(self):
+        def fn(x):
+            x1 = x[:, :, :, ::2]
+            x2 = x[:, :, :, 1::2]
+            x = torch.stack((-x2, x1), dim=-1)
+            return x.flatten(-2)
+
+        metrics.reset()
+        x = torch.randn(1, 32, 16, 68)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):

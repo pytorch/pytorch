@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set
 
 import sympy
 
@@ -418,6 +418,13 @@ class TritonOverrides(OpOverrides):
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
+
+    @staticmethod
     def trunc(x):
         return f"tl.math.trunc({x})"
 
@@ -430,6 +437,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -1639,13 +1654,29 @@ class TritonKernel(Kernel):
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
+            assignment = False
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = pexpr(tree.numel)
             else:
+                assignment = True
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {pexpr(tree.numel)}")
+                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
+                # The real fix here is to revisit our cross language calling convention.
+                code.writeline(
+                    f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
+                )
             if tree.prefix != "r" or self.inside_reduction:
-                call_args.append(expr)
+                if assignment:
+                    # We can get symbolic expressions here, like s0*64
+                    # It is fine to have them here, but we need to handle them correctly as their own type
+                    # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+                    # scalars as well.
+                    # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+                    # constant now, need type info. I agree, this needs type info, and while this is not true type info
+                    # it suffices as a type hint for the purposes of producing the correct code for this type.
+                    call_args.append(SymbolicCallArg(expr))
+                else:
+                    call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
@@ -1655,7 +1686,7 @@ class TritonKernel(Kernel):
             )
         else:
             # TODO: refactor generate_kernel_call
-            call_args_str = ", ".join(call_args)
+            call_args_str = ", ".join(str(item) for item in call_args)
             stream_name = code.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -1965,7 +1996,7 @@ class TritonScheduling:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
-                get_fused_kernel_name(node_schedule)
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names
                 else ""
             )
