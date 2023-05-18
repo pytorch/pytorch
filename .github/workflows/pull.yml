@@ -2,6 +2,8 @@ name: pull
 
 on:
   pull_request:
+    branches-ignore:
+      - nightly
   push:
     branches:
       - main
@@ -255,6 +257,20 @@ jobs:
       build-environment: linux-bionic-py3_8-clang8-xla
       docker-image: ${{ needs.linux-bionic-py3_8-clang8-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_8-clang8-xla-build.outputs.test-matrix }}
+
+  win-vs2019-cpu-py3-build:
+    name: win-vs2019-cpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2019-cpu-py3
+      cuda-version: cpu
+      sync-tag: win-cpu-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
+        ]}
 
   linux-bionic-cpu-py3_10-gcc7-bazel-test:
     name: linux-bionic-cpu-py3.10-gcc7-bazel-test

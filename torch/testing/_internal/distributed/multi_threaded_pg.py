@@ -381,7 +381,7 @@ class WorldData:
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
     pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
-    pg_object_coll_device: Dict[dist.ProcessGroup, torch.device]
+    pg_default_device: Dict[dist.ProcessGroup, torch.device]
 
 
 class ThreadLocalWorld:
@@ -437,8 +437,8 @@ class ThreadLocalWorld:
         return self._get_world().pg_coalesce_state
 
     @property
-    def pg_object_coll_device(self) -> Dict[dist.ProcessGroup, torch.device]:
-        return self._get_world().pg_object_coll_device
+    def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
+        return self._get_world().pg_default_device
 
 
 _old_pg_world = None
