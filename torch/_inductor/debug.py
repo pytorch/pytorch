@@ -97,7 +97,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
+    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused", "collective"]}
     buf_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
@@ -106,7 +106,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if snode.is_extern():
+        if isinstance(snode.node, ir.CollectiveKernel) or isinstance(snode.node, ir.Wait):
+            node_type = "collective"
+            group = node_type
+        elif snode.is_extern():
             node_type = "extern"
             group = node_type
         elif snode.is_template():

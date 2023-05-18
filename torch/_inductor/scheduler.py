@@ -678,6 +678,8 @@ class Scheduler:
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         from .debug import draw_buffers
+        if is_local():
+            draw_buffers(self.nodes, fname="pre_fusion.svg")
 
 
         comm_nodes = [n for n in self.nodes if isinstance(n.node, ir.CollectiveKernel)]
