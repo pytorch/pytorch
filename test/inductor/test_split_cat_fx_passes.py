@@ -567,7 +567,7 @@ class TestSplitCatFxPasses(TestCase):
             )
 
         def split_size_not_1(x):
-            items = [s for s in torch.split(x, 2, dim=1)]
+            items = list(torch.split(x, 2, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items)
 
