@@ -530,6 +530,11 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();
 
+  if (report_error_callback_ != nullptr) {
+    report_error_callback_->pyinterpreter()->reportErrorCallback(report_error_callback_->ptr(&report_error_callback_->pyinterpreter()), dispatchKey);
+    // reportErrorCallback should have raised an error
+    TORCH_INTERNAL_ASSERT(false);
+  }
   if (dispatchKey == DispatchKey::Undefined) {
     TORCH_CHECK_NOT_IMPLEMENTED(false,
           "There were no tensor arguments to this function (e.g., you passed an "
@@ -572,6 +577,10 @@ std::string OperatorEntry::dumpComputedTable() const {
     }
   }
   return oss.str();
+}
+
+void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback) {
+  report_error_callback_ = std::move(callback);
 }
 
 // Inspect the "canonical" information in OperatorEntry.  This only prints out

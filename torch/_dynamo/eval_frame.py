@@ -478,11 +478,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -732,7 +727,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: List[Constraint] = None,
+    constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     functionalize: bool = False,
     **kwargs,
@@ -895,7 +890,7 @@ def export(
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.warning(
+            log.info(
                 "Summary of dimension constraints:%s",
                 msg,
             )
@@ -1012,18 +1007,10 @@ def export(
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
-
         # Inline constraints added by users correspond to unbacked symbols in shape_env,
         new_graph.meta["inline_constraints"] = {
             k: v
