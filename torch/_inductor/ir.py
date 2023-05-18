@@ -3046,8 +3046,6 @@ class IndexPutFallback(ExternKernel):
     This needs to be a custom class to handle mutation and indices properly
     """
 
-    kernel = "aten.index_put_"
-
     def codegen(self, wrapper):
         (x, values, *valid_indices) = [t.codegen_reference() for t in self.inputs]
         indices = []
