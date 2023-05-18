@@ -282,6 +282,8 @@ def compile_fx_inner(
                 return compiled_fn
 
     if cudagraphs:
+        import sympy
+
         # output args are tuple of first argument
         output = list(gm.graph.nodes)[-1]
         assert len(output.args) == 1
@@ -296,11 +298,29 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
+        def _has_dynamism(t):
+            if isinstance(t, torch.Tensor):
+                if not all(isinstance(s, (int, sympy.Integer)) for s in t.size()):
+                    return True
+                if not all(isinstance(s, (int, sympy.Integer)) for s in t.stride()):
+                    return True
+            elif isinstance(t, sympy.Symbol):
+                if isinstance(t, sympy.Integer):
+                    return False
+                return True
+            return False
+
+
+        has_dynamism = any(
+            _has_dynamism(t) for t in example_inputs
+        )
+
         if (
             set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and not has_dynamism
             and all(isinstance(t, torch.Tensor) for t in example_inputs)
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
@@ -660,7 +680,7 @@ def compile_fx(
     assert not config._raise_error_for_testing
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(
-        config.triton.cudagraphs and not dynamo_config.dynamic_shapes
+        config.triton.cudagraphs
     )
     forward_device = BoxedDeviceIndex(None)
 
