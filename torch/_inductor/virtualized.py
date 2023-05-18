@@ -2,8 +2,8 @@ import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
-from unittest.mock import patch
 from typing import Any
+from unittest.mock import patch
 
 import sympy
 
@@ -77,7 +77,7 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size):
+    def indirect_indexing(index_var, size, check=True):
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -166,10 +166,17 @@ class OpsValue:
     """The turn type of most ops calls. This exists so we can do operator
     overloading.
     """
+
     value: Any
 
     def __init__(self, value):
         self.value = value
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f"OpsValue({self.value!r})"
 
     def __add__(self, other):
         return ops.add(self, other)
@@ -197,7 +204,7 @@ class OpsValue:
 
 
 class OpsWrapper:
-    def __getattr__(cls, name):
+    def __getattr__(self, name):
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
             new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
@@ -212,10 +219,11 @@ class OpsWrapper:
         return x
 
     @staticmethod
-    def indirect_indexing(index, size):
+    def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size)
+        return _ops.indirect_indexing(index, size, check)
+
 
 ops = OpsWrapper()
 

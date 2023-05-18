@@ -17,20 +17,20 @@ from .. import metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
+    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, V, OpsValue
 
-log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def data_type_logger(msg):
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Data type propagation: %s", msg)
+    if schedule_log.isEnabledFor(logging.DEBUG):
+        schedule_log.debug("Data type propagation: %s", msg)
 
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
@@ -252,16 +252,13 @@ class OpOverrides:
     def constant(value, dtype):
         return repr(value)
 
-    def reciprocal(self, x):
-        return self.div("1", x)
+    @staticmethod
+    def reciprocal(x):
+        return ops.div("1", x)
 
-    def square(self, x):
-        return self.mul(x, x)
-
-    def sign(self, x):
-        left = self.where(self.lt("0", x), "1", "0")
-        right = self.where(self.lt(x, "0"), "1", "0")
-        return self.sub(left, right)
+    @staticmethod
+    def square(x):
+        return ops.mul(x, x)
 
     @staticmethod
     def bitwise_not(x):
@@ -293,9 +290,10 @@ class OpOverrides:
     def bitwise_right_shift(x, y):
         return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
 
-    def remainder(self, a, b):
-        r = self.mod(a, b)
-        return self.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", self.add(r, b), r)
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
 
 class DeferredLine(DeferredLineBase):
@@ -430,10 +428,7 @@ class KernelArgs:
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
-                if val.is_integer:
-                    buffer_types[name] = torch.int64
-                else:
-                    buffer_types[name] = torch.float64
+                buffer_types[name] = get_sympy_Expr_dtype(val)
             else:
                 buffer_types[name] = val.get_dtype()
         buffer_types.update(
@@ -610,10 +605,13 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: typing.Union[str, CSEVariable],
+        expr: typing.Union[str, CSEVariable, OpsValue],
         write=True,
         assignment=True,
     ) -> CSEVariable:
+        if isinstance(expr, OpsValue):
+            expr = expr.value
+
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
@@ -738,8 +736,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size):
-                return sympy_symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
