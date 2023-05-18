@@ -864,14 +864,8 @@ class TestFunctionalIterDataPipe(TestCase):
                 # pydoc works differently on Python 3.8, see
                 # https://docs.python.org/3/whatsnew/3.9.html#pydoc
                 docstring = getattr(input_dp, dp_funcname).__doc__
-            try:
-                assert f"(functional name: ``{dp_funcname}``)" in docstring
-            except AssertionError:
-                print("***Begin docstring for", dp_funcname)
-                print(docstring)
-                print("***End docstring for", dp_funcname)
-                raise ValueError(dp_funcname, "IterDataPipe docstring incorrect")
 
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
             assert "Args:" in docstring
             assert "Example:" in docstring or "Examples:" in docstring
 
