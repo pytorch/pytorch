@@ -328,7 +328,6 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
-    # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
@@ -1526,6 +1525,9 @@ class DimConstraints:
         # printer for solutions
         self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
 
+        # inconsistencies found on substituting with concrete values / static solutions
+        self._inconsistencies: List[str] = []
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1590,7 +1592,13 @@ class DimConstraints:
             return
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
-        assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
+        # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
+        # It is possible that `expr` will fail the consistency check because of
+        # precision errors. Specifically, on substituting its free symbols with
+        # their concrete values, we might end up comparing floats. Until we have
+        # a fix for this issue, we delay raising such failures. See solve().
+        if orig_reduced == sympy.false:
+            self._inconsistencies.append(f"{orig_expr} is inconsistent!")
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1603,7 +1611,11 @@ class DimConstraints:
             expr = self.rewrite_with_congruences(s, expr)
             if expr != sympy.true:
                 reduced = expr.subs(self._var_to_val)
-                assert reduced != sympy.false, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
+                if reduced == sympy.false:
+                    self._inconsistencies.append(
+                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                        "is inconsistent!"
+                    )
                 if isinstance(expr, sympy.Eq):
                     # special status for symbols that have equalities (see `solve` below)
                     self._symbols_with_equalities.add(s)
@@ -1658,7 +1670,14 @@ class DimConstraints:
 
         return reduced_congruences
 
+    def raise_inconsistencies(self):
+        if self._inconsistencies:
+            msg = "\n".join(self._inconsistencies)
+            self._inconsistencies.clear()
+            raise ValueError(f"The following inconsistencies were found:\n{msg}")
+
     def solve(self):
+        self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
         while(self._symbols_with_equalities):
@@ -1680,6 +1699,7 @@ class DimConstraints:
             self._multivariate_inequalities = set()
             for expr in multivariate_inequalities:
                 self.add(expr.subs(s, self._substitutions[s]))
+            self.raise_inconsistencies()
 
             # simplify symbolic equivalences: some of them will now become specializations!
             symbolic_equivalences = self._symbolic_equivalences
@@ -1723,6 +1743,11 @@ class DimConstraints:
         def unwrap_local_source(source_name):
             return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
 
+        # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
+        # There is no change in behavior since 2 is the default lower bound.
+        def remove_default_lower_bound(dc):
+            return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
+
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
 
         buf = ""
@@ -1741,7 +1766,7 @@ class DimConstraints:
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{unwrap_local_source(result)},"
+                buf += f"\n{indent*2}{remove_default_lower_bound(unwrap_local_source(result))},"
             buf += f"\n{indent}]\n```\n"
         return buf
 
@@ -2036,7 +2061,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:

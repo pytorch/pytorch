@@ -370,15 +370,12 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
-        elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
-        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
-            assert "device_type" not in kwargs
-            if self.value is torch.cuda.amp.autocast:
-                kwargs.update({"device_type": ConstantVariable("cuda")})
-            else:
-                kwargs.update({"device_type": ConstantVariable("cpu")})
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]:
+            return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -583,7 +580,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
                 if isinstance(tensor_variable, TupleVariable):
-                    assert isinstance(kwargs["out"], TupleVariable)
+                    assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
                     output_tensor_names = [
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
@@ -771,7 +768,7 @@ class TorchHigherOrderOperator(VariableTracker):
             next_name = None
             i = 0
             while not next_name:
-                candidate = f"cond_{name}_{i}"
+                candidate = f"{name}_{i}"
                 if candidate in tx.output.nn_modules:
                     i += 1
                 else:
@@ -1055,11 +1052,11 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             true_name = add_subgraph(
-                "true",
+                "cond_true",
                 torch.fx.GraphModule(true_nn_modules_context.nn_modules, true_graph),
             )
             false_name = add_subgraph(
-                "false",
+                "cond_false",
                 torch.fx.GraphModule(false_nn_modules_context.nn_modules, false_graph),
             )
 
@@ -1125,7 +1122,7 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body",
+                "map_body",
                 torch.fx.GraphModule(body_nn_modules_context.nn_modules, body_graph),
             )
 
@@ -1172,7 +1169,7 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+                "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
             body_node = make_attr(body_name)
             p_args = (
