@@ -34,30 +34,6 @@ inline Vectorized<BFloat16> convert_float_bfloat16(
   return Vectorized<BFloat16>::loadu(arr2);
 }
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(
-    const Vectorized<Half>& a) {
-  constexpr int64_t K = Vectorized<Half>::size();
-  __at_align__ float arr[K];
-  __at_align__ Half arr2[K];
-  a.store(arr2);
-  convert(arr2, arr, K);
-  return std::make_tuple(
-       Vectorized<float>::loadu(arr),
-       Vectorized<float>::loadu(arr + Vectorized<float>::size()));
-}
-
-inline Vectorized<Half> convert_float_half(
-    const Vectorized<float>& a, const Vectorized<float>& b) {
-  constexpr int64_t K = Vectorized<Half>::size();
-  __at_align__ float arr[K];
-  __at_align__ Half arr2[K];
-  a.store(arr);
-  b.store(arr + Vectorized<float>::size());
-  convert(arr, arr2, K);
-  return Vectorized<Half>::loadu(arr2);
-};
-
-
 inline void load_fp32_from_bf16(const c10::BFloat16* data, Vectorized<float>& out) {
   __at_align__ float values[Vectorized<float>::size()];
   for (const auto k : c10::irange(Vectorized<float>::size())) {
