@@ -41,7 +41,7 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
 def lazy_init():
     if config.is_fbcode():
 
-        from .fb import split_cat # noqa: F401
+        from .fb import split_cat  # noqa: F401
 
 
 def pre_grad_passes(gm, example_inputs):

@@ -23,13 +23,11 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternExpr,
     register_graph_pattern,
-    ListOf,
     RepeatedExpr,
-    KeywordArg,
 )
 from .pre_grad import (
-    merge_splits_pass,
     merge_split_cat_pass,
+    merge_splits_pass,
     normalize_split_pass,
     split_squeeze_pass,
     unbind_stack_pass,
