@@ -600,7 +600,7 @@ class TestSplitCatFxPasses(TestCase):
             )
 
         def split_size_not_1(x):
-            items = [s for s in torch.split(x, 2, dim=1)]
+            items = list(torch.split(x, 2, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items)
 
@@ -659,17 +659,17 @@ class TestSplitCatFxPasses(TestCase):
             return torch.stack(torch.unbind(x, dim=1), 0)
 
         def split_squeeze_stack(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items, 1)
 
         def other_users(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items, 1), torch.relu(items[0])
 
         def other_users_2(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items, 1), torch.relu(items[0])
 

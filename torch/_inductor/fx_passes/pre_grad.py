@@ -33,14 +33,13 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     merge_splits_pass,
     merge_split_cat_pass,
     split_squeeze_pass,
-    unbind_stack_pass
+    unbind_stack_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
     if config.is_fbcode():
-
         from .fb import split_cat  # noqa: F401
 
 
