@@ -9,7 +9,7 @@ from copy import deepcopy
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
-from functorch.compile import min_cut_rematerialization_partition
+from torch._functorch.partitioners import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
 
