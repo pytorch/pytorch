@@ -459,7 +459,7 @@ def _export_fx_node_to_onnxscript(
         raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
 
 
-@_beartype.beartype
+# @_beartype.beartype
 @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
 def export_fx_to_onnxscript(
     diagnostic_context: diagnostics.DiagnosticContext,
