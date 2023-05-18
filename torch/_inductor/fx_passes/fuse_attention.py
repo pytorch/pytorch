@@ -417,3 +417,5 @@ def _sfdp_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
+
+    counters["inductor"].clear()  # clear view matches encountered during sdpa tracing

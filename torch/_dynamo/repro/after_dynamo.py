@@ -7,7 +7,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.fx as fx
@@ -189,11 +189,6 @@ def generate_dynamo_fx_test_from_repro_string(
     gm,
     args,
     compiler_name,
-    check_accuracy=False,
-    *,
-    stable_output=False,
-    save_dir=None,
-    command="run",
 ):
     """
     Generate a test string for backend-agnostic minified version.
@@ -201,8 +196,7 @@ def generate_dynamo_fx_test_from_repro_string(
 
     model_str = NNModuleToString.convert(gm, imports=False)
 
-    # TODO: Figure out why torch.compile'd hash isn't work on this codepath
-    writer = TestInputWriter(save_dir, stable_hash=True)
+    writer = TestInputWriter()
     for placeholder, arg in zip(fx_placeholder_targets(gm), args):
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
@@ -227,18 +221,20 @@ from torch.nn import *
 import torch._dynamo.test_case
 import torch._dynamo.testing
 
-{generate_config_string(stable_output=stable_output)}
+{generate_config_string(stable_output=False)}
 
 {extra_imports}
 
 class GeneratedReproTestCase(torch._dynamo.test_case.TestCase):
     def test_generated_repro_case(self):
         {textwrap.indent(model_str, ' ' * 8)}
-        mod = Repro()
 
         {load_args}
         # TODO(voz): Add dynamic, nopython, and all sorts of other configs
-        torch._dynamo.optimize({compiler_name!r})(mod)({storage_names})
+        optimized_result = torch._dynamo.optimize({compiler_name!r})(Repro())({storage_names})
+        eager_result = Repro()({storage_names})
+        self.assertEqual(optimized_result, eager_result)
+
 
 if __name__ == '__main__':
     from torch._dynamo.test_case import run_tests
@@ -258,36 +254,26 @@ def dump_backend_repro_as_file(
     subdir = os.path.join(os.getcwd(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    file_name = os.path.join(subdir, f"minified_{len(gm.graph.nodes)}_nodes.py")
+    file_name = os.path.join(
+        subdir,
+        f"minified_{'test_' if produce_test else ''}{len(gm.graph.nodes)}_nodes.py",
+    )
     log.warning(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
 
-    if produce_test:
-        test_file_name = os.path.join(
-            subdir, f"test_from_minified_{len(gm.graph.nodes)}_nodes.py"
-        )
-        with open(test_file_name, "w") as fd:
+    with open(file_name, "w") as fd:
+        if produce_test:
+            fd.write(generate_dynamo_fx_test_from_repro_string(gm, args, compiler_name))
+        else:
             fd.write(
-                generate_dynamo_fx_test_from_repro_string(
+                generate_dynamo_fx_repro_string(
                     gm, args, compiler_name, check_accuracy, save_dir=subdir
                 )
             )
 
-    with open(file_name, "w") as fd:
-        fd.write(
-            generate_dynamo_fx_repro_string(
-                gm, args, compiler_name, check_accuracy, save_dir=subdir
-            )
-        )
-    latest_repro = os.path.join(curdir, "repro.py")
+    latest_repro = os.path.join(curdir, "test.py" if produce_test else "repro.py")
     log.warning("Copying %s to %s for convenience", file_name, latest_repro)
-    if produce_test:
-        latest_test = os.path.join(curdir, "repro_test.py")
-        log.warning(
-            "Copying test %s to %s for convenience", test_file_name, latest_test
-        )
-        shutil.copyfile(test_file_name, latest_test)
 
     if use_buck:
         BuckTargetWriter(latest_repro).write()
@@ -471,7 +457,7 @@ def repro_common(options, mod, load_args):
     return args
 
 
-def repro_minify(options, mod, load_args):
+def repro_minify(options, mod, load_args, *, produce_test=False):
     args = repro_common(options, mod, load_args)
 
     # Setup debug minifier compiler
@@ -489,7 +475,7 @@ def repro_minify(options, mod, load_args):
         )
 
     dynamo_minifier_backend = functools.partial(
-        compiler_fn, compiler_name=options.backend, produce_test=options.produce_test
+        compiler_fn, compiler_name=options.backend, produce_test=produce_test
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
@@ -584,12 +570,6 @@ default settings on this script:
             help="don't use any directory for saved inputs",
         )
         parser.add_argument(
-            "--produce_test",
-            action="store_true",
-            help="Generate a unit test.",
-            default=False,
-        )
-        parser.add_argument(
             "--no-isolate",
             dest="isolate",
             action="store_false",
@@ -617,7 +597,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify}", required=True
+        dest="command", metavar="{run,minify,produce-test}", required=True
     )
 
     parser_run = subparsers.add_parser(
@@ -631,13 +611,23 @@ default settings on this script:
     )
     common_flags(parser_minify)
 
+    parser_produce_test = subparsers.add_parser(
+        "produce-test", help="run the minifier on the repro"
+    )
+    common_flags(parser_produce_test)
+
     args = None
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
+
+    produce_test: Callable[[Any], Any] = functools.partial(
+        repro_minify, produce_test=True
+    )
 
     options = parser.parse_args(args)
     COMMAND_FNS = {
         "minify": repro_minify,
         "run": repro_run,
+        "produce-test": produce_test,
     }
-    COMMAND_FNS[options.command](options, mod, load_args)
+    COMMAND_FNS[options.command](options, mod, load_args)  # type: ignore[operator]

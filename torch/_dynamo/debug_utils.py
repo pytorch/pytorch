@@ -9,7 +9,7 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import torch
 import torch._prims_common as utils
@@ -583,7 +583,6 @@ class InputReader:
 class InputWriter:
     def __init__(self, save_dir, *, stable_hash=False):
         self._lines = []
-        self._storage_names = []
         # TODO: consider ensuring tensor and storage counters line up?
         self.storage_counter = itertools.count()
         self.save_dir = save_dir
@@ -676,10 +675,17 @@ class InputWriter:
 
 
 class TestInputWriter(InputWriter):
+    def __init__(self):
+        super().__init__(save_dir=None, stable_hash=False)
+        self._storage_names = []
+
     def lines(self):
-        r = []
+        r: List[str] = []
         r.extend(f"{l}" for l in self._lines)
         return r
+
+    def storage_names(self):
+        return self._storage_names
 
     def tensor(self, name, t) -> None:
         storage = self.storage(

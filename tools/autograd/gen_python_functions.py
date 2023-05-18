@@ -89,10 +89,6 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
-    "sym_size",
-    "sym_stride",
-    "sym_storage_offset",
-    "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
@@ -365,7 +361,9 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+                "".join(
+                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
+                )
             )
         }
 

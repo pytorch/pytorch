@@ -196,7 +196,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch
         if: always()
