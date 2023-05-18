@@ -221,7 +221,7 @@ static void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool r
   }
 }
 
-static void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
+void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
       isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));

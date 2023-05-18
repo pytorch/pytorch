@@ -31,7 +31,7 @@ struct CPUVecKernel {
 
 }
 
-static void _validate_compressed_sparse_indices_cpu(
+void _validate_compressed_sparse_indices_cpu(
     const bool is_crow,
     const Tensor& cidx,
     const Tensor& idx,

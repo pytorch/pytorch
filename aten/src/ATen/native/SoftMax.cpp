@@ -649,7 +649,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   return output;
 }
 
-static Tensor masked_softmax_backward_cpu(
+Tensor masked_softmax_backward_cpu(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,
