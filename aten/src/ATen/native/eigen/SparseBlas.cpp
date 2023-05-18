@@ -1,9 +1,14 @@
 #include <ATen/native/eigen/SparseBlas.h>
 
-#include <ATen/Dispatch.h>
 #include <ATen/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
+#endif
 
 #include <c10/core/ScalarType.h>
 
