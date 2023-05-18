@@ -639,6 +639,7 @@ class UnbindCatRemover(SplitCatSimplifier):
     other cases like multiple users, additional args, dim mismatch are similar to `SplitCatSimplifier`,
     hence we extend that class.
     """
+
     def remove_unbind(
         self,
         graph: torch.fx.Graph,
