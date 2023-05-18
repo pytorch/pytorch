@@ -37,8 +37,11 @@ def read_models_and_batch_sizes():
         lines = fh.readlines()
         lines = [line.rstrip() for line in lines]
         for line in lines:
-            if line:
+            if "," in line:
                 model_name, batch_size = line.split(",")
+                TIMM_MODELS[model_name] = int(batch_size)
+            if " " in line:
+                model_name, batch_size = line.split(" ")
                 TIMM_MODELS[model_name] = int(batch_size)
         
     return TIMM_MODELS
