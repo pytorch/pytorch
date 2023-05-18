@@ -339,10 +339,10 @@ Tensor& gather_out(const Tensor& self, Dimname dim, const Tensor& index, bool sp
 Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
+static Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
-Tensor& index_add_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha, Tensor& result) {
+static Tensor& index_add_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha, Tensor& result) {
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
@@ -372,19 +372,19 @@ Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+static Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
-Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
+static Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   reportNYIDimnameOverload("scatter");
 }
 Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
-Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+static Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("scatter_add");
 }
 std::tuple<Tensor&, Tensor&> sort_out(const Tensor& self, c10::optional<bool> stable, Dimname dim, bool keepdim, Tensor& values, Tensor& indices) {
