@@ -122,8 +122,8 @@ except ImportError:
     _UCC_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-global _c10d_error_logger
-_c10d_error_logger = _get_or_create_logger()
+global _c10d_logger
+_c10d_logger = _get_or_create_logger()
 
 
 def exception_handler(func):
@@ -148,9 +148,35 @@ def exception_handler(func):
                     "args": f"{args}, {kwargs}",
                     "error": f"{error}",
                 }
-            _c10d_error_logger.debug(error_msg_dict)
+            _c10d_logger.debug(error_msg_dict)
             raise
     return wrapper
+
+
+def time_handler(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        func(*args, **kwargs)
+
+        if is_initialized():
+            msg_dict = {
+                "func_name": f"{func.__name__}",
+                "args": f"{args}, {kwargs}",
+                "backend": f"{get_backend(kwargs.get('group'))}",
+                "world_size": f"{get_world_size(kwargs.get('group'))}",
+                "global_rank": f"{get_rank()}",
+                "local_rank": f"{get_rank(kwargs.get('group'))}",
+                "pg_group_ranks": f"{get_process_group_ranks(kwargs.get('group'))}",
+            }
+        else:
+            msg_dict = {
+                "func_name": f"{func.__name__}",
+                "args": f"{args}, {kwargs}",
+            }
+        _c10d_logger.debug(msg_dict)
+
+    return wrapper
+
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
