@@ -139,7 +139,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -243,7 +243,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void frac_kernel(TensorIteratorBase& iter) {
+static void frac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -252,7 +252,7 @@ void frac_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void logical_not_kernel(TensorIteratorBase& iter) {
+static void logical_not_kernel(TensorIteratorBase& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
@@ -283,7 +283,7 @@ void neg_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void sign_kernel(TensorIteratorBase& iter){
+static void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
@@ -559,7 +559,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
-void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
         bool neg_flag = false;
