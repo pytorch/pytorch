@@ -171,7 +171,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+static Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
     return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -179,7 +179,7 @@ Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
-Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
+static Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
