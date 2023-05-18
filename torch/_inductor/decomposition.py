@@ -212,6 +212,8 @@ def should_pad_bench_impl(mat1, mat2, op, input=None):
 
         if mat1.layout != torch.strided or mat2.layout != torch.strided:
             return False
+    
+        return True
 
         mat1 = randn_like(mat1)
         mat2 = randn_like(mat2)
