@@ -301,7 +301,6 @@ class TestPaternMatcher(TestCase):
             pass_dict=test_pass,
         )
         def _test(match, x):
-            breakpoint()
             nonlocal counter
             counter += 1
 
