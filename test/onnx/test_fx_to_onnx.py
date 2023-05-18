@@ -166,7 +166,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             diagnostics.rules.fx_node_to_onnx,
             diagnostics.levels.WARNING,
             expected_error_node="aten.convolution.default",
-            expected_error_message="ValueError: You passed in an iterable attribute but I cannot figure out its applicable type.",
+            expected_error_message="ValueError: Could not infer the attribute type from the elements of the passed Iterable value.",
         )
 
 
