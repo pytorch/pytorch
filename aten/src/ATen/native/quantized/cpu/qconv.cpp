@@ -1059,7 +1059,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 }
 
 #ifdef USE_XNNPACK
-bool can_use_xnnp(
+static bool can_use_xnnp(
     c10::ScalarType dtype,
     int kSpatialDim,
     bool per_channel,

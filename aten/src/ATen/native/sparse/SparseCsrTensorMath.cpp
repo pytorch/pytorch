@@ -26,7 +26,11 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_prod_native.h>
+#include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -459,7 +463,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-static CREATE_UNARY_UFUNC(relu);
+CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -771,7 +775,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       1.0);
 }
 
-static Tensor _sparse_csr_addmm(
+Tensor _sparse_csr_addmm(
     const Tensor& t,
     const SparseCsrTensor& sparse,
     const Tensor& dense,
@@ -1265,7 +1269,7 @@ struct ReductionMulOp {
 
 }  // namespace
 
-static Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
@@ -1277,7 +1281,7 @@ static Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, 
   return result;
 }
 
-static Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
@@ -1289,7 +1293,7 @@ static Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_redu
   return result;
 }
 
-static std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
     const c10::string_view reduce) {
@@ -1340,7 +1344,7 @@ static std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
   return std::make_tuple(std::move(out), std::move(arg_out));
 }
 
-static std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
+std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,

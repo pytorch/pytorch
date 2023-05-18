@@ -27,6 +27,7 @@
 #include <ATen/ops/_batch_norm_impl_index_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/_native_batch_norm_legit_no_training.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
