@@ -640,6 +640,39 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Te
     return P, L, U
 
 
+@register_meta([aten.linalg_lu_factor_ex.default, aten.linalg_lu_factor_ex.out])
+@out_wrapper("LU", "pivots", "info")
+def linalg_lu_factor_ex_meta(
+    A: Tensor, *, pivot: bool = True, check_errors: bool = False
+) -> Tuple[Tensor, Tensor, Tensor]:
+    check(
+        A.ndim >= 2,
+        lambda: f"torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
+    )
+
+    sizes = list(A.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+
+    LU = torch.empty_strided(
+        size=sizes,
+        stride=make_contiguous_strides_for(sizes, row_major=False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+
+    # Sets sizes to the size of pivots
+    sizes.pop()
+    sizes[-1] = min(m, n)
+    pivots = A.new_empty(sizes, dtype=torch.int)
+
+    # Sets sizes to the size of info
+    sizes.pop()
+    info = A.new_empty(sizes, dtype=torch.int)
+
+    return LU, pivots, info
+
+
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
 def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
     if mode == "reduced":
@@ -1468,11 +1501,7 @@ def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
-# Leaving this function around because a python implementation
-# of indexing shape inference is useful,
-# but not registering it to the dispatcher because we already
-# get shape inference through structured kernels
-@register_meta(aten.index.Tensor)
+@register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -3510,6 +3539,15 @@ def t_(self):
         ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
 
     return transpose_(self, 0, 0 if ndims < 2 else 1)
+
+
+@register_meta([aten.searchsorted.Tensor, aten.searchsorted.Tensor_out])
+@out_wrapper()
+def meta_searchsorted(
+    sorted_sequence, self, *, out_int32=False, right=False, side=None, sorter=None
+):
+    dtype = torch.int32 if out_int32 else torch.int64
+    return torch.empty_like(self, dtype=dtype).contiguous()
 
 
 # We must also trigger meta registrations from PrimTorch ref
