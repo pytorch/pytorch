@@ -107,7 +107,7 @@ Tensor _test_autograd_multiple_dispatch_view(const Tensor &self) {
   return self.view(-1);
 }
 
-static Tensor _test_check_tensor(const Tensor& self) {
+Tensor _test_check_tensor(const Tensor& self) {
   TORCH_CHECK_TENSOR_ALL(self, "Test message for TORCH_CHECK_TENSOR_ALL");
   return self.clone();
 }
