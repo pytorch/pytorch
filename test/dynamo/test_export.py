@@ -1893,7 +1893,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
-    def test_pre_autograd_simple(self):
+    def test_pre_dispatch_simple(self):
         def f(x):
             y = torch.ones_like(x)
             return torch.matmul(x, y)
@@ -1902,7 +1902,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             f,
             torch.randn(5, 5),
             aten_graph=True,
-            pre_autograd=True,
+            pre_dispatch=True,
             tracing_mode="fake",
         )
 
