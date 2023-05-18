@@ -141,7 +141,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
     def test_non_foreach_producer(self):
@@ -160,7 +160,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
     def test_non_foreach_consumer_producer(self):
