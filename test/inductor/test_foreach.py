@@ -34,6 +34,7 @@ class ForeachTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
+    @requires_cuda()
     def test_single(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
