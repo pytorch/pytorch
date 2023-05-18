@@ -9,20 +9,21 @@ from .triton_utils import config_of, signature_of
 
 
 class ForeachKernel(Kernel):
+    MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
+
     @staticmethod
     def horizontal_partition(nodes):
         """Generates a list of list of nodes where each node sublist is
         guaranteed to not exceed CUDA limits for number of args (read/writes)."""
         assert len(nodes) >= 1
 
-        MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
         cur_count = 0
         partitions = []
         cur_partition = []
         for node in nodes:
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
-            if cur_count + read_write_count > MAX_NUM_ARGS:
+            if cur_count + read_write_count > ForeachKernel.MAX_NUM_ARGS:
                 partitions.append(cur_partition)
                 cur_partition = [node]
                 cur_count = read_write_count

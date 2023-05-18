@@ -104,27 +104,85 @@ class ForeachTests(TestCase):
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     def test_kernel_split_arg_limit(self):
-        pass
+        def fn(a, b):
+            return torch._foreach_add(a, b)
+
+        fn_opt = torch._dynamo.optimize()(fn)
+
+        max_args = 370
+        max_list_len = (max_args // 3) + 1
+        inputs = (
+            [torch.rand(10, 10, device="cuda:0") for _ in range(max_list_len)],
+            [torch.rand(10, 10, device="cuda:0") for _ in range(max_list_len)],
+        )
+
+        actual = fn_opt(*inputs)
+        expected = fn(*inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
     def test_non_foreach_consumer(self):
-        pass
+        def fn(a0, a1, b0, b1):
+            c = torch._foreach_add([a0, a1], [b0, b1])
+            return torch.mul(c[0], a0)
+
+        self.check_model(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
     def test_non_foreach_producer(self):
-        pass
+        def fn(a0, a1, b0, b1):
+            c0 = torch.mul(a0, b0)
+            c1 = torch.mul(a1, b1)
+            return torch._foreach_add([a0, a1], [c0, c1])
+
+        self.check_model(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
     def test_non_foreach_consumer_producer(self):
-        pass
+        def fn(a0, a1, b0, b1):
+            c0 = torch.mul(a0, b0)
+            c1 = torch.mul(a1, b1)
+            d = torch._foreach_add([a0, a1], [c0, c1])
+            e0 = torch.mul(d[0], a0)
+            e1 = torch.mul(d[1], a1)
+            return [e0, e1]
 
-    @requires_cuda()
-    def test_scalar_overloads(self):
-        pass
+        self.check_model(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(20, 20, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
 
 if __name__ == "__main__":
