@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+@config.patch(fallback_random=True)
 class TestSDPAPatternRewriter(TestCase):
     def _clone_inputs(self, inputs):
         def clone(x):
@@ -22,7 +23,6 @@ class TestSDPAPatternRewriter(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    @config.patch(fallback_random=True, lowmem_dropout=False)
     def _check_common(
         self,
         dot_prod_attention,
@@ -30,6 +30,7 @@ class TestSDPAPatternRewriter(TestCase):
         contains=True,
         atol=1e-5,
         has_fuse_pattern=True,
+        has_dropout=False,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
@@ -60,13 +61,18 @@ class TestSDPAPatternRewriter(TestCase):
                 self.assertIn(
                     "aten._scaled_dot_product_efficient_attention", source_code
                 )
-            self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
+            if not has_dropout:
+                self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
                 result1.sum().backward()
                 result2.sum().backward()
                 for arg1, arg2 in zip(args1, args2):
-                    if isinstance(arg1, torch.Tensor) and arg1.is_floating_point():
+                    if (
+                        isinstance(arg1, torch.Tensor)
+                        and arg1.is_floating_point()
+                        and not has_dropout
+                    ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
     def test_sdpa_rewriter_1(self):
@@ -83,7 +89,6 @@ class TestSDPAPatternRewriter(TestCase):
 
         self._check_common(dot_prod_attention)
 
-    @config.patch(fallback_random=True, lowmem_dropout=False)
     def test_pattern_fails_with_reuse(self):
         """
         This test checks that the replacement is not done
@@ -134,7 +139,7 @@ class TestSDPAPatternRewriter(TestCase):
                 inplace=False,
             ).matmul(value)
 
-        self._check_common(dot_prod_attention, contains=False)
+        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
     def test_sdpa_rewriter_4(self):
         def dot_prod_attention(
@@ -147,7 +152,7 @@ class TestSDPAPatternRewriter(TestCase):
                 inplace=False,
             ).matmul(value)
 
-        self._check_common(dot_prod_attention, contains=False)
+        self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
     def test_sdpa_rewriter_5(self):
         def sfdp_pattern_5_v1(query, key, value):
@@ -192,9 +197,8 @@ class TestSDPAPatternRewriter(TestCase):
             attn_weight = torch.dropout(attn_weight, 0.5, True)
             return attn_weight @ value
 
-        self._check_common(sfdp_pattern_6, contains=False)
+        self._check_common(sfdp_pattern_6, contains=False, has_dropout=True)
 
-    @config.patch(fallback_random=True, lowmem_dropout=False)
     def test_pattern_fails_with_tensor_factor(self):
         # https://github.com/pytorch/pytorch/issues/99124
         class Model(torch.nn.Module):

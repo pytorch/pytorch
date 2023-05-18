@@ -52,6 +52,7 @@ from .utils import (
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
+    pad_listlike,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -110,7 +111,6 @@ def validate_ir(node_or_nodes):
                 (
                     DynamicScalar,
                     TensorBox,
-                    RandSeedBuffer,
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
@@ -2147,13 +2147,6 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
-class RandSeedBuffer(ConstantBuffer):
-    def codegen_reference(self):
-        # Clone makes sure if we pass this from forwards to backwards
-        # the value does not get clobbered by the time backwards is run.
-        return self.get_name() + ".clone()"
-
-
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return V.graph.wrapper_code.none_str
@@ -2921,6 +2914,21 @@ class ExternKernelOut(ExternKernel):
         return True
 
 
+class RandomSeeds(ExternKernelOut):
+    def __init__(self, count: int, device: torch.device):
+        limits = torch.iinfo(torch.int64)
+        super().__init__(
+            layout=FixedLayout(
+                device=device,
+                dtype=torch.int64,
+                size=[count],
+            ),
+            inputs=[],
+            constant_args=[limits.min, limits.max, [count]],
+            kernel="aten.randint.low_out",
+        )
+
+
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         args = [*self.codegen_args(), *self.codegen_kwargs()]
@@ -3329,12 +3337,12 @@ def _prepare_convolution_fusion_create(
     x: "TensorBox",
     weight: "TensorBox",
     bias: "TensorBox",
-    padding_: List[int],
-    stride_: List[int],
-    dilation_: List[int],
+    padding: List[int],
+    stride: List[int],
+    dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding_: List[int] = None,
+    output_padding: List[int] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -3389,16 +3397,24 @@ def _prepare_convolution_fusion_create(
             weight_size = prepacked_weight.transpose(0, 1).size()
         return weight_size
 
-    stride = tuple(stride_)
-    padding = tuple(padding_)
-    dilation = tuple(dilation_)
-    assert isinstance(groups, int)
-    output_padding = tuple(output_padding_) if output_padding_ else (0, 0)
     x.realize()
     weight.realize()
     with V.graph.fake_mode:
         x_fake = ir_node_to_tensor(x, guard_shape=True)
         weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        dims = len(x_fake.size()) - 2
+        assert 0 < len(padding) <= dims
+        assert 0 < len(dilation) <= dims
+        assert 0 < len(stride) <= dims
+        padding = pad_listlike(padding, dims)
+        dilation = pad_listlike(dilation, dims)
+        stride = pad_listlike(stride, dims)
+        if output_padding is None:
+            output_padding = pad_listlike([0], dims)
+        else:
+            assert 0 < len(output_padding) <= dims
+            output_padding = pad_listlike(output_padding, dims)
+        assert isinstance(groups, int)
         if transposed:
             # When transposed, the size of the prepacked oneDNN weight is different
             # from the PyTorch weight. We're not able to run aten conv with such
