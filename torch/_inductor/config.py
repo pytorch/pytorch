@@ -267,7 +267,7 @@ class triton:
 
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
-    autotune_pointwise = True
+    autotune_pointwise = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
