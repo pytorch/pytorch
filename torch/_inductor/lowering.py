@@ -2874,17 +2874,20 @@ def max_pool2d_with_indices(
 ):
     if padding == 0:
         padding = [0, 0]
+    if dilation == 1:
+        dilation = [1, 1]
     if not stride:
         stride = kernel_size
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
+    dilation = pad_listlike(dilation, 2)
 
-    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert len(padding) == 2
+    assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
     x.realize_hint()
@@ -2901,7 +2904,7 @@ def max_pool2d_with_indices(
     new_size = list(batch) + [h_out, w_out]
     window_size = kernel_size[0] * kernel_size[1]
 
-    if window_size > 25:
+    if window_size > 25 or any(d != 1 for d in dilation):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
@@ -2957,14 +2960,16 @@ def max_pool2d_with_indices_backward(
 ):
     if padding == 0:
         padding = [0, 0]
+    if dilation == 1:
+        dilation = [1, 1]
     if not stride:
         stride = kernel_size
 
-    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert len(padding) == 2
+    assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
     # we will read this many times, so make sure it is computed
@@ -2995,8 +3000,8 @@ def max_pool2d_with_indices_backward(
             x_stride = None
     if (
         (x_stride is not None and x_stride[1] == 1)
-        or gO_stride is not None
-        and gO_stride[1] == 1
+        or (gO_stride is not None and gO_stride[1] == 1)
+        or any(d != 1 for d in dilation)
     ):
         # don't codegen channels-last, it's very slow
         return fallback_max_pool2d_with_indices_backward(
