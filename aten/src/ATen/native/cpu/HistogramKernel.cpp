@@ -302,7 +302,7 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
 static void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
         std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
-        infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);         
+        infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
     });
 }
 

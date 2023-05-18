@@ -177,7 +177,7 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         }
     } else if (input.numel() > 0) {
         // non-empty input
-        
+
         histogram_select_outer_bin_edges_stub(input.device().type(), input, N, leftmost_edges, rightmost_edges);
     }
 
