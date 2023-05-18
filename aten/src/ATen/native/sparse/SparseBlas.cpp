@@ -92,7 +92,7 @@ Tensor& addmv_out_sparse_compressed(
   * `X` - dense Tensor of size m × nrhs.
   * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
 */
-std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
+static std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
     const Tensor& B,
     const Tensor& A,
     bool upper,

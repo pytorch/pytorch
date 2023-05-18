@@ -346,7 +346,7 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 // TODO: Check what happens with MKL, the output error reported with non square
 // matrices tends to be high See:
 // https://github.com/pytorch/pytorch/issues/58770
-bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
+static bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
@@ -460,7 +460,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -772,7 +772,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       1.0);
 }
 
-Tensor _sparse_csr_addmm(
+static Tensor _sparse_csr_addmm(
     const Tensor& t,
     const SparseCsrTensor& sparse,
     const Tensor& dense,
@@ -802,7 +802,7 @@ Tensor& add_sparse_csr_(
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-void add_out_dense_sparse_csr_cpu(
+static void add_out_dense_sparse_csr_cpu(
     const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,
@@ -1266,7 +1266,7 @@ struct ReductionMulOp {
 
 }  // namespace
 
-Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+static Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
@@ -1278,7 +1278,7 @@ Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool ke
   return result;
 }
 
-Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+static Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
@@ -1290,7 +1290,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
   return result;
 }
 
-std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
+static std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
     const c10::string_view reduce) {
@@ -1341,7 +1341,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
   return std::make_tuple(std::move(out), std::move(arg_out));
 }
 
-std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
+static std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
