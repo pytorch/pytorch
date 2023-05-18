@@ -440,7 +440,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
   }
 }
 
-Tensor softmax(const Tensor& input_, const int64_t dim_) {
+static Tensor softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_softmax(input_, dim_, false);
@@ -505,7 +505,7 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<S
   return at::softmax(input_, dim_, dtype);
 }
 
-Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
+static Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_log_softmax(input_, dim_, false);
@@ -648,7 +648,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   return output;
 }
 
-Tensor masked_softmax_backward_cpu(
+static Tensor masked_softmax_backward_cpu(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,
