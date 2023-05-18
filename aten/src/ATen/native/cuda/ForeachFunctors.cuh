@@ -21,9 +21,9 @@ template<int depth, typename T>
 __device__ bool init_args(
     T** args,
     TensorListMetadata<depth>& tl,
-    int chunk_idx,
-    int chunk_size,
-    int tensor_loc) {
+    const int64_t chunk_idx,
+    const int64_t chunk_size,
+    const int64_t tensor_loc) {
         bool all_aligned = true;
         for (int i = 0; i < depth; i++) {
             args[i] =  (T*)tl.addresses[i][tensor_loc];
@@ -41,9 +41,9 @@ template<int depth, typename T, typename T2>
 __device__ bool init_args(
     T** args,
     TensorListScalarListMetadata<T2, depth>& tl,
-    int chunk_idx,
-    int chunk_size,
-    int tensor_loc) {
+    const int64_t chunk_idx,
+    const int64_t chunk_size,
+    const int64_t tensor_loc) {
         bool all_aligned = true;
         for (int i = 0; i < depth; i++) {
             args[i] =  (T*)tl.addresses[i][tensor_loc];
@@ -60,9 +60,9 @@ template<int depth, typename T>
 __device__ bool init_args(
     T** args,
     FusedOptimizerTensorListMetadata<depth>& tl,
-    int chunk_idx,
-    int chunk_size,
-    int tensor_loc) {
+    const int64_t chunk_idx,
+    const int64_t chunk_size,
+    const int64_t tensor_loc) {
         bool all_aligned = true;
         for (int i = 0; i < depth; i++) {
             args[i] =  (T*)tl.addresses[i][tensor_loc];
@@ -76,10 +76,10 @@ __device__ bool init_args(
 }
 
 template<int depth, typename T>
-__device__ void load_args(T r_args[][kILP], T** args, int i_start, int chunk_size, int n) {
+__device__ void load_args(T r_args[][kILP], T** args, const int64_t i_start, const int64_t chunk_size, const int64_t n) {
 #pragma unroll
     for(int ii = 0; ii < kILP; ii++) {
-        int i = i_start + threadIdx.x + ii * blockDim.x;
+        const auto i = i_start + threadIdx.x + ii * blockDim.x;
         for (int r_index = 0; r_index < depth; r_index++) {
             r_args[r_index][ii] = 0;
             if(i < n && i < chunk_size) {
@@ -90,10 +90,10 @@ __device__ void load_args(T r_args[][kILP], T** args, int i_start, int chunk_siz
 }
 
 template<typename T>
-__device__ void store_args(T* dst, T* src, int i_start, int chunk_size, int n) {
+__device__ void store_args(T* dst, T* src, const int64_t i_start, const int64_t chunk_size, const int64_t n) {
 #pragma unroll
     for(int ii = 0; ii < kILP; ii++) {
-        int i = i_start + threadIdx.x + ii * blockDim.x;
+        const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
         if(i < n && i < chunk_size)
             dst[i] = src[ii];
     }

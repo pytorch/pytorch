@@ -26,14 +26,14 @@ __device__ __forceinline__ bool is_aligned(T* p){
 }
 
 template<typename T>
-__device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int src_offset){
+__device__ __forceinline__ void load_store(T* dst, T* src, int64_t dst_offset, int64_t src_offset){
   using LT = at::native::memory::aligned_vector<T, kILP>;
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
 template<int n> struct TensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n-1]];
-  int numel_for_tensor[depth_to_max_tensors[n-1]];
+  int64_t numel_for_tensor[depth_to_max_tensors[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
   int start_tensor_this_launch;
@@ -41,7 +41,7 @@ template<int n> struct TensorListMetadata {
 
 template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata {
   const void* addresses[n][depth_to_max_tensors_scalarlist[n-1]];
-  int numel_for_tensor[depth_to_max_tensors_scalarlist[n-1]];
+  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist[n-1]];
   scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
@@ -52,7 +52,7 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata {
 // 80 is a number that does not violate this limitation.
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 1> {
   const void* addresses[1][80];
-  int numel_for_tensor[80];
+  int64_t numel_for_tensor[80];
   c10::complex<double> scalar_vals[80];
   unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
   int block_to_chunk[depth_to_max_blocks[1-1]];
@@ -62,7 +62,7 @@ template<> struct TensorListScalarListMetadata<c10::complex<double>, 1> {
 // whose each element is `at::Tensor` of 1 element representing the number of `step`s called so far.
 template<int n> struct FusedOptimizerTensorListMetadata {
   const void* addresses[n][depth_to_max_tensors[n-1]];
-  int numel_for_tensor[depth_to_max_tensors[n-1]];
+  int64_t numel_for_tensor[depth_to_max_tensors[n-1]];
   const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
@@ -253,7 +253,8 @@ void multi_tensor_apply_for_fused_optimizer(
     if (static_cast<decltype(num_tensors)>(num_zero_tensors) == num_tensors) {
       continue;
     }
-    const auto chunks = (tensor_lists[0][tensor_index - static_cast<decltype(tensor_index)>((tensor_index == num_tensors - 1) && (tensor_lists[0][tensor_index].numel() == 0))].numel() + kChunkSize - 1) / kChunkSize;
+    const int64_t chunks = (tensor_lists[0][tensor_index - static_cast<decltype(tensor_index)>((tensor_index == num_tensors - 1) && (tensor_lists[0][tensor_index].numel() == 0))].numel() + kChunkSize - 1) / kChunkSize;
+    TORCH_CHECK(chunks > -1);
     for (const auto & chunk : c10::irange(chunks)) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
