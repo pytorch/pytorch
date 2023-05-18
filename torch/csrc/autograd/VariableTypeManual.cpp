@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
@@ -37,16 +38,16 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
   return res;
 }
 
-C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
+std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({Backend::CPU, Backend::SparseCPU});
 }
 
-C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
+std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
-C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
+std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
   return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
 }
 
