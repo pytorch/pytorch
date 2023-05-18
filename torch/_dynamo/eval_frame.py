@@ -787,6 +787,7 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
+    original_signature = inspect.signature(f.forward if isinstance(f, torch.nn.Module) else f)
 
     if functionalize and not aten_graph:
         raise UserError(
@@ -890,7 +891,7 @@ def export(
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
-        msg = dim_constraints.prettify_results(inspect.signature(f))
+        msg = dim_constraints.prettify_results(original_signature)
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
@@ -1033,7 +1034,7 @@ def export(
         dim_constraints.solve()
         log.warning(
             "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
+            dim_constraints.prettify_results(original_signature),
         )
 
         # Inline constraints added by users correspond to unbacked symbols in shape_env,

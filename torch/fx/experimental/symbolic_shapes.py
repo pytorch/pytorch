@@ -1728,7 +1728,10 @@ class DimConstraints:
             groups = defaultdict(list)
             for dc in results:
                 arg, dc = extract_and_rewrite_local(dc)
-                groups[args_index[arg]].append(dc)
+                if arg in args_index:
+                    groups[args_index[arg]].append(dc)
+                else:
+                    raise ValueError(f"Cannot find param `{arg}` in {signature}")
             sorted_groups = []
             for idx, dcs in sorted(groups.items()):
                 _, arg = idx
@@ -1742,7 +1745,7 @@ class DimConstraints:
 
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
         args_index = {}
-        for i, arg in enumerate(original_signature.parameters.keys()):
+        for i, arg in enumerate(signature.parameters.keys()):
             args_index[arg] = (i, arg)
 
         buf = ""
