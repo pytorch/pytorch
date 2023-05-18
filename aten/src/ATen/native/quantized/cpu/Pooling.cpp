@@ -97,7 +97,8 @@ void spatial_dilated_max_pooling(
 
 template <typename T>
 void spatial_dilated_max_pooling3d(
-    const T* iData,
+    const T* qxd,
+    int64_t nbatch,
     int64_t iC, // input/output channels
     int64_t iT,
     int64_t iH,
@@ -117,13 +118,23 @@ void spatial_dilated_max_pooling3d(
     int64_t dT,
     int64_t dH,
     int64_t dW, // dilation
-    T* oData) { // output arrays (data and max-index)
+    T* qyd) { // output arrays (data and max-index)
+  // TODO: Further optimize the performance suggested by @mingfeima. Parallel on NCTH and cache the output indices from W.
   // Handle each bs
-  at::parallel_for(0, iC, 0, [&](int64_t start, int64_t end) {
+  int64_t oC = iC;
+  int64_t parallel_dim = nbatch * iC;
+  at::parallel_for(0, parallel_dim, 0, [&](int64_t start, int64_t end) {
     for (const auto p : c10::irange(start, end)) {
+
+      int64_t batch_idx = p / iC;
+      int64_t channel_idx = p - batch_idx * iC;
+
+      auto* iData = qxd + batch_idx * iC * iT * iH * iW;
+      auto* oData = qyd + batch_idx * oC * oT * oH * oW;
+
       // Handle each Channel
       int64_t time, row, col;
-      const T* i_p = iData + p * iT * iW * iH;
+      const T* i_p = iData + channel_idx * iT * iW * iH;
       for (time = 0; time < oT; ++time) {
         for (row = 0; row < oH; ++row) {
           for (col = 0; col < oW; ++col) {
@@ -143,7 +154,7 @@ void spatial_dilated_max_pooling3d(
               w_start += dW;
 
             // local pointers
-            T* o_p = oData + p * oT * oH * oW  + time * oH * oW  + row * oW + col;
+            T* o_p = oData + channel_idx * oT * oH * oW  + time * oH * oW  + row * oW + col;
 
             // local max
             auto max_val = std::numeric_limits<typename T::underlying>::lowest();
@@ -338,6 +349,7 @@ Tensor q_maxpool_3d(
       dW,
       ")");
   int ndim = qx.dim();
+  // TODO leslie: Support non batch mode input when input is THWC which is 4-d tensor.
   TORCH_CHECK(ndim == 5, "Expecting the input tensor of rank 5.");
 
   // act: n, c, t, h, w
@@ -395,34 +407,30 @@ Tensor q_maxpool_3d(
     auto qxd = qx_contig.data_ptr<Q>();
     auto qyd = qy.data_ptr<Q>();
 
-    at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-      for (const auto p : c10::irange(start, end)) {
-        auto* iData = qxd + p * iC * iT * iH * iW;
-        auto* oData = qyd + p * oC * oT * oH * oW;
-        spatial_dilated_max_pooling3d<Q>(
-            iData,
-            iC,
-            iT,
-            iH,
-            iW,
-            oT,
-            oH,
-            oW,
-            kT,
-            kH,
-            kW,
-            sT,
-            sH,
-            sW,
-            pT,
-            pH,
-            pW,
-            dT,
-            dH,
-            dW,
-            oData);
-      }
-    });
+    spatial_dilated_max_pooling3d<Q>(
+        qxd,
+        nbatch,
+        iC,
+        iT,
+        iH,
+        iW,
+        oT,
+        oH,
+        oW,
+        kT,
+        kH,
+        kW,
+        sT,
+        sH,
+        sW,
+        pT,
+        pH,
+        pW,
+        dT,
+        dH,
+        dW,
+        qyd);
+
     return qy;
   }
 }
