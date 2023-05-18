@@ -258,7 +258,9 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        return NotImplemented
+        # When is_inside_mode is set, we are logically a fallthrough.
+        if not proxy_mode.is_inside_mode:
+            return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
@@ -272,43 +274,6 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
                 return r
-
-    tracer = proxy_mode.tracer
-    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
-
-    # If there are SymInts, we also should not consider this constant.
-    # However, fake tensor handling of SymInts is sufficiently broken that
-    # I couldn't write a test for this case
-    all_constant = (
-        pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
-        # TODO: maybe constant SymInts should also be allowed?  Not sure if
-        # this can happen
-        and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
-    )
-
-    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
-        # Check if all of the Tensor inputs are constants
-        if all_constant:
-            const_args, const_kwargs = pytree.tree_map_only(
-                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
-            )
-            with maybe_disable_fake_tensor_mode():
-                return func(*const_args, **const_kwargs)
-        # If any of the Tensor inputs are "real" (not FakeTensor), we may
-        # incorrectly burn in constants by allowing this access.  Raise
-        # an error in this case
-        if pytree.tree_all_only(torch.Tensor, lambda t: not isinstance(t, FakeTensor), (args, kwargs)):
-            raise RuntimeError(
-                f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
-                "It's likely that this is caused by data-dependent control flow or similar.  "
-                "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
-                "in your make_fx call."
-            )
-    proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat, SymBool),
-        fetch_sym_proxy(proxy_mode.tracer),
-        pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
-    )
 
     # When we trace through a torch.tensor invocation, you never actually
     # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -351,6 +316,43 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     # then we only want it to trace out proxies the first time that we hit an op.
     if proxy_mode.is_inside_mode:
         return func(*args, **kwargs)
+
+    tracer = proxy_mode.tracer
+    f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
+
+    # If there are SymInts, we also should not consider this constant.
+    # However, fake tensor handling of SymInts is sufficiently broken that
+    # I couldn't write a test for this case
+    all_constant = (
+        pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
+        # TODO: maybe constant SymInts should also be allowed?  Not sure if
+        # this can happen
+        and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
+    )
+
+    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
+        # Check if all of the Tensor inputs are constants
+        if all_constant:
+            const_args, const_kwargs = pytree.tree_map_only(
+                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
+            )
+            with maybe_disable_fake_tensor_mode():
+                return func(*const_args, **const_kwargs)
+        # If any of the Tensor inputs are "real" (not FakeTensor), we may
+        # incorrectly burn in constants by allowing this access.  Raise
+        # an error in this case
+        if pytree.tree_all_only(torch.Tensor, lambda t: not isinstance(t, FakeTensor), (args, kwargs)):
+            raise RuntimeError(
+                f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
+                "It's likely that this is caused by data-dependent control flow or similar.  "
+                "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
+                "in your make_fx call."
+            )
+    proxy_args, proxy_kwargs = pytree.tree_map_only(
+        (SymInt, SymFloat, SymBool),
+        fetch_sym_proxy(proxy_mode.tracer),
+        pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
+    )
 
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
