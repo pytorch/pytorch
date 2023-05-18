@@ -384,7 +384,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.group = (node.get_device(), group_fn(self._sizes))
 
-        if self.is_template() or isinstance(node, ir.ListElemBuffer):
+        if self.is_template():
             self.set_read_writes(node.normalized_read_writes())
         else:
             self.set_read_writes(
@@ -621,19 +621,13 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         self.origins = set()
 
     def mark_run(self):
-        if isinstance(self.node, ir.ListElemBuffer):
-            self.allocate()
-        else:
-            for node in [
-                self.scheduler.name_to_node[n.name] for n in self.read_writes.writes
-            ]:
-                node.mark_run()
+        raise NotImplementedError
 
     def codegen(self):
         self.node.get_store_function()(self.node.make_loader()())
 
     def can_free(self):
-        return isinstance(self.node, ir.ListElemBuffer)
+        return NotImplementedError
 
     def is_foreach(self):
         return True
@@ -646,9 +640,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
-
-    def get_first_name(self):
-        return self.get_name()
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -738,8 +729,8 @@ class Scheduler:
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
-        self.create_foreach_nodes()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.create_foreach_nodes()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -786,11 +777,14 @@ class Scheduler:
         removed_node_names = set()
         for names in V.graph.lists.values():
             removed_node_names.update(names)
-            self.nodes.append(
-                ForeachKernelSchedulerNode(
-                    self, [self.name_to_node[name] for name in names]
-                )
+            fe_node = ForeachKernelSchedulerNode(
+                self, [self.name_to_node[name] for name in names]
             )
+
+            self.nodes.append(fe_node)
+
+            for name in names:
+                self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
@@ -1079,11 +1073,6 @@ class Scheduler:
 
         if isinstance(node1, ForeachKernelSchedulerNode) ^ isinstance(
             node2, ForeachKernelSchedulerNode
-        ):
-            return False
-
-        if isinstance(node1.node, ir.ListElemBuffer) or isinstance(
-            node2.node, ir.ListElemBuffer
         ):
             return False
 

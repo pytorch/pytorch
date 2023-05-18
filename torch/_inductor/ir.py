@@ -2098,126 +2098,6 @@ class Buffer(IRNode):
         pass
 
 
-class BufferList(IRNode):
-    def __init__(self, data):
-        super().__init__()
-        self.name = V.graph.register_buffer(self)
-        self.buffers = [
-            ListElemBuffer(layout, self, i) for i, layout in enumerate(data.layouts)
-        ]
-        names = [t.name for t in self.buffers]
-        self.list_name = V.graph.register_list(names)
-        self.data = data
-
-    def __getitem__(self, ind):
-        return TensorBox.create(self.buffers[ind])
-
-    def make_indexer(self, ind):
-        return self.data.layouts[ind].make_indexer()
-
-    def get_name(self):
-        return self.name
-
-    def make_loader(self):
-        def fn():
-            load = self.data.make_loader()
-            return load()
-
-        return fn
-
-    def get_store_function(self):
-        def fn(result):
-            ops.store(self.list_name, self.data.layouts, result)
-
-        return fn
-
-    def decide_layout(self):
-        pass
-
-    def get_device(self):
-        return self.data.layouts[0].device
-
-    def get_layout(self):
-        return MultiOutputLayout(self.get_device())
-
-    def get_layouts(self):
-        return self.data.layouts
-
-    def is_no_op(self):
-        return False
-
-    def get_alias_names(self):
-        return ()
-
-    def get_mutation_names(self):
-        return ()
-
-    def list_arg_count(self):
-        _, (list_reads, list_writes) = self._list_read_writes()
-        return len(list_reads) + len(list_writes)
-
-    @cache_on_self
-    def _list_read_writes(self):
-        def fn():
-            self.get_store_function()(self.make_loader()())
-
-        return dependencies.extract_list_read_writes(fn)
-
-    def get_read_writes(self):
-        read_writes, _ = self._list_read_writes()
-        return read_writes
-
-
-class ListElemBuffer(Buffer):
-    def codegen(self, wrapper):
-        wrapper.writeline(f"{self.get_name()} = {self.input.get_name()}_{self.index}")
-
-    def __init__(self, layout, parent_list, index: int):
-        super().__init__(None, layout)
-        self.parent_list = parent_list
-        self.name = V.graph.register_buffer(self)
-        self.index = index
-
-    def should_allocate(self):
-        return True
-
-    def simplify_and_reorder(self):
-        return (
-            (
-                self.get_size(),
-                (),
-            ),
-            None,
-        )
-
-    def get_read_writes(self):
-        return self.normalized_read_writes()
-
-    def get_reduction_type(self):
-        return None
-
-    @cache_on_self
-    def normalized_read_writes(self):
-        name = self.get_name()
-        indexer = self.layout.make_indexer()
-
-        def dummy(index, rindex):
-            assert len(rindex) == 0
-            return ops.store(name, indexer(index), "fake")
-
-        deps = dependencies.extract_read_writes(
-            dummy, self.get_size(), (), normalize=True
-        )
-        deps.reads = {dependencies.StarDep(self.parent_list.get_name())}
-        return deps
-
-    @staticmethod
-    def is_valid_list(buffers):
-        for ind, buffer in enumerate(buffers):
-            if buffer.parent_list is not buffers[0].parent_list or ind != buffer.index:
-                return False
-
-
 class InputBuffer(Buffer):
     pass
 
@@ -3990,7 +3870,6 @@ class StorageBox(MutableBox):
                 InputBuffer,
                 ReinterpretView,
                 TemplateBuffer,
-                ListElemBuffer,
             ),
         ):
             return self.data.get_name()
@@ -4082,31 +3961,6 @@ class StorageBox(MutableBox):
             if isinstance(self.data, Pointwise)
             else True
         )
-
-
-class ForeachPointwise(IRNode):
-    def __init__(self, fns):
-        super().__init__()
-        self.fns = fns
-
-    @classmethod
-    def create(cls, left_list, right_list, **kwargs):
-        for t in itertools.chain(left_list, right_list):
-            t.data.realize()
-
-        return cls(*args, **kwargs)
-
-    def get_inputs(self):
-        return itertools.chain(self.left, self.right)
-
-    def make_loader(self):
-        def fn():
-            return self.op_fn(self.left.make_loader()(), self.right.make_loader()())
-
-        return fn
-
-    def get_layouts(self):
-        return self.layouts
 
 
 class InterpreterShim(torch.fx.Interpreter):
