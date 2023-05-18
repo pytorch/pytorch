@@ -1996,7 +1996,7 @@ class TestSparseCSR(TestCase):
     )
     def test_addmm_all_sparse_csr(self, device, dtype, layout):
         if not TEST_MKL and layout == torch.sparse_csc:
-            self.skipTest("addmm(CSC, CSC, CSC) is not upported without MKL Sparse")
+            self.skipTest("addmm(CSC, CSC, CSC) is not supported without MKL    ")
 
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -2009,8 +2009,9 @@ class TestSparseCSR(TestCase):
         m2 = torch.randn(50, 25, device=device).to(dtype)
         _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="all_sparse")
 
-        # Test beta=0, M=nan
+        # TODO: handle M=nan in Eigen
         if TEST_MKL:
+            # Test beta=0, M=nan
             M = torch.full((10, 25), float('nan'), device=device).to(dtype)
             m1 = torch.randn(10, 50, device=device).to(dtype)
             m2 = torch.randn(50, 25, device=device).to(dtype)
