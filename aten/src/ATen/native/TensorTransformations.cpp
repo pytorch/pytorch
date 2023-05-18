@@ -17,6 +17,7 @@
 #include <ATen/ops/atleast_2d_native.h>
 #include <ATen/ops/atleast_3d_native.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/chalf_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/fliplr_native.h>
@@ -230,7 +231,7 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   return result;
 }
 
-static Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
+Tensor chalf(const Tensor& self, c10::optional<MemoryFormat> memory_format) {
   return self.to(kComplexHalf, false, false, memory_format);
 }
 

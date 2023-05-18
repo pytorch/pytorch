@@ -25,6 +25,7 @@
 #include <ATen/ops/_thnn_fused_lstm_cell.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward_native.h>
 #include <ATen/ops/_use_cudnn_rnn_flatten_weight_native.h>
 #include <ATen/ops/cat.h>
 #include <ATen/ops/cudnn_is_acceptable.h>
@@ -1167,7 +1168,7 @@ bool _use_cudnn_rnn_flatten_weight() {
 // NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
 //     It duplicates the outputs of this function so the non-composite verison doesn't have to.
 //     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
-static std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
   TORCH_INTERNAL_ASSERT(!GradMode::is_enabled());
