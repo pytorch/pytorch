@@ -31,6 +31,7 @@ maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
+moco,pass,77
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,45
 phlippe_densenet,pass,0
@@ -53,4 +54,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
 tts_angular,pass,2
 vgg16,pass,0
+vision_maskrcnn,infra_error,0
 yolov3,pass,2
