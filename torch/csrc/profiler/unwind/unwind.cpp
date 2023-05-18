@@ -95,7 +95,7 @@ struct LibraryInfo {
   EHFrameHdr eh_frame_hdr_;
 };
 
-const char* process_name() {
+static const char* process_name() {
   static char name[PATH_MAX + 1] = "";
   if (*name == '\0') {
     ssize_t len = readlink("/proc/self/exe", name, PATH_MAX);
