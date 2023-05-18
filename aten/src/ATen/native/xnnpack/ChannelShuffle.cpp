@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 namespace xnnpack {
 
-bool use_channel_shuffle(
+static bool use_channel_shuffle(
     const Tensor& input,
     const int64_t groups) {
   using namespace internal;
@@ -33,7 +33,7 @@ bool use_channel_shuffle(
       true;
 }
 
-Tensor channel_shuffle(
+static Tensor channel_shuffle(
     const Tensor& input,
     const int64_t groups) {
   using namespace internal;

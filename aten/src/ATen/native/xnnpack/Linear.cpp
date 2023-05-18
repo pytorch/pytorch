@@ -194,7 +194,7 @@ unpack_prepacked_sizes_linear(const IValue& ivalue) {
 } // namespace linear
 } // namespace internal
 
-bool use_linear(
+static bool use_linear(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias) {
@@ -207,7 +207,7 @@ bool use_linear(
       internal::linear::usable(input);
 }
 
-Tensor linear(
+static Tensor linear(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias) {

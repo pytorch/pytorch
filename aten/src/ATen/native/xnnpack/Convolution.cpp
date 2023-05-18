@@ -451,7 +451,7 @@ Tensor conv2d_transpose_clamp_run(
 } // namespace convolution2d
 } // namespace internal
 
-bool use_convolution2d(
+static bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
     const at::OptionalIntArrayRef bias_sizes_opt,
@@ -473,7 +473,7 @@ bool use_convolution2d(
          internal::convolution2d::usable(input);
 }
 
-Tensor convolution2d(
+static Tensor convolution2d(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,

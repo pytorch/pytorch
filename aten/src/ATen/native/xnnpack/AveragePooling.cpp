@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 namespace xnnpack {
 
-bool use_global_average_pool(
+static bool use_global_average_pool(
   const Tensor& input) {
   return xnnpack::available() &&
           (1 <= input.ndimension()) &&
@@ -18,7 +18,7 @@ bool use_global_average_pool(
            true;
 }
 
-Tensor global_average_pool(
+static Tensor global_average_pool(
     const Tensor& input) {
   using namespace internal;
 

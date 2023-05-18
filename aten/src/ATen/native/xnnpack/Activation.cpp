@@ -8,7 +8,7 @@ namespace native {
 namespace xnnpack {
 
 
-bool use_hardswish(
+static bool use_hardswish(
   const Tensor& input) {
   return xnnpack::available() &&
           (1 <= input.ndimension()) &&
@@ -18,7 +18,7 @@ bool use_hardswish(
            true;
 }
 
-Tensor& hardswish_impl(Tensor& input, Tensor& output) {
+static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   using namespace internal;
 
   xnn_operator_t hardswish_op{};
@@ -57,7 +57,7 @@ Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   return output;
 }
 
-Tensor hardswish(const Tensor& input) {
+static Tensor hardswish(const Tensor& input) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
     input, input.suggest_memory_format());
 
@@ -71,7 +71,7 @@ Tensor hardswish(const Tensor& input) {
   return output.contiguous(input.suggest_memory_format());
 }
 
-Tensor& hardswish_(Tensor& input) {
+static Tensor& hardswish_(Tensor& input) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
     input, input.suggest_memory_format());
 

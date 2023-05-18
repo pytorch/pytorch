@@ -15,7 +15,7 @@ namespace xnnpack {
 //  - stride
 //  - dilation
 
-bool use_max_pool2d(
+static bool use_max_pool2d(
     const Tensor& input,
     const IntArrayRef kernel_,
     const IntArrayRef padding_,
@@ -134,7 +134,7 @@ bool use_max_pool2d(
       true;
 }
 
-Tensor max_pool2d(
+static Tensor max_pool2d(
     const Tensor& input,
     const IntArrayRef kernel_,
     const IntArrayRef padding_,
