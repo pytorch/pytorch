@@ -463,6 +463,7 @@ def repro_minify(options, mod, load_args, *, produce_test=False):
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
+        compiler_fn = functools.partial(compiler_fn, produce_test=produce_test)
     else:
         compiler_fn = lookup_backend("dynamo_accuracy_minifier_backend")
 
@@ -475,7 +476,7 @@ def repro_minify(options, mod, load_args, *, produce_test=False):
         )
 
     dynamo_minifier_backend = functools.partial(
-        compiler_fn, compiler_name=options.backend, produce_test=produce_test
+        compiler_fn, compiler_name=options.backend
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
