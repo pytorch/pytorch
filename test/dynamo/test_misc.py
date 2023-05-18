@@ -5230,7 +5230,9 @@ def fn():
         return sys.version_info[:2] <= (3, 8)
 
     def _has_ast_unparse(self) -> bool:
-        return not self._is_py38() or "astunparse" in sys.modules
+        from torch._dynamo.guards import HAS_UNPARSE_FUNCTIONS
+
+        return HAS_UNPARSE_FUNCTIONS
 
     def test_guards_cse_pass_single(self):
         if not self._has_ast_unparse():
