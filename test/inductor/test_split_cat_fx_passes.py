@@ -548,17 +548,17 @@ class TestSplitCatFxPasses(TestCase):
     @torch._inductor.config.patch(split_cat_fx_passes=True)
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items)
 
         def split_squeeze_stack_kwarg1(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, dim=1) for s in items]
             return torch.stack(split_items)
 
         def split_squeeze_multi_squeeze_users(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return (
                 torch.stack(split_items),
@@ -572,17 +572,17 @@ class TestSplitCatFxPasses(TestCase):
             return torch.stack(split_items)
 
         def dim_mismatch(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 0) for s in items]
             return torch.stack(split_items)
 
         def other_users(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items), torch.relu(items[0])
 
         def other_users_2(x):
-            items = [s for s in torch.split(x, 1, dim=1)]
+            items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items), torch.relu(items[0])
 
