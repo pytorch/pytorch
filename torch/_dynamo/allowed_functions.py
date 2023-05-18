@@ -96,6 +96,7 @@ def _disallowed_function_ids():
         torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.cuda.current_device,
+        torch.cuda.set_device,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
