@@ -5,7 +5,6 @@ import functools
 import itertools
 import logging
 import math
-import operator
 from typing import Any, Dict, Iterable, List, Set
 
 import sympy
@@ -13,6 +12,7 @@ import sympy
 import torch
 
 import torch._logging
+from torch._prims_common import is_integer_dtype
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -26,37 +26,618 @@ from ..utils import (
     next_power_of_2,
     sympy_product,
     sympy_subs,
+    sympy_symbol,
     unique,
 )
-from ..virtualized import V
+from ..virtualized import ops, V
 
 from .common import (
+    CSEVariable,
     DeferredLine,
     free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
     Kernel,
+    OpOverrides,
     PythonPrinter,
     SizeArg,
 )
-from .triton_overrides import triton_compute_type, triton_constant, TritonOverrides
-from .triton_utils import (
-    CantSplit,
-    config_of,
-    IterationRangesRoot,
-    signature_of,
-    split_iteration_ranges,
-    TritonCSEVariable,
-    TritonPrinter,
-)
-
+from .triton_utils import config_of, signature_of
 
 log = logging.getLogger(__name__)
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
+class TritonPrinter(PythonPrinter):
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
+
+
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
+
+
+def triton_compute_type(dtype):
+    triton_type_name = str(dtype).split(".")[-1]
+    if triton_type_name == "bool":
+        triton_type_name = "int1"
+    if triton_type_name in ("float16", "bfloat16"):
+        # float16 math is done in float32 inside the kernel
+        triton_type_name = "float32"
+    return f"tl.{triton_type_name}"
+
+
+def triton_acc_type(dtype):
+    if is_integer_dtype(dtype) and dtype.is_signed:
+        nbits = 64 if dtype == torch.int64 else 32
+        return f"tl.int{nbits}"
+    return triton_compute_type(dtype)
+
+
+def triton_constant(value):
+    if value == float("inf"):
+        return 'float("inf")'
+    elif value == float("-inf"):
+        return 'float("-inf")'
+    elif math.isnan(value):
+        return 'float("nan")'
+    return repr(value)
+
+
+class TritonCSEVariable(CSEVariable):
+    def __init__(self, name):
+        super().__init__(name)
+        # We'll use this to track which masks the variable needs when used for indirect indexing
+        self.mask_vars: Set[str] = set()
+
+    def update_on_args(self, name, args, kwargs):
+        # When making a variable that is going to be used in indirect indexing
+        # if a where clause is used it should mean that the result is always a
+        # valid index, so you shouldn't include any of the dependent variables
+        # in the resulting load mask
+        if name == "where":
+            return
+        for arg in args:
+            if isinstance(arg, TritonCSEVariable):
+                self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
+
+
+class TritonOverrides(OpOverrides):
+    """Map element-wise ops to Triton"""
+
+    @staticmethod
+    def to_dtype(x, dtype: torch.dtype):
+        if dtype == torch.bool:
+            return f"({x} != 0)"
+        elif dtype == torch.uint8:
+            # to work around llvm uint conversion semantics
+            # that produces 0's for negative values
+            return f"{x}.to(tl.int8).to(tl.uint8)"
+        return f"{x}.to({triton_compute_type(dtype)})"
+
+    @staticmethod
+    def constant(value, dtype):
+        type_ = torch._prims_common.dtype_to_type(dtype)
+        return triton_constant(type_(value))
+
+    @staticmethod
+    def abs(x):
+        return f"tl.abs({x})"
+
+    @staticmethod
+    def libdevice_abs(x):
+        return f"tl.math.abs({x})"
+
+    @staticmethod
+    def exp(x):
+        return f"tl.exp({x})"
+
+    @staticmethod
+    def libdevice_exp(x):
+        return f"tl.math.exp({x})"
+
+    @staticmethod
+    def exp2(x):
+        return f"tl.math.exp2({x})"
+
+    @staticmethod
+    def expm1(x):
+        return f"tl.math.expm1({x})"
+
+    @staticmethod
+    def sqrt(x):
+        return f"tl.sqrt({x})"
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return f"tl.math.sqrt({x})"
+
+    @staticmethod
+    def relu(x):
+        bug = config.triton.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            # NB: this only triggers runtime error as long as input
+            # is not all zero
+            return f'triton_helpers.device_assert_then({x} == 0, "injected assert fail", {x})'
+        elif bug == "accuracy":
+            return f"{x} + 1"
+        elif bug is None:
+            return ops.maximum("0", x)
+        else:
+            raise AssertionError(
+                f"unrecognized config triton.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
+
+    @staticmethod
+    def minimum(a, b):
+        return f"triton_helpers.minimum({a}, {b})"
+
+    @staticmethod
+    def maximum(a, b):
+        return f"triton_helpers.maximum({a}, {b})"
+
+    @staticmethod
+    def where(a, b, c):
+        return f"tl.where({a}, {b}, {c})"
+
+    @staticmethod
+    def cos(x):
+        return f"tl.cos({x})"
+
+    @staticmethod
+    def libdevice_cos(x):
+        return f"tl.math.cos({x})"
+
+    @staticmethod
+    def sin(x):
+        return f"tl.sin({x})"
+
+    @staticmethod
+    def libdevice_sin(x):
+        return f"tl.math.sin({x})"
+
+    @staticmethod
+    def index_expr(expr, dtype):
+        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        var = V.kernel.cse.generate(V.kernel.compute, index_str)
+        var.mask_vars = mask_vars
+        return var
+
+    @staticmethod
+    def masked(mask, body, other):
+        with V.kernel.mask_loads(mask) as new_mask:
+            result = body()
+        return ops.where(new_mask, result, triton_constant(other))
+
+    @staticmethod
+    def lgamma(x):
+        return f"tl.math.lgamma({x})"
+
+    @staticmethod
+    def erf(x):
+        return f"tl.math.erf({x})"
+
+    @staticmethod
+    def cosh(x):
+        return f"tl.math.cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"tl.math.sinh({x})"
+
+    @staticmethod
+    def acos(x):
+        return f"tl.math.acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"tl.math.acosh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"tl.math.asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"tl.math.asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"tl.math.atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"tl.math.atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"tl.math.atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"tl.math.copysign({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"tl.math.erfc({x})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"tl.math.hypot({x}, {y})"
+
+    @staticmethod
+    def log10(x):
+        return f"tl.math.log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"tl.math.nextafter({x}, {y})"
+
+    @staticmethod
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.rand({seed}, {offset})"
+
+    @staticmethod
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.randn({seed}, {offset})"
+
+    # TODO: work out how to use randint4x
+    @staticmethod
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
+        offset = f"({offset}).to(tl.uint32)"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
+
+    @staticmethod
+    def rsqrt(x):
+        return f"tl.math.rsqrt({x})"
+
+    @staticmethod
+    def log1p(x):
+        return f"tl.math.log1p({x})"
+
+    @staticmethod
+    def tan(x):
+        return f"tl.math.tan({x})"
+
+    @staticmethod
+    def tanh(x):
+        return f"tl.math.tanh({x})"
+
+    @staticmethod
+    def sigmoid(x):
+        return f"tl.sigmoid({x})"
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        return f"1/(1 + tl.math.exp(-({x})))"
+
+    @staticmethod
+    def signbit(x):
+        # XX: This is wrong for the value -0.0 in floating point
+        return f"tl.math.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
+
+    @staticmethod
+    def fmod(a, b):
+        return f"tl.math.fmod({a}, {b})"
+
+    @staticmethod
+    def pow(a, b):
+        return f"tl.math.pow({a}, {b})"
+
+    @staticmethod
+    def log(x):
+        return f"tl.log({x})"
+
+    @staticmethod
+    def libdevice_log(x):
+        return f"tl.math.log({x})"
+
+    @staticmethod
+    def isinf(x):
+        return f"tl.math.isinf({x}).to(tl.int1)"
+
+    @staticmethod
+    def isnan(x):
+        return f"tl.math.isnan({x}).to(tl.int1)"
+
+    @staticmethod
+    def round(x):
+        return f"tl.math.nearbyint({x})"
+
+    @staticmethod
+    def floor(x):
+        return f"tl.math.floor({x})"
+
+    @staticmethod
+    def floordiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Similar to div_floor_kernel_cuda in pytorch core.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        quot = f"{a} // {b}"
+        rem = f"{a} % {b}"
+        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
+
+    @staticmethod
+    def trunc(x):
+        return f"tl.math.trunc({x})"
+
+    @staticmethod
+    def truncdiv(a, b):
+        # See the comment in lowering.div_mode. a and b are integer type.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        return f"{a} // {b}"
+
+    @staticmethod
+    def ceil(x):
+        return f"tl.math.ceil({x})"
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
+
+
+@dataclasses.dataclass
+class IterationRanges:
+    """
+    Each range tree represents multiple sets of iteration indexing
+    in a single tiled dimension in the output kernel.
+
+    If you have two loops ranges one (4, 3, 2) and another (4, 6),
+    then the range tree will be:
+            4 (i0)
+        3 (i1)  6 (i3)
+        2 (i2)
+    Where i0 is shared between both loops, but then the split into
+    different indexing vars.  All loop ranges must iterate over
+    the same number of elements.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        var_list: List[sympy.Symbol],
+        var_ranges: Dict[sympy.Symbol, sympy.Expr],
+        numel: sympy.Expr,
+        prefix: str,
+        *,
+        kernel: "Kernel",
+        divisor=sympy.Integer(1),
+        length=sympy.Integer(1),
+    ):
+        super().__init__()
+        self.name = name
+        self.var_list = var_list
+        self.var_ranges = var_ranges
+        self.numel = numel
+        self.prefix = prefix
+        self.divisor = divisor
+        self.length = length
+        self.kernel = kernel
+
+    def is_loop(self):
+        return self.prefix == "r" and not self.kernel.persistent_reduction
+
+
+class IterationRangesRoot(IterationRanges):
+    def __init__(
+        self,
+        name: str,
+        numel: sympy.Expr,
+        prefix: str,
+        index: int,
+        kernel: "Kernel",
+        pid_cache=None,
+    ):
+        if pid_cache is None:
+            pid_cache = {}
+        super().__init__(
+            name=name,
+            var_list=[],
+            var_ranges={},
+            numel=numel,
+            prefix=prefix,
+            kernel=kernel,
+        )
+        self.index = index
+        # Store all the nodes in one flat list
+        self.nodes: Dict[sympy.Expr, IterationRangesEntry] = {}
+        # This is for re-ordering program ID in triton mm template
+        # pid_cache["tl.program_id(0)"] = pid_m
+        self.pid_cache: Dict[str, str] = pid_cache
+
+    def cache_clear(self):
+        for node in self.nodes.values():
+            node.cache_clear()
+
+    def lookup(self, divisor, length):
+        """
+        Lookup a given RangeTreeEntry, creating it if needed
+        """
+        if V.graph.sizevars.statically_known_equals(divisor * length, self.numel):
+            expr = ir.FloorDiv(sympy_symbol(f"{self.prefix}index"), divisor)
+        else:
+            expr = ir.ModularIndexing(
+                sympy_symbol(f"{self.prefix}index"), divisor, length
+            )
+
+        if expr not in self.nodes:
+            node = IterationRangesEntry(
+                f"{self.prefix}{next(V.kernel.iter_vars_count)}",
+                divisor,
+                length,
+                expr,
+                self,
+            )
+            V.kernel.range_tree_nodes[node.symbol()] = node
+            self.var_list.append(node.symbol())
+            self.var_ranges[node.symbol()] = length
+            self.nodes[expr] = node
+        return self.nodes[expr]
+
+    def construct_entries(self, lengths: List[sympy.Expr]):
+        divisor = sympy.Integer(1)
+        itervars = []
+        for length in reversed(lengths):
+            itervars.append(self.lookup(divisor, length))
+            divisor = divisor * length
+        return list(reversed(itervars))
+
+    def construct(self, lengths: List[sympy.Expr]):
+        return [e.symbol() for e in self.construct_entries(lengths)]
+
+    def vars_and_sizes(self, index: sympy.Expr):
+        """Figure out vars from this tree used in index"""
+        nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
+        nodes = [n for n in nodes if n and n.prefix == self.prefix]
+        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        divisor = sympy.Integer(1)
+        index_vars = []
+        sizes = []
+
+        def add(node):
+            nonlocal divisor
+            index_vars.append(node.symbol())
+            sizes.append(node.length)
+            divisor = divisor * node.length
+
+        for node in nodes:
+            if not V.graph.sizevars.statically_known_equals(node.divisor, divisor):
+                # fill in unused index var
+                add(self.lookup(divisor, ir.FloorDiv(node.divisor, divisor)))
+                divisor = node.divisor
+            add(node)
+        if not V.graph.sizevars.statically_known_equals(self.numel, divisor):
+            # fill in unused index var
+            add(self.lookup(divisor, ir.FloorDiv(self.numel, divisor)))
+
+        return list(reversed(index_vars)), list(reversed(sizes))
+
+    def ranges_code(self):
+        size = self.kernel.indexing_size_str(self.index, self.prefix)
+        index_dtype = self.kernel.index_dtype
+        convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
+
+    def get_pid(self):
+        key = f"tl.program_id({self.index})"
+        pid = self.pid_cache.get(key, key)
+        if self.kernel.index_dtype != "tl.int32":
+            return f"{pid}.to({self.kernel.index_dtype})"
+        return pid
+
+    def codegen_header(self, code):
+        x = self.prefix
+        if self.is_loop():
+            code.writeline(f"{self.name} = {x}offset + {x}base")
+        elif x == "r" and self.kernel.persistent_reduction:
+            # no need to "roffset = "
+            code.writeline(
+                f"{self.name} = {self.ranges_code()}",
+            )
+        else:
+            code.writelines(
+                [
+                    f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
+                    f"{self.name} = {x}offset + {self.ranges_code()}",
+                ]
+            )
+        code.writeline(f"{x}mask = {self.name} < {x}numel")
+
+
+class IterationRangesEntry(IterationRanges):
+    def __init__(
+        self,
+        name: str,
+        divisor: sympy.Expr,
+        length: sympy.Expr,
+        expr: sympy.Expr,
+        parent: IterationRanges,
+    ):
+        super().__init__(
+            name=name,
+            numel=parent.numel / length,
+            var_list=parent.var_list,
+            var_ranges=parent.var_ranges,
+            prefix=parent.prefix,
+            divisor=divisor,
+            length=length,
+            kernel=parent.kernel,
+        )
+        self.parent = parent
+        self.codegen = functools.lru_cache(None)(self._codegen)
+        self.expr = expr
+
+    def set_name(self, name):
+        self.codegen = lambda: name
+        self.codegen.cache_clear = lambda: None
+        self.name = name
+
+    def cache_clear(self):
+        self.codegen.cache_clear()
+
+    def writeline(self, line):
+        if self.is_loop():
+            V.kernel.indexing_code.writeline(line)
+        else:
+            # lift non-reduction stores outside loop
+            V.kernel.body.writeline(line)
+
+    def _codegen(self):
+        self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
+        return self.name
+
+    def precomputed_args(self):
+        # for dynamic shapes, find parts of indexing expressions that have to be precomputed
+        precomputed_args = []
+        if isinstance(self.expr, sympy.Symbol):
+            return precomputed_args
+        assert isinstance(self.expr, (ir.FloorDiv, ir.ModularIndexing)), type(self.expr)
+        for arg in self.expr.args[1:]:
+            if not isinstance(arg, (sympy.Integer, sympy.Symbol)):
+                symbols = arg.free_symbols
+                if len(symbols) > 0 and all(s.name.startswith("s") for s in symbols):
+                    precomputed_args.append(arg)
+        return precomputed_args
+
+    def symbol(self):
+        return sympy_symbol(self.name)
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self.name == other.name
 
 
 class TritonKernel(Kernel):
@@ -1598,3 +2179,7 @@ class EnableReduction:
                 pass
             else:
                 yield node
+
+
+class CantSplit(Exception):
+    pass
