@@ -226,7 +226,7 @@ class CppPrinter(ExprPrinter):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+        return f"std::floor({x} / {div})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
