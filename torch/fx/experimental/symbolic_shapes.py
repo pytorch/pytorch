@@ -1719,8 +1719,21 @@ class DimConstraints:
         # LocalSource.name() wraps the name with L[""]. We use regular
         # expression to do the replacement to avoid traversing up
         # the source hierarchy manually.
-        def unwrap_local_source(source_name):
-            return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
+        def extract_and_rewrite_local(dc):
+            arg = re.search(r"L\['(.+?)'\]", dc).expand(r'\1')
+            dc = re.sub(r"L\['(.+?)'\]", r'\1', dc)
+            return arg, dc
+
+        def group(results, args_index):
+            groups = defaultdict(list)
+            for dc in results:
+                arg, dc = extract_and_rewrite_local(dc)
+                groups[args_index[arg]].append(dc)
+            sorted_groups = []
+            for idx, dcs in sorted(groups.items()):
+                _, arg = idx
+                sorted_groups.append((arg, sorted(dcs)))
+            return sorted_groups
 
         # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
         # There is no change in behavior since 2 is the default lower bound.
@@ -1728,24 +1741,41 @@ class DimConstraints:
             return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
 
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+        args_index = {}
+        for i, arg in enumerate(original_signature.parameters.keys()):
+            args_index[arg] = (i, arg)
 
         buf = ""
         indent = 4 * " "
         if self._static_results:
-            sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
+            sorted_static_results = group(self._static_results, args_index)
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
             buf += f"\n```\ndef specializations{str(signature)}:"
-            for result in sorted_static_results:
-                buf += f"\n{indent}assert {result}"
+            space = False
+            for arg, results in sorted_static_results:
+                if space:
+                    buf += "\n"
+                else:
+                    space = True
+                buf += f"\n{indent}# {arg}:"
+                for result in results:
+                    buf += f"\n{indent}assert {result}"
             buf += "\n```\n"
         if self._dynamic_results:
-            sorted_dynamic_results = sorted(self._dynamic_results)
+            sorted_dynamic_results = group(self._dynamic_results, args_index)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
-            for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{remove_default_lower_bound(unwrap_local_source(result))},"
+            space = False
+            for arg, results in sorted_dynamic_results:
+                if space:
+                    buf += "\n"
+                else:
+                    space = True
+                buf += f"\n{indent*2}# {arg}:"
+                for result in results:
+                    buf += f"\n{indent*2}{remove_default_lower_bound(result)},"
             buf += f"\n{indent}]\n```\n"
         return buf
 

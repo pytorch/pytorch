@@ -1780,23 +1780,47 @@ class TestDimConstraints(TestCase):
         print(static_code)
         expected_static = '''
 def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+    # x0:
     assert x0.size()[0] == 8
+
+    # x1:
     assert x1.size()[2] == 96
-    assert x11.size()[1] == 1
-    assert x12.size()[2] == 3
+
+    # x2:
     assert x2.size()[0] == 8
+
+    # x3:
     assert x3.size()[0] == 8
+
+    # x4:
     assert x4.size()[0] == 8
+
+    # x5:
     assert x5.size()[1] == 22
+
+    # x7:
     assert x7.size()[3] == 96
+
+    # x8:
     assert x8.size()[1] == 22
+
+    # x11:
+    assert x11.size()[1] == 1
+
+    # x12:
+    assert x12.size()[2] == 3
 '''
         expected_dynamic = '''
 def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
     return [
+        # x6:
         dynamic_dim(x6, 1),
-        dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
+
+        # x9:
         dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
+
+        # x10:
+        dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
     ]
 '''
 
