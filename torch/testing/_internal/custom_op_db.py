@@ -7,7 +7,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 import numpy as np
-from torch._custom_op import custom_op
+from torch._custom_op.impl import custom_op
 from torch.testing._internal.autograd_function_db import (
     sample_inputs_numpy_cube,
     sample_inputs_numpy_mul,
@@ -110,7 +110,7 @@ def numpy_nonzero_impl(x):
 
 @numpy_nonzero.impl_abstract()
 def numpy_nonzero_abstract(x):
-    ctx = torch._custom_op.get_ctx()
+    ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
     shape = [x.dim(), i0]
     result = x.new_empty(shape, dtype=torch.long)
@@ -199,7 +199,7 @@ def numpy_nms_abstract(boxes, scores, iou_threshold):
     assert boxes.shape == (N, 4)
     assert scores.shape == (N,)
 
-    ctx = torch._custom_op.get_ctx()
+    ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
     result = boxes.new_empty([i0, 4])
     return result
