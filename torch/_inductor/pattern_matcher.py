@@ -316,7 +316,7 @@ class _TargetArgsExpr(_TargetExpr):
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
         ):
-            return FailedMatch("function_mismatch")
+            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users")
@@ -340,13 +340,14 @@ class _TargetArgsExpr(_TargetExpr):
         m.targets[self] = node.target
         return m
 
-    def find_anchor_nodes(self, ctx: MatchContext, searched):
+    def find_anchor_nodes(self, ctx: MatchContext, searched, matching_nodes=True):
         """
         This is used when we are matching a pattern with multiple outputs.
         There is a partial match (stored in ctx) and we want to walk
         this pattern to find a connection to an already-matched node.
 
-        Yields candidate nodes that `self._match` might like.
+        If `matching_nodes` is True, will yield candidate nodes that `self._match` might
+        like.
         """
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
@@ -355,10 +356,13 @@ class _TargetArgsExpr(_TargetExpr):
         for pattern in self.flat_args_kwargs[0]:
             if isinstance(pattern, PatternExpr):
                 for other_node in pattern.find_anchor_nodes(ctx, searched):
+                    if not isinstance(other_node, torch.fx.Node):
+                        continue
                     for node in other_node.users:
-                        if node not in searched and self._match_fns(node):
-                            yield node
-                            searched.add(node)
+                        if node not in searched:
+                            if not matching_nodes or self._match_fns(node):
+                                yield node
+                                searched.add(node)
 
 
 class CallFunction(_TargetArgsExpr):
@@ -486,6 +490,40 @@ class MultiOutputPattern(PatternExpr):
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
             return e
+
+
+class RepeatedExpr(PatternExpr):
+    """
+    Checks for a repeated pattern. Useful for repeated operations after a node such as `split` or `unbind`
+    """
+
+    def __init__(self, inner_pattern):
+        super().__init__()
+        assert isinstance(inner_pattern, PatternExpr)
+        self.inner_pattern = inner_pattern
+
+    @property
+    def fns(self):
+        return self.inner_pattern.fns
+
+    def _match(self, node: torch.fx.Node, ctx: MatchContext):
+        m = ctx.match(self.inner_pattern, node)
+        if not m:
+            return m
+        ctx.pattern_to_node.pop(
+            self.inner_pattern,
+        )
+        # Check all anchor nodes match the pattern
+        for anchor_node in self.inner_pattern.find_anchor_nodes(
+            ctx, set(), matching_nodes=False
+        ):
+            anchor_m = MatchContext([self], graph=node.graph).match(
+                self.inner_pattern, anchor_node
+            )
+            if not anchor_m:
+                return anchor_m
+            m.extend(anchor_m)
+        return m
 
 
 @dataclasses.dataclass

@@ -21,9 +21,18 @@ from ..pattern_matcher import (
     Match,
     MatchContext,
     MULTIPLE,
+    PatternExpr,
     register_graph_pattern,
+    ListOf,
+    RepeatedExpr,
+    KeywordArg,
 )
-from .pre_grad import merge_split_cat_pass, merge_splits_pass, normalize_split_pass
+from .pre_grad import (
+    merge_splits_pass,
+    merge_split_cat_pass,
+    normalize_split_pass,
+    split_squeeze_pass,
+)
 
 log = logging.getLogger(__name__)
 
@@ -584,6 +593,89 @@ class SplitCatSimplifier:
             to_remove.append(next_user)
         for node in reversed(to_remove):
             graph.erase_node(node)
+
+
+class GetItem(CallFunction):
+    def __init__(self, arg, index):
+        super().__init__(operator.getitem, arg, index)
+
+    def find_anchor_nodes(self, ctx: MatchContext, searched, matching_nodes=True):
+        # We generally match GetItem with arg being an Arg(). So, we never return the anchor
+        # nodes as the stored node in ctx.pattern_to_node is returned. Here we override find_anchor_nodes
+        # to not use ctx.pattern_to_node
+        for pattern in self.flat_args_kwargs[0]:
+            if isinstance(pattern, PatternExpr):
+                for other_node in pattern.find_anchor_nodes(ctx, searched):
+                    if not isinstance(other_node, torch.fx.Node):
+                        continue
+                    for node in other_node.users:
+                        if node not in searched:
+                            if not matching_nodes or self._match_fns(node):
+                                yield node
+                                searched.add(node)
+
+
+@register_graph_pattern(
+    RepeatedExpr(
+        CallFunction(
+            torch.squeeze,
+            GetItem(
+                TorchSplit(
+                    KeywordArg("split_input"),
+                    KeywordArg("split_sizes"),
+                ),
+                Ignored(),
+            ),
+            KeywordArg("dim"),
+            _users=MULTIPLE,
+        ),
+    ),
+    pass_dict=split_squeeze_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    RepeatedExpr(
+        CallFunction(
+            torch.squeeze,
+            GetItem(
+                TorchSplit(
+                    KeywordArg("split_input"),
+                    KeywordArg("split_sizes"),
+                ),
+                Ignored(),
+            ),
+            dim=KeywordArg("dim"),
+            _users=MULTIPLE,
+        )
+    ),
+    pass_dict=split_squeeze_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def merge_split_squeeze(
+    match: Match, split_input: torch.fx.Node, split_sizes: List[int], dim: int
+):
+    graph = match.graph
+    split = next(node for node in match.nodes if node.target == torch.split)
+    if not all(s == 1 for s in split_sizes):
+        return
+    with graph.inserting_before(match.output_node()):
+        unbind = graph.call_function(torch.unbind, args=(split_input, dim))
+        for item_index, getitem_node in sorted(
+            [
+                (getitem_node.args[1], getitem_node)
+                for getitem_node in split.users.keys()
+            ]
+        ):
+            squeeze = next(iter(getitem_node.users.keys()))
+            new_get_item = graph.call_function(
+                operator.getitem, args=(unbind, item_index)
+            )
+            squeeze.replace_all_uses_with(new_get_item)
+            new_get_item.meta.update(squeeze.meta)
+            graph.erase_node(squeeze)
+            graph.erase_node(getitem_node)
+    graph.erase_node(split)
+    counters["inductor"]["split_squeeze_replaced"] += 1
 
 
 getitem_split = ListOf(

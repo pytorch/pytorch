@@ -25,11 +25,13 @@ log = logging.getLogger(__name__)
 normalize_split_pass = PatternMatcherPass()
 merge_splits_pass = PatternMatcherPass()
 merge_split_cat_pass = PatternMatcherPass()
+split_squeeze_pass = PatternMatcherPass()
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalize_split_pass,
     merge_splits_pass,
     merge_split_cat_pass,
+    split_squeeze_pass,
 ]
 
 
