@@ -170,8 +170,12 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def constant(value, dtype):
-        tmp = ops.constant_val(value)
-        return ops.to_dtype(tmp, dtype)
+        if dtype == torch.uint8:
+            tmp = ops.constant_val(value)
+            return ops.to_dtype(tmp, dtype)
+        else:
+            type_ = torch._prims_common.dtype_to_type(dtype)
+            return triton_constant(type_(value))
 
     @staticmethod
     def abs(x):
