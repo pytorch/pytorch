@@ -16,12 +16,14 @@ pip_install \
   onnx==1.14.0
 
 pip_install \
-  onnxruntime==1.14.0 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
   transformers==4.25.1
+
+# TODO: change this when onnxruntime 1.15 is released
+pip_install "onnxruntime@git+https://github.com/microsoft/onnxruntime@a3febf979a619f81d42ad8a2ed94e3c0ca78d678"
 
 # TODO: change this when onnx-script is on testPypi
 pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@bf502680231e4b134a71f74e812c84ddd7efffbe"
