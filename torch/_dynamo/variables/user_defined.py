@@ -16,6 +16,8 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
+    all_hook_names,
+    check_constant_args,
     get_custom_getattr,
     is_namedtuple_cls,
     istype,
@@ -23,7 +25,7 @@ from ..utils import (
     object_has_getattribute,
 )
 from .base import MutableLocal, VariableTracker
-from .ctx_manager import NullContextVariable
+from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -105,6 +107,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if self.value is contextlib.nullcontext:
             return NullContextVariable(**options)
+        elif (
+            issubclass(type(self.value), type)
+            and hasattr(self.value, "__enter__")
+            and hasattr(self.value, "__exit__")
+            and check_constant_args(args, kwargs)
+            and len(kwargs) == 0  # TODO(ybliang): support kwargs
+        ):
+            unwrapped_args = [x.as_python_constant() for x in args]
+            return GenericContextWrappingVariable(
+                unwrapped_args, cm_obj=self.value(*unwrapped_args), **options
+            )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)
@@ -283,8 +296,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
             random_call_index = len(tx.random_calls)
-            if random_call_index == 0:
-                tx.output.initial_random_state = random.getstate()
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.random_calls.append((self.value, args, kwargs))
@@ -336,6 +347,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif callable(self.value):
+            self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
+            return self.call_method(tx, "__call__", args, kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -391,6 +405,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__func__, self, source=source, **options
             )
         elif isinstance(subobj, types.FunctionType):
+            # Check `__dict__` to bypass the function descriptor protocol to
+            # accurately check for static method
+            is_staticmethod = name in type(self.value).__dict__ and isinstance(
+                type(self.value).__dict__[name], staticmethod
+            )
+            if is_staticmethod:
+                # Use `UserFunctionVariable` to avoid doubly passing in `self`
+                # as an argument, which happens if using `UserMethodVariable`
+                return variables.UserFunctionVariable(
+                    subobj, name, source=source, **options
+                )
             return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
@@ -438,6 +463,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
+        elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
+            assert isinstance(subobj, collections.OrderedDict)
+            if not subobj:
+                return variables.ConstDictVariable(
+                    subobj, collections.OrderedDict, **options
+                )
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)
@@ -445,6 +476,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return variables.GetAttrVariable(self, name, **options)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if tx.output.side_effects.is_attribute_mutation(self):
+            try:
+                result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+                return variables.ConstantVariable(
+                    not isinstance(result, variables.DeletedVariable)
+                ).add_options(self, result)
+            except KeyError:
+                pass
         if not self.source:
             unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)

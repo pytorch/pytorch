@@ -7,6 +7,7 @@ import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
     _get_default_group,
+    all_gather,
     all_to_all,
     Backend,
     broadcast,
@@ -34,18 +35,17 @@ if TYPE_CHECKING:
         )
 
 
-_global_device_mesh: Optional["DeviceMesh"] = None
+class _MeshEnv(object):
+    def __init__(self) -> None:
+        self.mesh_stack: List[DeviceMesh] = []
+
+    def get_current_mesh(self) -> "DeviceMesh":
+        if len(self.mesh_stack) == 0:
+            raise RuntimeError("No device mesh is currently active!")
+        return self.mesh_stack[-1]
 
 
-def get_global_device_mesh() -> "DeviceMesh":
-    global _global_device_mesh
-    assert _global_device_mesh is not None, "Could not get a default device mesh!"
-    return _global_device_mesh
-
-
-def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
-    global _global_device_mesh
-    _global_device_mesh = mesh
+mesh_resources: _MeshEnv = _MeshEnv()
 
 
 class DeviceMesh(object):
@@ -113,6 +113,20 @@ class DeviceMesh(object):
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
+        # validate that all calling ranks pass in the same `mesh` argument.
+        mesh_list = [
+            torch.empty_like(self.mesh, device=self.device_type)
+            for _ in range(get_world_size())
+        ]
+        self_mesh = self.mesh.to(self.device_type)
+        all_gather(mesh_list, self_mesh)
+        for other_rank, other_mesh in enumerate(mesh_list):
+            if not torch.equal(self_mesh, other_mesh):
+                raise RuntimeError(
+                    f"DeviceMesh.__init__ does not allow different mesh argument:"
+                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
+                    f"has mesh {other_mesh}!"
+                )
         if _init_process_groups:
             self._dim_groups = self._init_process_groups()
 
@@ -128,7 +142,6 @@ class DeviceMesh(object):
                 f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
             )
 
-        # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
         world_backend = get_backend()
         if self.device_type == "cpu":
@@ -214,14 +227,14 @@ class DeviceMesh(object):
         return dim_groups
 
     def __enter__(self) -> "DeviceMesh":
-        # set global device_mesh to this instance
-        set_global_device_mesh(self)
+        # set this mesh as the current mesh in mesh env
+        mesh_resources.mesh_stack.append(self)
         return self
 
     # pyre-fixme[2]: Parameter must be annotated.
     def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
-        # unset global device mesh
-        set_global_device_mesh(None)
+        # pop this mesh from mesh env
+        mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
@@ -377,7 +390,7 @@ class DeviceMesh(object):
     def all_reduce(
         self,
         tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
         async_op: bool = False,
     ) -> torch.Tensor:
@@ -396,7 +409,7 @@ class DeviceMesh(object):
             A :class:`torch.Tensor` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        op_name: str = op.name  # type: ignore[attr-defined]
+        op_name: str = op.name
         return funcol.all_reduce(
             tensor,
             reduceOp=op_name,
@@ -409,7 +422,7 @@ class DeviceMesh(object):
     def reduce_scatter(
         self,
         input: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
         scatter_dim: int = 0,
     ) -> torch.Tensor:
@@ -428,7 +441,7 @@ class DeviceMesh(object):
         Returns:
             A :class:`torch.Tensor` object
         """
-        op_name: str = op.name  # type: ignore[attr-defined]
+        op_name: str = op.name
         if self._backend == "nccl" or self._backend == "threaded":
             dim_group = self._dim_groups[mesh_dim]
             scatter_tensor = funcol.reduce_scatter_tensor(

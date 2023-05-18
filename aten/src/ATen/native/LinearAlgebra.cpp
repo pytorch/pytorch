@@ -137,7 +137,7 @@
 namespace at {
 
 namespace detail {
-  void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
+  static void check_linalg_norm_dtype(optional<ScalarType> opt_dtype, ScalarType self_dtype, const char* const name) {
     if (opt_dtype.has_value()) {
       auto dtype = opt_dtype.value();
       TORCH_CHECK(isFloatingType(dtype) || isComplexType(dtype), name, ": dtype should"
@@ -326,7 +326,7 @@ DEFINE_DISPATCH(addr_stub);
 
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-Tensor lu_det_P(const Tensor& pivots) {
+static Tensor lu_det_P(const Tensor& pivots) {
   return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
@@ -440,7 +440,7 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     checkNotComplexTolerance(rtol, function_name, "rtol");
   } else {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
-    auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2)), options);
+    auto default_rtol = at::full({}, _get_epsilon(real_dtype) * std::max(input.sym_size(-1), input.sym_size(-2)), options);
     rtol = atol_opt.has_value()
            ? at::where(atol_opt.value() > 0, at::zeros({}, options), default_rtol)
            : std::move(default_rtol);
@@ -453,12 +453,12 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
     optional<double> atol_opt,
     optional<double> rtol_opt) {
   double atol = atol_opt.has_value() ? atol_opt.value() : 0.0;
-  double rtol;
+  c10::SymFloat rtol;
   if (rtol_opt.has_value()) {
     rtol = rtol_opt.value();
   } else {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
-    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    auto default_rtol = _get_epsilon(real_dtype) * std::max(input.sym_size(-1), input.sym_size(-2));
     rtol = (atol_opt.has_value() && atol_opt.value() > 0.0)
            ? 0.0
            : default_rtol;
@@ -715,7 +715,7 @@ Tensor& matrix_rank_impl(
 
   // NumPy doesn't take into account possible input with no elements and it errors on max not defined for this case
   // Let's output 0 for this case, since that kind of matrices have zero number of non-zero rows, hence rank is 0.
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     result.fill_(0);
     return result;
   }
@@ -752,9 +752,9 @@ Tensor get_matrix_rank_result_tensor(const Tensor& input) {
   // avoid resizing in `out` variant.
   // See also `NOTE [matrix rank output shape]`
   auto result_shape =
-      IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2);
+      SymIntArrayRef(input.sym_sizes().cbegin(), input.sym_sizes().cend() - 2);
   Tensor result =
-      at::empty(result_shape, input.options().dtype(ScalarType::Long));
+      at::empty_symint(result_shape, input.options().dtype(ScalarType::Long));
 
   return result;
 }
@@ -1284,11 +1284,11 @@ Tensor inner(const Tensor& self, const Tensor& other) {
 
   // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
-      self.size(-1) == other.size(-1),
+      self.sym_size(-1) == other.sym_size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
-      self.sizes(),
+      self.sym_sizes(),
       " and ",
-      other.sizes());
+      other.sym_sizes());
 
   return at::tensordot(self, other, -1, -1);
 }
@@ -1312,6 +1312,11 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
+
+  TORCH_CHECK(
+    m1.dtype() == m2.dtype(),
+    "expected m1 and m2 to have the same dtype, but got: ", m1.dtype(), " != ", m2.dtype()
+  )
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
@@ -1441,10 +1446,10 @@ static void addmm_impl_cpu_(
               transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
               m, n, k,
               alpha.to<opmath_t>(),
-              a.data_ptr<scalar_t>(), lda,
-              b.data_ptr<scalar_t>(), ldb,
+              a.const_data_ptr<scalar_t>(), lda,
+              b.const_data_ptr<scalar_t>(), ldb,
               beta.to<opmath_t>(),
-              c.data_ptr<scalar_t>(), ldc);
+              c.mutable_data_ptr<scalar_t>(), ldc);
         });
   }
 
@@ -1589,7 +1594,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
     });
 }
 
-void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
+static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   const auto result_sizes = result.sizes();
@@ -1761,7 +1766,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   return;
 }
 
-void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
+static void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
   }
@@ -1818,7 +1823,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
+static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -1888,7 +1893,7 @@ The behavior depends on the dimensionality of the Tensors as follows:
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
   there's more than one
 */
-Tensor _matmul_impl(
+static Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
@@ -2673,7 +2678,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
+static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
   // A
   at::native::checkIsMatrix(A, "linalg.matrix_norm");
   at::native::checkFloatingOrComplex(A, "linalg.matrix_norm", /*low_precision*/low_precision);
@@ -2945,7 +2950,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -2962,13 +2967,13 @@ Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_
 }
 
 // Return zero for each matrix in the batch
-Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
+static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
   TensorOptions options = self.options().dtype(toRealValueType(self.scalar_type()));
   return at::zeros(result_shape, options);
 }
 
-void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
@@ -2995,7 +3000,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
-  if (self.numel() == 0) {
+  if (self.sym_numel() == 0) {
     auto real_dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     return _linalg_cond_empty_matrix(self, real_dtype);
   }

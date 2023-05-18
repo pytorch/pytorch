@@ -152,9 +152,9 @@ class CapabilityBasedPartitioner:
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
-            for user_node in node.users:
-                if user_node in assignment:
-                    merge_candidates[assignment[user_node]] = None
+            # merge all possible partitions
+            for node in assignment:
+                merge_candidates[assignment[node]] = None
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -207,7 +207,7 @@ class CapabilityBasedPartitioner:
 
         logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logger.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 

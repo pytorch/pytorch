@@ -26,9 +26,11 @@ import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandle,
     _FSDPState,
     _get_module_fsdp_state,
     _is_fsdp_flattened,
+    _named_parameters_with_duplicates,
     clean_tensor_name,
     TrainingState,
 )
@@ -427,6 +429,8 @@ def _init_param_handle_from_module(
         device_from_device_id,
         state.rank,
     )
+    state._device_handle = _FSDPDeviceHandle.from_device(state.compute_device)
+
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
     if sync_module_states:
         _sync_module_params_and_buffers(
@@ -503,13 +507,14 @@ def _init_param_handles_from_module(
                 for buffer_name in buffer_names
             ]
         _move_states_to_device(params, buffers, device_from_device_id)
-        if not hasattr(state, "compute_device"):  # only need to set once
+        if state.compute_device is None:  # only need to set once
             state.compute_device = _get_compute_device(
                 fully_sharded_module,
                 state._ignored_params,
                 device_from_device_id,
                 state.rank,
             )
+            state._device_handle = _FSDPDeviceHandle.from_device(state.compute_device)
         if sync_module_states:
             _sync_module_states(params, buffers, state.process_group)
         _init_param_handle_from_params(state, params, fully_sharded_module)
@@ -571,7 +576,8 @@ def _get_state_names_for_states(
     param_names: List[str] = []
     buffer_names: List[str] = []
     param_to_param_name = {
-        param: param_name for param_name, param in module.named_parameters()
+        param: param_name
+        for param_name, param in _named_parameters_with_duplicates(module)
     }
     buffer_to_buffer_name = {
         buffer: buffer_name for buffer_name, buffer in module.named_buffers()
@@ -875,8 +881,9 @@ def _get_compute_device(
     rank: int,
 ) -> torch.device:
     """
-    Determines and returns this FSDP instance's compute device. If the module
-    is already on a non-CPU device, then the compute device is that non-CPU
+    Determines and returns this FSDP instance's compute device. If a device is
+    specified by ``device_id``, then returns that device. Otherwise, If the
+    module is already on a non-CPU device, then the compute device is that non-CPU
     device. If the module is on CPU, then the compute device is the current
     device.
 
@@ -887,13 +894,14 @@ def _get_compute_device(
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
     """
-    # If the module is on GPU already, then that GPU device has priority
-    # over the current device
     param = next(_get_orig_params(module, ignored_params), None)
-    if param is not None and param.device.type == "cuda":
-        compute_device = param.device
+    if param is not None and param.device.type != "cpu":
+        compute_device = param.device  # Determined by model param placement
     else:
-        compute_device = torch.device("cuda", torch.cuda.current_device())
+        if device_from_device_id is not None and device_from_device_id.type != "cuda":
+            compute_device = device_from_device_id  # Determined by custom backend
+        else:
+            compute_device = torch.device("cuda", torch.cuda.current_device())
     if device_from_device_id is not None and compute_device != device_from_device_id:
         raise ValueError(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
@@ -992,7 +1000,7 @@ def _check_orig_params_flattened(
     ``fsdp_module``. This should be called as a sanity check after flattening
     the wrapped module's parameters.
     """
-    for param_name, param in fsdp_module.named_parameters():
+    for param_name, param in _named_parameters_with_duplicates(fsdp_module):
         if param not in ignored_params and not _is_fsdp_flattened(param):
             raise RuntimeError(
                 f"Found an unflattened parameter: {param_name}; "

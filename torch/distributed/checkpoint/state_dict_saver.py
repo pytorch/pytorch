@@ -38,12 +38,12 @@ def save_state_dict(
         call `save_state_dict` and that all data in state_dict belong to it.
 
     .. note::
-        This function can be used to save a state_dict with an initialized process
-        group by passing ``no_dist=True``. This can be used to produce a checkpoint
-        that can consumed by load_state_dict is a SPMD fashion.
+        This function can be used to save a state_dict without having a process group
+        initialized by passing ``no_dist=True``.
+
 
     Args:
-        state_dict (Dict[str, Any]): A state_dict
+        state_dict (Dict[str, Any]): The state_dict to save.
         storage_writer (StorageWriter):
             Instance of StorageWrite use to perform writes.
         process_group (ProcessGroup):

@@ -192,8 +192,9 @@ class TimerServer(abc.ABC):
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
             log.info(
-                f"Reaping worker_id=[{worker_id}]."
-                f" Expired timers: {self._get_scopes(expired_timers)}"
+                "Reaping worker_id=[%s]."
+                " Expired timers: %s",
+                worker_id, self._get_scopes(expired_timers)
             )
             if self._reap_worker_no_throw(worker_id):
                 log.info("Successfully reaped worker=[%s]", worker_id)
@@ -209,9 +210,10 @@ class TimerServer(abc.ABC):
 
     def start(self) -> None:
         log.info(
-            f"Starting {type(self).__name__}..."
-            f" max_interval={self._max_interval},"
-            f" daemon={self._daemon}"
+            "Starting %s..."
+            " max_interval=%s,"
+            " daemon=%s",
+            type(self).__name__, self._max_interval, self._daemon
         )
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon

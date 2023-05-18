@@ -1,24 +1,13 @@
-import os
-import sys
 from itertools import product, combinations, combinations_with_replacement, permutations
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
 from torch.ao.pruning import WeightNormPruner
 from torch.ao.nn.sparse.cusparselt_linear import cuSPARSELtLinear, cuSPARSELtLinearInt8
-from torch.profiler import profile, record_function, ProfilerActivity
-from pprint import pprint
-from time import time
 from tqdm import tqdm
 import pandas as pd
 import argparse
-import gc
 import random
-
-"""
-torch/csrc
-third party tp2:
-"""
 
 
 DEVICE = "cuda"
@@ -44,7 +33,6 @@ class Model(nn.Module):
 
 
 def gen_two_four_sparse_mask(m, k, dtype):
-
     def random_mask_choice(i=None):
         choices = [
             [1, 1, 0, 0],
@@ -57,61 +45,68 @@ def gen_two_four_sparse_mask(m, k, dtype):
         return choices[random.randint(0, len(choices) - 1) if i is None else i]
 
     mask_entries = [random_mask_choice() for i in range(m * k // 4)]
-    return torch.tensor(mask_entries, dtype=dtype, device=DEVICE).view(m, k).contiguous()
-
+    return (
+        torch.tensor(mask_entries, dtype=dtype, device=DEVICE).view(m, k).contiguous()
+    )
 
 
 class SemiSparseTensor(torch.Tensor):
     @staticmethod
     def __new__(
         cls,
-        wrapped_data,
+        original_tensor,
+        original_shape=None,
         compressed_tensor=None,
-        custom_shape=None,
-        compress=False,
+        cslt=None,
         transposed=False,
     ):
         kwargs = {}
         kwargs["device"] = (
-            wrapped_data.device
-            if wrapped_data is not None
+            original_tensor.device
+            if original_tensor is not None
             else compressed_tensor.device
         )
         kwargs["dtype"] = (
-            wrapped_data.dtype if wrapped_data is not None else compressed_tensor.dtype
+            original_tensor.dtype
+            if original_tensor is not None
+            else compressed_tensor.dtype
         )
         kwargs["layout"] = (
-            wrapped_data.layout
-            if wrapped_data is not None
+            original_tensor.layout
+            if original_tensor is not None
             else compressed_tensor.layout
         )
         kwargs["requires_grad"] = (
-            wrapped_data.requires_grad if wrapped_data is not None else False
+            original_tensor.requires_grad if original_tensor is not None else False
         )
 
-        shape = custom_shape if custom_shape is not None else wrapped_data.shape
+        shape = original_shape if original_shape is not None else original_tensor.shape
 
         return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
     def __init__(
         self,
         original_tensor,
+        original_shape=None,
         compressed_tensor=None,
-        custom_shape=None,
-        compress=True,
+        cslt=None,
         transposed=False,
     ):
         self.original_tensor = original_tensor
         self.original_shape = (
-            original_tensor.shape if custom_shape is None else custom_shape
+            original_tensor.shape if original_shape is None else original_shape
         )
         self.compressed_tensor = compressed_tensor
-        self.is_2x4sparse = False
+        self.cslt = cslt
         self.transposed = transposed
 
-        if compress:
+        if original_tensor is not None:
             num_bytes = original_tensor.nelement() * original_tensor.element_size()
-            compressed_size_bytes = num_bytes * 9 // 16
+            if original_tensor.dtype == torch.float16:
+                compression_factor = 9
+            elif original_tensor.dtype == torch.int8:
+                compression_factor = 10
+            compressed_size_bytes = num_bytes * compression_factor // 16
             compressed_size = compressed_size_bytes // original_tensor.element_size()
 
             self.compressed_tensor = torch.empty(
@@ -120,12 +115,9 @@ class SemiSparseTensor(torch.Tensor):
                 device=original_tensor.device,
             )
 
-            self.cslt = torch.classes.cusparselt.CusparseLtLinear(
-                self.compressed_tensor
-            )
-            self.cslt.set_compressed(original_tensor)
-            self.is_2x4sparse = True
-            del self.original_tensor
+            self.cslt = torch.cusparselt.CusparseLt(self.compressed_tensor)
+            self.cslt.set_compressed(original_tensor, self.transposed)
+            self.original_tensor = None
 
     def __repr__(self):
         return f"SemiSparseTensor(shape={self.shape})"
@@ -135,26 +127,24 @@ class SemiSparseTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if func is torch.ops.aten.detach.default:
-            res = SemiSparseTensor(
-                None,
+            # since we create a new compressed tensor, the tensor will already be detached. 
+            return SemiSparseTensor(
+                args[0].original_tensor,
                 compressed_tensor=args[0].compressed_tensor,
-                custom_shape=args[0].original_shape,
-                compress=False,
+                cslt=args[0].cslt,
+                original_shape=args[0].original_shape,
                 transposed=args[0].transposed,
             )
-            res.cslt = args[0].cslt
-            return res
 
         if func is torch.ops.aten.t.default:
-            res = SemiSparseTensor(
-                None,
+            # Because we cannot go from the compressed representation back to the dense representation currently, we just keep track of how many times we have been transposed. If it's an odd number of times, we'll throw an error since we can't handle this situation
+            return SemiSparseTensor(
+                args[0].original_tensor,
                 compressed_tensor=args[0].compressed_tensor,
-                custom_shape=args[0].original_shape,
-                compress=False,
-                transposed=(not args[0].transposed),
+                cslt=args[0].cslt,
+                original_shape=args[0].original_shape,
+                transposed=not args[0].transposed,
             )
-            res.cslt = args[0].cslt
-            return res
 
         if (
             func is torch.ops.aten.addmm.default
@@ -162,24 +152,21 @@ class SemiSparseTensor(torch.Tensor):
             and args[0].is_cuda
         ):
             bias, a, b = args
-            # b must be transposed so we can undo it
-            if isinstance(b, SemiSparseTensor) and b.transposed:
-                return b.t().cslt.cusparselt_addmm(a.T, bias).T
-            elif isinstance(a, SemiSparseTensor) and not a.transposed:
+            if isinstance(a, SemiSparseTensor) and not a.transposed:
                 # CURRENTLY BIAS is broadcasted the wrong way in cuSPARSELT
-                a.set_compressed(a.transpose)
                 return a.cslt.cusparselt_addmm(b, bias)
+            # b must be transposed so we can undo it
+            elif isinstance(b, SemiSparseTensor) and b.transposed:
+                return b.t().cslt.cusparselt_addmm(a.T, bias)
 
         if func is torch.ops.aten.mm.default:
             a, b = args
             if isinstance(a, SemiSparseTensor) and not a.transposed:
                 return a.cslt.cusparselt_mm(b)
-            elif isinstance(b, SemiSparseTensor) and not b.transposed:
+            elif isinstance(b, SemiSparseTensor) and b.transposed:
                 return b.t().cslt.cusparselt_mm(a.T).T
 
-        raise NotImplementedError(
-            f"bruh i aint implementing {func}({args}) gluck with that"
-        )
+        raise NotImplementedError("Not implemented")
 
 
 def test_linear(m, k, n, dtype):
@@ -202,6 +189,11 @@ def test_linear(m, k, n, dtype):
 
     model.linear.weight = nn.Parameter(SemiSparseTensor(model.linear.weight))
     res = model(B)
+
+    # print(temp.is_contiguous())
+    # print(res.is_contiguous())
+    # print(temp)
+    # print(res)
 
     sparse_measurement = benchmark.Timer(
         stmt="model(input_tensor)",

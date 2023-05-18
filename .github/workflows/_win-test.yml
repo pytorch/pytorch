@@ -27,34 +27,11 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
@@ -65,43 +42,7 @@ jobs:
           git config --global core.symlinks true
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
-        shell: powershell
-        continue-on-error: true
-        run: |
-          # This needs to be run before checking out PyTorch to avoid locking the working directory.
-          # Below is the list of commands that could lock $GITHUB_WORKSPACE gathered from sysinternals
-          # handle tool
-          $processes = "python", "ninja", "cl", "nvcc", "cmd"
-          Foreach ($process In $processes) {
-            Try {
-              # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process
-              Get-Process -Name $process -ErrorAction Stop | Stop-Process -Force
-            }
-            Catch {
-              Write-Output "No leftover $process process, continuing"
-              Write-Output $_
-            }
-          }
-
-          # Try it again https://stackoverflow.com/questions/40585754/powershell-wont-terminate-hung-process
-          # for hung processes
-          Foreach ($process In $processes) {
-            Try {
-              (Get-WmiObject -Class Win32_Process -Filter "Name LIKE '${process}%'").terminate()
-            }
-            Catch {
-              Write-Output $_
-            }
-          }
-
-          Try {
-            # Print all the processes for debugging
-            Wmic Path Win32_Process Get Caption,Processid,Commandline | Format-List
-          }
-          Catch {
-            # Better to write out whatever exception thrown to help debugging any potential issue
-            Write-Output $_
-          }
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -120,7 +61,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -149,6 +90,23 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Check for keep-going label
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+
       - name: Test
         id: test
         shell: bash
@@ -158,7 +116,7 @@ jobs:
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"
@@ -178,7 +136,7 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #
@@ -198,6 +156,15 @@ jobs:
           popd
 
           .ci/pytorch/win-test.sh
+
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
 
       - name: Print remaining test logs
         shell: bash
@@ -229,7 +196,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: python3 .github/scripts/parse_ref.py
 
       - name: Uninstall PyTorch
         if: always()

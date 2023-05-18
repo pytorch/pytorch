@@ -1,5 +1,7 @@
+import ast
 import builtins
 import collections
+import dataclasses
 import enum
 import importlib
 import itertools
@@ -7,6 +9,7 @@ import logging
 import math
 import os
 import re
+import sys
 import types
 import weakref
 from inspect import currentframe, getframeinfo
@@ -14,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from weakref import ReferenceType
 
 import torch
+import torch.utils._device
+from torch._dynamo.source import TensorProperty, TensorPropertySource
 
 from torch._guards import (
     DuplicateInputs,
@@ -23,7 +28,13 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_concrete_int,
+    SYMPY_INTERP,
+)
+
+from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -66,8 +77,31 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
         ("__load_module", lambda name: importlib.import_module(name)),
+        ("utils_device", torch.utils._device),
+        ("device", torch.device),
     ]
 )
+
+if sys.version_info[:2] <= (3, 8):
+    # [Note: Python Version <= 3.8]
+    # This branch should be dropped when we drop support for Python 3.8.
+    # Reason: 'ast.unparse' function was introduced in Python 3.9.
+
+    try:
+        import astunparse  # type: ignore[import]
+
+        def _ast_unparse(node: ast.AST) -> str:
+            return astunparse.unparse(node).replace("\n", "")
+
+        HAS_UNPARSE_FUNCTIONS = True
+    except ImportError:
+        HAS_UNPARSE_FUNCTIONS = False
+        pass
+else:
+    HAS_UNPARSE_FUNCTIONS = True
+
+    def _ast_unparse(node: ast.AST) -> str:
+        return ast.unparse(node).replace("\n", "")
 
 
 def strip_function_call(name):
@@ -111,6 +145,7 @@ class GuardBuilder(GuardBuilderBase):
         *,
         local: bool,
     ):
+        self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
         if user_scope:
@@ -390,7 +425,7 @@ class GuardBuilder(GuardBuilderBase):
         code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         param_key_ids = set(dict_param_key_ids(value))
         const_keys = set(dict_const_keys(value))
-        const_keys_repr = dict_const_keys_repr(const_keys)
+        const_keys_repr = dict_const_keys_repr(const_keys, local=self.local)
         if param_key_ids:
             code.append(f"___dict_param_key_ids({ref}) == {param_key_ids!r}")
             code.append(f"___dict_const_keys({ref}) == {const_keys_repr}")
@@ -450,6 +485,15 @@ class GuardBuilder(GuardBuilderBase):
             code = "not ___are_deterministic_algorithms_enabled()"
         self._produce_guard_code(guard, [code])
 
+    def DEFAULT_DEVICE(self, guard: Guard):
+        """Guard on CURRENT_DEVICE per torch.utils._device"""
+        assert guard.source is GuardSource.GLOBAL
+        import torch.utils._device as m
+
+        self._produce_guard_code(
+            guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
+        )
+
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
         # shape variables to sources from tracked_fakes.  This must happen after
@@ -459,12 +503,50 @@ class GuardBuilder(GuardBuilderBase):
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
         constraint_inputs = [a.constraint_dims for a in fs]
+
+        def get_sources(t_id, dim):
+            # Looks up base sources mapped to a tensor id and uses them to create
+            # sources for the corresponding tensor dimension.
+            return [
+                TensorPropertySource(source, TensorProperty.SIZE, dim)
+                for source in output_graph.tracked_fakes_id_to_source[t_id]
+            ]
+
+        if output_graph.export_constraints:
+            source_pairs: List[Tuple[Source, Source]] = []
+            for constraint in output_graph.export_constraints:
+                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+                # When t.size()[dim] maps to src0, src1, ..., srcN, we add
+                # constraints that make src0 "equal" to src1, ..., srcN.
+                source_pairs.extend(
+                    (source, other_source) for other_source in other_sources
+                )
+                if constraint.shared is not None:
+                    # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+                    # and t'.size()[dim'] maps to src1', ..., srcN', we add
+                    # constraints that also make src0 "equal" to src1', ..., srcN'.
+                    other_sources = get_sources(
+                        constraint.shared.t_id, constraint.shared.dim
+                    )
+                    source_pairs.extend(
+                        (source, other_source) for other_source in other_sources
+                    )
+            equalities_inputs = EqualityConstraint(
+                source_pairs=source_pairs,
+                warn_only=False,
+            )
+        else:
+            equalities_inputs = None
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
             constraint_inputs=constraint_inputs,
+            equalities_inputs=equalities_inputs,
             source_ref=self.source_ref,
+            # Export keeps static.
+            ignore_static=(not self.check_fn_manager.output_graph.export),
         )
+        output_graph.shape_env.freeze()
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
@@ -546,11 +628,13 @@ class GuardBuilder(GuardBuilderBase):
             # compiled with that same
             # tensor + more onerous user directives.
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
+            static, reason = tensor_always_has_static_shape(
+                value, is_tensor=True, guard_source=guard.source
+            )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                        f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -558,7 +642,6 @@ class GuardBuilder(GuardBuilderBase):
                     code.append(
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
@@ -611,6 +694,104 @@ class GuardBuilder(GuardBuilderBase):
             code_list,
             obj_ref,
         )
+
+
+# Common Sub-Expression Elimination for Python expressions.
+#
+# There are 2 steps to this pass:
+#     1. Count the frequency of each sub-expression (i.e. inner
+#        node in the AST tree)
+#
+#     2. Replace those that occur more than once by a fresh variable 'v'.
+#        'v' will be defined in the 'preface' list (output argument to
+#        'NodeTransformer')
+#
+# NB: the use of 'ast.unparse' while visiting the nodes makes this pass
+# quadratic on the depth of the tree.
+#
+# NB: this pass creates a new variable for each AST node that is repeated
+# more than 'USE_THRESHOLD'. e.g. if 'a.b.c.d' is used 10 times, 'a.b.c'
+# and 'a.b' are also used 10 times. So, there will be a new variable for
+# each of them.
+class PyExprCSEPass:
+    # Maximum number of times a given expression can be used without being
+    # replaced by a fresh variable.
+    USE_THRESHOLD = 1
+
+    # Ad-Hoc: AST nodes this pass focuses on.
+    ALLOWED_NODE_TYPES = (ast.Attribute, ast.Call, ast.Subscript)
+
+    @dataclasses.dataclass
+    class Config:
+        expr_count: Dict[str, int]
+        expr_to_name: Dict[str, str]
+
+    class ExprCounter(ast.NodeVisitor):
+        def __init__(self, config: "PyExprCSEPass.Config") -> None:
+            self._config = config
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
+                self._config.expr_count[_ast_unparse(node)] += 1
+            super().visit(node)
+
+    class Replacer(ast.NodeTransformer):
+        def __init__(
+            self,
+            config: "PyExprCSEPass.Config",
+            gen_name: Callable[[], str],
+        ) -> None:
+            super().__init__()
+            self._config = config
+            self._gen_name = gen_name
+            self.preface: List[str] = []
+
+        def visit(self, node: ast.AST) -> Any:
+            if isinstance(node, PyExprCSEPass.ALLOWED_NODE_TYPES):
+                expr = _ast_unparse(node)
+
+                # Replacement only occurs if a given expression is used more
+                # than once.
+                if self._config.expr_count[expr] > PyExprCSEPass.USE_THRESHOLD:
+                    if expr not in self._config.expr_to_name:
+                        # Parent 'visit' is called so that we CSE the inner expressions first.
+                        #
+                        # The resulting expression is used as right-hand-side of the variable
+                        # assignment. i.e. we are CSE-ing the children before the parents.
+                        #
+                        # Indexing still uses the old 'node', since that's what was counted
+                        # by the 'NodeVisitor'.
+                        node_ = super().visit(node)
+                        expr_ = _ast_unparse(node_)
+                        var_name = self._gen_name()
+                        self.preface.append(f"{var_name} = {expr_}")
+                        self._config.expr_to_name[expr] = var_name
+                    else:
+                        var_name = self._config.expr_to_name[expr]
+                    return ast.Name(var_name, ast.Load())
+
+            return super().visit(node)
+
+    def __init__(self) -> None:
+        self._counter = 0
+        self._config = self.Config(
+            expr_count=collections.defaultdict(lambda: 0), expr_to_name={}
+        )
+
+    def _new_var(self, prefix: str = "_var") -> str:
+        name = f"{prefix}{self._counter}"
+        self._counter += 1
+        return name
+
+    def count(self, exprs: List[str]) -> None:
+        counter = self.ExprCounter(self._config)
+        for e in exprs:
+            counter.visit(ast.parse(e))
+
+    def replace(self, expr: str) -> Tuple[List[str], str]:
+        replacer = self.Replacer(self._config, self._new_var)
+        new_node = replacer.visit(ast.parse(expr))
+        return replacer.preface, _ast_unparse(new_node)
 
 
 # NB: Naively, you'd expect this to only be a function that produces
@@ -722,8 +903,40 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
+            dynamic_dims_sizes = None
+            dynamic_dims_strides = None
+
+            def convert(size_or_stride):
+                converted: List[Optional[int]] = []
+                for dim in size_or_stride:
+                    if is_concrete_int(dim):
+                        converted.append(int(dim))
+                    else:
+                        converted.append(None)
+                return converted
+
+            dynamic_dims_sizes = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "size"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_dims_strides = [
+                convert(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "stride"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
             tensor_guards = TensorGuards(
-                *tensor_check_examples, dynamic_shapes=config.dynamic_shapes
+                *tensor_check_examples,
+                dynamic_dims_sizes=dynamic_dims_sizes,
+                dynamic_dims_strides=dynamic_dims_strides,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
@@ -752,7 +965,6 @@ class CheckFunctionManager:
         verbose_code_parts.extend(local_builder.shape_env_code)
         assert not global_builder.shape_env_code
 
-        code = " and ".join(unique(code_parts))
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -763,15 +975,23 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
-        py_code = f"""\
-def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda L: {code}
-"""
+
+        unique_code_parts = list(unique(code_parts))
+        make_guard_fn_args = ", ".join(closure_vars.keys())
+        guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
+
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
-            print("GUARDS", code)
-        set_guard_fail_hook(guard_fail_hook)
+            print("GUARDS", guard_body)
+
+        if config.report_guard_failures or guard_fail_fn is not None:
+            # Guard fail hook is called everytime guard eval fails. For a cache
+            # lookup where there are multiple entries in the same cache line,
+            # this can lead to very high performance overhead. So, we have
+            # decided to hide this behing a config flag.
+            set_guard_fail_hook(guard_fail_hook)
+
         out: Dict[str, Any] = dict()
-        exec(py_code, global_builder.scope, out)
+        exec(pycode, global_builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         guard_fn.closure_vars = closure_vars
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
@@ -796,6 +1016,49 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+
+def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
+    from torch._inductor.utils import IndentedBuffer
+
+    if HAS_UNPARSE_FUNCTIONS:
+        csepass = PyExprCSEPass()
+        csepass.count(code_parts)
+
+        def replace(expr: str) -> Tuple[List[str], str]:
+            return csepass.replace(expr)
+
+    else:
+
+        def replace(expr: str) -> Tuple[List[str], str]:
+            return [], expr
+
+    # Generate the inner body of the guard function.
+    # i.e. if-chain of the guard expressions.
+    guard_body = IndentedBuffer()
+    for expr in code_parts:
+        preface, expr = replace(expr)
+        guard_body.writelines(preface)
+        guard_body.writeline(f"if not ({expr}):")
+        with guard_body.indent():
+            guard_body.writeline("return False")
+
+    # Wrap the inner body into the actual guard function.
+    guard = IndentedBuffer()
+    guard.writeline("def guard(L):")
+    with guard.indent():
+        guard.splice(guard_body)
+        guard.writeline("return True")
+
+    # Wrap the whole guard function into another function
+    # with the closure variables.
+    make_guard_fn = IndentedBuffer()
+    make_guard_fn.writeline(f"def ___make_guard_fn({closure_args}):")
+    with make_guard_fn.indent():
+        make_guard_fn.splice(guard)
+        make_guard_fn.writeline("return guard")
+
+    return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
 stashed_first_fail_reason = None

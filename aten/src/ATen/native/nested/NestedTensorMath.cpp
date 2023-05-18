@@ -667,8 +667,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
   bool viewable = true;
   Tensor sizemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op),
       stridemat_reshaped = at::empty({ntensors, ndims_underlying_reshaped}, op);
-  int64_t* sizemat_reshaped_ptr = sizemat_reshaped.data_ptr<int64_t>(),
-      * stridemat_reshaped_ptr = stridemat_reshaped.data_ptr<int64_t>();
+  int64_t* sizemat_reshaped_ptr = sizemat_reshaped.mutable_data_ptr<int64_t>(),
+      * stridemat_reshaped_ptr = stridemat_reshaped.mutable_data_ptr<int64_t>();
   for (int64_t itensor = 0; itensor < ntensors; itensor++) {
     const IntArrayRef& size = sizes[itensor],
         & stride = strides[itensor];

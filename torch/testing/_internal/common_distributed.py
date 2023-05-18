@@ -662,8 +662,9 @@ class MultiProcessTestCase(TestCase):
             sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
             logger.error(
-                f"Caught exception: \n{traceback.format_exc()} exiting "
-                f"process {self.rank} with exit code: {MultiProcessTestCase.TEST_ERROR_EXIT_CODE}"
+                "Caught exception: \n%s exiting "
+                "process %s with exit code: %s",
+                traceback.format_exc(), self.rank, MultiProcessTestCase.TEST_ERROR_EXIT_CODE
             )
             # Send error to parent process.
             parent_pipe.send(traceback.format_exc())
@@ -736,7 +737,7 @@ class MultiProcessTestCase(TestCase):
                 if subprocess_error:
                     break
                 # All processes have joined cleanly if they all a valid exitcode
-                if all([p.exitcode is not None for p in self.processes]):
+                if all(p.exitcode is not None for p in self.processes):
                     break
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time

@@ -3,19 +3,7 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 from functorch import make_fx
 
@@ -26,64 +14,20 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives
 import torch.nn as nn
 import torch.utils._pytree as pytree
+
 from torch import fx
-from torch._subclasses import FakeTensorMode
-from torch.distributed._spmd.distribute import (
-    _convert_to_distributed,
-    distribute,
-    Schema,
+
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._spmd.data_parallel import gradients_tagging
+from torch.distributed._spmd.parallel_mode import (
+    DataParallel,
+    DTensorExpandMode,
+    ParallelMode,
 )
-from torch.distributed._spmd.distributed_graph import DistributedGraph
-from torch.distributed._tensor import DeviceMesh, Placement, Replicate, Shard
+from torch.distributed._tensor import Placement
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
-
-
-class SPMD(nn.Module):
-    def __init__(
-        self,
-        module: nn.Module,
-        schema: Schema,
-        input_schemas: Sequence[Placement] = tuple(),
-    ) -> None:
-        """
-        Given a non-distributed nn.Module, distribute the module and apply
-        optimizations over the distributed module (fx.GraphModule).
-
-        Args:
-            module (nn.Module): The target module.
-            schema (Schema): The distributed schema.
-            input_schemas (Sequence[Placement]): The schemas of the inputs.
-        """
-        super().__init__()
-        assert schema.placements == [
-            Replicate()
-        ], "SPMD only support Replicate() parameters for now"
-
-        # TODO: Fix model initialization with coalescing.
-        # This needs to happen post model transformation.
-        # Consider an explicit model init API.
-        for p in module.parameters():
-            dist.broadcast(p, src=0)
-
-        self._param_schema = schema
-        self._input_schemas = input_schemas
-        self._compiled_m: Optional[nn.Module] = None
-        self._dist_graph = DistributedGraph(orig_module=module)
-
-    def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
-        if self._compiled_m is None:
-            self._compiled_m = distribute(
-                self._dist_graph,
-                self._param_schema,
-                self._input_schemas,
-                *args,
-                **kwargs,
-            )
-
-        assert self._compiled_m is not None
-        return self._compiled_m(*args, **kwargs)
 
 
 class Override(ABC):
@@ -101,13 +45,14 @@ class Override(ABC):
     """
 
     @abstractmethod
-    def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+    def replacement(self, fqn: str, orig_submodule: torch.nn.Module) -> torch.nn.Module:
         r"""
         Implement this method to return a new :class:`nn.Module` instance to
         replace the ``orig_submodule`` argument in the model. This helps if
         ``orig_submodule`` is not traceable or should not be traced.
 
         Args:
+            fqn (str): fully quantified name of the submodule.
             orig_submodule (class:`nn.Module`): original submodule instance to replace.
 
         Returns:
@@ -178,65 +123,14 @@ def _to_caller_flattened_graph_module(gm: torch.fx.GraphModule) -> torch.fx.Grap
     return gm
 
 
-_placements_override: Dict[int, List[Placement]] = {}
+# Use a dtensor expand mode for now to preserve the old behavior
+# and avoid breaking existing code
+dtensor_expand_mode = DTensorExpandMode()
 
 
 def _override_placements(t: torch.Tensor, placements: List[Placement]):
-    global _placements_override
-    _placements_override[id(t)] = placements
-
-
-def _dtensor_expand(
-    gm: fx.GraphModule,
-    args: Tuple[Any, ...],
-    kwargs: Dict[str, Any],
-    named_states: Dict[str, Any],
-    params_and_buffers: Dict[str, Any],
-) -> fx.GraphModule:
-    flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
-
-    mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
-    shard_schema: Schema = Schema(mesh=mesh, placements=[Shard(0)])
-    # FIXME: allow other sharding schemas
-    replicate_schema: Schema = Schema(mesh=mesh, placements=[Replicate()])
-
-    inps, schemas = [], []
-
-    for o in pytree.tree_flatten(named_states)[0]:
-        if isinstance(o, torch.Tensor):
-            inps.append(o)
-            schemas.append(replicate_schema)
-        else:
-            inps.append(torch.empty(0))
-            schemas.append(replicate_schema)
-
-    for p in pytree.tree_flatten(params_and_buffers)[0]:
-        assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
-        inps.append(p)
-        schemas.append(replicate_schema)
-
-    for a in flat_args:
-        if isinstance(a, torch.Tensor):
-            inps.append(a)
-            if id(a) in _placements_override:
-                schemas.append(
-                    Schema(mesh=mesh, placements=_placements_override[id(a)])
-                )
-            else:
-                schemas.append(shard_schema)
-        else:
-            # Create dummy tensor and schema for non-tensor inputs for
-            # the purpose of dtensor expansion. Non-tensor inputs are
-            # guaranteed unused in dispatcher graphs produced by make_fx.
-            # However, we still need to respect them so that tensor inputs
-            # match wtih their placeholders.
-            inps.append(torch.empty(0))
-            schemas.append(shard_schema)
-
-    with FakeTensorMode(allow_non_fake_inputs=True):
-        fake_inps = [torch.empty_like(inp) for inp in inps]
-
-    return _convert_to_distributed(gm, fake_inps, schemas, _allow_partial=False)[0]
+    global dtensor_expand_mode
+    dtensor_expand_mode._placements_override[id(t)] = placements
 
 
 @contextmanager
@@ -351,7 +245,10 @@ def _fused_adam_decomp(
         found_inf=found_inf,
     )
 
-    for orig, updated in zip(orig_tuple, updated_tuple):
+    for idx, (orig, updated) in enumerate(zip(orig_tuple, updated_tuple)):
+        if idx == 1:
+            # skip gradient copying as we don't need to copy gradients back
+            continue
         for o, u in zip(orig, updated):
             o.copy_(u)
 
@@ -425,7 +322,8 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Type[Any], Override]],
+    module_override: Optional[List[Override]],
+    parallel_mode: ParallelMode,
     *args: Any,
     **kwargs: Any,
 ) -> _CompiledResult:
@@ -448,10 +346,19 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        for typ, override in module_override.items():
-            for name, submodule in mod.named_modules():
-                if isinstance(submodule, typ):
-                    accessor.swap_submodule(name, override.replacement(submodule))
+        def swap(fqn_prefix: str, module: torch.nn.Module) -> None:
+            for override in module_override:  # type: ignore[union-attr]
+                for name, child in module.named_children():
+                    if len(name) == 0:
+                        continue
+                    fqn = fqn_prefix + "." + name if fqn_prefix != "" else name
+                    new_child = override.replacement(fqn, child)
+                    if id(new_child) == id(child):
+                        swap(fqn, new_child)
+                    else:
+                        accessor.swap_submodule(fqn, new_child)
+
+        swap("", mod)
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))
@@ -459,8 +366,6 @@ def _compile(
 
     named_states = {}
     if opt is not None:
-        opt_states, spec = pytree.tree_flatten(dict(opt.state))
-
         # Pass named_states instead of opt.state to stateless_func, because
         # the later uses nn.Parameter as key. During tracing, we need to
         # make sure optimizers can find the states using proxy tensors.
@@ -470,22 +375,49 @@ def _compile(
                 # Parameter as keys
                 named_states[n] = opt.state[p]  # type: ignore[index]
 
+    is_data_parallel_mode = isinstance(parallel_mode, DataParallel)
+
     # Lift states and parameters as function arguments so that make_fx
     # can trace operations applied to them.
-    def stateless_func(func, named_states, params, buffers, args, kwargs):
+    def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
             cast(nn.Module, mod), {**params, **buffers}
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
-            ret = func(*args, **kwargs)
-            # make sure updated parameters are returned
-            return ret, list(mod.parameters())  # type: ignore[union-attr]
+            # For DataParallel mode, install hooks first to tag the gradients
+            with gradients_tagging(params) if is_data_parallel_mode else nullcontext():
+                ret = func(*args, **kwargs)
 
-    # FIXME: Using symbolic tracing to work around. Otherwise it hits
-    # shape mismatch error, as we use local inputs to trace local graph
-    # and use DTensor to expand operators, where DTensor's shape is the
-    # global shape.
+            # make sure updated parameters are returned
+            return ret, list(mod.parameters()), list(named_states.values())  # type: ignore[union-attr]
+
+    # FIXME: Using symbolic tracing to work around in DTensor expand mode.
+    # Otherwise it hits shape mismatch error, as we use local inputs to
+    # trace local graph and use DTensor to expand operators, where
+    # DTensor's shape is the global shape.
+    tracing_mode = "fake" if is_data_parallel_mode else "symbolic"
+
+    if is_data_parallel_mode:
+        fake_mode = FakeTensorMode()
+
+        def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
+            # since compilation happens in the first iteration and we
+            # receives mini-batch input, convert them to full batch
+            # fake tensor input first for data parallel sharding
+            # propagations
+            fake_arg = fake_mode.from_tensor(arg)
+            arg_dims = [1] * arg.ndim
+            # we assume the first dim is batch dim in data parallel
+            arg_dims[0] *= dist.get_world_size()
+            return fake_arg.repeat(arg_dims)
+
+        args = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            args,
+        )
+
     with _enable_compile():
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
@@ -493,18 +425,26 @@ def _compile(
         # Issue: https://github.com/pytorch/pytorch/issues/97852
         gm = make_fx(
             partial(stateless_func, func),
-            tracing_mode="symbolic",
+            tracing_mode=tracing_mode,
             decomposition_table=FOREACH_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
-        )(named_states, params, buffers, args, kwargs)
+        )(params, buffers, named_states, args, kwargs)
 
     params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
         **params,
         **buffers,
     }
 
-    # 4. Use DTensor to insert collectives
-    gm = _dtensor_expand(gm, args, kwargs, named_states, params_and_buffers)
+    # 4. parallel mode to expand a single device graph to a distributed graph
+    gm = parallel_mode.partition(
+        gm,
+        mod,
+        opt,
+        params_and_buffers,
+        named_states,
+        args,
+        kwargs,
+    )
 
     # 5. Move the responsibility of flattening the input arguments from the
     # graph module to the caller. This serves two purposes:
@@ -512,7 +452,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([named_states, params_and_buffers])
+    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
@@ -530,7 +470,7 @@ def _compile(
 
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
-        for _, override in module_override.items():
+        for override in module_override:
             gm = override.transform(gm, flat_state)
 
     return _CompiledResult(gm, mod, opt, flat_state)
@@ -542,8 +482,9 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Type[Any], Override]] = None,
+    module_override: Optional[List[Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+    parallel_mode: Optional[ParallelMode] = None,
 ):
     r"""
     Compile and optimize a callable, which can be a train step within a training
@@ -552,27 +493,36 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Type[Any], Override]]): a dictionary maps
-            from target :class:`nn.Module` types to :class:`Override` objects.
-            The :class:`Override` objects provide :class:`nn.Module` replacements
-            during tracing and a graph transformation function after tracing.
-            (Default: ``None``)
+        module_override (Optional[List[Override]]): a list of Override instances
+            that will be applied to the module in order. The :class:`Override`
+            objects provide :class:`nn.Module` replacements during tracing and a
+            graph transformation function after tracing. (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
             a callback that will be called after the original callable is
             compiled and distributed (usually after the first iteration) to
             transform the compiled GraphModule into a new optimized one.
+        parallel_mode (Optional[ParallelMode]): a :class:`ParallelMode` object
+            that specifies how to parallelize the callable. Each ParallelMode
+            would have its own strategy to partition the model and the captured
+            graph (Default: ``None``)
     """
 
     def inner(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            last_train_step = kwargs.pop("last_train_step", False) if kwargs else False
             first_iter = False
             # Put the COMPILED_OBJECT_KEY in ``wrapper`` instead of ``func`` as
             # ``wrapper`` is the one that users will get.
             compiled_obj = wrapper.__dict__.get(COMPILED_OBJECT_KEY, None)
             if compiled_obj is None:
                 first_iter = True
-                compiled_obj = _compile(func, module_override, *args, **kwargs)
+                global dtensor_expand_mode
+                mode: ParallelMode = (
+                    dtensor_expand_mode if parallel_mode is None else parallel_mode
+                )
+
+                compiled_obj = _compile(func, module_override, mode, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
             flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
@@ -584,7 +534,21 @@ def compile(
                     # TODO: SPMD should provid a default and configurable
                     # transformation.
                     compiled_obj.gm = gm_transformation(compiled_obj.gm)
-                output = compiled_obj.gm(*flat_inps)[0]
+                if not last_train_step:
+                    output = compiled_obj.gm(*flat_inps)[0]
+                else:
+                    # This is the last train step. Call IterGraphModule.forward()
+                    # with the `last_iter` argument and catch the exception in
+                    # case the compiled_obj is not wrapped with IterGraphModule.
+                    try:
+                        output = compiled_obj.gm(*flat_inps, last_iter=last_train_step)[
+                            0
+                        ]
+                    except TypeError as e:
+                        if "last_iter" not in str(e):
+                            raise e
+                        output = compiled_obj.gm(*flat_inps)[0]
+
                 return output
 
         return wrapper

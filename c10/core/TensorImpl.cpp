@@ -232,20 +232,22 @@ normalize_sym_sizes_strides(SymIntArrayRef sizes, SymIntArrayRef strides) {
   // Look for a SymNode to dispatch on
   SymNode base;
   bool all_hinted = true;
+  // NB: sizes/strides guaranteed to be positive, so only need
+  // is_heap_allocated
   for (const auto& s : sizes) {
     if (all_hinted && !s.has_hint()) {
       all_hinted = false;
     }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
+    if (!base && s.is_heap_allocated()) {
+      base = s.toSymNode();
     }
   }
   for (const auto& s : strides) {
     if (all_hinted && !s.has_hint()) {
       all_hinted = false;
     }
-    if (!base && s.is_symbolic()) {
-      base = s.toSymNodeImpl();
+    if (!base && s.is_heap_allocated()) {
+      base = s.toSymNode();
     }
   }
   if (!base || all_hinted) {
@@ -591,6 +593,14 @@ bool TensorImpl::has_storage() const {
 void TensorImpl::throw_storage_access_error() const {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
+}
+
+void TensorImpl::throw_data_ptr_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
+    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
+  }
+  TORCH_CHECK(
+      false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
@@ -1106,7 +1116,7 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
+static void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
   dst.clear();
   dst.reserve(src.size());
   for (const auto& i : src) {
@@ -1125,7 +1135,8 @@ void TensorImpl::set_sizes_and_strides(
   auto int_sizes = asIntArrayRefSlowOpt(sizes);
   auto int_strides = asIntArrayRefSlowOpt(strides);
   if (int_sizes && int_strides &&
-      (!storage_offset.has_value() || !storage_offset->is_symbolic()) &&
+      // NB: storage_offset guaranteed to be positive
+      (!storage_offset.has_value() || !storage_offset->is_heap_allocated()) &&
       !has_symbolic_sizes_strides_) {
     set_sizes_and_strides(*int_sizes, *int_strides);
     if (storage_offset.has_value())
