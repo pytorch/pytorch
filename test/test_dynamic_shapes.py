@@ -1772,14 +1772,14 @@ class TestDimConstraints(TestCase):
             "dynamic_dim(L['x9'], 1) == dynamic_dim(L['x6'], 1)",
         })
 
-        def dummy_f(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+        def dummy_f(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12):
             pass
 
         action_code = dim_constraints.prettify_results(inspect.signature(dummy_f))
         static_code, dynamic_code = re.findall(r"```(.*?)```", action_code, re.DOTALL)
         print(static_code)
         expected_static = '''
-def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12):
     # x0:
     assert x0.size()[0] == 8
 
@@ -1811,7 +1811,7 @@ def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
     assert x12.size()[2] == 3
 '''
         expected_dynamic = '''
-def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
+def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12):
     return [
         # x6:
         dynamic_dim(x6, 1),
