@@ -3,7 +3,7 @@ import functools
 import itertools
 
 import operator
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Any
 
 import sympy
 from triton.runtime.jit import JITFunction
@@ -34,6 +34,11 @@ class TritonCSEVariable(CSEVariable):
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
+            elif isinstance(arg, sympy.Symbol) and arg.name[0] in "xyr":
+                # most of the time index vars don't need masks associated with them
+                # however, when index vars are used to compute indices for indirect reads
+                # those reads should subsequently be masked,
+                self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
 def signature_of(arg):
@@ -145,6 +150,43 @@ def split_iteration_ranges(groups: List[sympy.Expr], lengths: List[List[sympy.Ex
     ), f"failed to set ranges {remaining} {lengths}"
 
     return new_ranges, return_getters_groups
+
+def triton_compute_type(dtype):
+    triton_type_name = str(dtype).split(".")[-1]
+    if triton_type_name == "bool":
+        triton_type_name = "int1"
+    if triton_type_name in ("float16", "bfloat16"):
+        # float16 math is done in float32 inside the kernel
+        triton_type_name = "float32"
+    return f"tl.{triton_type_name}"
+
+
+def triton_acc_type(dtype):
+    if is_integer_dtype(dtype) and dtype.is_signed:
+        nbits = 64 if dtype == torch.int64 else 32
+        return f"tl.int{nbits}"
+    return triton_compute_type(dtype)
+
+
+def triton_constant(value):
+    if value == float("inf"):
+        return 'float("inf")'
+    elif value == float("-inf"):
+        return 'float("-inf")'
+    elif math.isnan(value):
+        return 'float("nan")'
+    return repr(value)
+
+
+
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -335,9 +377,8 @@ class IterationRangesEntry(IterationRanges):
             kernel=parent.kernel,
         )
         self.parent = parent
-        self.expr = expr
         self.codegen = functools.lru_cache(None)(self._codegen)
-        self.code = functools.lru_cache(None)(self._code)
+        self.expr = expr
 
     def set_name(self, name):
         self.codegen = lambda: name
@@ -347,19 +388,15 @@ class IterationRangesEntry(IterationRanges):
     def cache_clear(self):
         self.codegen.cache_clear()
 
-    def _code(self):
-        return f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr))
-
-    def codegen_into(self, buffer):
-        buffer.writeline(self._code())
-
-    def _codegen(self):
+    def writeline(self, line):
         if self.is_loop():
-            self.codegen_into(V.kernel.indexing_code)
+            V.kernel.indexing_code.writeline(line)
         else:
             # lift non-reduction stores outside loop
-            self.codegen_into(V.kernel.body)
+            V.kernel.body.writeline(line)
 
+    def _codegen(self):
+        self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
     def precomputed_args(self):

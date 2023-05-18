@@ -134,6 +134,9 @@ class BaseSchedulerNode:
         self.unmet_dependencies = self.read_writes.reads
         self.prune_deps()
 
+    def op_counts(self):
+        return self.read_writes.op_counts
+
     def used_buffer_names(self) -> Set[str]:
         return {
             dep.name
@@ -393,23 +396,6 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
-        if self.is_reduction():
-            # reduction has last (reduced) dim in its sizes, and some
-            # downstream dependencies get confused by it
-            self.read_writes.writes = self.read_writes.writes | {
-                w.strip_last_size() for w in self.read_writes.writes
-            }
-            # reduction not on the last dim swaps the sizes, and downstream
-            # dependencies expect unswapped
-            # TODO swapping sizes doesn't work, leads to
-            # File "/scratch/ngimel/work/repos/torchdynamo/torchinductor/sizevars.py", line 130, in guard_equals
-            # if len(right.free_symbols) < len(left.free_symbols):
-            # AttributeError: 'int' object has no attribute 'free_symbols'
-            # even though memory dep looks correct
-            # self.read_writes.writes = self.read_writes.writes | {
-            #     w.maybe_swap_sizes() for w in self.read_writes.writes
-            # }
-
     def debug_str_extra(self):
         name = self.get_name()
         lines = [
@@ -573,6 +559,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def has_aliasing_or_mutation(self):
         return any(x.has_aliasing_or_mutation() for x in self.snodes)
+
+    @cache_on_self
+    def op_counts(self):
+        op_counts = collections.Counter()
+        for node in self.snodes:
+            op_counts.update(node.op_counts())
+        return op_counts
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes

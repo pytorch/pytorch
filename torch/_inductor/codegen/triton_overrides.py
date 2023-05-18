@@ -134,7 +134,10 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        return V.kernel.indexing(expr)[0]
+        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        var = V.kernel.cse.generate(V.kernel.compute, index_str)
+        var.mask_vars = mask_vars
+        return var
 
     @staticmethod
     def masked(mask, body, other):
@@ -301,6 +304,13 @@ class TritonOverrides(OpOverrides):
         quot = f"{a} // {b}"
         rem = f"{a} % {b}"
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+
+    @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
 
     @staticmethod
     def trunc(x):

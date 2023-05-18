@@ -39,6 +39,9 @@ The following components and artifacts are configurable through the ``TORCH_LOGS
 variable (see torch._logging.set_logs for the python API):
 
 Components:
+        ``all``
+            Special component which configures the default log level of all components. Default: ``logging.WARN``
+
         ``dynamo``
             The log level for the TorchDynamo component. Default: ``logging.WARN``
 
