@@ -2213,7 +2213,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
-        strict_ctx = contextlib.nullcontext()
+        strict_ctx : Any = contextlib.nullcontext()
         if parent.strict_checks_enabled:
             strict_ctx = tracer.strict_translation_mode()
         try:

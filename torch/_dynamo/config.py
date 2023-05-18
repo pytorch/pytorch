@@ -5,6 +5,8 @@ from os.path import abspath, dirname
 
 import torch
 from . import external_utils
+import inspect
+import re
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -265,12 +267,12 @@ _autograd_backward_strict_mode_banned_ops = [
     "requires_grad",
     "storage_offset",
     "layout",
-    "is_cuda",
-    "is_quantized",
-    "is_meta",
     "data",
-    "is_sparse",
 ]
+
+_autograd_backward_strict_mode_banned_ops.extend(
+    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r'^is_.*', name)]
+)
 
 
 from .config_utils import install_config_module
