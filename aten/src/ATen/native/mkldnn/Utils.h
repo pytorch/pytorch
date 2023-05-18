@@ -84,7 +84,7 @@ inline void mkldnn_check_low_precision(ScalarType input_t, std::string name){
         ": bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   } else if (input_t  == ScalarType::Half) {
     TORCH_CHECK(mkldnn_fp16_device_check(), name,
-        ": fp16 path needs the cpu support avx512fp16");
+        ": fp16 path needs the cpu support avx512_fp16");
   }
 }
 
