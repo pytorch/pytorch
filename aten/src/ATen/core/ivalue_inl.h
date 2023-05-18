@@ -1627,7 +1627,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
   TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
-      const EnumHolder& v);
+      const ivalue::EnumHolder& v);
 
   TORCH_API const std::string qualifiedClassName() const;
 
@@ -1962,6 +1962,14 @@ inline std::vector<int64_t> IValue::toIntVector() const {
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toIntVector on null intrusive_ptr IValue");
   return createVectorFromList<int64_t>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline std::vector<c10::SymInt> IValue::toSymIntVector() const {
+  AT_ASSERT(isSymIntList() || isIntList(), "Expected SymIntList or IntList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toSymIntVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::SymInt>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline at::DimVector IValue::toDimVector() const {

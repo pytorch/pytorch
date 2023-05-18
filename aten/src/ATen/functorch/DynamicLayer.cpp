@@ -467,20 +467,21 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
 
 // right now grad_special_case as a bool is sufficient because this is the only special case for grad. If we need to add
 // more special cases, it's more scalable to add an enum to know which op we're looking at without looking at the schema
-void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
-  auto& layer = dynamicLayerStackAccessor().back();
-  auto restore_guard = restoreLocalDispatchKeySetRAII(layer.interpreter().getSavedLocalDispatchKeySet());
+static void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
+  auto restore_guard = restoreLocalDispatchKeySetRAII(
+      dynamicLayerStackAccessor().back().interpreter().getSavedLocalDispatchKeySet());
   WithoutTop guard;
 
-  layer.interpreter().sendToNextInterpreter(op, stack, grad_special_case);
+  // WithoutTop stores the popped DynamicLayer object.
+  guard.layer_.interpreter().sendToNextInterpreter(op, stack, grad_special_case);
 }
 
 // used for functions that have aliasing operations but should be treated like they're out of place (i.e. lift_fresh)
-void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   return dynamicLayerBack(op, stack, true);
 }
 
-void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   return dynamicLayerBack(op, stack, false);
 }
 

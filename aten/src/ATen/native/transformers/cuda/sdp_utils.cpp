@@ -27,17 +27,16 @@ constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
-bool check_requires_grad(sdp_params params, bool debug) {
+bool input_requires_grad(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled)) {
-    if (debug) {
-      TORCH_WARN("Flash Attention does not currently support training.");
-    }
-    return false;
-  }
-  return true;
+  return any_inputs_require_grad && gradmode_enabled;
+}
+
+bool has_for_nested_inputs(sdp_params params) {
+  return (params.query.is_nested() || params.key.is_nested() ||
+          params.value.is_nested());
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
@@ -55,9 +54,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
   // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
 
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    // See check_for_nested_inputs for details
+  if (has_for_nested_inputs(params)) {
     return efficient_first;
   }
   if (params.query.dim() != 4) {
@@ -78,7 +75,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
     // The training heuristic is taken from
     // https://github.com/pytorch/pytorch/pull/99644 Revisit when updated
     // cutlass kernel is upstreamed.
-    if (check_requires_grad(params, false)) {
+    if (input_requires_grad(params)) {
       if (6 * threads_flash > query_lengths)
         return efficient_first;
     } else if ((small_threads_flash && more_threads_cutlass) || large_head_dim)
@@ -125,14 +122,6 @@ bool check_for_non_zero_dropout(sdp_params params, bool debug) {
     return false;
   }
   return true;
-}
-
-bool check_for_nested_inputs(sdp_params params) {
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    return true;
-  }
-  return false;
 }
 
 bool try_broadcast_param_size(
@@ -204,7 +193,7 @@ bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
 
 bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (!check_for_nested_inputs(params)) {
+  if (!has_for_nested_inputs(params)) {
     return true;
   }
 
@@ -251,7 +240,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
 
 bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (check_for_nested_inputs(params) && !check_requires_grad(params, false)) {
+  if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
       TORCH_WARN(
           "Memory efficient attention currently doesn't support training with NT inputs.");
@@ -312,7 +301,7 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto k_batch_size = params.key.sym_size(0);
   auto v_batch_size = params.value.sym_size(0);
 
-  bool has_nested_input = check_for_nested_inputs(params);
+  bool has_nested_input = has_for_nested_inputs(params);
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
@@ -501,14 +490,11 @@ bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_head_dim_gt64_and_sm_ge86(sdp_params params, bool debug) {
+bool check_head_dim_gt64_and_sm_ge86_lt90(sdp_params params, bool debug) {
   // Memory Efficient Attention is throwing a cuda illegal memory error
   // on sm86 or newer when head_dim is greater than 64.
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
-  // Categorically disable sm90 as well. Will want to fix this once we have
-  // H100s available for testing.
-  is_sm86_or_newer = is_sm86_or_newer || (dprops->major > 8);
   if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
     if (debug) {
       TORCH_WARN(
@@ -519,13 +505,13 @@ bool check_head_dim_gt64_and_sm_ge86(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt64_and_sm_ge86(
+bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
     sdp_params params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 64 And the device is sm86 or newer.
-  if (!check_requires_grad(params, false) &&
-      !check_head_dim_gt64_and_sm_ge86(params, false)) {
+  if (input_requires_grad(params) &&
+      !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
@@ -571,7 +557,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_requires_grad_and_head_dim_gt64_and_sm_ge86,
+      check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
@@ -608,7 +594,7 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_head_dim_gt64_and_sm_ge86,
+      check_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms);

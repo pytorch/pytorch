@@ -12,10 +12,16 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
+    spawn_threads_and_init_comms,
     MultiProcessTestCase,
     TEST_SKIPS
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
+)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
@@ -117,6 +123,46 @@ class TestObjectCollectives(MultiProcessTestCase):
 
         self.assertEqual(self.rank, output_list[0])
 
+class TestObjectCollectivesWithSubPg(TestCase):
+
+    # the threads share ``self`` so it can't store any state
+    def setup(self):
+        rank = dist.get_rank()
+        base_rank = rank - (rank % 2)
+        ranks = [base_rank, base_rank + 1]
+        my_pg = dist.new_group(ranks, use_local_synchronization=True)
+        return rank, ranks, my_pg
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_scatter_object(self):
+        rank, ranks, my_pg = self.setup()
+        out_list = [None]
+        dist.scatter_object_list(out_list, ranks, src=ranks[0], group=my_pg)
+        self.assertEqual(rank, out_list[0])
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_all_gather_object(self):
+        rank, ranks, my_pg = self.setup()
+        out_list = [None] * len(ranks)
+        dist.all_gather_object(out_list, rank, group=my_pg)
+        self.assertEqual(ranks, out_list)
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_gather_object(self):
+        rank, ranks, my_pg = self.setup()
+        out_list = [None] * len(ranks) if rank == ranks[0] else None
+        dist.gather_object(rank, out_list, dst=ranks[0], group=my_pg)
+        if rank == ranks[0]:
+            self.assertEqual(ranks, out_list)
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_broadcast_object(self):
+        rank, ranks, my_pg = self.setup()
+        out_list = [None]
+        if rank == ranks[0]:
+            out_list[0] = rank
+        dist.broadcast_object_list(out_list, src=ranks[0], group=my_pg)
+        self.assertEqual(ranks[0], out_list[0])
 
 if __name__ == "__main__":
     run_tests()

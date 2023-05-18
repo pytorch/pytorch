@@ -953,6 +953,28 @@ class TestTorchDeviceType(TestCase):
             # t + 1 allocates a new tensor for result using empty
             t + 1
 
+    @onlyCUDA
+    def test_dtypetensor_warnings(self, device):
+        msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.cuda.FloatTensor([0])
+
+        with self.assertWarnsOnceRegex(UserWarning, msg):
+            t = torch.cuda.DoubleTensor([0])
+
+    def test_set_default_tensor_type_warnings(self, device):
+        msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
+        default_type = torch.tensor([]).type()
+        try:
+            with self.assertWarnsOnceRegex(UserWarning, msg):
+                torch.set_default_tensor_type(torch.FloatTensor)
+
+            if torch.cuda.is_available():
+                with self.assertWarnsOnceRegex(UserWarning, msg):
+                    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+        finally:
+            torch.set_default_tensor_type(default_type)
+
     # TODO: this test should be in test_nn.py
     @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
@@ -1417,6 +1439,24 @@ else:
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_interpolate_bilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=12,
+                    mode='bilinear',
+                    align_corners=False)
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
+
     @skipIfMps
     @skipIfTorchInductor("aot-autograd issue")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
@@ -1820,11 +1860,17 @@ else:
             x = torch.zeros(m, device=device)
             res = x.scatter_add(dim, idx, src)
 
+            # Checking if scatter_add is deterministic
+            for i in range(5):
+                res_next = x.scatter_add(dim, idx, src)
+                self.assertEqual(res, res_next, atol=0, rtol=0)
+                res = res_next
+
             expected = torch.zeros(m, device=device)
             for i in range(elems):
                 expected[idx[i]] += src[i]
 
-            self.assertEqual(res, expected, atol=0, rtol=0)
+            self.assertEqual(res, expected, atol=1e-4, rtol=1e-5)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -4453,6 +4499,17 @@ else:
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
 
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
+
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
     @skipCUDAMemoryLeakCheckIf(True)
@@ -5392,6 +5449,40 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    @onlyNativeDeviceTypes
+    def test_masked_scatter_inplace_noncontiguous(self, device):
+        t = torch.zeros(5, 2, dtype=torch.long, device=device)
+        t_non_contig = t.transpose(0, 1)
+        t_contig = t_non_contig.contiguous()
+
+        assert t_contig.is_contiguous()
+        assert not t_non_contig.is_contiguous()
+
+        mask = torch.tensor([[False, True], [False, True], [False, False], [True, True], [True, True]], device=device)
+        mask_non_contig = mask.transpose(0, 1)
+        mask_contig = mask_non_contig.contiguous()
+
+        assert mask_contig.is_contiguous()
+        assert not mask_non_contig.is_contiguous()
+
+        # source is always converted to contiguous by the op.
+        source = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 9]], device=device)
+
+        # t: contig, mask: contig
+        expected = t_contig.masked_scatter_(mask_contig, source)
+
+        # t: non-contig, mask: non-contig
+        actual = t_non_contig.masked_scatter_(mask_non_contig, source)
+        self.assertEqual(actual, expected)
+
+        # t: contig, mask: non-contig
+        actual = t_contig.masked_scatter_(mask_non_contig, source)
+        self.assertEqual(actual, expected)
+
+        # t: non-contig, mask: contig
+        actual = t_non_contig.masked_scatter_(mask_contig, source)
+        self.assertEqual(actual, expected)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -6095,6 +6186,53 @@ class TestTorch(TestCase):
         self.assertTrue(torch.equal(x, y))
         self.assertFalse(torch.equal(z, x))
 
+        # Fast path test: tensor flags, like neg and conj
+        neg_0 = torch.tensor((1, 2, 3), dtype=torch.float)
+        neg_1 = neg_0._neg_view()
+        self.assertTrue(neg_1.is_neg())
+        self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
+        self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
+        self.assertEqual(neg_0.stride(), neg_1.stride())
+        self.assertEqual(neg_0.size(), neg_1.size())
+        self.assertFalse(torch.equal(neg_0, neg_1))
+        # FIXME: Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+
+        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
+        conj_1 = conj_0.conj()
+        self.assertTrue(conj_1.is_conj())
+        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
+        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
+        self.assertEqual(conj_0.stride(), conj_1.stride())
+        self.assertEqual(conj_0.size(), conj_1.size())
+        self.assertFalse(torch.equal(conj_0, conj_1))
+        # FIXME: Disable the following check due to the inductor failure
+        # See https://github.com/pytorch/pytorch/issues/100340 and
+        # https://github.com/pytorch/pytorch/issues/98175
+        if not TEST_WITH_TORCHINDUCTOR:
+            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+
+        # Fast path test: two tensors share the same storage, but different dtype
+        s_0 = torch.rand((2, 3), dtype=torch.float)
+        s_1 = s_0.view(dtype=torch.int32)
+        self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
+        self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
+        self.assertEqual(s_0.stride(), s_1.stride())
+        self.assertEqual(s_0.size(), s_1.size())
+        self.assertFalse(torch.equal(s_0, s_1))
+
+        # Fast path test: two tensors share the same storage, but different strides
+        t_0 = torch.rand((2, 3), dtype=torch.float)
+        t_1 = t_0.t()
+        self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
+        self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
+        self.assertNotEqual(t_0.stride(), t_1.stride())
+        self.assertNotEqual(t_0.size(), t_1.size())
+        self.assertFalse(torch.equal(t_0, t_1))
+
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
         char = torch.CharStorage().element_size()
@@ -6193,6 +6331,7 @@ class TestTorch(TestCase):
             "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
             lambda: [1, 2] in x)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_deepcopy_parameter(self):
         from copy import deepcopy
         l = torch.nn.Linear(10, 1)
@@ -7333,6 +7472,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_parallel_info(self):
         torch.__config__.parallel_info()
+
+    def test_get_cpu_capability(self):
+        # This method is primarily exposed for torchvision's resize
+        torch.backends.cpu.get_cpu_capability()
+
+        # We have to ensure that method is torchscriptable as torchvision's resize
+        # should be torchscriptable
+        torch.jit.script(torch.backends.cpu.get_cpu_capability)
 
     @slowTest
     def test_slow_test(self):

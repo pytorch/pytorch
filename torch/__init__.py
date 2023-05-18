@@ -19,11 +19,18 @@ import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
+# multipy/deploy is setting this import before importing torch, this is the most
+# reliable way we have to detect if we're running within deploy.
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+def _running_with_deploy():
+    return sys.modules.get("torch._meta_registrations", None) is object
+
 from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if sys.executable == 'torch_deploy':
+if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
@@ -157,7 +164,7 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -191,7 +198,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
+        (_running_with_deploy() or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -1277,7 +1284,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1393,6 +1400,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
+import torch.backends.cpu
 import torch.backends.cuda
 import torch.backends.mps
 import torch.backends.cudnn
@@ -1536,6 +1544,35 @@ class _TorchCompileInductorWrapper:
                 from torch._inductor.cudagraph_trees import reset_cudagraph_trees
                 reset_cudagraph_trees()
 
+class _TorchCompileWrapper:
+    def __init__(self, backend, mode, options, dynamic):
+        from torch._dynamo.backends.registry import lookup_backend
+
+        if isinstance(backend, str):
+            self.compiler_name = backend
+        elif hasattr(backend, "__name__"):
+            self.compiler_name = backend.__name__
+        else:
+            self.compiler_name = str(backend)
+        self.dynamic = dynamic
+        self.compiler_fn = lookup_backend(backend)
+        self.kwargs = {}
+        # only pass the args if they non-empty
+        if mode and mode != "default":
+            self.kwargs["mode"] = mode
+        if options:
+            self.kwargs["options"] = options
+
+    def __eq__(self, other):
+        return (isinstance(other, _TorchCompileWrapper) and
+                self.compiler_fn == other.compiler_fn and
+                self.kwargs == other.kwargs and
+                self.dynamic == other.dynamic)
+
+    def __call__(self, model_, inputs_):
+        return self.compiler_fn(model_, inputs_, **self.kwargs)
+
+
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
             dynamic: builtins.bool = False,
@@ -1600,6 +1637,8 @@ def compile(model: Optional[Callable] = None, *,
         mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+    else:
+        backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 

@@ -145,7 +145,7 @@ def _operator_dispatch(
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate(op_call, op_schema)
 
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:

@@ -35,6 +35,7 @@ aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
+aten::_assert_async.msg
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -487,6 +488,7 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
+aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -526,6 +528,7 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
+aten::_unsafe_index.Tensor
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -972,8 +975,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_
@@ -1160,8 +1161,6 @@ aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
 aten::smooth_l1_loss
 aten::smooth_l1_loss.out
-aten::smooth_l1_loss_backward
-aten::smooth_l1_loss_backward.grad_input
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
