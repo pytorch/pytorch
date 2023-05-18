@@ -5229,7 +5229,12 @@ def fn():
     def _is_py38(self) -> bool:
         return sys.version_info[:2] <= (3, 8)
 
+    def _has_ast_unparse(self) -> bool:
+        return not self._is_py38() or "astunparse" in sys.modules
+
     def test_guards_cse_pass_single(self):
+        if not self._has_ast_unparse():
+            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -5274,6 +5279,8 @@ def fn():
             self.assertEqual(expr, expected)
 
     def test_guards_cse_pass_multiple(self):
+        if not self._has_ast_unparse():
+            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -5383,9 +5390,7 @@ def ___make_guard_fn():
 
         if self._is_py38():
             expected = (
-                expected_38
-                if "astunparse" in sys.modules
-                else expected_38_no_astunparse
+                expected_38 if self._has_ast_unparse() else expected_38_no_astunparse
             )
         self.assertEqual(expected, pycode)
 
