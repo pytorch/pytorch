@@ -6,6 +6,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_spdiags_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
@@ -17,7 +18,7 @@ namespace at::native {
 
 DEFINE_DISPATCH(spdiags_kernel_stub);
 
-static Tensor spdiags(
+Tensor spdiags(
     const Tensor& diagonals,
     const Tensor& offsets,
     IntArrayRef shape,

@@ -17,6 +17,7 @@
 #include <ATen/ops/_log_softmax.h>
 #include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
+#include <ATen/ops/_masked_softmax_backward_native.h>
 #include <ATen/ops/_masked_softmax_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
@@ -648,7 +649,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   return output;
 }
 
-static Tensor masked_softmax_backward_cpu(
+Tensor masked_softmax_backward_cpu(
     const Tensor& grad_,
     const Tensor& output_,
     const Tensor& mask_,

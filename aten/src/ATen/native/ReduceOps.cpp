@@ -24,8 +24,8 @@
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper.h>
 #include <ATen/ops/_cummin_helper_native.h>
-#include <ATen/ops/_is_all_true.h>
-#include <ATen/ops/_is_any_true.h>
+#include <ATen/ops/_is_all_true_native.h>
+#include <ATen/ops/_is_any_true_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
 #include <ATen/ops/_sparse_sum.h>

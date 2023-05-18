@@ -19,6 +19,7 @@
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_sampled_addmm_native.h>
+#include <ATen/ops/triangular_solve_native.h>
 #endif
 
 #include <c10/util/MaybeOwned.h>
@@ -92,7 +93,7 @@ Tensor& addmv_out_sparse_compressed(
   * `X` - dense Tensor of size m × nrhs.
   * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
 */
-static std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
+std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
     const Tensor& B,
     const Tensor& A,
     bool upper,
