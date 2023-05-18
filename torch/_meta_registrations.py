@@ -1501,11 +1501,7 @@ def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
-# Leaving this function around because a python implementation
-# of indexing shape inference is useful,
-# but not registering it to the dispatcher because we already
-# get shape inference through structured kernels
-@register_meta(aten.index.Tensor)
+@register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -3543,6 +3539,15 @@ def t_(self):
         ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
 
     return transpose_(self, 0, 0 if ndims < 2 else 1)
+
+
+@register_meta([aten.searchsorted.Tensor, aten.searchsorted.Tensor_out])
+@out_wrapper()
+def meta_searchsorted(
+    sorted_sequence, self, *, out_int32=False, right=False, side=None, sorter=None
+):
+    dtype = torch.int32 if out_int32 else torch.int64
+    return torch.empty_like(self, dtype=dtype).contiguous()
 
 
 # We must also trigger meta registrations from PrimTorch ref
