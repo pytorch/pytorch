@@ -1610,7 +1610,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
-Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+static Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     TORCH_CHECK(0, "_reshape_copy is not implemented for sparse tensors");
   }

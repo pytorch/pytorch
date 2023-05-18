@@ -10,7 +10,7 @@
 
 namespace ao {
 namespace sparse {
-int register_linear_params() {
+static int register_linear_params() {
   static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "sparse", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))

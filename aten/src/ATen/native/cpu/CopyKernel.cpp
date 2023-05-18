@@ -164,7 +164,7 @@ static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_n
   }
 }
 
-void direct_copy_kernel(TensorIteratorBase &iter) {
+static void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
   // we only need a separate instantiation per dtype size. This would
   // probably save us a little bit of code size here
@@ -221,7 +221,7 @@ static void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool r
   }
 }
 
-void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
+static void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
       isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));

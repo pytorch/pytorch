@@ -205,7 +205,7 @@ static void angle_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-void conj_kernel(TensorIteratorBase& iter) {
+static void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cpu",
     AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
       // conj is a no-op for non-complex types
@@ -264,7 +264,7 @@ static void logical_not_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void reciprocal_kernel(TensorIteratorBase& iter) {
+static void reciprocal_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -274,7 +274,7 @@ void reciprocal_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-void neg_kernel(TensorIteratorBase& iter) {
+static void neg_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kComplexHalf, kBFloat16, kHalf, iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -470,7 +470,7 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
   });
 }
 
-void rsqrt_kernel(TensorIteratorBase& iter) {
+static void rsqrt_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
