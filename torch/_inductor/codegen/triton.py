@@ -3,9 +3,9 @@ import contextlib
 import dataclasses
 import functools
 import itertools
-import operator
 import logging
 import math
+import operator
 from typing import Any, Dict, Iterable, List, Set
 
 import sympy
@@ -1976,7 +1976,6 @@ class TritonScheduling:
                     V.graph.wrapper_code.writeline(
                         f"run_intermediate_hooks({origin_node.name!r}, {name})"
                     )
-
 
         self.scheduler.free_buffers()
 
