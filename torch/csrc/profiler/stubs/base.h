@@ -16,13 +16,16 @@ namespace impl {
 // -- Annotation --------------------------------------------------------------
 // ----------------------------------------------------------------------------
 using ProfilerEventStub = std::shared_ptr<CUevent_st>;
+using ProfilerVoidEventStub = std::shared_ptr<void>;
 
 struct TORCH_API ProfilerStubs {
-  virtual void record(int* device, ProfilerEventStub* event, int64_t* cpu_ns)
-      const = 0;
+  virtual void record(
+      int* device,
+      ProfilerVoidEventStub* event,
+      int64_t* cpu_ns) const = 0;
   virtual float elapsed(
-      const ProfilerEventStub* event,
-      const ProfilerEventStub* event2) const = 0;
+      const ProfilerVoidEventStub* event,
+      const ProfilerVoidEventStub* event2) const = 0;
   virtual void mark(const char* name) const = 0;
   virtual void rangePush(const char* name) const = 0;
   virtual void rangePop() const = 0;

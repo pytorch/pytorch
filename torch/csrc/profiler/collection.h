@@ -116,8 +116,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  ProfilerEventStub device_event_start_ = nullptr;
-  ProfilerEventStub device_event_end_ = nullptr;
+  ProfilerVoidEventStub device_event_start_ = nullptr;
+  ProfilerVoidEventStub device_event_end_ = nullptr;
 };
 
 template <>

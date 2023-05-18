@@ -447,14 +447,10 @@ void onFunctionExit(
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
   } else if (config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
-    try {
-      auto fallback = kineto_ctx_ptr->fallback_;
-      TORCH_INTERNAL_ASSERT(fallback != nullptr);
-      torch::profiler::impl::privateuse1Stubs()->record(
-          nullptr, &fallback->device_event_end_, nullptr);
-    } catch (const std::exception& e) {
-      LOG(WARNING) << "Failed to record device event. " << e.what();
-    }
+    auto fallback = kineto_ctx_ptr->fallback_;
+    TORCH_INTERNAL_ASSERT(fallback != nullptr);
+    torch::profiler::impl::privateuse1Stubs()->record(
+        nullptr, &fallback->device_event_end_, nullptr);
   }
 
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
@@ -794,13 +790,8 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
   if (!privateuse1_event_start || !privateuse1_event_end) {
     return -1;
   }
-  try {
-    return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
-        &privateuse1_event_start, &privateuse1_event_end);
-  } catch (std::exception& e) {
-    LOG(WARNING) << "Failed to measure time between two device events. "
-                 << e.what();
-  }
+  return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
+      &privateuse1_event_start, &privateuse1_event_end);
   return -1;
 }
 
