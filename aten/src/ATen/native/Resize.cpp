@@ -80,7 +80,7 @@ bool resize_output_symint(const Tensor& output, SymIntArrayRef shape) {
   return _resize_output(output, shape);
 }
 
-static const Tensor& _resize_output_(const Tensor& self, IntArrayRef shape, c10::Device device) {
+const Tensor& _resize_output_(const Tensor& self, IntArrayRef shape, c10::Device device) {
   TORCH_CHECK(self.device() == device, "out Tensor doesn't have the correct device set");
   at::native::resize_output(self, shape);
   return self;

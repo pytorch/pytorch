@@ -22,6 +22,7 @@
 #else
 #include <ATen/ops/_copy_from.h>
 #include <ATen/ops/_propagate_xla_data.h>
+#include <ATen/ops/_propagate_xla_data_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/expand_copy.h>
@@ -321,7 +322,7 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   copy_stub(iter.device_type(), iter, /*non_blocking=*/false);
 }
 
-static void _propagate_xla_data(const Tensor& input, const Tensor& output) {
+void _propagate_xla_data(const Tensor& input, const Tensor& output) {
   TORCH_INTERNAL_ASSERT(input.device().type() == kXLA, "This op should only be called by XLA")
 }
 
