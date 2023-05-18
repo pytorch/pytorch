@@ -13,7 +13,7 @@ inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
 
-void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
+static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   auto strides_out = iter.strides(0);
   auto strides_in = iter.strides(1);
   auto shape = iter.shape();
@@ -164,7 +164,7 @@ void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   }
 }
 
-void direct_copy_kernel(TensorIteratorBase &iter) {
+static void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
   // we only need a separate instantiation per dtype size. This would
   // probably save us a little bit of code size here
@@ -193,7 +193,7 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
   }
 }
 
-void neg_conj_kernel(TensorIteratorBase &iter) {
+static void neg_conj_kernel(TensorIteratorBase &iter) {
   // fused a = b.neg().conj_physical()
   AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cpu", [&] {
     cpu_kernel_vec(
@@ -203,7 +203,7 @@ void neg_conj_kernel(TensorIteratorBase &iter) {
   });
 }
 
-void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
+static void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
   if (requires_neg) {
     // This case should never actually happen since currently there's no way to get a complex tensor
     // with negative bit.
@@ -221,7 +221,7 @@ void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires
   }
 }
 
-void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
+static void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
       isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
