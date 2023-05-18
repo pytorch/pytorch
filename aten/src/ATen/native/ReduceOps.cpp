@@ -2002,11 +2002,11 @@ Tensor all(const Tensor& self, Dimname dim, bool keepdim) {
 Tensor& all_out(const Tensor &self, Dimname dim, bool keepdim, Tensor& result) {
   reportNYIDimnameOverload("all");
 }
-static Tensor _is_all_true(const Tensor& self) {
+Tensor _is_all_true(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
   return self.all();
 }
-static Tensor _is_any_true(const Tensor& self) {
+Tensor _is_any_true(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(self.scalar_type() == at::kBool);
   return self.any();
 }
