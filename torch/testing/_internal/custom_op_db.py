@@ -16,7 +16,7 @@ from torch.testing._internal.autograd_function_db import (
 )
 from torch import Tensor
 from torch.types import Number
-from typing import Tuple
+from typing import Sequence, Tuple
 
 # Note: [custom op db]
 #
@@ -126,6 +126,22 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(result, args=())
 
+@custom_op('_torch_testing::numpy_view_copy')
+def numpy_view_copy(x: Tensor, shape: Sequence[int]) -> Tensor:
+    ...
+
+@numpy_view_copy.impl(['cpu', 'cuda'])
+def numpy_view_copy_impl(x, shape) -> Tensor:
+    return torch.tensor(np.copy(to_numpy(x).reshape(shape)), device=x.device)
+
+@numpy_view_copy.impl_abstract()
+def numpy_view_copy_abstract(x, shape) -> Tensor:
+    return x.clone().view(shape).clone()
+
+def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    result = make_arg(2, 3, 4, low=0.9, high=2)
+    yield SampleInput(result, args=([2, 12],))
 
 @custom_op('_torch_testing::numpy_nms')
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
@@ -247,6 +263,13 @@ custom_op_db = [
         'NumpyNMSCustomOp',
         op=wrap_for_opinfo(numpy_nms),
         sample_inputs_func=sample_inputs_numpy_nms,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+    ),
+    OpInfo(
+        'NumpyViewCopyCustomOp',
+        op=wrap_for_opinfo(numpy_view_copy),
+        sample_inputs_func=sample_inputs_numpy_view_copy,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),

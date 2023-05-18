@@ -953,6 +953,14 @@ class TestCustomOp(TestCase):
         with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
             make_fx(f, tracing_mode='fake')(x)
 
+    def test_symints(self):
+        def f(x):
+            return torch.testing._internal.custom_op_db.numpy_view_copy(x, x.shape)
+        x = torch.randn(2, 3, 4)
+        gm = make_fx(f, tracing_mode='symbolic')(x)
+        result = gm(x)
+        self.assertEqual(result, f(x))
+
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
