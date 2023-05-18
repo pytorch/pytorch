@@ -6142,12 +6142,12 @@ class CommonTemplate:
         self.common(fn, (torch.randn(8, 8),))
 
     def test_uint(self):
-        def fn():
-            x = torch.tensor(5, device="cuda", dtype=torch.uint8)
+        def fn(z):
+            x = torch.tensor(5, device=z.device, dtype=torch.uint8)
             y = torch.neg(x)
             return x < y
 
-        self.common(fn, ())
+        self.common(fn, (torch.randn(26),))
 
 
 @dataclasses.dataclass

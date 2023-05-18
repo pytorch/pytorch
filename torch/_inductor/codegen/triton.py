@@ -165,9 +165,13 @@ class TritonOverrides(OpOverrides):
         return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
+    def constant_val(val):
+        return triton_constant(val)
+
+    @staticmethod
     def constant(value, dtype):
-        type_ = torch._prims_common.dtype_to_type(dtype)
-        return triton_constant(type_(value))
+        tmp = ops.constant_val(value)
+        return ops.to_dtype(tmp, dtype)
 
     @staticmethod
     def abs(x):
