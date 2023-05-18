@@ -452,10 +452,42 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1
 
+        def multi_split_cat(x1, x2):
+            split_output_1 = list(torch.split(x1, 4, dim=1))
+            split_output_2 = list(torch.split(x2, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output_1[1], split_output_1[2], split_output_1[3]]
+                + [torch.ones(2, 4, 32, 16)]
+                + [split_output_2[1], split_output_2[2], split_output_2[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output_1[4],
+                    split_output_1[5],
+                    torch.ones(2, 4, 32, 16),
+                    split_output_2[4],
+                    split_output_2[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            relu1 = torch.relu(split_output_1[6])
+            relu2 = torch.relu(split_output_2[6])
+
+            return cat1, stack1, relu1, relu2
+
         # TODO: Add more tests:
-        # * Multiple splits going into a cat (not handled yet)
         # * Cases where replacement shouldn't happen
-        args = [
+        default_args = [
+            torch.randn(2, 32, 32, 16),
+        ]
+        multi_args = [
+            torch.randn(2, 32, 32, 16),
             torch.randn(2, 32, 32, 16),
         ]
         for (
@@ -465,29 +497,30 @@ class TestSplitCatFxPasses(TestCase):
             expected_cat_added,
             expected_cat_removed,
             expected_sections_removed,
+            args,
         ) in [
-            (simple_split_cat, 0, 1, 0, 1, 7),
-            (simple_split_cat_argspec1, 0, 1, 0, 1, 7),
-            (simple_split_cat_argspec2, 0, 1, 0, 1, 7),
-            (simple_split_stack, 0, 1, 0, 1, 7),
-            (simple_split_stack_argspec1, 0, 1, 0, 1, 7),
-            (simple_split_stack_argspec2, 0, 1, 0, 1, 7),
-            (split_cat_addn_args, 0, 1, 1, 1, 7),
-            (split_stack_addn_args, 0, 1, 1, 1, 7),
-            (split_cat_addn_args_dim2, 0, 1, 1, 1, 7),
-            (split_cat_dim_mismatch, 0, 1, 1, 1, 7),
-            (split_stack_dim_mismatch, 0, 1, 1, 1, 7),
-            (split_cat_dim_mismatch2, 0, 1, 1, 1, 7),
-            (split_stack_dim_mismatch2, 0, 1, 1, 1, 7),
-            (split_cat_dim_mismatch3, 0, 1, 1, 1, 7),
-            (split_stack_dim_mismatch3, 0, 1, 1, 1, 7),
-            (input_shuffling, 1, 1, 1, 1, 4),
-            (input_shuffling_stack, 1, 1, 1, 1, 4),
-            (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4),
-            (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4),
-            (input_shuffling_multiple_output, 1, 1, 2, 2, 3),
-            (input_shuffling_multiple_output_same_ranges, 1, 1, 3, 3, 3),
-            (unequal_split_multiple_output, 1, 1, 2, 2, 3),
+            (simple_split_cat, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec1, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec2, 0, 1, 0, 1, 7, default_args),
+            (simple_split_stack, 0, 1, 0, 1, 7, default_args),
+            (simple_split_stack_argspec1, 0, 1, 0, 1, 7, default_args),
+            (simple_split_stack_argspec2, 0, 1, 0, 1, 7, default_args),
+            (split_cat_addn_args, 0, 1, 1, 1, 7, default_args),
+            (split_stack_addn_args, 0, 1, 1, 1, 7, default_args),
+            (split_cat_addn_args_dim2, 0, 1, 1, 1, 7, default_args),
+            (split_cat_dim_mismatch, 0, 1, 1, 1, 7, default_args),
+            (split_stack_dim_mismatch, 0, 1, 1, 1, 7, default_args),
+            (split_cat_dim_mismatch2, 0, 1, 1, 1, 7, default_args),
+            (split_stack_dim_mismatch2, 0, 1, 1, 1, 7, default_args),
+            (split_cat_dim_mismatch3, 0, 1, 1, 1, 7, default_args),
+            (split_stack_dim_mismatch3, 0, 1, 1, 1, 7, default_args),
+            (input_shuffling, 1, 1, 1, 1, 4, default_args),
+            (input_shuffling_stack, 1, 1, 1, 1, 4, default_args),
+            (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4, default_args),
+            (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4, default_args),
+            (input_shuffling_multiple_output, 1, 1, 2, 2, 3, default_args),
+            (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
+            (multi_split_cat, 2, 2, 4, 4, 3, multi_args),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn, dynamic=True)(*args)
