@@ -241,7 +241,7 @@ def get_reordered_tests(
         return ([], tests)
 
     # TODO: Would be great to upload these stats to RDS/Rockset!
-    if len(bring_to_front):
+    if bring_to_front:
         test_cnt_str = pluralize(len(tests), "test")
         print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
         print(
