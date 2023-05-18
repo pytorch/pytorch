@@ -63,6 +63,9 @@ def mps_ops_grad_modifier(ops):
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.softplus': [torch.float16],
+
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'prod': [torch.float32],  # The operator 'aten::cumprod.out'
@@ -710,7 +713,6 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
@@ -10501,7 +10503,15 @@ class TestConsistency(TestCaseMPS):
                     mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
+                if op.name in ["nn.functional.softplus"] and dtype in [torch.float, torch.half]:
+                    print(op.name)
+                    print("cpu_out ", cpu_out)
+                    print("mps_args ", mps_args, mps_kwargs)
+                
                 mps_out = op(*mps_args, **mps_kwargs)
+                if op.name in ["nn.functional.softplus"] and dtype in [torch.float, torch.half]:
+                    print(op.name)
+                    print("mps_out ", mps_out)
 
                 if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
                     atol = 1e-4

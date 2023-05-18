@@ -51,6 +51,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
+TEST_CUDA = torch.cuda.is_available()
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
+
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
 
@@ -1856,7 +1859,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_rand(self):
         cnts = torch._dynamo.testing.CompileCounter()
         device = "cuda"
@@ -3836,7 +3839,7 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self):
         def fn(x):
@@ -3850,7 +3853,7 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable_bad_inputs(self):
         def fn1(x):
@@ -3877,7 +3880,7 @@ def fn():
             opt_fn2 = torch._dynamo.optimize("eager", nopython=True)(fn2)
             res = opt_fn2(x2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_get_device(self):
         def fn(x, y):
             x = x + 1
@@ -5180,6 +5183,22 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_cuda_set_device(self):
+        torch.cuda.set_device(0)
+
+        def fn():
+            a = torch.ones(2, device="cuda")
+            torch.cuda.set_device(1)
+            return a + 1
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        res = opt_fn()
+        self.assertEqual(res.device.type, "cuda")
+        self.assertEqual(res.device.index, 0)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_nested_function_resuming_with_correct_globals(self):
         # https://github.com/pytorch/pytorch/issues/99665
         try:
@@ -5245,7 +5264,6 @@ def fn():
             testcase(expr="self.g(a, b).k", expected="_var6"),
             testcase(expr="self.g(a, b).k", expected="_var6"),
         ]
-
         csepass = PyExprCSEPass()
         csepass.count([t.expr for t in testcases])
 

@@ -960,7 +960,6 @@ def download_retry_decorator(download_fn):
     @functools.wraps(download_fn)
     def wrapper(self, *args, **kwargs) -> Any:
         tries = 0
-        model = None
         total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
         while tries <= total_allowed_tries:
             try:
@@ -976,7 +975,7 @@ def download_retry_decorator(download_fn):
                     time.sleep(wait)
                 else:
                     raise RuntimeError(
-                        f"Failed to load model '{model_name}' with following error(s): {str(e)}."
+                        f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 
     return wrapper
@@ -1636,7 +1635,7 @@ class BenchmarkRunner:
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
             msg += f" {tag:26}"
-        print(msg, end=" ", flush=True)
+        print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
 

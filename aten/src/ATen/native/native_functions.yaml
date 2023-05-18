@@ -2942,6 +2942,13 @@
   dispatch:
     CPU, CUDA, MPS: index_out
 
+# Used by inductor to signal indexing without bounds checks
+# Note that we don't support boolean indexing, to avoid dynamic output shapes
+- func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: _unsafe_index
+
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -3203,7 +3210,7 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
-- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None) -> (Tensor, Tensor)
+- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None, str? activation=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: _structured_sparse_linear
 
