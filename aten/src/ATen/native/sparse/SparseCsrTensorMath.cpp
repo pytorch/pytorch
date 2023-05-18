@@ -776,18 +776,6 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       1.0);
 }
 
-Tensor _sparse_csr_addmm(
-    const Tensor& t,
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  // _sparse_addmm forward is functionally equivalent to addmm; it's
-  // just the backward that is different.  This technically does an
-  // unnecessary redispatch, I was too lazy to make it not do that
-  return at::addmm(t, sparse, dense, beta, alpha);
-}
-
 // Functions for element-wise addition.
 Tensor add_sparse_csr(
     const Tensor& self,
