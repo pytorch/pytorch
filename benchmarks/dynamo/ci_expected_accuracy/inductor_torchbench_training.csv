@@ -26,6 +26,7 @@ llama,fail_accuracy,11
 maml_omniglot,pass,8
 mnasnet1_0,pass,8
 mobilenet_v2,pass,8
+moco,pass,85
 nvidia_deeprecommender,pass,8
 phlippe_densenet,pass,8
 phlippe_resnet,pass,8
