@@ -127,6 +127,10 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#if !AT_USE_MKL_SPARSE()
+#include <ATen/native/eigen/SparseBlas.h>
+#endif
+
 #include <algorithm>
 
 namespace at {
@@ -649,6 +653,10 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
 #if !AT_USE_MKL_SPARSE()
+  if (result.layout() != kStrided && mat1.layout() != kStrided && mat2.layout() != kStrided) {
+    at::native::eigen::sparse::addmm_out_sparse(mat1, mat2, result, alpha, beta);
+    return result;
+  }
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
   // strided -> strided
   if (mat1.layout() == kStrided) {
