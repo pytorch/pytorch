@@ -124,7 +124,6 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "moco",  # Please convert all Tensors to FakeTensors first
     "hf_BigBird",  # OOM
     "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
@@ -143,7 +142,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
-    "moco",
     "pytorch_struct",
     "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
@@ -185,7 +183,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "hf_GPT2_large",  # OOM
     "maml",  # accuracy
     "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
-    "moco",  # accuracy
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
