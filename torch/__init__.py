@@ -88,7 +88,7 @@ if sys.platform == 'win32':
     from .version import cuda as cuda_version
     import glob
     if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
-        cuda_version_1 = cuda_version.replace('.', '_')
+        cuda_version_1 = str(cuda_version).replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
         default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
         cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
