@@ -3541,6 +3541,15 @@ def t_(self):
     return transpose_(self, 0, 0 if ndims < 2 else 1)
 
 
+@register_meta([aten.searchsorted.Tensor, aten.searchsorted.Tensor_out])
+@out_wrapper()
+def meta_searchsorted(
+    sorted_sequence, self, *, out_int32=False, right=False, side=None, sorter=None
+):
+    dtype = torch.int32 if out_int32 else torch.int64
+    return torch.empty_like(self, dtype=dtype).contiguous()
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
