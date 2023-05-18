@@ -811,7 +811,7 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(self._multi_tensor_optimizer_configs, "foreach")
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
-    @largeTensorTest("12GB", "cuda")
+    @largeTensorTest("72GB", "cuda")
     def test_multi_tensor_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._multi_tensor_optimizer_configs:
             # note(crcrpar): H100 wasn't sufficient for Adamax, surprisingly
@@ -819,7 +819,7 @@ class TestOptim(TestCase):
                 continue
             params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
             params[0].grad = torch.zeros_like(params[0])
-            optimizer = optimizer_ctor(params, fused=True, **optimizer_params)
+            optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
             optimizer.step()
 
     @property
@@ -842,7 +842,7 @@ class TestOptim(TestCase):
         self._test_derived_optimizers_varying_tensors(self._fused_optimizer_configs, "fused")
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
-    @largeTensorTest("12GB", "cuda")
+    @largeTensorTest("64GB", "cuda")
     def test_fused_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._fused_optimizer_configs:
             params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
