@@ -4,29 +4,15 @@ const char* UNARY_KERNEL_TEMPLATE = R"METAL(
 #include <metal_stdlib>
 using namespace metal;
 
-struct ErfinvConstant {{
-  float a[4];
-  float b[4];
-  float c[4];
-  float d[2];
-}};
-
-constant ErfinvConstant erfinv_constant = {{
-  {{0.886226899, -1.645349621, 0.914624893, -0.140543331}},
-  {{-2.118377725, 1.442710462, -0.329097515, 0.012229801}},
-  {{-1.970840454, -1.624906493, 3.429567803, 1.641345311}},
-  {{3.543889200, 1.637067800}}
-}};
-
+constant float a[4] = {{0.886226899, -1.645349621, 0.914624893, -0.140543331}};
+constant float b[4] = {{-2.118377725, 1.442710462, -0.329097515, 0.012229801}};
+constant float c[4] = {{-1.970840454, -1.624906493, 3.429567803, 1.641345311}};
+constant float d[2] = {{3.543889200, 1.637067800}};
 
 kernel void erfinv_mps_kernel( device {0} *output [[buffer(0)]],
                             device {1} *input [[buffer(1)]],
                             uint index [[thread_position_in_grid]]) {{
 
-  constant const float *a = erfinv_constant.a;
-  constant const float *b = erfinv_constant.b;
-  constant const float *c = erfinv_constant.c;
-  constant const float *d = erfinv_constant.d;
   float y = input[index];
   float x, z, num, dem; /*working variables */
   /* coefficients in rational expansion */
