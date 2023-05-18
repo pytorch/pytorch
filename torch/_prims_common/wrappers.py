@@ -253,6 +253,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     # These two operations are done in-place
                     _maybe_resize_out(out, result.shape)
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                    torch._C._set_conj(out, result.is_conj())
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     utils.check(
@@ -264,6 +265,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape)
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                        torch._C._set_conj(o, r.is_conj())
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
