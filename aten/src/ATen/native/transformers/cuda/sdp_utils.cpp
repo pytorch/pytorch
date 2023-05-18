@@ -278,6 +278,28 @@ static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
   return num_heads > 1 && query_lengths % 64 == 0 && head_dim % 64 == 0;
 }
 
+static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
+  const int64_t h = params.query.size(1);
+  const int64_t s_q = params.query.size(2);
+  const int64_t d = params.query.size(3);
+  const int64_t s_k = params.key.size(2);
+  const int64_t s_v = params.value.size(2);
+  // corresponds to cuDNN's "packed QKV" layout
+  const bool query_layout_ok = (params.query.stride(0) == s_q * 3 * h * d) &&
+				 (params.query.stride(1) == d) &&
+				 (params.query.stride(2) == 3 * h * d) &&
+				 (params.query.stride(3) == 1);
+  const bool key_layout_ok = (params.key.stride(0) == s_k * 3 * h * d) &&
+			       (params.key.stride(1) == d) &&
+			       (params.key.stride(2) == 3 * h * d) &&
+			       (params.key.stride(3) == 1);
+  const bool value_layout_ok = (params.value.stride(0) == s_v * 3 * h * d) &&
+				 (params.value.stride(1) == d) &&
+				 (params.value.stride(2) == 3 * h * d) &&
+				 (params.value.stride(3) == 1);
+  return query_layout_ok && key_layout_ok && value_layout_ok;
+}
+
 static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->minor == 0 && dprops->major >= 8;
@@ -287,11 +309,13 @@ inline bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
   TORCH_WARN("checking cudnn mha...");
   static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
 	                  check_cudnn_mha_compute_capability(kernel_params, print_debug);
-  bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
-  if (supported && shape_ok) {
+  const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
+  const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
+  const bool ok = supported && shape_ok && layout_ok;
+  if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }
-  return supported && shape_ok;
+  return ok; 
 }
 
 bool use_flash_attention(sdp_params params, bool debug) {

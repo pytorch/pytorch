@@ -744,9 +744,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
-  Tensor q_t = query.transpose(1, 2);
-  Tensor k_t = key.transpose(1, 2);
-  Tensor v_t = value.transpose(1, 2);
+  //Tensor q_t = query.transpose(1, 2);
+  //Tensor k_t = key.transpose(1, 2);
+  //Tensor v_t = value.transpose(1, 2);
 
   Tensor cumulative_sequence_length_q = at::arange(
       0,
@@ -764,9 +764,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 
   // For the standard MHA these will actually be views
-  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
-  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
-  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
+  //Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
+  //Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
+  //Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
   Tensor attention, log_sumexp, debug_attn_mask;
   //std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
@@ -798,9 +798,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       softmax_scale/*float scaling_factor*/,
                       false/*bool isTraining*/,
                       dropout_p/*double dropout_probability*/,
-                      q_t/*Tensor q*/, 
-                      k_t/*Tensor k*/,   
-                      v_t/*Tensor v*/,
+                      query/*Tensor q*/, 
+                      key/*Tensor k*/,   
+                      value/*Tensor v*/,
                       log_sumexp/*Tensor softmaxstats*/,
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
