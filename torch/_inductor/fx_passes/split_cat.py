@@ -10,8 +10,8 @@ from torch._dynamo.utils import counters
 from ..pattern_matcher import (
     Arg,
     CallFunction,
-    CallMethodVarArgs,
     CallFunctionVarArgs,
+    CallMethodVarArgs,
     config_flag,
     FailedMatch,
     get_arg_value,
