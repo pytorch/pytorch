@@ -300,18 +300,21 @@ def compile_fx_inner(
 
         def _has_dynamism(t):
             if isinstance(t, torch.Tensor):
-                if not all(isinstance(s, (int, sympy.Integer)) for s in t.size()):
+                if not all(isinstance(s, int) for s in t.size()):
                     return True
-                if not all(isinstance(s, (int, sympy.Integer)) for s in t.stride()):
+                if not all(isinstance(s, int) for s in t.stride()):
                     return True
-            elif isinstance(t, sympy.Symbol):
-                if isinstance(t, sympy.Integer):
+            elif isinstance(t, sympy.Expr):
+                if len(t.free_symbols) == 0:
                     return False
                 return True
             return False
 
 
-        has_dynamism = any(
+        # automatic_dynamic_shapes is rejected here because it can lead to a case of bifurcated memory, wherein
+        # you start off entirely static, and therefore produce cudagraphs, but on a subsequent frame you re-enter
+        # lowering with some dynamism on inputs, and therefore, cannot produce cudagraphs.
+        has_dynamism = dynamo_config.automatic_dynamic_shapes is True or any(
             _has_dynamism(t) for t in example_inputs
         )
 
