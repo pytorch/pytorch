@@ -3,7 +3,7 @@ import functools
 import itertools
 
 import operator
-from typing import Dict, List, Set, Any
+from typing import Any, Dict, List, Set
 
 import sympy
 from triton.runtime.jit import JITFunction
@@ -151,6 +151,7 @@ def split_iteration_ranges(groups: List[sympy.Expr], lengths: List[List[sympy.Ex
 
     return new_ranges, return_getters_groups
 
+
 def triton_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
@@ -176,9 +177,6 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
-
-
-
 
 
 @dataclasses.dataclass
