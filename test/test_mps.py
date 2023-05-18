@@ -89,12 +89,15 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
-        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
-        '__rpow__': [torch.float16],
-        'pow': [torch.float16],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
+        # 'float' object is not iterable
+        'item': [torch.float16, torch.float32],
         # "mse_backward_cpu_out" not implemented for 'Half'
         'nn.functional.mse_loss': [torch.float16],
         # "smooth_l1_backward_cpu_out" not implemented for 'Half'
@@ -117,6 +120,9 @@ def mps_ops_grad_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -333,10 +339,12 @@ def mps_ops_modifier(ops):
         'masked.cumsum': [torch.int64],
     }
 
-    MACOS_13_3_XFAILLIST = {
-        # before macOS 13.3 it falls back to cpu and pass the forward pass
+    MACOS_AFTER_13_1_XFAILLIST = {
+        # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+    }
 
+    MACOS_13_3_XFAILLIST = {
         # Failure due to precision issue for fp16
         # on both cpu and mps there are test cases that might produce inf result
         # 'nn.functional.pairwise_distance': [torch.float16],
@@ -405,9 +413,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'histc': None,
-        'histogram': None,
-        'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -640,6 +645,9 @@ def mps_ops_modifier(ops):
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+
+        # round not working properly for float16
+        'round': [torch.float16],
     }
 
     UNDEFINED_XFAILLIST = {
@@ -732,6 +740,11 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_BEFORE_13_3_XFAILLIST[key]))
+
+        if key in MACOS_AFTER_13_1_XFAILLIST and torch.backends.mps.is_macos13_or_newer(2):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_AFTER_13_1_XFAILLIST[key]))
 
         if key in MACOS_13_3_XFAILLIST and (product_version >= 13.3):
             addDecorator(op, DecorateInfo(
@@ -7218,6 +7231,17 @@ class TestNLLLoss(TestCaseMPS):
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
+        # Check it works for different dtypes
+        for dtype in [torch.float16, torch.int8, torch.int16, torch.int32, torch.int64]:
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype).bernoulli(0.5)
+            # Check that output is not all zeros or ones
+            if product_version > 13.0:
+                uniq = mps_out.unique()
+                self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
+            else:
+                self.assertEqual(mps_out.min().item(), 0.)
+                self.assertEqual(mps_out.max().item(), 1.)
+
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
         g_mps = torch.Generator(device='mps')
@@ -7300,6 +7324,25 @@ class TestNLLLoss(TestCaseMPS):
         # grown at this point
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
+
+    # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
+    # press record, then run this python test, and press stop. Next expand
+    # the os_signposts->PyTorchMPS and check if events or intervals are logged
+    # like this example:
+    # "aten::mps_convolution_backward_input:f32[1,128,6,6]:f32[128,64,3,3]:1,128,6,6 (id=G2, run=2)"
+    def test_mps_profiler_module(self):
+        with torch.mps.profiler.profile(mode="event", wait_until_completed=False) as p:
+            # just running some ops to capture the OS Signposts traces for profiling
+            net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+                .to(device='mps', dtype=torch.float)
+            x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+            x = net1(x)
+
+        torch.mps.profiler.start(mode="interval", wait_until_completed=True)
+        # just running some ops to capture the OS Signposts traces for profiling
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        torch.mps.profiler.stop()
 
     # Test random_, random_.to and random_.from
     def test_random(self):
@@ -10201,11 +10244,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement `torch.lgamma`
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
+        return (torch.lgamma,
                 torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -10343,6 +10386,12 @@ class TestConsistency(TestCaseMPS):
         'linalg.vector_norm',
         'addr', 'var_mean',
         'var_mean_unbiased',
+        'acosh', 'asinh', 'asin',
+        'masked.std',
+        'nn.functional.normalize',
+        'nn.functional.triplet_margin_loss',
+        'nn.functional.triplet_margin_with_distance_loss',
+        'round', 'xlogy',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10525,7 +10574,7 @@ class TestErrorInputs(TestCase):
 
     @ops(mps_ops_error_inputs_modifier(test_error_inputs_op_db), dtypes=OpDTypes.none)
     def test_error_inputs(self, device, op):
-        self.assertEqual(device, "mps")
+        self.assertEqual(device, "mps:0")
 
         mps_samples = op.error_inputs(device)
 

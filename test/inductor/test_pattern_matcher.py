@@ -7,7 +7,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -154,6 +154,24 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
+        # Verify we fallback to non-optimal path for negative `end`.
+        def fn(a, b):
+            cat_1 = torch.ops.aten.cat.default([a, b], 1)
+            slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
+            slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, -1)
+            return torch.ops.aten.cat.default([cat_1, slice_2], 1)
+
+        counters.clear()
+        args = [
+            torch.randn(2, 8, device="cuda"),
+            torch.randn(2, 16, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
     def test_pointless_convert(self):
         def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)
@@ -274,7 +292,7 @@ class TestPaternMatcher(TestCase):
         )
 
         counter = 0
-        test_pass = PatternMatcherPass()
+        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
         @register_graph_pattern(
             CallFunction(
@@ -310,5 +328,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
         run_tests()

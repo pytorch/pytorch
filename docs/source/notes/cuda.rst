@@ -180,9 +180,9 @@ To toggle the reduced precision reduction flags in C++, one can do
 Reduced Precision Reduction in BF16 GEMMs
 -----------------------------------------
 
-A similar flag (as above) exists for BFloat16 GEMMs. Note that this switch is
-set to `False` by default for BF16 as we have observed numerical instability in
-PyTorch CI tests (e.g., test/test_matmul_cuda.py).
+A similar flag (as above) exists for BFloat16 GEMMs.
+Note that this switch is set to `True` by default for BF16, if you observe
+numerical instability in your workload, you may wish to set it to `False`.
 
 If reduced precision reductions are not desired, users can disable reduced
 precision reductions in bf16 GEMMs with:
@@ -511,6 +511,19 @@ of the alloc/free functions that match the signatures specified above.
    # This will error since the current allocator was already instantiated
    torch.cuda.memory.change_current_allocator(new_alloc)
 
+.. cublas-workspaces:
+
+cuBLAS workspaces
+-----------------
+
+For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
+if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
+In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
+``torch._C._cuda_clearCublasWorkspaces()`` is called. The workspace size per allocation can be
+specified via the environment variable ``CUBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.
+As an example, the default workspace size per allocation is ``CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8``
+which specifies a total size of ``2 * 4096 + 8 * 16 KiB``. To force cuBLAS to avoid using workspaces,
+set ``CUBLAS_WORKSPACE_CONFIG=:0:0``.
 
 .. _cufft-plan-cache:
 
