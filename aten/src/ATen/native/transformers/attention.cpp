@@ -679,8 +679,11 @@ Tensor scaled_dot_product_attention(
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::cudnn_mha: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
       auto out_lse_softmax = at::_cudnn_mha(
-	query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+	query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::flash_attention: {

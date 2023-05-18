@@ -274,8 +274,11 @@ static bool check_cudnn_mha_shape(sdp_params params, bool debug) {
   const auto num_heads{params.query.sym_size(1)},
       query_lengths{params.query.sym_size(2)},
       head_dim{params.query.sym_size(3)};
-  TORCH_WARN("num heads ", num_heads, " query lengths ", query_lengths, " head dim ", head_dim);
-  return num_heads > 1 && query_lengths % 64 == 0 && head_dim % 64 == 0;
+  const bool ok = query_lengths % 64 == 0 && head_dim % 64 == 0;
+  if (debug) {
+    if (!ok) { TORCH_WARN("Shape does not meet cuDNN support constraints (sequence length and head dim divisible by 64)") };
+  }
+  return ok;
 }
 
 static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
@@ -297,6 +300,11 @@ static bool check_cudnn_mha_layout(sdp_params params, bool debug) {
 				 (params.value.stride(1) == d) &&
 				 (params.value.stride(2) == 3 * h * d) &&
 				 (params.value.stride(3) == 1);
+  if (debug) {
+    if (!query_layout_ok) { TORCH_WARN("Query tensor was not in cuDNN-supported packed QKV layout"); }
+    if (!key_layout_ok) { TORCH_WARN("Key tensor was not in cuDNN-supported packed QKV layout"); }
+    if (!value_layout_ok) { TORCH_WARN("Value tensor was not in cuDNN-supported packed QKV layout"); }
+  }
   return query_layout_ok && key_layout_ok && value_layout_ok;
 }
 
@@ -306,12 +314,15 @@ static bool check_cudnn_mha_compute_capability(sdp_params params, bool debug) {
 }
 
 inline bool use_cudnn_mha(sdp_params kernel_params, bool print_debug) {
-  TORCH_WARN("checking cudnn mha...");
   static bool supported = (c10::utils::check_env("TORCH_CUDNN_MHA_ENABLED") == true) &&
 	                  check_cudnn_mha_compute_capability(kernel_params, print_debug);
+  if (print_debug) {
+    if (!supported) { TORCH_WARN("cuDNN MHA is only supported on sm80 and sm90"); }
+    if (!kernel_params.is_causal) { TORCH_WARN("cuDNN MHA only supports is_causal=True"); }
+  }
   const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
   const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
-  const bool ok = supported && shape_ok && layout_ok;
+  const bool ok = supported && kernel_params.is_causal && shape_ok && layout_ok;
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }

@@ -131,9 +131,7 @@ void set_params_fprop(FMHA_fprop_params &params,
     TORCH_CHECK(p_dropout < 1.f);
     set_alpha(params.scale_dropout, params.rp_dropout, data_type);
 
-    TORCH_WARN("GOT PARAMS FPROP", is_causal);
     params.is_causal = is_causal;
-    TORCH_WARN("SET PARAMS FPROP", params.is_causal);
     params.num_splits = num_splits;
 }
 
