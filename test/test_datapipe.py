@@ -856,9 +856,14 @@ class TestFunctionalIterDataPipe(TestCase):
             "unbatch",
             "zip",
         ]:
-            docstring = pydoc.render_doc(
-                thing=getattr(input_dp, dp_funcname), forceload=True
-            )
+            if sys.version_info >= (3, 9):
+                docstring = pydoc.render_doc(
+                    thing=getattr(input_dp, dp_funcname), forceload=True
+                )
+            elif sys.version_info < (3, 9):
+                # pydoc works differently on Python 3.8, see
+                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
+                docstring = getattr(input_dp, dp_funcname).__doc__
             try:
                 assert f"(functional name: ``{dp_funcname}``)" in docstring
             except AssertionError:
