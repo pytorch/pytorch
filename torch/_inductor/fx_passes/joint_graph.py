@@ -12,7 +12,6 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from .replace_random import replace_random_passes
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -29,14 +28,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
+    if not config.pattern_matcher:
+        return
+
     lazy_init()
-    count = 0
 
-    if config.pattern_matcher:
-        count += patterns.apply(graph.graph)
-
-    if not config.fallback_random:
-        count += replace_random_passes(graph)
+    count = patterns.apply(graph.graph)
 
     if count:
         stable_topological_sort(graph.graph)
@@ -68,4 +65,18 @@ def pointless_convert(match: Match, arg, dtype1, dtype2):
         )
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
+        match.erase_nodes(graph)
+
+
+@register_graph_pattern(
+    CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
+    pass_dict=patterns,
+)
+def pointless_view(match: Match, arg, size):
+    """Remove no-op view"""
+    graph = match.graph
+    node = match.output_node()
+    arg_size = list(node.args[0].meta["val"].shape)
+    if size == arg_size:
+        node.replace_all_uses_with(node.args[0])
         match.erase_nodes(graph)

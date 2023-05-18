@@ -963,16 +963,16 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})({x} ^ {y})"
 
     @staticmethod
-    def rand(seed: sympy.Expr, offset: sympy.Expr):
-        return f"normalized_rand_cpu({seed}, {offset})"
+    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
 
     @staticmethod
-    def randn(seed: sympy.Expr, offset: sympy.Expr):
-        return f"randn_cpu({seed}, {offset})"
+    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
 
     @staticmethod
-    def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
-        return f"randint64_cpu({seed}, {offset}, {low}, {high})"
+    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
+        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
 
     @staticmethod
     def sigmoid(x):
@@ -1021,6 +1021,10 @@ class CppKernel(Kernel):
         replacement = {var: var * scale + offset}
         new_index = sympy_subs(index, replacement)
         return new_index
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -2018,7 +2022,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var, size, check=True):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod

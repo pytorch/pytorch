@@ -111,6 +111,7 @@ def validate_ir(node_or_nodes):
                 (
                     DynamicScalar,
                     TensorBox,
+                    RandSeedBuffer,
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
@@ -2147,6 +2148,13 @@ class ConstantBuffer(InputBuffer):
         return ConstantBuffer(V.graph.constant_name(self.name, device), self.layout)
 
 
+class RandSeedBuffer(ConstantBuffer):
+    def codegen_reference(self):
+        # Clone makes sure if we pass this from forwards to backwards
+        # the value does not get clobbered by the time backwards is run.
+        return self.get_name() + ".clone()"
+
+
 class NoneAsConstantBuffer(IRNode):
     def codegen_reference(self):
         return V.graph.wrapper_code.none_str
@@ -2912,21 +2920,6 @@ class ExternKernelOut(ExternKernel):
 
     def should_allocate(self):
         return True
-
-
-class RandomSeeds(ExternKernelOut):
-    def __init__(self, count: int, device: torch.device):
-        limits = torch.iinfo(torch.int64)
-        super().__init__(
-            layout=FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[count],
-            ),
-            inputs=[],
-            constant_args=[limits.min, limits.max, [count]],
-            kernel="aten.randint.low_out",
-        )
 
 
 class ExternKernelAlloc(ExternKernel):
@@ -4095,8 +4088,6 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
-        self.indirect_max_sizes = []
-        self.indirect_new = {}
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
@@ -4136,14 +4127,12 @@ class LoopBody:
         name = f"indirect{len(self.indirect_vars)}"
         var = sympy_symbol(name)
         self.indirect_vars.append(var)
-        self.indirect_max_sizes.append(size)
         return var
 
     def replace_indirect(self, old, new):
         """Swap in a variable used in indirect indexing"""
         if str(old) == str(new):
             return
-        self.indirect_new[old] = new
         assert self.indexing is not None
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
@@ -4203,7 +4192,7 @@ class LoopBodyBlock:
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):
-                    return ops.constant(int(index), dtype)
+                    return self._inner.constant(int(index), dtype)
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
@@ -4224,7 +4213,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size):
+            def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -4232,7 +4221,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size)
+                        var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
                 var = self.body.add_indirect(size)
@@ -4244,15 +4233,25 @@ class LoopBodyBlock:
                 )
                 return var
 
+            @staticmethod
+            def output(result):
+                tracer.create_proxy("output", "output", (result,), {})
+
         tracer = torch.fx.Tracer()
         tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
         proxy_ops = tracer.create_proxy("placeholder", "ops", (), {})
+
+        from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        with V.set_ops_handler(
-            SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
-        ):
-            tracer.create_proxy("output", "output", (fn(*args),), {})
+        handler = SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        if config.constant_and_index_propagation:
+            handler = IndexPropagation(handler)
+
+        with V.set_ops_handler(handler):
+            # This indirection is just a cute way to get IndexPropagation to
+            # unwrap the return value.
+            ops.output(fn(*args))
         self.graph = tracer.graph
 
     def __call__(self):

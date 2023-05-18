@@ -76,7 +76,7 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size):
+    def indirect_indexing(index_var, size, check=True):
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -170,7 +170,6 @@ class _V:
     get_ops_handler = ops._get_handler
     set_graph_handler = _graph._set_handler
     set_fake_mode = _fake_mode._set_handler
-    get_fake_mode = _fake_mode._get_handler
     set_kernel_handler = _kernel._set_handler
     set_debug_handler = _debug._set_handler
     set_interpreter_handler = _interpreter._set_handler
