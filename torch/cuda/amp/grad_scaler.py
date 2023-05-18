@@ -336,6 +336,8 @@ class GradScaler:
             # and `found_inf` to the passed optimizer so that the optimizer can utilize those
             # to skip the parameter updates or unscale gradients before updating parameters in
             # the fused kernel, e.g. `FusedAdamMathFunctor`.
+            # In this behavior, `GradScaler._check_inf_per_device` is called if `OptState.READY`,
+            # while the method is expected to be called by users side, i.e. their optimizers.
             kwargs_ = kwargs
             has_grad_scaler_kwarg = "grad_scaler" in inspect.signature(optimizer.step).parameters
             if has_grad_scaler_kwarg:
@@ -346,11 +348,13 @@ class GradScaler:
                     FutureWarning)
                 kwargs_.update({"grad_scaler": self})
             else:
+                if optimizer_state["stage"] is OptState.READY:
+                    self._check_inf_per_device(optimizer)
                 scaler = self._get_scale_async()
                 found_inf = cast(
                     torch.Tensor,
                     sum([
-                        t.to(scaler.device, non_blocking=True) for t in self._check_inf_per_device(optimizer).values()
+                        t.to(scaler.device, non_blocking=True) for t in optimizer_state["found_inf_per_device"].values()
                     ])
                 )
                 optimizer.grad_scale = None if optimizer_state["stage"] == OptState.UNSCALED else scaler
@@ -392,6 +396,12 @@ class GradScaler:
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
             been invoked for all optimizers used this iteration.
+
+        .. warning::
+            For performance reasons, we do not check the scale factor value to avoid synchronizations,
+            so the scale factor is not guaranteed to be above 1. If the scale falls below 1 and/or
+            you are seeing NaNs in your gradients or loss, something is likely wrong. For example,
+            bf16-pretrained models are often incompatible with AMP/fp16 due to differing dynamic ranges.
         """
         if not self._enabled:
             return

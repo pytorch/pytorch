@@ -540,12 +540,14 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> eq(const Vectorized<ComplexFlt>& other) const {
-    auto ret = (*this == other);
-    return ret & one;
+    auto eq = (*this == other);  // compares real and imag individually
+    // If both real numbers and imag numbers are equal, then the complex numbers are equal
+    return (eq.real() & eq.imag()) & one;
   }
   Vectorized<ComplexFlt> ne(const Vectorized<ComplexFlt>& other) const {
-    auto ret = (*this != other);
-    return ret & one;
+    auto ne = (*this != other);  // compares real and imag individually
+    // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+    return (ne.real() | ne.imag()) & one;
   }
 
   Vectorized<ComplexFlt> sgn() const {

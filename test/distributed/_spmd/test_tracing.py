@@ -2,27 +2,21 @@
 
 from copy import deepcopy
 from functools import wraps
-from typing import Any, List
+from typing import Any, List, Type
 
-import numpy as np
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
-from torch.distributed._spmd.api import (
-    compile,
-    COMPILED_OBJECT_KEY,
-    Override,
-    Schema,
-    SPMD,
-)
+from torch.distributed._spmd.api import compile, COMPILED_OBJECT_KEY, Override
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -197,164 +191,6 @@ class TraceDeviceMesh2DTest(DTensorTestBase, TraceDeviceMeshTestBase):
     @with_comms
     def test_all_gather_nd(self):
         self._test_all_gather_nd(torch.arange(4).reshape(2, 2))
-
-
-class TraceModuleTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 2
-
-    def _test_trace_replicate(self, model: nn.Module, x, *args, **kwargs):
-        # if x.device.type == "cuda":
-        ddp = DDP(deepcopy(model))
-        spmd = SPMD(
-            deepcopy(model),
-            schema=Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                placements=[Replicate()],
-            ),
-            input_schemas=kwargs["inp_schemas"] if "inp_schemas" in kwargs else None,
-        )
-        if "inp_schemas" in kwargs:
-            del kwargs["inp_schemas"]
-        only_fw = False
-        if "only_fw" in kwargs:
-            only_fw = kwargs["only_fw"]
-            del kwargs["only_fw"]
-        if only_fw:
-            output_ddp = ddp(x, *args, **kwargs)
-            output_spmd = spmd(x, *args, **kwargs)
-            self.assertTrue(output_ddp.size(), output_spmd.size())
-            return
-        ddp(x, *args, **kwargs).sum().backward()
-        spmd(x, *args, **kwargs).sum().backward()
-        for p1, p2 in zip(ddp.parameters(), spmd.parameters()):
-            # DDP divides gradients by world size to compute average, but
-            # _Partial tensor shouldn't do that automatically. Hence explicitly
-            # do division here.
-            self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
-            )
-
-    @with_comms
-    def test_torch_cat(self):
-        x = torch.rand((2, 4)).to(self.device_type)
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.w = torch.nn.Parameter(torch.rand((2, 4)))
-
-            def forward(self, x):
-                # TODO(anj): Using self.w and ignoring x results in an allgather call
-                # that we have not yet supported.
-                return torch.cat((self.w, self.w), 0)
-
-        model = Model().to(self.device_type)
-        inp_kwargs = {}
-        inp_kwargs["inp_schemas"] = [
-            Schema(
-                mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                placements=[Replicate()],
-            )
-        ]
-        self._test_trace_replicate(
-            Model().to(self.device_type),
-            torch.rand((2, 4)).to(self.device_type),
-            **inp_kwargs,
-        )
-
-    @with_comms
-    def test_layer_norm_fw(self):
-        # This test is for get_item support. layer_norm contains
-        # tuples in its output which means we need to support get_item.
-        input_dims = []
-
-        input = np.random.randn(4, 5).astype(np.float32)
-        model = nn.LayerNorm(input.shape[1:]).to(self.device_type)
-        pt_input = torch.tensor(input, dtype=torch.float).to(self.device_type)
-        self._test_trace_replicate(model, pt_input)
-
-    @with_comms
-    def test_baked_in_shape(self):
-        class LCE(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(5)
-                self.w = torch.nn.Parameter(torch.rand((5, 10)))
-                self.b = torch.nn.Parameter(torch.rand((5)))
-
-            def forward(self, x, *args, **kwargs):
-                # the code below will bake in the shape of x_t as arguments to expand
-                x_t = x.permute(0, 2, 1)
-                y_t = kwargs["dict_test"]["value"].expand(x_t.shape) + args[0][
-                    0
-                ].expand(x_t.shape)
-                # code below triggers an "expand" with shape baked in.
-                return torch.nn.functional.linear(y_t, self.w, self.b)
-
-        model = LCE().to(self.device_type)
-        x = torch.randn(2, 10, 80).to(self.device_type)
-        y = torch.randn(2, 80, 10).to(self.device_type)
-        z = torch.randn(2, 80, 10).to(self.device_type)
-        self._test_trace_replicate(model, x, [y], dict_test={"value": z})
-
-    @with_comms
-    def test_sequential(self):
-        model = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)]).to(
-            self.device_type
-        )
-        x = torch.randn(2, 10).to(self.device_type)
-        self._test_trace_replicate(model, x)
-
-    @with_comms
-    def test_parallel(self):
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.module_list = nn.ModuleList([nn.Linear(10, 10) for _ in range(2)])
-
-            def forward(self, x):
-                return sum([m(x) for m in self.module_list])
-
-        model = Model().to(self.device_type)
-        x = torch.randn(2, 10).to(self.device_type)
-        self._test_trace_replicate(model, x)
-
-    @with_comms
-    def test_hybrid(self):
-        bottom_model = nn.Sequential(
-            nn.Linear(4, 8),
-            nn.Softmax(),
-        ).to(self.device_type)
-
-        top_model = nn.Sequential(
-            nn.Linear(8, 2),
-            nn.Softmax(),
-        ).to(self.device_type)
-
-        hybrid = nn.Sequential(
-            DDP(deepcopy(bottom_model)),
-            SPMD(
-                deepcopy(top_model),
-                schema=Schema(
-                    mesh=DeviceMesh(self.device_type, torch.arange(self.world_size)),
-                    placements=[Replicate()],
-                ),
-            ),
-        )
-        ddp = DDP(nn.Sequential(deepcopy(bottom_model), deepcopy(top_model)))
-        input = torch.randn(12, 4).to(self.device_type)
-
-        ddp(input).sum().backward()
-        hybrid(input).sum().backward()
-        for p1, p2 in zip(ddp.parameters(), hybrid.parameters()):
-            # DDP divides gradients by world size to compute average, but
-            # _Partial tensor shouldn't do that automatically. Hence explicitly
-            # do division here.
-            self.assertTrue(
-                p1.grad.allclose(p2.grad / self.world_size) or p1.grad.allclose(p2.grad)
-            )
 
 
 class DataDependentModule(nn.Module):
@@ -539,7 +375,9 @@ class TraceTrainStepTest(DTensorTestBase):
             def __init__(self, outer):
                 self.outer = outer
 
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
                 return orig_submodule
 
             def transform(
@@ -561,7 +399,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={nn.Linear: AssertOverride(self)})
+        @compile(module_override=[AssertOverride(self)])
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -596,14 +434,18 @@ class TraceTrainStepTest(DTensorTestBase):
     def test_adam_fused(self):
         self._test_adam(foreach=False, fused=True)
 
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_train_step_override(self):
+    def _test_train_step_override(self):
         transform_targets = []
 
         class DDMOverride(Override):
-            def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
-                return DummyDDM()
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
+                return (
+                    DummyDDM()
+                    if isinstance(orig_submodule, DataDependentModule)
+                    else orig_submodule
+                )
 
             def transform(
                 self,
@@ -629,7 +471,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={DataDependentModule: DDMOverride()})
+        @compile(module_override=[DDMOverride()])
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -644,6 +486,84 @@ class TraceTrainStepTest(DTensorTestBase):
         self.assertEqual(
             transform_targets,
             [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default],
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_override(self):
+        self._test_train_step_override()
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_module_multi_fqn_override(self):
+        transform_targets = []
+
+        class DDMOverride(Override):
+            def replacement(
+                self, fqn: str, orig_submodule: torch.nn.Module
+            ) -> torch.nn.Module:
+                return (
+                    DummyDDM()
+                    if isinstance(orig_submodule, DataDependentModule)
+                    else orig_submodule
+                )
+
+            def transform(
+                self,
+                gm: fx.GraphModule,
+                flat_state: List[torch.Tensor],
+            ) -> fx.Graph:
+                nonlocal transform_targets
+                for node in gm.graph.nodes:
+                    if node.target in [
+                        torch.ops.dummy.ddm.default,
+                        torch.ops.dummy.ddm_backward.default,
+                    ]:
+                        transform_targets.append(node.target)
+                        # N.B.: this is not a complete subgraph representing
+                        # original logic, as we are testing the ability to
+                        # modify graph after DTensor expansion.
+                        with gm.graph.inserting_before(node):
+                            new_node = gm.graph.call_function(torch.add, args=node.args)
+                        node.replace_all_uses_with(new_node)
+
+                gm.graph.eliminate_dead_code()
+
+                return gm
+
+        class MultiDDM(nn.Module):
+            def __init__(self, world_size):
+                super().__init__()
+                self.l1 = nn.Linear(10, 10)
+                self.ddm1 = DataDependentModule(world_size)
+                self.l2 = nn.Linear(10, 10)
+                self.ddm2 = DataDependentModule(world_size)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                assert len(x.size()) == 2
+
+                return self.relu(self.ddm2(self.l2(self.ddm1(self.l1(x)))))
+
+        @compile(module_override=[DDMOverride()])
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = MultiDDM(self.world_size).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
+        inp = torch.randn(4, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+
+        # checking transforms are indeed invoked.
+        self.assertEqual(
+            transform_targets,
+            [
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm.default,
+                torch.ops.dummy.ddm_backward.default,
+                torch.ops.dummy.ddm_backward.default,
+            ],
         )
 
     @skip_if_lt_x_gpu(2)
@@ -724,6 +644,24 @@ class TraceTrainStepTest(DTensorTestBase):
 
         self._test_optimizer(mod, ddp_mod, opt, ddp_opt, inp, train_step)
         self.assertEqual(mod.dummy_buffer, ddp_mod.module.dummy_buffer)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_expand_dimension(self):
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        mod = nn.Linear(10, 10, bias=True).cuda(self.rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=True)
+        inp = torch.randn(2, 10).cuda(self.rank)
+        train_step(mod, opt, inp)
+        for node in train_step._compiled_obj.gm.graph.nodes:
+            if node.target == torch.ops.aten.expand.default:
+                # backward grad expandion op should match local batch size
+                # instead of global batch size.
+                self.assertEqual(node.args[1], [2, 10])
 
 
 class CoverageTest(DTensorTestBase):
@@ -836,6 +774,182 @@ class CoverageTest(DTensorTestBase):
         tgt = torch.empty(B, dtype=torch.long).random_(0, D).to(self.rank)
 
         self._test_train_step(train_step, mod, ids, tgt)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_pos_embedding(self):
+        N, D, B, Block = 10, 8, 2, 20
+
+        class EmbeddingModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.wte = nn.Embedding(N, D)
+                self.wpe = nn.Embedding(Block, D)
+                self.norm = nn.LayerNorm(D, elementwise_affine=False)
+                self.fc = nn.Linear(D, D)
+
+            def forward(self, ids, tgt):
+                _, t = ids.size()
+                wte = self.wte(ids)
+                wpe = self.wpe(
+                    torch.arange(0, t, dtype=torch.long, device=ids.device).unsqueeze(0)
+                )
+                emb = wpe + wte
+                norm = self.norm(emb)
+                fc = self.fc(norm)
+                log = F.softmax(fc, dim=-1)
+                return F.cross_entropy(log.view(-1, log.size(-1)), tgt.view(-1))
+
+        torch.manual_seed(0)
+        mod = EmbeddingModule().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, ids, tgt):
+            mod(ids, tgt).sum().backward()
+            opt.step()
+
+        ids = torch.randint(0, N, (B, Block)).cuda(self.rank)
+        tgt = torch.empty((B, Block), dtype=torch.long).random_(0, D).to(self.rank)
+
+        self._test_train_step(train_step, mod, ids, tgt)
+
+    def _test_op_with_train_step(self, Model: Type[nn.Module]):
+        torch.manual_seed(0)
+        mod = Model().cuda(self.rank)
+
+        @compile()
+        def train_step(mod, opt, inp):
+            mod(inp).sum().backward()
+            opt.step()
+
+        inp = torch.randn(2, 10).cuda(self.rank)
+        self._test_train_step(train_step, mod, inp)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_full(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.full(x.shape, 7, device=x.device)
+                return y + self.fc(x)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_factory_arange(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = torch.arange(x.numel(), device=x.device).view(x.shape)
+                z = torch.arange(0, x.numel(), device=x.device).view(x.shape)
+                return self.fc(x) + y + z
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_numel(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.numel()
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_sym_stride(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                y = self.fc.weight.stride(0)
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_scalar(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                # FIXME: torch.tensor(x.numel()) is captured as a tensor constant
+                y = torch.ops.aten.scalar_tensor.default(
+                    7, dtype=x.dtype, device=x.device
+                )
+                return self.fc(x) + y
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_stack(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.stack([x, self.fc(x)], dim=1)
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_arithmetic_ops_on_symint(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x) + x.shape[0] * x.numel() - x.shape[0] // 2
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_slice(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.fc(x)[:, :1]
+
+        self._test_op_with_train_step(Model)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_bulk_cat(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(10, 10)
+
+            def forward(self, x):
+                return torch.cat([self.fc(x) for _ in range(100)], dim=1)
+
+        self._test_op_with_train_step(Model)
 
 
 if __name__ == "__main__":

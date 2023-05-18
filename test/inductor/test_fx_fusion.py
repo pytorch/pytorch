@@ -2,7 +2,7 @@
 from typing import Any, Callable
 
 import torch
-from torch._inductor.overrides import (
+from torch._inductor.fx_passes.pre_grad import (
     linear_permute_fusion,
     linear_transpose,
     permute_linear_fusion,
@@ -12,7 +12,7 @@ from torch._inductor.overrides import (
     transpose_matmul,
 )
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 
@@ -50,6 +50,9 @@ class TestFxFusion(TestCase):
         def test_arg(x, y):
             return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
+        def test_arg2(x, y):
+            return torch.cat([x, y]).view(-1).view(128).tanh()
+
         def test_kwarg2(x, y):
             return torch.cat(tensors=[x, y], dim=0).tanh()
 
@@ -61,7 +64,7 @@ class TestFxFusion(TestCase):
             torch.randn(8, 8),
             torch.randn(8, 8),
         ]
-        for f in [test_kwarg, test_arg, test_kwarg2, test_kwarg3]:
+        for f in [test_kwarg, test_arg, test_arg2, test_kwarg2, test_kwarg3]:
             traced = trace_func(f, inputs)
             self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
             self.assertEqual(count_call_method(traced, "tanh"), 2)
@@ -151,4 +154,5 @@ class TestFxFusion(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

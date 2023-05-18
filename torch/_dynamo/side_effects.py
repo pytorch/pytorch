@@ -14,7 +14,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import LocalSource, Source
-from .utils import object_new
+from .utils import nn_module_new, object_new
 from .variables.base import VariableTracker
 
 
@@ -156,9 +156,12 @@ class SideEffects:
             self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
         self.store_attr_mutations[item.mutable_local][name] = value
 
-    def load_attr(self, item, name):
+    def load_attr(self, item, name, deleted_ok=False):
         assert self.is_attribute_mutation(item)
-        return self.store_attr_mutations[item.mutable_local][name]
+        result = self.store_attr_mutations[item.mutable_local][name]
+        if not deleted_ok and isinstance(result, variables.DeletedVariable):
+            unimplemented("read deleted attribute")
+        return result
 
     def store_cell(self, cellvar, value):
         assert isinstance(cellvar, variables.NewCellVariable)
@@ -187,6 +190,11 @@ class SideEffects:
 
     def is_attribute_mutation(self, item):
         return isinstance(item.mutable_local, AttributeMutation)
+
+    def has_pending_mutation(self, item):
+        return self.is_attribute_mutation(item) and bool(
+            self.store_attr_mutations.get(item.mutable_local)
+        )
 
     def is_modified(self, item):
         if isinstance(item.mutable_local, AttributeMutationNew):
@@ -230,6 +238,8 @@ class SideEffects:
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
+        elif issubclass(user_cls, torch.nn.Module):
+            obj = nn_module_new(user_cls)
         else:
             obj = object_new(user_cls)
         variable = variable_cls(
@@ -404,6 +414,15 @@ class SideEffects:
                         )
                     elif name == "__call_nn_module_init":
                         pass  # handled in codegen_save_tempvars
+                    elif isinstance(value, variables.DeletedVariable):
+                        if isinstance(
+                            var.mutable_local, AttributeMutationExisting
+                        ) and hasattr(getattr(var, "value", None), name):
+                            cg.tx.output.update_co_names(name)
+                            cg(var.mutable_local.source)
+                            suffixes.append(
+                                [create_instruction("DELETE_ATTR", argval=name)]
+                            )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -421,3 +440,7 @@ class SideEffects:
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.save_for_backward
         )
+
+    def clear(self):
+        self.keepalive.clear()
+        self.id_to_variable.clear()

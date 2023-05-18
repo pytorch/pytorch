@@ -33,7 +33,6 @@ namespace at::native {
 namespace {
 
 constexpr int kCUDANumThreads = 256;
-constexpr int kColwiseReduceTileSize = 32;
 constexpr unsigned int kWarpSize = 32;
 constexpr int vec_size = 4; //we could make it dependent on dtype, but that would lead to different results between float and low-p types
 
@@ -484,80 +483,6 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
 }
 
 template <typename T, typename T_ACC>
-__global__ void GammaBetaBackwardCUDAKernel1(
-    int64_t M,
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    T* dg,
-    T* db) {
-  __shared__ T_ACC g_shared[kColwiseReduceTileSize][kColwiseReduceTileSize + 1];
-  __shared__ T_ACC b_shared[kColwiseReduceTileSize][kColwiseReduceTileSize + 1];
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
-  T_ACC dg_sum1 = 0;
-  T_ACC dg_sum2 = 0;
-  T_ACC db_sum1 = 0;
-  T_ACC db_sum2 = 0;
-  if (j < N) {
-    for (int64_t i = threadIdx.y; i < M; i += blockDim.y * 2) {
-      const int64_t i1 = i;
-      const int64_t i2 = i + blockDim.y;
-      const int64_t index1 = i1 * N + j;
-      const int64_t index2 = i2 * N + j;
-      dg_sum1 += dg == nullptr ? T_ACC(0)
-                               : static_cast<T_ACC>(dY[index1]) *
-              (static_cast<T_ACC>(X[index1]) - static_cast<T_ACC>(mean[i1])) *
-              static_cast<T_ACC>(rstd[i1]);
-      db_sum1 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index1]);
-      if (i2 < M) {
-        dg_sum2 += dg == nullptr ? T_ACC(0)
-                                 : static_cast<T_ACC>(dY[index2]) *
-                (static_cast<T_ACC>(X[index2]) - static_cast<T_ACC>(mean[i2])) *
-                static_cast<T_ACC>(rstd[i2]);
-        db_sum2 += db == nullptr ? T_ACC(0) : static_cast<T_ACC>(dY[index2]);
-      }
-    }
-  }
-  g_shared[threadIdx.y][threadIdx.x] = dg_sum1;
-  g_shared[threadIdx.y + blockDim.y][threadIdx.x] = dg_sum2;
-  b_shared[threadIdx.y][threadIdx.x] = db_sum1;
-  b_shared[threadIdx.y + blockDim.y][threadIdx.x] = db_sum2;
-  __syncthreads();
-  T_ACC sum1 = g_shared[threadIdx.x][threadIdx.y];
-  T_ACC sum2 = b_shared[threadIdx.x][threadIdx.y];
-  sum1 = cuda_utils::WarpReduceSum(sum1);
-  sum2 = cuda_utils::WarpReduceSum(sum2);
-  if (threadIdx.x == 0) {
-    const int64_t j = blockIdx.x * blockDim.x + threadIdx.y;
-    if (j < N) {
-      if (dg != nullptr) {
-        dg[j] = sum1;
-      }
-      if (db != nullptr) {
-        db[j] = sum2;
-      }
-    }
-  }
-  sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
-  sum1 = cuda_utils::WarpReduceSum(sum1);
-  sum2 = cuda_utils::WarpReduceSum(sum2);
-  if (threadIdx.x == 0) {
-    const int64_t j = blockIdx.x * blockDim.x + threadIdx.y + blockDim.y;
-    if (j < N) {
-      if (dg != nullptr) {
-        dg[j] = sum1;
-      }
-      if (db != nullptr) {
-        db[j] = sum2;
-      }
-    }
-  }
-}
-
-template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardCUDAKernel_32x32(
     int64_t M,
     int64_t N,
@@ -784,9 +709,9 @@ void LayerNormKernelImplInternal(
   // assumes all tensors are contiguous
   TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
   file a support request to support bigger batches");
-  const T* X_data = X.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
   T_ACC* mean_data = mean->data_ptr<T_ACC>();
   T_ACC* rstd_data = rstd->data_ptr<T_ACC>();

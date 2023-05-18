@@ -248,6 +248,7 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
+  c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -261,12 +262,16 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
+    if (other.custom_data_ptr_error_msg_) {
+      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
-      intrusive_ptr<c10::BackendMeta> backend_meta)
+      intrusive_ptr<c10::BackendMeta> backend_meta,
+      c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(backend_meta) {}
@@ -1496,15 +1501,55 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * for you; this class is available from 'Tensor'.
    */
   template <typename T>
-  inline T* data() const {
+  const T* data_dtype_initialized() const {
+    return data_dtype_initialized_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
+  }
+
+  /**
+   * Return a mutable typed data pointer to the actual data which this
+   * tensor refers to. This checks that the requested type (from the
+   * template parameter) matches the internal type of the tensor.
+   *
+   * It is invalid to call data() on a dtype-uninitialized tensor, even if
+   * the size is 0.
+   *
+   * WARNING: If a tensor is not contiguous, you MUST use strides when
+   * performing index calculations to determine the location of elements in
+   * the tensor.  We recommend using 'TensorAccessor' to handle this computation
+   * for you; this class is available from 'Tensor'.
+   */
+  template <typename T>
+  T* mutable_data_dtype_initialized() {
+    return data_dtype_initialized_impl<T>(
+        [this] { return static_cast<T*>(storage_.mutable_data()); });
+  }
+
+ private:
+  // Shared implementation of data_dtype_initialized() and
+  // mutable_data_dtype_initialized().
+  template <typename T, typename Func>
+  T* data_dtype_initialized_impl(const Func& get_data) const {
     TORCH_CHECK(
-        data_type_.Match<T>(),
+        data_type_.Match<std::remove_const_t<T>>(),
         "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
+        caffe2::TypeMeta::TypeName<std::remove_const_t<T>>(),
         ", while tensor contains ",
         data_type_.name(),
         ". ");
-    return legacy_mutable_data_ptr_impl<T>();
+    return data_ptr_impl_impl<T>(get_data);
+  }
+
+ public:
+  /**
+   * More efficient helper for Tensor::data_ptr(). Like data<T>(), but
+   * does not do a type check. Unlike the untemplated data(), does
+   * check has_storage() and storage_initialized().
+   */
+  template <typename T>
+  inline const T* data_ptr_impl() const {
+    return data_ptr_impl_impl<const T>(
+        [this] { return static_cast<const T*>(storage_.data()); });
   }
 
   /**
@@ -1514,27 +1559,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data_ptr_impl() {
-    return legacy_mutable_data_ptr_impl<T>();
+    return data_ptr_impl_impl<T>(
+        [this] { return static_cast<T*>(storage_.mutable_data()); });
   }
 
  private:
-  // The real implementation of mutable_data_ptr_impl, but in a
-  // non-const method.
-  //
-  // TODO: move the implementation into mutable_data_ptr_impl() and
-  // delete this when data<T>() is no longer const.
-  template <typename T>
-  inline T* legacy_mutable_data_ptr_impl() const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+  // Shared implementation of mutable_data_ptr_impl() and the future
+  // mutable_data_ptr_impl().
+  template <typename T, typename Func>
+  T* data_ptr_impl_impl(const Func& get_data) const {
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
+    return get_data() + storage_offset_;
   }
 
  public:
@@ -1576,9 +1619,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /// std::byte const*, etc.
   template <typename Void, typename Func>
   Void* data_impl(const Func& get_data) const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
@@ -1589,22 +1632,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (data == nullptr) {
+    if (is_empty()) {
       return nullptr;
     }
     return data + data_type_.itemsize() * storage_offset_;
   }
 
  public:
-  /**
-   * Like data<T>(), but performs no checks.  You are responsible for ensuring
-   * that all invariants required by data() are upheld here.
-   */
-  template <typename T>
-  inline T* unsafe_data() const {
-    return static_cast<T*>(storage_.mutable_data()) + storage_offset_;
-  }
-
   /**
    * Returns the TypeMeta of a tensor, which describes what data type
    * it is (e.g., int, float, ...)
@@ -1642,6 +1676,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->backend_meta_;
   }
 
+  void release_storage_and_set_meta_custom_data_ptr_error_msg_(
+      c10::optional<std::string> s) {
+    storage_ = {};
+    get_extra_meta().custom_data_ptr_error_msg_ = std::move(s);
+  }
+
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
@@ -1653,6 +1693,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+  [[noreturn]] void throw_data_ptr_access_error() const;
 
   ExtraMeta& get_extra_meta() {
     if (!extra_meta_) {

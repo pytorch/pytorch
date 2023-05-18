@@ -104,19 +104,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
     // backends
-    if (getBackendType() == BackendType::NCCL) {
-      getBackend(deviceType)->startCoalescing();
-    }
+    auto backend = getBackend(deviceType);
+    backend->startCoalescing();
   }
 
-  virtual void endCoalescing(
-      c10::DeviceType deviceType,
-      std::vector<c10::intrusive_ptr<Work>>& reqs) {
-    // only nccl has implemented startCoalescing so only execute for nccl
+  virtual c10::intrusive_ptr<Work> endCoalescing(c10::DeviceType deviceType) {
+    // only nccl has implemented endCoalescing so only execute for nccl
     // backends
-    if (getBackendType() == BackendType::NCCL) {
-      getBackend(deviceType)->endCoalescing(reqs);
-    }
+    auto backend = getBackend(deviceType);
+    auto work = backend->endCoalescing();
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
@@ -177,7 +174,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.timeout.count());
   }
@@ -197,7 +193,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
         opts.rootRank,
         opts.rootTensor,
@@ -265,6 +260,27 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
     return op.call(
         outputTensorLists,
+        inputTensors,
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
+  }
+
+  // This function is a coalesced version of `allgather_into_tensor` (currently
+  // still named as `_allgather_base`). Each tensor in the vector corresponds to
+  // an input/output of one `allgather_into_tensor` operation.
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("c10d::allgather_into_tensor_coalesced_", "")
+            .typed<c10::intrusive_ptr<Work>(
+                const at::TensorList,
+                const at::TensorList,
+                const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
+
+    return op.call(
+        outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
   }
@@ -512,7 +528,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const BarrierOptions& opts = BarrierOptions()) {
     static at::Tensor tensor;
     // TODO: if nccl was specified then use it
-    if (backendType_ == c10d::ProcessGroup::BackendType::NCCL) {
+    auto device = opts.device;
+    if (device.has_value()) {
+      // set device tensor from argument
+      tensor = at::empty(
+          {1},
+          at::TensorOptions().device(device.value()).dtype(at::kByte));
+    } else if (backendType_ == c10d::ProcessGroup::BackendType::NCCL) {
       // set cuda tensor
       tensor = at::empty(
           {1},
@@ -551,7 +573,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       c10::DeviceType deviceType,
       BackendType backendType,
       const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
+    // TODO: should we add these entries after the backend setting succeeds?
     deviceTypeToBackendType_[deviceType] = backendType;
+    deviceTypes_.insert(deviceType);
     // if the backendType is already set then reuse it for this device
     if (backendTypeToBackend_.find(backendType) !=
         backendTypeToBackend_.end()) {
@@ -588,6 +612,19 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return backendTypeToBackend_.at(backendType);
   }
 
+  // Return device types supported by this ProcessGroup.
+  // Note: the return type is `Device` rather than `DeviceType` for the purpose
+  // of easy comparison at Python level. The `Device` will have default index
+  // (-1).
+  std::vector<c10::Device> getDeviceTypes() const {
+    std::vector<c10::Device> devices;
+    devices.reserve(deviceTypes_.size());
+    for (auto& dt : deviceTypes_) {
+      devices.push_back(c10::Device(dt));
+    }
+    return devices;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -606,6 +643,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   DebugLevel dist_debug_level_;
 
   // Backend classes for this ProcessGroup
+  std::unordered_set<c10::DeviceType> deviceTypes_;
   std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;

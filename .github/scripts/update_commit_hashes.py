@@ -6,13 +6,13 @@ from typing import Any, Dict
 
 import requests
 
-MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
+UPDATEBOT_TOKEN = os.environ["UPDATEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 OWNER, REPO = "pytorch", "pytorch"
 
 
 def git_api(
-    url: str, params: Dict[str, str], type: str = "get", token: str = MERGEBOT_TOKEN
+    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -50,8 +50,8 @@ def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
-        "base": "master",
-        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
+        "base": "main",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/main/"
         + f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, type="post")

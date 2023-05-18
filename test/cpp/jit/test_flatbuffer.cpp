@@ -232,6 +232,22 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // Test if flatbuffer does not require any explicit key entries mapping in the
+  // extra file map.
+  std::unordered_map<std::string, std::string>
+      loaded_extra_files_without_explicit_entries;
+  auto mobile_module3 = _load_for_mobile(
+      ss,
+      c10::nullopt,
+      loaded_extra_files_without_explicit_entries,
+      MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS);
+
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_entries["metadata.json"], "abc");
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_entries["mobile_info.json"],
+      "{\"key\": 23}");
 }
 
 TEST(FlatbufferTest, Conv) {

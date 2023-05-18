@@ -123,19 +123,25 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
           } >> "${GITHUB_ENV} }}"
+
       - name: List the env
         shell: bash
         run: env
+
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
+
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
+
       - name: Clean workspace
         shell: bash
         run: |
@@ -149,6 +155,7 @@ jobs:
           submodules: recursive
           path: pytorch
           quiet-checkout: true
+
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
@@ -163,17 +170,33 @@ jobs:
           repository: pytorch/builder
           path: builder
           quiet-checkout: true
+
       - name: Clean pytorch/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
 
+      - name: Check if the job is disabled
+        id: filter
+        uses: ./pytorch/.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # NB: Use a mock test matrix with a default value here. After filtering, if the
+          # returned matrix is empty, it means that the job is disabled
+          test-matrix: |
+            { include: [
+              { config: "default" },
+            ]}
+
       - name: Pull Docker image
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
+
       - name: Build PyTorch binary
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         run: |
           set -x
           mkdir -p artifacts/
@@ -203,14 +226,16 @@ jobs:
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+
       - name: Chown artifacts
-        if: always()
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         shell: bash
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
       - uses: actions/upload-artifact@v3
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         with:
           name: ${{ inputs.build_name }}
           if-no-files-found: error

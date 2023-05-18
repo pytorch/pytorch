@@ -18,6 +18,7 @@ class GitHubComment:
     author_association: str
     editor_login: Optional[str]
     database_id: int
+    url: str
 
 
 def gh_fetch_url(

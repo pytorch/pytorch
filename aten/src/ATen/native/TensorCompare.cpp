@@ -405,6 +405,10 @@ void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
+void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+  TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
     const Tensor& elements,
@@ -756,10 +760,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {

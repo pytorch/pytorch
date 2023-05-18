@@ -195,7 +195,7 @@ auto handle_torch_function_setter(
 }
 
 // Combines self and args into one tuple.
-auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
+static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   if (args == nullptr) {
     return py::make_tuple(py::handle(self));
   } else if (self == nullptr) {
@@ -601,7 +601,7 @@ bool is_tensor_and_append_overloaded(
   return false;
 }
 
-bool is_scalar_list(PyObject* obj) {
+static bool is_scalar_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -646,7 +646,7 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
-bool is_float_or_complex_list(PyObject* obj) {
+static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -746,7 +746,7 @@ static bool is_int_or_symint_list(
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
-  return broadcast_size > 0 && THPUtils_checkLong(obj);
+  return broadcast_size > 0 && is_int_or_symint(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -1585,6 +1585,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   } else if (torch::is_symfloat(py::handle(obj))) {
     save_symint = true;
     scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
+  } else if (torch::is_symbool(py::handle(obj))) {
+    save_symint = true;
+    scalar = at::Scalar(true);
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1645,6 +1648,13 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
 
   if (torch::is_symfloat(arg)) {
     return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
+  if (torch::is_symbool(arg)) {
+    // Windows build fails with C2440: '<function-style-cast>'
+    // when at:Scalar(py::cast<c10::SymBool>(arg))
+    auto sym_bool = py::handle(arg).cast<c10::SymBool>();
+    return at::Scalar(sym_bool);
   }
 
   return at::Scalar(THPUtils_unpackDouble(arg));

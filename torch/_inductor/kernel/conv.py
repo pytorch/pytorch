@@ -178,7 +178,18 @@ conv2d_template = TritonTemplate(
 )
 
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    "at::convolution",
+    (
+        "bias",
+        "stride",
+        "padding",
+        "dilation",
+        "transposed",
+        "output_padding",
+        "groups",
+    ),
+    has_out_variant=False,
 )
 
 
@@ -210,10 +221,10 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),
             dilation,
             transposed,
-            output_padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -347,7 +358,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.maybe_guard_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)
