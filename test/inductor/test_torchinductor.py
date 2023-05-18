@@ -6141,7 +6141,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
-    @requires_cuda()
     def test_uint(self):
         def fn(z):
             x = torch.tensor(5, device=z.device, dtype=torch.uint8)
