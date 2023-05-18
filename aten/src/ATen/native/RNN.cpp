@@ -1807,7 +1807,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
                          std::move(std::get<2>(results)));
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
     const Tensor& data,
     const Tensor& batch_sizes,
     c10::List<at::Tensor> hx_,
