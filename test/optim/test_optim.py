@@ -814,6 +814,9 @@ class TestOptim(TestCase):
     @largeTensorTest("12GB", "cuda")
     def test_multi_tensor_optimizers_with_large_tensors(self):
         for optimizer_ctor, optimizer_params in self._multi_tensor_optimizer_configs:
+            # note(crcrpar): H100 wasn't sufficient for Adamax, surprisingly
+            if optimizer_ctor == optim.Adamax:
+                continue
             params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optimizer_ctor(params, fused=True, **optimizer_params)
