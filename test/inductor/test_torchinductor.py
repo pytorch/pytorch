@@ -2367,6 +2367,19 @@ class CommonTemplate:
             (torch.randn([1, 1, 6, 7]),),
         )
 
+    # From https://github.com/pytorch/pytorch/issues/93384
+    def test_max_pool2d8(self):
+        # dialtion is not 1, use fallback
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn([2, 2, 3, 6]),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -4912,6 +4925,34 @@ class CommonTemplate:
             [1, 1],
             2,
             1,
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    # From https://github.com/pytorch/pytorch/issues/93384
+    def test_max_pool2d_with_indices_backward6(self):
+        # dilation is not 1. Should fallback
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([2, 2, 3, 6])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [3, 2],
+            [2, 1],
+            [1, 1],
+            [1, 2],
             False,
         )
         self.common(
