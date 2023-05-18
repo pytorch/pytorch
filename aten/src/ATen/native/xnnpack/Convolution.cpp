@@ -473,7 +473,7 @@ static bool use_convolution2d(
          internal::convolution2d::usable(input);
 }
 
-static Tensor convolution2d(
+Tensor convolution2d(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
