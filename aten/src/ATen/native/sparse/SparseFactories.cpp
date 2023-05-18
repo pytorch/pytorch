@@ -17,7 +17,7 @@ namespace at::native {
 
 DEFINE_DISPATCH(spdiags_kernel_stub);
 
-Tensor spdiags(
+static Tensor spdiags(
     const Tensor& diagonals,
     const Tensor& offsets,
     IntArrayRef shape,
