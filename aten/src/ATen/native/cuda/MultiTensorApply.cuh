@@ -57,9 +57,9 @@ template<> struct TensorListScalarListMetadata<c10::complex<double>, 1> {
 };
 
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 2> {
-  const void* addresses[1][60];
-  int64_t numel_for_tensor[60];
-  c10::complex<double> scalar_vals[60];
+  const void* addresses[1][66];
+  int64_t numel_for_tensor[66];
+  c10::complex<double> scalar_vals[66];
   unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
   int block_to_chunk[depth_to_max_blocks[1-1]];
 };
