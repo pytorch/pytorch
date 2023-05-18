@@ -3189,6 +3189,10 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
+- func: _structured_sparse_linear(Tensor a, Tensor b, Tensor mask_or_meta) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _structured_sparse_linear
+
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
@@ -3209,10 +3213,6 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
-
-- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None) -> (Tensor, Tensor)
-  dispatch:
-    CUDA: _structured_sparse_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
