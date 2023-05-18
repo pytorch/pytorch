@@ -117,7 +117,7 @@ BATCH_SIZE_DIVISORS = {
     "DebertaForMaskedLM": 4,
     "DebertaForQuestionAnswering": 2,
     "DebertaV2ForMaskedLM": 4,
-    "DebertaV2ForQuestionAnswering": 4,
+    "DebertaV2ForQuestionAnswering": 8,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
     "DistillGPT2": 2,
