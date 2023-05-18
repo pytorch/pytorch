@@ -11,14 +11,13 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
-from torch._guards import GuardsCheckpointState
+from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
-from torch._guards import Source
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,

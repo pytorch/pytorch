@@ -1,12 +1,12 @@
+import inspect
 import os
+import re
 import sys
 import tempfile
 from os.path import abspath, dirname
 
 import torch
 from . import external_utils
-import inspect
-import re
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -271,7 +271,7 @@ _autograd_backward_strict_mode_banned_ops = [
 ]
 
 _autograd_backward_strict_mode_banned_ops.extend(
-    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r'^is_.*', name)]
+    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
 

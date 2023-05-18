@@ -1114,7 +1114,7 @@ class SubgraphTracer(fx.Tracer):
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
         if len(node.users) > 0:
-            user_graph_nodes : List[torch.fx.Node] = []
+            user_graph_nodes: List[torch.fx.Node] = []
             for user in node.users.keys():
                 # For the case where user.graph == self.graph, that is a real bug and will raise
                 # properly.

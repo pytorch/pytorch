@@ -261,7 +261,11 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx)
         args = [ctx, *args]
 
-        if requires_grad and torch.is_grad_enabled() and torch._dynamo.config.capture_autograd_function:
+        if (
+            requires_grad
+            and torch.is_grad_enabled()
+            and torch._dynamo.config.capture_autograd_function
+        ):
             # Note - this is the same check used in autograd/function.py, except inverted.
             # If we want to support functorch transforms here, we will need to enable this.
             if (
@@ -309,7 +313,9 @@ class AutogradFunctionVariable(VariableTracker):
             module_source = AttrSource(
                 tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
             )
-            higher_order_autograd_fn = TorchHigherOrderOperator(trampoline_autograd_fwd, source=AttrSource(module_source, "forward"))
+            higher_order_autograd_fn = TorchHigherOrderOperator(
+                trampoline_autograd_fwd, source=AttrSource(module_source, "forward")
+            )
             speculated_fwd_result = higher_order_autograd_fn.call_function(
                 tx, args, kwargs
             )
@@ -319,7 +325,10 @@ class AutogradFunctionVariable(VariableTracker):
                 tx,
                 graph_checkpoint,
                 checkpoint,
-                TorchHigherOrderOperator(trampoline_autograd_bwd, source=AttrSource(module_source, "backward")),
+                TorchHigherOrderOperator(
+                    trampoline_autograd_bwd,
+                    source=AttrSource(module_source, "backward"),
+                ),
                 bwd_args,
             )
             # If fwd and backward are sound, we want apply in the graph.

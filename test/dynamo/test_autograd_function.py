@@ -215,7 +215,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         eager_result = model(input, weight)
         self.assertEqual(optim_result, eager_result)
 
-
     def test_materialize_grad(self):
         model = MaterializingGradModule()
         opt_model = torch._dynamo.optimize("eager")(model)
