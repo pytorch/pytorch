@@ -14,7 +14,6 @@ from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 from torch.utils import _pytree as pytree
 
-from ..guards import GuardBuilder
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
@@ -1189,6 +1188,7 @@ class TorchHigherOrderOperator(VariableTracker):
             vmap_args = self.value._vmap_info['args']
             vmap_kwargs = self.value._vmap_info['kwargs']
             fn = vmap_args[0]
+            # Hack!
             self.source = fn.source
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 fn,
@@ -1201,13 +1201,34 @@ class TorchHigherOrderOperator(VariableTracker):
                 "vmap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
             body_node = make_attr(body_name)
-            p_args = (
+            vmap_proxy_args = (
                 body_node,
                 *(arg.as_proxy() for arg in vmap_args[1:]),
                 *(arg for arg in body_lifted_freevars),
             )
             r = body_r.as_proxy().node.meta["example_value"]
+            vmap_proxy_kwargs = {k: v.as_proxy() for k, v in vmap_kwargs.items()}
             example_value = r
+            # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
+            vmap_proxy = tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    args=tuple(vmap_proxy_args),
+                    kwargs=vmap_proxy_kwargs,
+                    name="vmap_proxy",
+                )
+
+            batched_fn_args = tuple(arg.as_proxy() for arg in args)
+            batched_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
+
+            # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
+            proxy = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)
+            fx_proxy = wrap_fx_proxy(
+                tx=tx,
+                proxy=proxy,
+                example_value=example_value,
+            )
+            return fx_proxy
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
