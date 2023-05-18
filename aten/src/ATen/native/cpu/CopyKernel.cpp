@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/native/cpu/zmath.h>
@@ -164,7 +165,7 @@ static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_n
   }
 }
 
-static void direct_copy_kernel(TensorIteratorBase &iter) {
+void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
   // we only need a separate instantiation per dtype size. This would
   // probably save us a little bit of code size here
