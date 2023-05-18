@@ -12,6 +12,7 @@ concurrency:
 jobs:
   do_update_viablestrict:
     runs-on: ubuntu-20.04
+    environment: mergebot
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
