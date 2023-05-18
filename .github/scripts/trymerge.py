@@ -1261,9 +1261,11 @@ def find_matching_merge_rule(
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
                 reject_reason = "\n".join(
-                    f"Not all files match rule `{rule_name}`.",
-                    f"{num_matching_files} files matched, but there are still non-matching files:",
-                    f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
+                    (
+                        f"Not all files match rule `{rule_name}`.",
+                        f"{num_matching_files} files matched, but there are still non-matching files:",
+                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
+                    )
                 )
             continue
 
