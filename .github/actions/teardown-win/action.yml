@@ -23,6 +23,9 @@ runs:
       run: |
         .github\scripts\kill_active_ssh_sessions.ps1
 
+    - name: Clean up leftover processes on non-ephemeral Windows runner
+      uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
     - name: Cleanup workspace
       if: always()
       shell: bash
