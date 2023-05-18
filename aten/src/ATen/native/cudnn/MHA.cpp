@@ -55,12 +55,12 @@ struct MHAParams {
   int64_t s_kv;
   int64_t d;
   bool is_training;
-  
+
 };
 
 void setMHAParams(MHAParams& params,
-		  int64_t b, 
-                  int64_t h, 
+		  int64_t b,
+                  int64_t h,
                   int64_t s_q,
                   int64_t s_kv,
                   int64_t d,
@@ -169,9 +169,9 @@ __half cpu_float2half_rn(float f)
         void* hr_ptr = &hr;
         return *reinterpret_cast<__half*>(hr_ptr);
     }
-  
+
     sign = ((x >> 16) & 0x8000);
-  
+
     // Get rid of +Inf/-Inf, +0/-0.
     if (u > 0x477fefff) {
         hr.x = static_cast<unsigned short> (sign | 0x7c00U);
@@ -200,7 +200,7 @@ __half cpu_float2half_rn(float f)
     lsb = (1 << shift);
     lsb_s1 = (lsb >> 1);
     lsb_m1 = (lsb - 1);
-  
+
     // Round to nearest even.
     remainder = (mantissa & lsb_m1);
     mantissa >>= shift;
@@ -210,7 +210,7 @@ __half cpu_float2half_rn(float f)
             ++exponent;
             mantissa = 0;
         }
-    }  
+    }
 
     hr.x = static_cast<unsigned short>((sign | (exponent << 10) | mantissa));
 
@@ -367,19 +367,18 @@ allowAllConfig(cudnnBackendDescriptor_t engine_config) {
     return false;
 }
 
-static cudnn_frontend::Tensor tensor_create(cudnnDataType_t type, int64_t id, int64_t const * dim, 
+static cudnn_frontend::Tensor tensor_create(cudnnDataType_t type, int64_t id, int64_t const * dim,
                                 int64_t const * stride, bool is_virtual, bool is_value) {
     int nbDims = 4;
     auto tensor_created = cudnn_frontend::TensorBuilder()
             .setDim(nbDims, dim)
             .setStride(nbDims, stride)
-            .setId(id) 
+            .setId(id)
             .setAlignment(16) // 16B alignment is needed to run a tensor core engine
             .setDataType(type)
             .setVirtual(is_virtual)
             .setByValue(is_value)
             .build();
-    std::cout << tensor_created.describe() << std::endl;
     return tensor_created;
 };
 
@@ -388,23 +387,21 @@ static cudnn_frontend::PointWiseDesc pw_desc_create(cudnnDataType_t type, cudnnP
             .setMode(mode)
             .setComputeType(type)
             .build();
-    
-    std::cout << pw_desc_created.describe() << std::endl;
-    return pw_desc_created;
-} 
 
-static cudnn_frontend::Operation unary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &yDesc, 
+    return pw_desc_created;
+}
+
+static cudnn_frontend::Operation unary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &yDesc,
                                                     cudnn_frontend::PointWiseDesc const &pwDesc) {
     auto pw_op_created = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                         .setxDesc(xDesc)
                         .setyDesc(yDesc)
                         .setpwDesc(pwDesc)
                         .build();
-    std::cout << pw_op_created.describe() << std::endl;
     return pw_op_created;
 }
 
-static cudnn_frontend::Operation binary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &bDesc, 
+static cudnn_frontend::Operation binary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &bDesc,
                                                     cudnn_frontend::Tensor const &yDesc, cudnn_frontend::PointWiseDesc const &pwDesc) {
     auto pw_op_created = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                         .setxDesc(xDesc)
@@ -412,11 +409,10 @@ static cudnn_frontend::Operation binary_pw_op_create(cudnn_frontend::Tensor cons
                         .setyDesc(yDesc)
                         .setpwDesc(pwDesc)
                         .build();
-    std::cout << pw_op_created.describe() << std::endl;
     return pw_op_created;
 }
 
-static cudnn_frontend::Operation ternary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &bDesc, cudnn_frontend::Tensor const &tDesc, 
+static cudnn_frontend::Operation ternary_pw_op_create(cudnn_frontend::Tensor const &xDesc, cudnn_frontend::Tensor const &bDesc, cudnn_frontend::Tensor const &tDesc,
                                             cudnn_frontend::Tensor const &yDesc, cudnn_frontend::PointWiseDesc const &pwDesc) {
     auto pw_op_created = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                         .setxDesc(xDesc)
@@ -425,17 +421,16 @@ static cudnn_frontend::Operation ternary_pw_op_create(cudnn_frontend::Tensor con
                         .setyDesc(yDesc)
                         .setpwDesc(pwDesc)
                         .build();
-    std::cout << pw_op_created.describe() << std::endl;
     return pw_op_created;
 }
 
-static cudnn_frontend::Tensor 
-createScale(int64_t b, 
-            int64_t h, 
+static cudnn_frontend::Tensor
+createScale(int64_t b,
+            int64_t h,
             int64_t s_q,
             int64_t s_kv,
             int64_t d,
-            MHA_Layout layout, 
+            MHA_Layout layout,
             cudnnDataType_t tensorType,
             const cudnn_frontend::Tensor& sTensor,
             std::vector<cudnn_frontend::Operation>& ops) {
@@ -462,8 +457,8 @@ createScale(int64_t b,
 }
 
 static cudnn_frontend::Tensor
-createQKBMM(int64_t b, 
-           int64_t h, 
+createQKBMM(int64_t b,
+           int64_t h,
            int64_t s_q,
            int64_t s_kv,
            int64_t d,
@@ -490,7 +485,6 @@ createQKBMM(int64_t b,
 
     // Define the matmul 1 desc
     auto matmul_1_Desc = cudnn_frontend::MatMulDescBuilder().setComputeType(CUDNN_DATA_FLOAT).build();
-    std::cout << matmul_1_Desc.describe() << std::endl;
 
     // Create a matmul 1 Node
     auto matmul_op1 = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
@@ -500,7 +494,6 @@ createQKBMM(int64_t b,
                             .setmatmulDesc(matmul_1_Desc)
                             .build();
 
-    std::cout << matmul_op1.describe() << std::endl;
 
     ops.push_back(std::move(matmul_op1));
 
@@ -508,8 +501,8 @@ createQKBMM(int64_t b,
 }
 
 static cudnn_frontend::Tensor
-createCausalMask(int64_t b, 
-           int64_t h, 
+createCausalMask(int64_t b,
+           int64_t h,
            int64_t s_q,
            int64_t s_kv,
            int64_t d,
@@ -530,7 +523,7 @@ createCausalMask(int64_t b,
 
     int64_t maskVal_dim [4] =  {1, 1, 1, 1};
     int64_t maskVal_stride [4] = {1, 1, 1, 1};
-    
+
     // mask value to put in the masked pixels
     auto maskValTensor = tensor_create(CUDNN_DATA_FLOAT, MASK_VAL_ID, maskVal_dim, maskVal_stride, false, true); // is by value
     // gen index row output
@@ -539,7 +532,7 @@ createCausalMask(int64_t b,
     auto columnIndexTensor = tensor_create(CUDNN_DATA_FLOAT, VIRTUAL_ID + 101, afterBMM1_dim, afterBMM1_stride, true, false); // is virtual
     // create causal mask (row >= col)
     auto causalMaskTensor = tensor_create(CUDNN_DATA_BOOLEAN, VIRTUAL_ID + 106, afterBMM1_dim, afterBMM1_stride, true, false); // is virtual
-    
+
     // output after masking
     auto maskOutputTensor = tensor_create(CUDNN_DATA_FLOAT, VIRTUAL_ID + 107, afterBMM1_dim, afterBMM1_stride, true, false); // is virtual
 
@@ -549,11 +542,9 @@ createCausalMask(int64_t b,
                             .setAxis(2)
                             .setComputeType(CUDNN_DATA_FLOAT)
                             .build();
-    std::cout << genIndexRowDesc.describe() << std::endl;
 
     // Create a gen index Node.
     auto genIndexRow_op = unary_pw_op_create(prevBlockOutputTensor, rowIndexTensor, genIndexRowDesc);
-    std::cout << genIndexRow_op.describe() << std::endl;
 
     // Define the gen index for row descriptor
     auto genIndexColumnDesc = cudnn_frontend::PointWiseDescBuilder()
@@ -561,7 +552,6 @@ createCausalMask(int64_t b,
                             .setAxis(3)
                             .setComputeType(CUDNN_DATA_FLOAT)
                             .build();
-    std::cout << genIndexColumnDesc.describe() << std::endl;
 
     // Create a gen index Node.
     auto genIndexColumn_op = unary_pw_op_create(prevBlockOutputTensor, columnIndexTensor, genIndexColumnDesc);
@@ -589,8 +579,8 @@ createCausalMask(int64_t b,
 }
 
 static cudnn_frontend::Tensor
-createSoftmaxForward(int64_t b, 
-                     int64_t h, 
+createSoftmaxForward(int64_t b,
+                     int64_t h,
                      int64_t s_q,
                      int64_t s_kv,
                      bool is_training,
@@ -625,7 +615,7 @@ createSoftmaxForward(int64_t b,
     auto afterSoftmaxTensor = cudnn_frontend::TensorBuilder()
             .setDim(4, afterBMM1_dim)
             .setStride(4, afterBMM1_stride)
-            .setId(VIRTUAL_ID + 156) 
+            .setId(VIRTUAL_ID + 156)
             .setAlignment(16) // 16B alignment is needed to run a tensor core engine
             .setDataType(CUDNN_DATA_FLOAT)
             .setVirtual(true)
@@ -638,7 +628,6 @@ createSoftmaxForward(int64_t b,
                                 .setComputeType(CUDNN_DATA_FLOAT)
                                 .setReductionOp(CUDNN_REDUCE_TENSOR_MAX)
                                 .build();
-    std::cout << reductionMaxDesc.describe() << std::endl;
 
     // Create a reduction max Node.
     auto reductionMax_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR)
@@ -646,7 +635,6 @@ createSoftmaxForward(int64_t b,
                                 .setyDesc(afterMaxReductionTensor)
                                 .setreductionDesc(reductionMaxDesc)
                                 .build();
-    std::cout << reductionMax_op.describe() << std::endl;
 
     // Define the subtract descriptor
     auto subtractDesc = pw_desc_create(CUDNN_DATA_FLOAT, CUDNN_POINTWISE_SUB);
@@ -665,7 +653,6 @@ createSoftmaxForward(int64_t b,
                                 .setComputeType(CUDNN_DATA_FLOAT)
                                 .setReductionOp(CUDNN_REDUCE_TENSOR_ADD)
                                 .build();
-    std::cout << reductionAddDesc.describe() << std::endl;
 
     // Create a reduction add Node.
     auto reductionAdd_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR)
@@ -674,7 +661,6 @@ createSoftmaxForward(int64_t b,
                                 .setreductionDesc(reductionAddDesc)
                                 .build();
 
-    std::cout << reductionAdd_op.describe() << std::endl;
 
     // Create log descriptor
     auto logDesc = pw_desc_create(CUDNN_DATA_FLOAT, CUDNN_POINTWISE_LOG);
@@ -706,8 +692,8 @@ createSoftmaxForward(int64_t b,
 }
 
 static cudnn_frontend::Tensor
-createDropoutForward(int64_t b, 
-              int64_t h, 
+createDropoutForward(int64_t b,
+              int64_t h,
               int64_t s_q,
               int64_t s_kv,
               int64_t d,
@@ -715,9 +701,9 @@ createDropoutForward(int64_t b,
               cudnnDataType_t tensorType,
               std::vector<cudnn_frontend::Operation>& ops,
               cudnn_frontend::Tensor& afterSoftmaxTensor) {
-    
+
     CUDNN_FRONTEND_UNUSED(d);
-    
+
     cudnn_frontend::throw_if(ops.size() == 0, "Dropout DAG constructed incorrectly as the first one", CUDNN_STATUS_BAD_PARAM);
 
     int64_t afterBMM1_dim [4] = {b, h, s_q, s_kv};
@@ -735,7 +721,7 @@ createDropoutForward(int64_t b,
     auto afterDropoutTensor = cudnn_frontend::TensorBuilder()
             .setDim(4, afterBMM1_dim)
             .setStride(4, afterBMM1_stride)
-            .setId(VIRTUAL_ID + 201) 
+            .setId(VIRTUAL_ID + 201)
             .setAlignment(16) // 16B alignment is needed to run a tensor core engine
             .setDataType(tensorType)
             .setVirtual(true)
@@ -753,7 +739,6 @@ createDropoutForward(int64_t b,
                                 .setRngDistribution(CUDNN_RNG_DISTRIBUTION_BERNOULLI)
                                 .setBernoulliDistProbability(1.0 - probability)
                                 .build();
-    std::cout << rngDesc.describe() << std::endl;
 
     // Create a rng Node.
     auto rng_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_RNG_DESCRIPTOR)
@@ -763,7 +748,6 @@ createDropoutForward(int64_t b,
                                 .setRngDesc(rngDesc)
                                 .build();
 
-    std::cout << rng_op.describe() << std::endl;
 
     // Define the multiply mask descriptor
     auto maskMulDesc = pw_desc_create(CUDNN_DATA_FLOAT, CUDNN_POINTWISE_MUL);
@@ -785,8 +769,8 @@ createDropoutForward(int64_t b,
 }
 
 static void
-createSVBMM(int64_t b, 
-           int64_t h, 
+createSVBMM(int64_t b,
+           int64_t h,
            int64_t s_q,
            int64_t s_kv,
            int64_t d,
@@ -804,14 +788,13 @@ createSVBMM(int64_t b,
     int64_t o_dim [4] =  {b, h, s_q, d};
     int64_t o_stride [4];
     generateMHAStrides(b, h, s_q, s_kv, d, o_stride, layout, MHA_Matrix::O_Matrix);
-    
+
     auto vTensor = tensor_create(tensorType, V_ID, v_dim, v_stride, false, false);
     // second GEMM output
     auto oTensor = tensor_create(tensorType, O_ID, o_dim, o_stride, false, false);
 
     // Define the matmul 2 desc
     auto matmul_2_Desc = cudnn_frontend::MatMulDescBuilder().setComputeType(CUDNN_DATA_FLOAT).build();
-    std::cout << matmul_2_Desc.describe() << std::endl;
 
     // Create a matmul 2 Node
     auto matmul_op2 = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
@@ -821,7 +804,6 @@ createSVBMM(int64_t b,
                             .setmatmulDesc(matmul_2_Desc)
                             .build();
 
-    std::cout << matmul_op2.describe() << std::endl;
 
     ops.push_back(std::move(matmul_op2));
 }
@@ -844,7 +826,6 @@ void run_mha_plan(cudnnHandle_t handle,
 		  bool is_training) {
 
     auto workspace_size = plan.getWorkspaceSize();
-    std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
 
     void* workspace_ptr = nullptr;
     if (workspace_size > 0) {
@@ -875,14 +856,13 @@ void run_mha_plan(cudnnHandle_t handle,
                            .setWorkspacePointer(workspace_ptr)
                            .setDataPointers(data_ptrs)
                            .build();
-    std::cout << "variantPack " << variantPack.describe() << std::endl;
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
 
-void 
-run_bf16_LLM_fprop(int64_t b, 
-              int64_t h, 
+void
+run_bf16_LLM_fprop(int64_t b,
+              int64_t h,
               int64_t s_q,
               int64_t s_kv,
               int64_t d,
@@ -890,15 +870,15 @@ run_bf16_LLM_fprop(int64_t b,
               float scaling_factor,
               bool is_training,
               double dropout_probability,
-              void* devPtrQ, 
-              void* devPtrK,   
+              void* devPtrQ,
+              void* devPtrK,
               void* devPtrV,
               void* devPtrSoftmaxStats,
               void* devPtrO,
               void* devPtrDropoutSeed,
               void* devPtrDropoutOffset,
               cudnnDataType_t tensorType) {
-                
+
     try {
         cudnnHandle_t handle_ = getCudnnHandle();
 	MHAParams params;
@@ -919,17 +899,14 @@ run_bf16_LLM_fprop(int64_t b,
 
 		auto sAfterMaskTensor = createCausalMask(b, h, s_q, s_kv, d, layout, tensorType, ops, sScaleTensor);
 
-		cudnn_frontend::throw_if(dropout_probability != 0.0f && !is_training, "Dropout probability should be 0.0f for inference mode", CUDNN_STATUS_BAD_PARAM);
+		// cudnn_frontend::throw_if(dropout_probability != 0.0f && !is_training, "Dropout probability should be 0.0f for inference mode", CUDNN_STATUS_BAD_PARAM);
 		cudnn_frontend::throw_if(dropout_probability == 1.0f, "Dropout probability cannot be 1.0", CUDNN_STATUS_BAD_PARAM);
-
 
 		auto softmax_output = createSoftmaxForward(b, h, s_q, s_kv, is_training, ops, sAfterMaskTensor);
 
 		// Dropout(softmax)
 		auto dropout_output = createDropoutForward(b, h, s_q, s_kv, d, dropout_probability, tensorType, ops, softmax_output);
 		createSVBMM(b, h, s_q, s_kv, d, layout, tensorType, ops, dropout_output);
-		
-		std::cout << "Total ops created: " << ops.size() << std::endl;
 
 		for (unsigned int i = 0; i < ops.size(); i++) {
 		    all_ops.push_back(&ops[i]);
@@ -950,9 +927,8 @@ run_bf16_LLM_fprop(int64_t b,
 			    nullptr,
 			    CUDNN_STATUS_NOT_SUPPORTED,
 			    "run_mha_fprop: No config returned by the heuristics");
-		}   
+		}
             auto plan = cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(filtered_configs[0], opGraph.getTag()).build();
-            std::cout << "Plan tag: " << plan.getTag() << std::endl;
 	    run_mha_plan(handle_,
 		         plan,
 		         devPtrQ,
@@ -981,33 +957,23 @@ run_bf16_LLM_fprop(int64_t b,
 			 is_training);
        }
     } catch (cudnn_frontend::cudnnException& e) {
-        std::cerr << "debug cudnnException " << e.what() << std::endl;
-        //struct cudaDeviceProp prop;
-        //C10_CUDA_CHECK(cudaGetDeviceProperties( &prop, 0 ));
-        //
-        //// this example is only for GA100 cards and GH100 cards
-        //if (!((prop.major == 8 && prop.minor == 0) || (prop.major == 9 && prop.minor == 0 && CUDNN_VERSION >= 8900)) && (e.getCudnnStatus() == CUDNN_STATUS_ARCH_MISMATCH || e.getCudnnStatus() == CUDNN_STATUS_NOT_SUPPORTED)) {
-        //    std::cout << "Example is only supported for GA100 (cuDNN >= 8900) and GH100 (cuDNN >= 8900) GPUs" << std::endl; 
-        //}  else {
-        //    std::cout << "[ERROR] Exception " << e.what() << std::endl;
-        //    CHECK(false);
-        //}
+        TORCH_WARN("cudnnException ", e.what());
     }
 }
 
 // END COPY-PASTE FRO CUDNN-FRONTEND SAMPLE
 
-void 
-run_cudnn_LLM_fprop(int64_t b, 
-                    int64_t h, 
+void
+run_cudnn_LLM_fprop(int64_t b,
+                    int64_t h,
                     int64_t s_q,
                     int64_t s_kv,
                     int64_t d,
                     float scaling_factor,
                     bool return_softmaxstats,
                     double dropout_probability,
-                    const Tensor& q, 
-                    const Tensor& k,   
+                    const Tensor& q,
+                    const Tensor& k,
                     const Tensor& v,
                     Tensor& softmaxstats,
                     Tensor& o,
@@ -1017,20 +983,12 @@ run_cudnn_LLM_fprop(int64_t b,
     if (q.scalar_type() == kBFloat16) {
       tensorType = CUDNN_DATA_BFLOAT16;
     }
-    //q = q.contiguous();
-    //k = k.contiguous();
-    //v = v.contiguous();
-    std::cout << q.is_nested() << " " << k.is_nested() << " " << v.is_nested() << std::endl;
-    std::cout << q.is_contiguous() << " " << k.is_contiguous() << " " << v.is_contiguous() << std::endl;
-    std::cout << q.strides() << " " << k.strides() << " " << v.strides() << " " << std::endl;
-    std::cout << q.sizes() << " " << k.sizes() << " " << v.sizes() << " " << o.sizes() << std::endl;
-    std::cout << "LLM params " << " " <<  b << " " <<  h << " " <<  s_q << " " << s_kv << " " << d << " " <<  scaling_factor << " " <<  return_softmaxstats << " " << dropout_probability;
     o = at::zeros({b, s_q, h, d}, q.options());
     if (return_softmaxstats) {
       softmaxstats = at::zeros({b, h, s_q}, q.options());
     }
-    run_bf16_LLM_fprop( b, 
-                   h, 
+    run_bf16_LLM_fprop( b,
+                   h,
                    s_q,
                    s_kv,
                    d,
@@ -1039,7 +997,7 @@ run_cudnn_LLM_fprop(int64_t b,
                   return_softmaxstats,
                   dropout_probability,
                   q.data_ptr(),
-                  k.data_ptr(), 
+                  k.data_ptr(),
                   v.data_ptr(),
                   return_softmaxstats ? softmaxstats.data_ptr() : nullptr,
                   o.data_ptr(),
