@@ -134,6 +134,8 @@ from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
 from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_sparse_mul,
+    sample_inputs_sparse_mul,
     error_inputs_sparse_reduction_sum,
     sample_inputs_sparse_reduction_sum
 )
@@ -367,6 +369,36 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
     yield SampleInput(make_arg((1, 2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -2})
     yield SampleInput(make_arg((2, 3)), args=(make_arg((2, 1, 3)),), kwargs={'dim': -1})
+
+
+def sample_inputs_item(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+
+    cases = (
+        (),
+        (()),
+        (1),
+        ((1,)),
+    )
+
+    for shape in cases:
+        yield SampleInput(make_arg(shape))
+
+def error_inputs_item(op, device, **kwargs):
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
+
+    cases = (
+        (M),
+        ((S,)),
+        (S, S),
+        (S, M, L),
+    )
+
+    for shape in cases:
+        yield ErrorInput(
+            SampleInput(make_arg(shape)), error_type=RuntimeError,
+            error_regex="elements cannot be converted to Scalar")
+
 
 def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6084,7 +6116,7 @@ def make_mvlgamma_opinfo(variant_test_name, domain, skips, sample_kwargs):
                           variant_test_name=variant_test_name,
                           domain=domain,
                           decorators=(precisionOverride({torch.float16: 5e-2}),),
-                          dtypes=all_types_and(torch.bfloat16),
+                          dtypes=all_types_and(torch.half, torch.bfloat16),
                           dtypesIfCUDA=all_types_and(torch.float16),
                           sample_inputs_func=sample_inputs_mvlgamma,
                           supports_forward_ad=True,
@@ -8442,6 +8474,13 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
+
+    ForeachFuncInfo(
+        'zero',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -8925,7 +8964,7 @@ op_db: List[OpInfo] = [
                    aliases=('arccos', ),
                    ref=np.arccos,
                    domain=(-1, 1),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -8965,7 +9004,7 @@ op_db: List[OpInfo] = [
                    aliases=('arccosh', ),
                    ref=np.arccosh,
                    domain=(1, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
@@ -9031,6 +9070,28 @@ op_db: List[OpInfo] = [
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
                     )),
+    OpInfo('item',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.item, inp, *args, **kwargs),
+           ref=np.ndarray.item,
+           method_variant=None,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.chalf, torch.bool),
+           supports_out=False,
+           supports_autograd=False,
+           error_inputs_func=error_inputs_item,
+           sample_inputs_func=sample_inputs_item,
+           skips=(
+               # Error testing item function variant
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.float32, torch.complex64)),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # RuntimeError: Composite compliance check failed with the above error.
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               # Booleans mismatch: AssertionError: False is not true
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               # Booleans mismatch: AssertionError: False is not true
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+           )),
     OpInfo('arange',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_out=True,
@@ -9282,7 +9343,13 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_two_python_scalars=True),
+                    supports_two_python_scalars=True,
+                    error_inputs_sparse_func=error_inputs_sparse_mul,
+                    sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_mul, layout=torch.sparse_coo),
+                    sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_mul, layout=torch.sparse_csr),
+                    sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_mul, layout=torch.sparse_csc),
+                    sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_mul, layout=torch.sparse_bsr),
+                    sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_mul, layout=torch.sparse_bsc)),
     BinaryUfuncInfo('sub',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
@@ -9542,7 +9609,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_bsc=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    decorators=[
@@ -9569,7 +9636,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('asinh',
                    aliases=('arcsinh', ),
                    ref=np.arcsinh,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    supports_inplace_autograd=False,
@@ -9601,7 +9668,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
                    ref=np.arctan,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -9648,7 +9715,7 @@ op_db: List[OpInfo] = [
                    aliases=('arctanh', ),
                    ref=np.arctanh,
                    domain=(-1, 1),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    supports_inplace_autograd=False,
@@ -9823,8 +9890,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
-                   dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -10056,7 +10122,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    handles_large_floats=False,
@@ -10290,7 +10356,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/50093#pullrequestreview-561791547
@@ -10521,8 +10587,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
-                   dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -10656,8 +10721,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.i0',),
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    backward_dtypes=floating_types(),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10720,8 +10784,7 @@ op_db: List[OpInfo] = [
                    ref=np.log1p,
                    aliases=('special.log1p',),
                    domain=(-1, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -10874,7 +10937,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.chalf),
                    assert_autodiffed=True,
@@ -10892,9 +10955,8 @@ op_db: List[OpInfo] = [
                    ref=np.log10,
                    domain=(0, None),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -10907,8 +10969,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('log2',
                    ref=np.log2,
                    domain=(0, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -11581,8 +11642,7 @@ op_db: List[OpInfo] = [
         )
     ),
     OpInfo('nn.functional.normalize',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_normalize,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True),
@@ -11758,8 +11818,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11906,8 +11965,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         sample_inputs_func=sample_inputs_binary_cross_entropy_with_logits,
         skips=(
@@ -11929,8 +11987,7 @@ op_db: List[OpInfo] = [
         supports_sparse_csc=True,
         supports_sparse_bsr=True,
         supports_sparse_bsc=True,
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
@@ -12471,8 +12528,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo(
         "nn.functional.soft_margin_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         # doesn't support grad on target
@@ -12496,8 +12552,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo(
         "nn.functional.margin_ranking_loss",
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
         error_inputs_func=error_inputs_margin_ranking_loss,
@@ -12539,8 +12594,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multilabel_soft_margin_loss",
         supports_out=False,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13142,8 +13196,7 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         aten_backward_name='log_sigmoid_backward',
         ref=reference_logsigmoid,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_forward_ad=True,
@@ -13204,8 +13257,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.tanhshrink',
         ref=lambda x: x - np.tanh(x),
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13237,8 +13289,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.threshold',
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
         inplace_variant=lambda x, threshold, value:
             torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
@@ -13258,8 +13309,7 @@ op_db: List[OpInfo] = [
         "nn.functional.triplet_margin_loss",
         sample_inputs_func=sample_inputs_triplet_margin_loss,
         error_inputs_func=error_inputs_triplet_margin_loss,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13268,8 +13318,7 @@ op_db: List[OpInfo] = [
         "nn.functional.triplet_margin_with_distance_loss",
         sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
         error_inputs_func=error_inputs_triplet_margin_loss,
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -13537,10 +13586,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardtanh',
                    aten_name="hardtanh",
                    aten_backward_name='hardtanh_backward',
-                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16),
-                   backward_dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
-                                                   torch.bfloat16),
+                   dtypes=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.half, torch.bfloat16),
+                   backward_dtypes=all_types_and(torch.half, torch.bfloat16),
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
@@ -13570,10 +13617,8 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('nn.functional.relu6',
                    aten_name="relu6",
-                   dtypes=all_types_and(torch.bfloat16),
-                   backward_dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-                   backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   backward_dtypes=floating_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_out=False,
                    supports_forward_ad=True,
@@ -13753,7 +13798,7 @@ op_db: List[OpInfo] = [
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
-                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
+                    backward_dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
                     backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
@@ -13904,8 +13949,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('round',
                    ref=np.round,
                    aliases=('special.round',),
-                   dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
@@ -13934,8 +13978,7 @@ op_db: List[OpInfo] = [
                    ref=np.round,
                    variant_test_name='decimals_0',
                    aliases=('special.round',),
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                   dtypes=floating_types_and(torch.half, torch.bfloat16),
                    sample_kwargs=lambda device, dtype, input: ({'decimals': 0}, {'decimals': 0}),
                    sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'decimals': 0}),
                    supports_forward_ad=True,
@@ -13990,7 +14033,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=False),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    handles_large_floats=False,
@@ -14016,8 +14059,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
                    aliases=('special.sinc',),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    handles_large_floats=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14264,8 +14306,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     # Reference: https://github.com/pytorch/pytorch/issues/54774
                     # "log2" "_vml_cpu" not implemented for Half
-                    backward_dtypes=all_types_and_complex_and(torch.bfloat16),
-                    backward_dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
+                    backward_dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -14342,7 +14383,7 @@ op_db: List[OpInfo] = [
                    supports_autograd=False,),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -14376,7 +14417,7 @@ op_db: List[OpInfo] = [
                    aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    assert_jit_shape_analysis=True,
@@ -14468,8 +14509,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
                    ref=np.trunc,
-                   dtypes=all_types_and(torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -14507,8 +14547,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('expm1',
                    aliases=('special.expm1', ),
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
@@ -14569,7 +14608,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('rsqrt',
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
                    domain=(0, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    assert_autodiffed=True,
@@ -14588,7 +14627,7 @@ op_db: List[OpInfo] = [
                    ref=np.sqrt,
                    supports_sparse=True,
                    domain=(0, None),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -16431,8 +16470,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_zero_),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
-           dtypes=all_types_and(torch.bool, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16514,15 +16552,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
@@ -16661,7 +16697,7 @@ op_db: List[OpInfo] = [
                    ref=scipy.special.digamma if TEST_SCIPY else None,
                    aliases=('special.psi', 'special.digamma',),
                    decorators=(precisionOverride({torch.float16: 5e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
@@ -16675,8 +16711,7 @@ op_db: List[OpInfo] = [
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
 
                    ),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    assert_jit_shape_analysis=True,
                    supports_sparse=True,
@@ -16691,8 +16726,7 @@ op_db: List[OpInfo] = [
                    aliases=('special.erfc', ),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True),
@@ -16702,7 +16736,7 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2,
                                                   torch.float32: 1e-4}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
@@ -16758,7 +16792,7 @@ op_db: List[OpInfo] = [
                    ref=reference_lgamma if TEST_SCIPY else None,
                    aliases=('special.gammaln', ),
                    decorators=(precisionOverride({torch.float16: 7e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -17800,8 +17834,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.cosine_embedding_loss",
-        dtypes=all_types_and(torch.bfloat16, torch.bool),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=all_types_and(torch.half, torch.bfloat16, torch.bool),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -17828,8 +17861,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.gaussian_nll_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_out=False,
@@ -17857,8 +17889,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.hinge_embedding_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -17895,8 +17926,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.poisson_nll_loss",
-        dtypes=all_types_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.half, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -18440,6 +18470,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_executor"),
         )
     ),
+    PythonRefInfo(
+        "_refs.equal",
+        torch_opinfo_name="equal",
+        supports_nvfuser=False,
+        skips=(
+            # RuntimeError: Cannot cast FakeTensor to number
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+        )
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
@@ -18458,6 +18497,16 @@ python_ref_db = [
         # Fails on int32
         # https://github.com/pytorch/pytorch/issues/85258
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.item",
+        torch_opinfo_name="item",
+        supports_nvfuser=False,
+        skips=(
+            # RuntimeError: Cannot cast FakeTensor(FakeTensor(..., device='meta', size=()), cpu) to number
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
+            # ValueError: Can't convert a tensor with 10 elements to a number!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.conj_physical",
