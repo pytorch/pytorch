@@ -47,13 +47,19 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata {
   int block_to_chunk[depth_to_max_blocks[n-1]];
 };
 
-// note(mkozuki): `n` of 96 and `scalar_vals_t` of `c10::complex<double>`
-// violates the cuda kernel argument size limitation of 4kb.
-// 80 is a number that does not violate this limitation.
+// note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of 4kb with `c10::complex<double>`
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 1> {
-  const void* addresses[1][80];
-  int64_t numel_for_tensor[80];
-  c10::complex<double> scalar_vals[80];
+  const void* addresses[1][72];
+  int64_t numel_for_tensor[72];
+  c10::complex<double> scalar_vals[72];
+  unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
+  int block_to_chunk[depth_to_max_blocks[1-1]];
+};
+
+template<> struct TensorListScalarListMetadata<c10::complex<double>, 2> {
+  const void* addresses[1][60];
+  int64_t numel_for_tensor[60];
+  c10::complex<double> scalar_vals[60];
   unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
   int block_to_chunk[depth_to_max_blocks[1-1]];
 };
@@ -118,8 +124,8 @@ void multi_tensor_apply(
             if (n_zero_tensors == n_tensors) {
                 continue;
             }
-            const int chunks = (tensor_lists[0][t - static_cast<size_t>((t == n_tensors - 1) && (tensor_lists[0][t].numel() == 0))].numel() + kChunkSize - 1)/kChunkSize;
-            for (int chunk = 0; chunk < chunks; chunk++) {
+            const auto chunks = (tensor_lists[0][t - static_cast<size_t>((t == n_tensors - 1) && (tensor_lists[0][t].numel() == 0))].numel() + kChunkSize - 1)/kChunkSize;
+            for (auto chunk = 0; chunk < chunks; chunk++) {
                 tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
                 loc_block_info++;
@@ -185,8 +191,8 @@ void multi_tensor_apply(
             if (n_zero_tensors == n_tensors) {
                 continue;
             }
-            const int chunks = (tensor_lists[0][t - static_cast<size_t>((t == n_tensors - 1) && (tensor_lists[0][t].numel() == 0))].numel() + kChunkSize - 1)/kChunkSize;
-            for (int chunk = 0; chunk < chunks; chunk++) {
+            const auto chunks = (tensor_lists[0][t - static_cast<size_t>((t == n_tensors - 1) && (tensor_lists[0][t].numel() == 0))].numel() + kChunkSize - 1)/kChunkSize;
+            for (auto chunk = 0; chunk < chunks; chunk++) {
                 tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
                 tensorListMeta.block_to_chunk[loc_block_info] = chunk;
                 loc_block_info++;
