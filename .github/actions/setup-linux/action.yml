@@ -87,9 +87,3 @@ runs:
 
         echo "${RESOLVED_IP} ${PT_DOMAIN}" | sudo tee -a /etc/hosts
         cat /etc/hosts
-
-    - name: Increase the stack size limit
-      shell: bash
-      run: |
-        # This is needed to avoid argument list too long when invoking Docker command for nightly jobs
-        ulimit -a
