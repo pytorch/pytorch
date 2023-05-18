@@ -333,9 +333,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             sym_integer = sympy.Integer(a)
             shape_env = fake_mode.shape_env
             shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
-            shape_env.var_to_stack[sym_integer] = ''.join(
-                traceback.format_list(TracingContext.extract_stack())
-            )
+            shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
         return
 
