@@ -1438,7 +1438,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -4036,6 +4035,24 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+
+erfinv_fallback = fallback_handler(aten.erfinv)
+
+
+@make_pointwise
+def erfinv_native(x):
+    return ops.erfinv(x)
+
+
+@register_lowering(aten.erfinv)
+def erfinv_lowering(x):
+    is_cuda = decode_device(x.get_device()).type == "cuda"
+    # triton has a primitive for erfinv
+    if is_cuda:
+        return erfinv_native(x)
+
+    # CPU doesn't have a primitive for erfinv.
+    return erfinv_fallback(x)
 
 
 def register_inplace(aten_op, outplace_op):
