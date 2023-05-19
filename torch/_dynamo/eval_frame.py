@@ -1062,10 +1062,7 @@ def export(
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
-        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-
-        sig = inspect.signature(call_to_inspect)
-        fullargspec = signature_to_fullargspec(sig)
+        fullargspec = signature_to_fullargspec(original_signature)
 
         # 1. Map `args` 1-to-1 to positional arguments in original signature.
         input_strs = fullargspec.args[: len(args)]

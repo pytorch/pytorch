@@ -1778,37 +1778,42 @@ class DimConstraints:
         for i, arg in enumerate(signature.parameters.keys()):
             args_index[arg] = (i, arg)
 
-        buf = ""
-        indent = 4 * " "
-        if self._static_results:
-            sorted_static_results = group(self._static_results, args_index)
-            buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
-            buf += f"\n```\ndef specializations{str(signature)}:"
+        def print_results(grouped, buf, indent, result_fn):
             space = False
-            for arg, results in sorted_static_results:
+            for arg, results in grouped:
                 if space:
                     buf += "\n"
                 else:
                     space = True
                 buf += f"\n{indent}# {arg}:"
                 for result in results:
-                    buf += f"\n{indent}assert {result}"
+                    buf += f"\n{indent}{result_fn(result)},"
+
+        buf = ""
+        indent = 4 * " "
+        if self._static_results:
+            grouped_static_results = group(self._static_results, args_index)
+            buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
+            buf += f"\n```\ndef specializations{str(signature)}:"
+            print_results(
+                grouped_static_results,
+                buf,
+                indent,
+                lambda result: f"assert {result}",
+            )
             buf += "\n```\n"
         if self._dynamic_results:
-            sorted_dynamic_results = group(self._dynamic_results, args_index)
+            grouped_dynamic_results = group(self._dynamic_results, args_index)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
-            space = False
-            for arg, results in sorted_dynamic_results:
-                if space:
-                    buf += "\n"
-                else:
-                    space = True
-                buf += f"\n{indent*2}# {arg}:"
-                for result in results:
-                    buf += f"\n{indent*2}{remove_default_lower_bound(result)},"
+            print_results(
+                grouped_dynamic_results,
+                buf,
+                indent*2,
+                lambda result: remove_default_lower_bound(result)
+            )
             buf += f"\n{indent}]\n```\n"
         return buf
 
