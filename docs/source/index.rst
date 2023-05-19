@@ -58,6 +58,7 @@ Features described in this documentation are classified by release status:
    compile/performance-dashboard
    ir
    logging
+   compile/transformations
 
 .. toctree::
    :maxdepth: 1
