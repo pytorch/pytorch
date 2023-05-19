@@ -1240,6 +1240,7 @@ class TorchPatcher:
             opt._cuda_graph_capture_health_check = disable(
                 opt._cuda_graph_capture_health_check
             )
+            # Default zero_grad sets attributes to None, which cannot be optimized
             opt.zero_grad = disable(opt.zero_grad)
 
             if hasattr(opt, "_init_group"):
