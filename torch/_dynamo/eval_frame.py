@@ -781,7 +781,8 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
-    original_signature = inspect.signature(f.forward if isinstance(f, torch.nn.Module) else f)
+    call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+    original_signature = inspect.signature(call_to_inspect)
 
     if functionalize and not aten_graph:
         raise UserError(
