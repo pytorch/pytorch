@@ -2529,23 +2529,17 @@ def upsample_bicubic2d_default(
             return ops.mul(scale, dst_index_ie)
         else:
             half = ops.constant(0.5, torch.float32)
-            return ops.sub(
-                ops.mul(scale, ops.add(dst_index_ie, half)), half
-            )  # scale * (dst_index + 0.5) - 0.5
+            return scale * (dst_index_ie + half) - half
 
     def cubic_convolution1(x, A):
         _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
-        # ((A + 2) * x - (A+3)) * x * x + 1
-        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
+        return (_Ap2 * x - _Ap3) * x * x + _1
 
     def cubic_convolution2(x, A):
         _A, _4A, _5A, _8A = _create_constants(
             A, 4 * A, 5 * A, 8 * A, dtype=torch.float32
         )
-        # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
-        return ops.sub(
-            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(_A, x), _5A), x), _8A), x), _4A
-        )
+        return ((_A * x - _5A) * x + _8A) * x - _4A
 
     def get_cubic_upsample_coefficients(t):
         A = -0.75
@@ -2561,13 +2555,7 @@ def upsample_bicubic2d_default(
     def cubic_interp1d(xs, t):
         cs = get_cubic_upsample_coefficients(t)
         # dot product between xs and cs
-        return ops.add(
-            ops.mul(xs[0], cs[0]),
-            ops.add(
-                ops.mul(xs[1], cs[1]),
-                ops.add(ops.mul(xs[2], cs[2]), ops.mul(xs[3], cs[3])),
-            ),
-        )
+        return xs[0] * cs[0] + xs[1] * cs[1] + xs[2] * cs[2] + xs[3] * cs[3]
 
     height_scale = compute_scale(iH, oH, align_corners, scales_h)
     width_scale = compute_scale(iW, oW, align_corners, scales_h)
