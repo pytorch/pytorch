@@ -304,7 +304,7 @@ def compile_fx_inner(
         # automatic_dynamic_shapes is rejected here because it can lead to a case of bifurcated memory, wherein
         # you start off entirely static, and therefore produce cudagraphs, but on a subsequent frame you re-enter
         # lowering with some dynamism on inputs, and therefore, cannot produce cudagraphs.
-        has_dynamism = dynamo_config.automatic_dynamic_shapes is True or any(
+        has_dynamism = any(
             _has_dynamism(t) for t in example_inputs
         )
 

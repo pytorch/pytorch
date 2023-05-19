@@ -1489,12 +1489,6 @@ class _TorchCompileInductorWrapper:
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1505,6 +1499,14 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
+            # This is a hacky place for this. If we need more of this, we should ostensibly either combine
+            # the configs to make this easier, or give the dynamo config an equivalent to_dict() and list_mode_options()
+            # or split list_mode_options into another key of "dynamo"/"inductor"
+            if mode == "reduce-overhead":
+                from torch._dynamo import config
+                self.dynamic = False
+                config.dynamic_shapes = False
+
             self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
