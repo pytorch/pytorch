@@ -29,7 +29,6 @@
         status);                                                \
   }
 
-
 // create a container that holds relevant data for cusparselt linear
 struct CusparseLt : torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
@@ -59,7 +58,10 @@ struct CusparseLt : torch::CustomClassHolder {
 
   // struct functions / constructor
   at::Tensor cusparselt_mm(const at::Tensor& input, bool transposeResult);
-  at::Tensor cusparselt_addmm(const at::Tensor& input, const at::Tensor& bias, bool transposeResult);
+  at::Tensor cusparselt_addmm(
+      const at::Tensor& input,
+      const at::Tensor& bias,
+      bool transposeResult);
   at::Tensor cusparselt_helper(
       const at::Tensor& input,
       void* dBias,
@@ -94,17 +96,13 @@ struct CusparseLt : torch::CustomClassHolder {
     // so we know this wil be correct.
     if (sparse_compressed.dtype() == torch::kBFloat16) {
       type = CUDA_R_16BF;
-    }
-    else if (sparse_compressed.dtype() == torch::kFloat32) {
+    } else if (sparse_compressed.dtype() == torch::kFloat32) {
       type = CUDA_R_32F;
       compute_type = CUSPARSE_COMPUTE_TF32_FAST;
-    }
-    else if (sparse_compressed.dtype() == torch::kInt8) {
+    } else if (sparse_compressed.dtype() == torch::kInt8) {
       type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
     }
-
-
   };
 };
 
@@ -123,7 +121,6 @@ void CusparseLt::compress(
   num_A_rows = (is_sparse_input_transposed) ? k : m;
   int64_t num_A_cols = (is_sparse_input_transposed) ? m : k;
   int64_t lda = (is_rowmajor) ? num_A_cols : num_A_rows;
-
 
   CHECK_CUSPARSE(cusparseLtStructuredDescriptorInit(
       &handle,
@@ -160,7 +157,9 @@ void CusparseLt::compress(
       stream))
 }
 
-at::Tensor CusparseLt::cusparselt_mm(const at::Tensor& input, bool transposeResult) {
+at::Tensor CusparseLt::cusparselt_mm(
+    const at::Tensor& input,
+    bool transposeResult) {
   return CusparseLt::cusparselt_helper(input, nullptr, 0, transposeResult);
 }
 
@@ -168,7 +167,8 @@ at::Tensor CusparseLt::cusparselt_addmm(
     const at::Tensor& input,
     const at::Tensor& bias,
     bool transposeResult) {
-  return CusparseLt::cusparselt_helper(input, bias.data_ptr(), 0, transposeResult);
+  return CusparseLt::cusparselt_helper(
+      input, bias.data_ptr(), 0, transposeResult);
 }
 
 at::Tensor CusparseLt::cusparselt_helper(
@@ -176,31 +176,32 @@ at::Tensor CusparseLt::cusparselt_helper(
     void* dBias,
     int64_t biasStride,
     bool transposeResult) {
-
   cusparseLtMatmulDescriptor_t matmul;
 
   int64_t k = input.size(0);
   int64_t n = input.size(1);
 
   // create tensor
-  auto res = (transposeResult) ? input.new_empty({n, num_A_rows}): input.new_empty({num_A_rows, n});
+  auto res = (transposeResult) ? input.new_empty({n, num_A_rows})
+                               : input.new_empty({num_A_rows, n});
 
-  cusparseOrder_t result_order = (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-  cusparseOrder_t dense_input_order = (input.is_contiguous()) ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
+  cusparseOrder_t result_order =
+      (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+  cusparseOrder_t dense_input_order =
+      (input.is_contiguous()) ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  int64_t num_B_rows = (input.is_contiguous()) ?  n : k;
-  int64_t num_B_cols = (input.is_contiguous()) ?  k : n;
+  int64_t num_B_rows = (input.is_contiguous()) ? n : k;
+  int64_t num_B_cols = (input.is_contiguous()) ? k : n;
   int64_t num_C_rows = num_A_rows;
   int64_t num_C_cols = n;
 
   int64_t ldb = (input.is_contiguous()) ? num_B_cols : num_B_rows;
   int64_t ldc = (transposeResult) ? num_C_rows : num_C_cols;
 
-
-  std::cout<<transposeResult<<std::endl;
-  std::cout<<dense_input_order<<std::endl;
-  std::cout<<ldb<<std::endl;
+  std::cout << transposeResult << std::endl;
+  std::cout << dense_input_order << std::endl;
+  std::cout << ldb << std::endl;
   // initalize dense input descriptor
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
       &handle,

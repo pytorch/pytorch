@@ -1,9 +1,11 @@
 import torch
 
+
 class SemiStructuredSparseTensor(torch.Tensor):
     """
-    This class implementes 2x4 sparsity 
+    This class implementes 2x4 sparsity
     """
+
     @staticmethod
     def __new__(
         cls,
@@ -45,7 +47,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         compressed_tensor=None,
         cslt=None,
         transposed=False,
-        contiguous_output=False, 
+        contiguous_output=False,
     ):
         self.original_tensor = original_tensor
         self.original_shape = (
@@ -83,7 +85,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if func is torch.ops.aten.detach.default:
-            # since we create a new compressed tensor, the tensor will already be detached. 
+            # since we create a new compressed tensor, the tensor will already be detached.
             return SemiStructuredSparseTensor(
                 args[0].original_tensor,
                 compressed_tensor=args[0].compressed_tensor,
@@ -115,20 +117,15 @@ class SemiStructuredSparseTensor(torch.Tensor):
                 return bias + a.cslt.mm(b, False)
             # b must be transposed so we can undo it
             elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                if b.contiguous_output:
-                    print("contig mode")
-                    return b.t().cslt.addmm(a.T, bias, True)
-                else:
-                    return b.t().cslt.addmm(a.T, bias, False).T
+                res = b.t().cslt.addmm(a.T, bias, b.contiguous_output)
+                return res if b.contiguous_output else res.T
 
         if func is torch.ops.aten.mm.default:
             a, b = args
             if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
                 return a.cslt.mm(b, False)
             elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                if b.contiguous_output:
-                    return b.t().cslt.mm(a.T, True)
-                else:
-                    return b.t().cslt.mm(a.T, False).T
+                res = b.t().cslt.mm(a.T, b.contiguous_output)
+                return res if b.contiguous_output else res.T
 
         raise NotImplementedError("Not implemented")
