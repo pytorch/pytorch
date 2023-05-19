@@ -58,6 +58,8 @@ Features described in this documentation are classified by release status:
    compile/performance-dashboard
    compile/torchfunc-and-torchcompile
    ir
+   logging
+   compile/transformations
 
 .. toctree::
    :maxdepth: 1
