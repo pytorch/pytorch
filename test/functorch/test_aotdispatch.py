@@ -2101,7 +2101,7 @@ class <lambda>(torch.nn.Module):
                 x.add_(4)
                 return (x.cos().sum() + self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \[0\] are mutated"):
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
             aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
 
     def test_aot_export_forward_mutation_multiple_mut_banned(self):
@@ -2115,7 +2115,7 @@ class <lambda>(torch.nn.Module):
                 self.buffer1.add_(5)
                 return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \[1\] are mutated"):
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
             aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
 
     def test_aot_export_input_mutation_on_parameter_banned(self):
@@ -2175,7 +2175,7 @@ class <lambda>(torch.nn.Module):
             return (x + x,)
         inp = torch.randn(2)
         with self.assertRaisesRegex(
-            RuntimeError, "Found following user inputs located at \[0\] are mutated"
+            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
         ):
             aot_export_joint_simple(fn, [inp], trace_joint=False)
             aot_export_joint_simple(fn, [inp], trace_joint=True)
