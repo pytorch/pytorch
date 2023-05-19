@@ -1838,7 +1838,7 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
-        self.var_to_stack: Dict["sympy.Symbol", str] = {}
+        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -2001,19 +2001,19 @@ class ShapeEnv:
 
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
@@ -2648,7 +2648,8 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, self.var_to_stack[s])
+            stacktrace = ''.join(traceback.format_list(self.var_to_stack[s]))
+            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
