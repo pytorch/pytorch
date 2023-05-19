@@ -1,0 +1,910 @@
+[1/12] Building CUDA object caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/transformers/cuda/attention_backward.cu.o
+FAILED: caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/transformers/cuda/attention_backward.cu.o 
+/data/shared/bin/ccache /usr/local/cuda-11.8/bin/nvcc -forward-unknown-to-host-compiler -ccbin=/usr/lib/llvm-10/bin/clang -DAT_PER_OPERATOR_HEADERS -DHAVE_MALLOC_USABLE_SIZE=1 -DHAVE_MMAP=1 -DHAVE_SHM_OPEN=1 -DHAVE_SHM_UNLINK=1 -DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS -DONNXIFI_ENABLE_EXT=1 -DONNX_ML=1 -DONNX_NAMESPACE=onnx_torch -DTORCH_CUDA_BUILD_MAIN_LIB -DUSE_CUDA -DUSE_EXPERIMENTAL_CUDNN_V8_API -DUSE_EXTERNAL_MZCRC -DUSE_FLASH_ATTENTION -D_FILE_OFFSET_BITS=64 -Dtorch_cuda_EXPORTS -I/scratch/drisspg/work/pytorch/build/aten/src -I/scratch/drisspg/work/pytorch/aten/src -I/scratch/drisspg/work/pytorch/build -I/scratch/drisspg/work/pytorch -I/scratch/drisspg/work/pytorch/third_party/onnx -I/scratch/drisspg/work/pytorch/build/third_party/onnx -I/scratch/drisspg/work/pytorch/third_party/foxi -I/scratch/drisspg/work/pytorch/build/third_party/foxi -I/scratch/drisspg/work/pytorch/aten/src/THC -I/scratch/drisspg/work/pytorch/aten/src/ATen/cuda -I/scratch/drisspg/work/pytorch/aten/src/ATen/../../../third_party/cutlass/include -I/scratch/drisspg/work/pytorch/build/caffe2/aten/src -I/scratch/drisspg/work/pytorch/aten/src/ATen/.. -I/scratch/drisspg/work/pytorch/c10/cuda/../.. -I/scratch/drisspg/work/pytorch/c10/.. -I/scratch/drisspg/work/pytorch/torch/csrc/api -I/scratch/drisspg/work/pytorch/torch/csrc/api/include -isystem=/scratch/drisspg/work/pytorch/third_party/protobuf/src -isystem=/scratch/drisspg/work/pytorch/third_party/ittapi/include -isystem=/scratch/drisspg/work/pytorch/cmake/../third_party/eigen -isystem=/usr/local/cuda-11.8/include -isystem=/scratch/drisspg/work/pytorch/third_party/ideep/mkl-dnn/third_party/oneDNN/include -isystem=/scratch/drisspg/work/pytorch/third_party/ideep/include -isystem=/scratch/drisspg/work/pytorch/third_party/ideep/mkl-dnn/include -isystem=/scratch/drisspg/work/pytorch/cmake/../third_party/cudnn_frontend/include -Xfatbin -compress-all -DONNX_NAMESPACE=onnx_torch -gencode arch=compute_80,code=sm_80 -Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=set_but_not_used,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl --expt-relaxed-constexpr --expt-extended-lambda  -Wno-deprecated-gpu-targets --expt-extended-lambda -DCUB_WRAPPED_NAMESPACE=at_cuda_detail -DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__ -D__CUDA_NO_BFLOAT16_CONVERSIONS__ -g -g -lineinfo --source-in-ptx -Xcompiler=-fPIC -DTH_HAVE_THREAD -Xcompiler=-Wall,-Wextra,-Wno-unused-parameter,-Wno-unused-function,-Wno-unused-result,-Wno-missing-field-initializers,-Wno-unknown-pragmas,-Wno-type-limits,-Wno-array-bounds,-Wno-unknown-pragmas,-Wno-strict-overflow,-Wno-strict-aliasing,-Wno-missing-braces,-Wno-range-loop-analysis -std=c++17 -MD -MT caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/transformers/cuda/attention_backward.cu.o -MF caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/transformers/cuda/attention_backward.cu.o.d -x cu -c /scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu -o caffe2/CMakeFiles/torch_cuda.dir/__/aten/src/ATen/native/transformers/cuda/attention_backward.cu.o
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 32, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 32, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(126): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(127): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 64, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 64, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(128): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(129): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(130): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(131): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(132): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(133): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(134): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(135): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(136): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(137): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 128, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 128, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(138): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(139): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(140): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, true, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(141): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(142): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(143): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(144): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(145): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(146): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(147): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(148): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(149): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(150): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(151): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(152): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(153): here
+            instantiation of "void dispatch_cutlassB_f16_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(871): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 32, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 32, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(227): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(228): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 64, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 64, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(229): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(230): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=96, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 64, 96, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 64, 96, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(231): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(232): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, true, 128, 128, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(233): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(234): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(235): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(236): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(237): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(238): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(239): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 128, 128, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, true, 128, 128, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(240): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(241): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(242): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::bfloat16_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::bfloat16_t, true, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(243): here
+            instantiation of "void dispatch_cutlassB_bf16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(874): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 32, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 32, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(317): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(318): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 64, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 64, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(319): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(320): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=96, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 64, 96, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 64, 96, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(321): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(322): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, true, 128, 128, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(323): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=true]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128, true>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128, true>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(324): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(325): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(326): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(327): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(328): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(329): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=true, kBlockSizeI_=128, kBlockSizeJ_=128, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 128, 128, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, true, 128, 128, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(330): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(331): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=128, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 128, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 128, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(332): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm80, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm80, cutlass::half_t, true, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(333): here
+            instantiation of "void dispatch_cutlassB_f16_sm80(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(877): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(403): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(404): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(405): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(406): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(407): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(408): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(409): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, true, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(410): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(411): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(412): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(413): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(414): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(415): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(416): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(417): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=cutlass::half_t, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(418): here
+            instantiation of "void dispatch_cutlassB_f16_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(880): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(488): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(489): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(490): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(491): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(492): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(493): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(494): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, true, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(495): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(496): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(497): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(498): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(499): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(500): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(501): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(502): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm50, scalar_t_=float, kIsAligned_=false, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm50, float, false, true, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(503): here
+            instantiation of "void dispatch_cutlassB_f32_sm50(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(883): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(573): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(574): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=128, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 128, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 128, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(575): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=false, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=65536, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 65536, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, false, false, 64, 64, 65536, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(576): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=32, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, true, false, 64, 64, 32, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, true, false, 64, 64, 32, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(577): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu(363): error: class "AttentionBackwardKernel<ArchTag_, scalar_t_, kIsAligned_, kApplyDropout_, kPreload_, kBlockSizeI_, kBlockSizeJ_, kMaxK_, kKeysQueriesAlignedToBlockSize_>::Params [with ArchTag_=cutlass::arch::Sm70, scalar_t_=float, kIsAligned_=true, kApplyDropout_=true, kPreload_=false, kBlockSizeI_=64, kBlockSizeJ_=64, kMaxK_=64, kKeysQueriesAlignedToBlockSize_=false]" has no member "rng_engine_inputs"
+          detected during:
+            instantiation of function "lambda [](auto, auto)->auto [with <auto-1>=AttentionBackwardKernel<cutlass::arch::Sm70, float, true, true, false, 64, 64, 64, false>, <auto-2>=void (*)(AttentionBackwardKernel<cutlass::arch::Sm70, float, true, true, false, 64, 64, 64, false>::Params)]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(578): here
+            instantiation of "void dispatch_cutlassB_f32_sm70(T, int) [with T=lambda [](auto, auto)->auto]" 
+/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassB.h(886): here
+            instantiation of "void dispatch_cutlassB<DT,T>(T, int) [with DT=float, T=lambda [](auto, auto)->auto]" 
+(443): here
+
+Error limit reached.
+100 errors detected in the compilation of "/scratch/drisspg/work/pytorch/aten/src/ATen/native/transformers/cuda/attention_backward.cu".
+Compilation terminated.
+ninja: build stopped: subcommand failed.
+Building wheel torch-2.1.0a0+git17e5d07
+-- Building version 2.1.0a0+git17e5d07
+cmake --build . --target install --config Debug
