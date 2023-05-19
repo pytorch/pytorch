@@ -174,6 +174,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
+    # Unsupported: data dependent operator: aten.equal.default
+    "corrcoef": {f16},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
     "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
