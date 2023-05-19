@@ -47,7 +47,7 @@ struct TORCH_API DynamicLayer {
   explicit DynamicLayer(
       TransformType transform_type,
       int64_t layerId,
-      optional<int64_t> batchSize = nullopt,
+      optional<c10::SymInt> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
       optional<bool> prev_grad_mode = nullopt,
       optional<bool> pre_fwd_grad_mode = nullopt,
@@ -60,7 +60,7 @@ struct TORCH_API DynamicLayer {
   Interpreter& interpreter() { return interpreter_; }
 
   // Only valid for vmap
-  int64_t batchSize() const;
+  c10::SymInt batchSize() const;
   RandomnessType randomness() const;
 
  private:
@@ -69,7 +69,7 @@ struct TORCH_API DynamicLayer {
 
 TORCH_API int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<int64_t> batch_size = nullopt,
+    optional<c10::SymInt> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,
     optional<bool> prev_fwd_grad_mode = nullopt,
