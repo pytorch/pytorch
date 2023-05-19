@@ -56,6 +56,7 @@ Features described in this documentation are classified by release status:
    compile/custom-backends
    compile/deep-dive
    compile/performance-dashboard
+   compile/torchfunc-and-torchcompile
    ir
 
 .. toctree::
