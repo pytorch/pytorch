@@ -473,32 +473,22 @@ def trace_plot(data, device=None, plot_segments=False):
 
     addr_versions: Dict[int, int] = {}
 
-    next_stream = 0
-    @cache
-    def stream_id(stream):
-        nonlocal next_stream
-        next_stream += 1
-        return next_stream
-
-    def add_element(addr, size, stream, frames, extra=()):
+    def add_element(addr, size, frames, extra=()):
         next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
-        title = f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)"
-        if stream != 0:
-            title = f"{title}, stream {stream_id(stream)}"
-        frames = [title,
+        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)",
                   *extra,
                   *_frames_fmt(frames, full_filename=True)]
         return w.add_element(size, frames)
 
     for i, e in enumerate(trace):
         if e['action'] == alloc:
-            elemid = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []))
+            elemid = add_element(e['addr'], e['size'], e.get('frames', []))
             addr_to_alloc[e['addr']] = elemid
             w.allocate(elemid)
         elif e['action'] == free:
             idx = addr_to_alloc.pop(e['addr'], None)
             if idx is None:
-                idx = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
+                idx = add_element(e['addr'], e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
                 w.initially_allocated(idx)
             w.free(idx)
 
@@ -510,7 +500,7 @@ def trace_plot(data, device=None, plot_segments=False):
             if b['state'] == 'active_allocated' and addr not in addr_to_alloc:
                 frames, real_size = _block_extra(b)
                 extra = () if frames else ('<block was allocated before _record_history was enabled>',)
-                elemid = add_element(addr, real_size, seg['stream'], frames, extra=extra)
+                elemid = add_element(addr, real_size, frames, extra=extra)
                 w.initially_allocated(elemid)
             addr += b['size']
 
@@ -1020,20 +1010,9 @@ def segment_plot(data: Any, device=None):
                 yield t
             i += 1
 
-    seen_streams = 0
-    @cache
-    def format_stream(s):
-        nonlocal seen_streams
-        if s == 0:
-            return 0
-        seen_streams += 1
-        return seen_streams
-
-
     preproc: Any = {
         'action': intern_str,
         'frames': format_frames,
-        'stream': format_stream,
     }
 
     events: Any = result['events']
