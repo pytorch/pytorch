@@ -773,13 +773,14 @@ def speculate_subgraph(
             output = f.call_function(tx, args, {})
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
-            # TODO: support non single Tensor output
+            # TODO: support pytree output
             # We check always_restore because we dont use the output or side effects of always_restore code,
             # like bwd.
-            if not isinstance(output, TensorVariable) and not always_restore:
-                unimplemented(
-                    "HigherOrderOperator with body with non single Tensor output"
-                )
+            if (
+                not isinstance(output, (TensorVariable, ListVariable, TupleVariable))
+                and not always_restore
+            ):
+                unimplemented("HigherOrderOperator with body with pytree output")
 
             if always_restore:
                 # Nothing left to do here
@@ -1205,8 +1206,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 *(arg.as_proxy() for arg in args[1:]),
                 *(arg for arg in body_lifted_freevars),
             )
-            r = body_r.as_proxy().node.meta["example_value"]
-            example_value = r
+            example_value = pytree.tree_map(
+                lambda a: a.node.meta["example_value"], body_r.as_proxy()
+            )
         elif self.value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",

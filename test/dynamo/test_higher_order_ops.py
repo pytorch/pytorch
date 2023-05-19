@@ -417,7 +417,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             {"Invoking an nn.Module inside HigherOrderOperator": 1},
         )
 
-    def test_fallback_on_non_single_tensor_output(self):
+    def test_flat_list_output(self):
+        def f(x):
+            return wrap(lambda x: [torch.sin(x), torch.cos(x)], x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, (x,), 2, expected_opcount=3)
+
+    def test_fallback_on_pytree_output(self):
         # We can likely support this in the future, I just don't want to deal
         # with it right now
         counters.clear()
@@ -425,16 +432,18 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnt)
         def f(x):
-            return wrap(lambda x: (x.sin(), x.cos()), x)
+            return wrap(lambda x: [(x.sin(), x.cos()), {"a": -x}], x)
 
         x = torch.randn(2, 3)
         result = f(x)
 
-        self.assertEqual(result, (x.sin(), x.cos()))
+        self.assertEqual(result, [(x.sin(), x.cos()), {"a": -x}])
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator with body with non single Tensor output": 1},
+            {
+                "torch.* op returned non-Tensor dict call_function <built-in function getitem>": 1
+            },
         )
 
     def test_access_module_attr(self):
