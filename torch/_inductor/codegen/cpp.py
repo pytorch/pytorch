@@ -226,7 +226,7 @@ class CppPrinter(ExprPrinter):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+        return f"std::floor({x} / {div})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -1022,6 +1022,10 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
@@ -1337,7 +1341,7 @@ class CppVecKernel(CppKernel):
                 f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
             )
             line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line}; "
+                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line} "
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
@@ -2018,7 +2022,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var, size, check=True):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
@@ -2331,6 +2335,9 @@ class CppKernelProxy(CppKernel):
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
+            if len(contig_vars) == 0:
+                # no contiguous vars
+                return [len(self.itervars) - 1]
             if contig_only:
                 return sorted(contig_only)[-1:]
             contig_and_const_stride = (

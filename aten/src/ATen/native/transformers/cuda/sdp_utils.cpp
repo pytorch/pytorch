@@ -472,14 +472,15 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
-  // Check that the gpu is capable of running flash attention
+bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
+  // Mem Efficient attention supports hardware in the range (sm_50, sm_90]
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm50 = dprops->major >= 5;
-  if (!(is_sm50)) {
+  bool is_gte_sm50 = dprops->major >= 5;
+  bool is_le_sm90 = dprops->major < 9;
+  if (!(is_gte_sm50 && is_le_sm90)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supports sm5x or greater gpu architectures. Attempting to run on a sm ",
+          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90). Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -582,13 +583,15 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto mem_efficient_dtypes =
+  constexpr auto default_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto sm50_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
+      check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
@@ -603,10 +606,12 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 5) {
+    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
   }
-  return true;
+  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
 }
 } // namespace
 

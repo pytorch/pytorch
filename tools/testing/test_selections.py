@@ -126,8 +126,16 @@ def _query_changed_test_files() -> List[str]:
         .decode()
         .strip()
     )
+
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+    base_commit = merge_base
+    if base_commit == head:
+        # We are on the default branch, so check for changes since the last commit
+        base_commit = "HEAD^"
+
     proc = subprocess.run(
-        ["git", "diff", "--name-only", merge_base, "HEAD"], capture_output=True
+        ["git", "diff", "--name-only", base_commit, "HEAD"], capture_output=True
     )
 
     if proc.returncode != 0:
@@ -241,16 +249,19 @@ def get_reordered_tests(
         return ([], tests)
 
     # TODO: Would be great to upload these stats to RDS/Rockset!
-    test_cnt_str = pluralize(len(tests), "test")
-    print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-    print(
-        f"Prioritized tests estimated to run up to {duration_to_str(time_savings_sec)} sooner than they would've otherwise"
-    )
+    if bring_to_front:
+        test_cnt_str = pluralize(len(tests), "test")
+        print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
+        print(
+            f"Prioritized tests estimated to run up to {duration_to_str(time_savings_sec)} sooner than they would've otherwise"
+        )
 
-    prioritized_test_names = [t.name for t in bring_to_front]
-    print(f"Prioritized: {prioritized_test_names}")
-    remaining_test_names = [t.name for t in the_rest]
-    print(f"The Rest: {remaining_test_names}")
+        prioritized_test_names = [t.name for t in bring_to_front]
+        print(f"Prioritized: {prioritized_test_names}")
+        remaining_test_names = [t.name for t in the_rest]
+        print(f"The Rest: {remaining_test_names}")
+    else:
+        print("Didn't find any tests to prioritize")
 
     return (bring_to_front, the_rest)
 
