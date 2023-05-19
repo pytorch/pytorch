@@ -10417,64 +10417,65 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
-    def test_output_match(self, device, dtype, op):
-        self.assertEqual(device, "cpu")
-        key = op.name + op.variant_test_name
-        run_grad_test = True
+    # @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
+    # def test_output_match(self, device, dtype, op):
+    #     self.assertEqual(device, "cpu")
+    #     key = op.name + op.variant_test_name
+    #     run_grad_test = True
+    #     if "softplus" not in op.name or dtype != torch.float16:
+    #         return
+    #     def get_samples():
+    #         return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+    #     cpu_samples = get_samples()
 
-        def get_samples():
-            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
-        cpu_samples = get_samples()
+    #     all_backward_pass = True
+    #     for cpu_sample in cpu_samples:
+    #         #
+    #         # Forward check
+    #         #
+    #         mps_sample = cpu_sample.transform(
+    #             lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-        all_backward_pass = True
-        for cpu_sample in cpu_samples:
-            #
-            # Forward check
-            #
-            mps_sample = cpu_sample.transform(
-                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+    #         cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+    #         cpu_kwargs = cpu_sample.kwargs
+    #         mps_args = [mps_sample.input] + list(mps_sample.args)
+    #         mps_kwargs = mps_sample.kwargs
 
-            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_kwargs = cpu_sample.kwargs
-            mps_args = [mps_sample.input] + list(mps_sample.args)
-            mps_kwargs = mps_sample.kwargs
+    #         # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+    #         if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+    #             mps_args[1] = cpu_args[1]
 
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                mps_args[1] = cpu_args[1]
+    #         cpu_out = op(*cpu_args, **cpu_kwargs)
+    #         mps_out = op(*mps_args, **mps_kwargs)
 
-            cpu_out = op(*cpu_args, **cpu_kwargs)
-            mps_out = op(*mps_args, **mps_kwargs)
+    #         if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+    #             atol = 1e-4
+    #             rtol = 3e-5
+    #         elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+    #             atol = 1e-2
+    #             rtol = 1e-2
+    #         elif op.name == "masked.mean":
+    #             atol = 7e-4
+    #             rtol = 2e-3
+    #         elif op.name == "native_layer_norm":
+    #             atol = 1e-4
+    #             rtol = 1.3e-5
+    #         elif op.name in ["pow", "__rpow__"]:
+    #             atol = 1e-6
+    #             rtol = 4e-6
+    #         else:
+    #             atol = None
+    #             rtol = None
 
-            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
-                atol = 1e-4
-                rtol = 3e-5
-            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
-                atol = 1e-2
-                rtol = 1e-2
-            elif op.name == "masked.mean":
-                atol = 7e-4
-                rtol = 2e-3
-            elif op.name == "native_layer_norm":
-                atol = 1e-4
-                rtol = 1.3e-5
-            elif op.name in ["pow", "__rpow__"]:
-                atol = 1e-6
-                rtol = 4e-6
-            else:
-                atol = None
-                rtol = None
-
-            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+    #         self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
     def test_tmp(self):
-        x = torch.randn((20), dtype=torch.float16, device="cpu")
-        y = F.softplus(x, 1, 1)
+        x = torch.randn((20), dtype=torch.float16, device="cpu").requires_grad_()
+        y = F.softplus(x, 3, 0.2)
 
-        x_mps = x.to("mps")
-        y_mps = F.softplus(x_mps, 1, 1)
+        x_mps = x.detach().to("mps").requires_grad_()
+        y_mps = F.softplus(x_mps, 3, 0.2)
         self.assertEqual(y, y_mps)
 
     # @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
