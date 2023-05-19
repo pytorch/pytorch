@@ -79,11 +79,13 @@ def cubin_cache_dir():
     os.makedirs(cubin_dir, exist_ok=True)
     return cubin_dir
 
+
 @functools.lru_cache(None)
 def hsaco_cache_dir():
     hsaco_dir = os.path.join(cache_dir(), "hsaco")
     os.makedirs(hsaco_dir, exist_ok=True)
     return hsaco_dir
+
 
 class PersistentCache:
     def __init__(self):
@@ -595,9 +597,10 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, binary):
-        from filelock import FileLock
         import os
         import shutil
+
+        from filelock import FileLock
 
         if torch.version.hip is None:
             cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")

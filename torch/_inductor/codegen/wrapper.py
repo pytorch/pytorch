@@ -141,9 +141,13 @@ class EnterCudaDeviceContextManagerLine:
             code.writeline("\n")
             if self.first_time:
                 if torch.version.hip is None:
-                    code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+                    code.writeline(
+                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                    )
                 else:
-                    code.writeline(f"at::hip::HIPGuard device_guard({self.device_idx});")
+                    code.writeline(
+                        f"at::hip::HIPGuard device_guard({self.device_idx});"
+                    )
             else:
                 code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
@@ -1203,9 +1207,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), "{bin_type} file should already exist at this moment"
 
         self.writeline(f"if ({name} == nullptr) {{")
-        self.writeline(
-            f"""     {name} = loadKernel("{bin_path}", "{mangled_name}");"""
-        )
+        self.writeline(f"""     {name} = loadKernel("{bin_path}", "{mangled_name}");""")
         self.writeline("}")
 
     def generate_args_decl(self, call_args):

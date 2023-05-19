@@ -34,7 +34,7 @@ except unittest.SkipTest:
 
 
 RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN 
+RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
 
 
 class CppWrapperTemplate:
@@ -186,9 +186,9 @@ if RUN_CUDA:
             "test_sum_dtype",
             "test_transpose",
         ]
-        
+
         cuda_tests = [test for test in cuda_tests if test.name not in exclude_rocm_list]
-    
+
     for item in cuda_tests:
         make_test_case(item.name, item.device, item.tests)
 
