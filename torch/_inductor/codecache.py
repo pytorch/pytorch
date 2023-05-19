@@ -7,8 +7,8 @@ import json
 import logging
 import multiprocessing
 import os
-import pickle
 import pathlib
+import pickle
 import re
 import shutil
 import signal
@@ -18,11 +18,11 @@ import sysconfig
 import tempfile
 import threading
 import types
-from copy import copy, deepcopy
-from dataclasses import field
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from copy import copy
 from ctypes import cdll
+from dataclasses import field
 from functools import partial
 from threading import Thread
 from time import sleep, time
@@ -227,12 +227,14 @@ def serialize_fx_arg(arg: Any):
             pickled_guards = []
             for t in arg:
                 pickled_guards.append(
-                    b"".join([
-                        pickle.dumps(torch._C._dispatch_keys(t).__repr__()),
-                        pickle.dumps(t.dtype),
-                        pickle.dumps(t.device),
-                        pickle.dumps(t.shape),
-                    ])
+                    b"".join(
+                        [
+                            pickle.dumps(torch._C._dispatch_keys(t).__repr__()),
+                            pickle.dumps(t.dtype),
+                            pickle.dumps(t.device),
+                            pickle.dumps(t.shape),
+                        ]
+                    )
                 )
             return b"".join(pickled_guards)
     return pickle.dumps(arg)
@@ -241,12 +243,7 @@ def serialize_fx_arg(arg: Any):
 def compiled_fx_graph_hash(fx_args: List[Any]):
     serialized_fx_args = b"".join([serialize_fx_arg(arg) for arg in fx_args])
     hashed_fx_args = base64.b32encode(hashlib.sha256(serialized_fx_args).digest())[:51]
-    return (
-        "f"
-        + hashed_fx_args
-        .decode("utf-8")
-        .lower()
-    )
+    return "f" + hashed_fx_args.decode("utf-8").lower()
 
 
 def get_path(basename, ext):
@@ -265,7 +262,9 @@ def write(content, key, ext):
 
 
 def write_atomic(path: str, content: Union[str, bytes]):
-    assert isinstance(content, str) or isinstance(content, bytes), "Only strings and byte arrays can be saved in the cache"
+    assert isinstance(
+        content, (str, bytes)
+    ), "Only strings and byte arrays can be saved in the cache"
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     path = pathlib.Path(path)
@@ -282,7 +281,9 @@ class FxGraphCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]):
+    def load(
+        cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]
+    ):
         fx_args_for_hashing = copy(fx_args)
         fx_args_for_hashing.extend(list(fx_kwargs.values()))
         # Hash also on torch version and current triton config
@@ -297,8 +298,10 @@ class FxGraphCache:
             with lock:
                 _, _, cg_path = get_path(key, "cg")
                 if not os.path.exists(cg_path):
-                    compiled_graph: CompiledFxGraph = compile_fx_fn(*fx_args, **fx_kwargs)
-                    
+                    compiled_graph: CompiledFxGraph = compile_fx_fn(
+                        *fx_args, **fx_kwargs
+                    )
+
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
                     disk_compiled_graph.compiled_artifact = None
@@ -319,6 +322,7 @@ class FxGraphCache:
 @dataclasses.dataclass
 class CompiledFxGraph:
     """Class holding a compiled FX graph"""
+
     compiled_artifact: Callable = None
     cache_key: str = None
     artifact_path: str = None
@@ -329,11 +333,18 @@ class CompiledFxGraph:
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
-        # We can't really serialize callables that may be C++/Triton/etc., so we serialize their disk cache location instead
-        # TODO: When making an API that can save compiled models e2e to disk this will need to be better
+        # We can't really serialize callables that may be C++/Triton/etc.,
+        # so we serialize their disk cache location instead
+        # TODO: When making an API that can save compiled models e2e to disk
+        # this will need to be better
         if self.compiled_artifact is None:
             from .codecache import PyCodeCache
-            self.compiled_artifact = PyCodeCache.load_by_key_path(self.cache_key, self.artifact_path, self.cache_linemap if self.cache_linemap is not None else ()).call
+
+            self.compiled_artifact = PyCodeCache.load_by_key_path(
+                self.cache_key,
+                self.artifact_path,
+                self.cache_linemap if self.cache_linemap is not None else (),
+            ).call
 
         return self.compiled_artifact(inputs)
 
@@ -709,7 +720,9 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
-        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+        cpp_command = repr(
+            cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda)
+        )
         key, input_path = write(
             source_code,
             code_hash(source_code + cpp_command),

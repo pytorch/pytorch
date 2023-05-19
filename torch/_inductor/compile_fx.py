@@ -12,13 +12,13 @@ from typing import Any, Callable, Dict, List, Optional
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
-from torch._inductor.codecache import CompiledFxGraph, FxGraphCache
 
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
+from torch._inductor.codecache import CompiledFxGraph, FxGraphCache
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -237,9 +237,13 @@ def compile_fx_inner(
         "is_inference": is_inference,
     }
     if config.fx_graph_cache:
-        compiled_graph: CompiledFxGraph = FxGraphCache.load(fx_codegen_and_compile, graph_args, graph_kwargs)
+        compiled_graph: CompiledFxGraph = FxGraphCache.load(
+            fx_codegen_and_compile, graph_args, graph_kwargs
+        )
     else:
-        compiled_graph: CompiledFxGraph = fx_codegen_and_compile(*graph_args, **graph_kwargs)
+        compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
+            *graph_args, **graph_kwargs
+        )
 
     if aot_mode:
         return compiled_graph
@@ -265,7 +269,10 @@ def compile_fx_inner(
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
             and all(isinstance(t, torch.Tensor) for t in example_inputs)
-            and (len(compiled_graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
+            and (
+                len(compiled_graph.device_idxs) == 1
+                or not config.triton.cudagraph_trees
+            )
         ):
             if (
                 boxed_forward_device_index is not None
@@ -314,7 +321,10 @@ def compile_fx_inner(
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
                     )
-                elif len(compiled_graph.device_idxs) > 1 and config.triton.cudagraph_trees:
+                elif (
+                    len(compiled_graph.device_idxs) > 1
+                    and config.triton.cudagraph_trees
+                ):
                     developer_warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
@@ -439,12 +449,13 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
         return compiled_graph
 
     old_compiled_artifact = compiled_graph.__call__
-    
+
     def run(new_inputs):
         for i in check_inputs:
             if new_inputs[i].data_ptr() % ALIGNMENT:
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
         return old_compiled_artifact(new_inputs)
+
     compiled_graph.__call__ = run
 
     return compiled_graph
