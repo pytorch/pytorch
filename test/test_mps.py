@@ -10487,52 +10487,47 @@ class TestConsistency(TestCaseMPS):
             # Forward check
             #
             forward_failed = False
-            try:
-                mps_sample = cpu_sample.transform(
-                    lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-                cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-                cpu_kwargs = cpu_sample.kwargs
-                mps_args = [mps_sample.input] + list(mps_sample.args)
-                mps_kwargs = mps_sample.kwargs
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
 
-                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                    mps_args[1] = cpu_args[1]
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = cpu_args[1]
 
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
 
-                if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
-                    atol = 1e-2
-                    rtol = 1e-2
-                elif (op.name == "masked.mean"):
-                    atol = 7e-4
-                    rtol = 2e-3
-                elif (op.name == "native_layer_norm"):
-                    atol = 1e-4
-                    rtol = 1.3e-5
-                elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
-                    atol = 7e-4
-                    rtol = 1.5e-3
-                elif op.name == "unique" and cpu_kwargs["sorted"] is False:
-                    continue
-                else:
-                    atol = None
-                    rtol = None
+            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
+                atol = 1e-2
+                rtol = 1e-2
+            elif (op.name == "masked.mean"):
+                atol = 7e-4
+                rtol = 2e-3
+            elif (op.name == "native_layer_norm"):
+                atol = 1e-4
+                rtol = 1.3e-5
+            elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
+                atol = 7e-4
+                rtol = 1.5e-3
+            elif op.name == "unique" and cpu_kwargs["sorted"] is False:
+                continue
+            else:
+                atol = None
+                rtol = None
 
-                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
-            except Exception as e:
-                raise e
-                forward_failed = True
-                all_forward_pass = False
 
             #
             # Backward check

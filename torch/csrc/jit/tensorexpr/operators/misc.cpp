@@ -70,7 +70,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-static bool isScalar(ExprHandle e) {
+bool isScalar(ExprHandle e) {
   auto n = e.node();
   return n->isConstant() || to<Var>(n);
 }
@@ -188,7 +188,7 @@ static bool isOne(ExprHandle e) {
   return *n == 1;
 }
 
-static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
   auto at = a.rbegin();
@@ -224,7 +224,7 @@ static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   return {ret, hasBroadcast};
 }
 
-static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     std::vector<std::vector<ExprHandle>> shapes) {
   size_t n = shapes.size();
   if (n == 1) {
@@ -508,7 +508,7 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   return {highType, nonEmptyInputs};
 }
 
-static Tensor computeCatWoConditionals(
+Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides) {
