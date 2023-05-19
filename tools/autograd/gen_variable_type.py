@@ -1912,7 +1912,10 @@ def emit_body(
                 )
             else:
                 # note(crcrpar): Assuming `self` is TensorList.
-                fw_grad_opt_definition = f"std::vector<{opt_res_grad_type}> {'_'.join(res)}_new_fw_grad_opts(self.size(), c10::nullopt);"
+                fw_grad_opt_definition = (
+                    f"std::vector<{opt_res_grad_type}> {'_'.join(res)}_new_fw_grad_opts"
+                    "(self.size(), c10::nullopt);"
+                )
                 inplace_foreach_forward_grad_formula = derivative.formula
                 for _foreach_arg, _ref_arg in inplace_foreacharg2refarg.items():
                     # note(crcrpar): Massage only Scalar and ArrayRef<Scalar> here.
