@@ -1266,19 +1266,19 @@ class CppVecKernel(CppKernel):
         if is_broadcast:
             if is_mask:
                 loadbuf = f"flag_to_float_scalar({loadbuf})"
-            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}));"
+            line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
-            line = f"at::vec::load_uint8_as_float({var_expr});"
+            line = f"at::vec::load_uint8_as_float({var_expr})"
         elif is_mask:
-            line = f"flag_to_float_vec({loadbuf});"
+            line = f"flag_to_float_vec({loadbuf})"
         elif dtype in [torch.bfloat16]:
             if opt_ctx.is_load_bf16_as_fp32:
-                line = f"load_bf16_as_float({loadbuf});"
+                line = f"load_bf16_as_float({loadbuf})"
             else:
                 assert opt_ctx.is_bf16_mem_copy
-                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor});"
+                line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
         else:
-            line = f"at::vec::Vectorized<float>::loadu({loadbuf});"
+            line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
         if non_contiguous:
             tmpbuftype = "float" if is_mask else f"{DTYPE_TO_CPP[dtype]}"
             tmpbufsize = f"{self.tiling_factor}"
@@ -1521,12 +1521,12 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 if opt_ctx.is_load_bf16_as_fp32:
-                    line = f"load_bf16_as_float({loadbuf});"
+                    line = f"load_bf16_as_float({loadbuf})"
                 else:
                     assert opt_ctx.is_bf16_mem_copy
-                    line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor});"
+                    line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
             else:
-                line = f"at::vec::Vectorized<float>::loadu({loadbuf});"
+                line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
