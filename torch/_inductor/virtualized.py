@@ -76,7 +76,7 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size):
+    def indirect_indexing(index_var, size, check=True):
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod

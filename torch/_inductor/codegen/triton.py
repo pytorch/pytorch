@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set
+from typing import Any, Dict, Iterable, List, Set
 
 import sympy
 
@@ -21,6 +21,7 @@ from ..codecache import get_code_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
+    DeferredLineBase,
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
     get_kernel_metadata,
@@ -249,7 +250,10 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        return V.kernel.indexing(expr)[0]
+        index_str, mask_vars, mask, expand_str = V.kernel.indexing(expr)
+        var = V.kernel.cse.generate(V.kernel.compute, index_str)
+        var.mask_vars = mask_vars
+        return var
 
     @staticmethod
     def masked(mask, body, other):
@@ -418,6 +422,13 @@ class TritonOverrides(OpOverrides):
         return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
+    def sign(x):
+        left = ops.where(ops.lt("0", x), 1, 0)
+        right = ops.where(ops.lt(x, "0"), 1, 0)
+        sub = ops.sub(left, right)
+        return f"{sub}.to({x}.dtype)"
+
+    @staticmethod
     def trunc(x):
         return f"tl.math.trunc({x})"
 
@@ -430,6 +441,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -693,6 +712,8 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
+        self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
+        self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         self.initialize_range_tree(pid_cache)
@@ -1050,45 +1071,73 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def gen_assert_indirect_indexing(self, buffer, original_index, mask):
-        if mask == "None":
-            return
-        body = self.current_node._body
-        indirect_size = dict(zip(body.indirect_vars, body.indirect_max_sizes))
-        indirect_name = body.indirect_new
-        # Many indirect variables may be mapped to the same CSE'd variable
-        # For example when you do x[y, y] for x = randn(3, 8)
-        var_size = collections.defaultdict(set)
-        for ind, size in indirect_size.items():
-            var_size[indirect_name[ind]].add(V.kernel.rename_indexing(size))
+    def indirect_indexing(self, var, size, check=True):
+        class IndirectAssertLine(DeferredLineBase):
+            def __init__(self, line, var, mask, size_map):
+                self.var = var
+                self.mask = mask
+                self.line = line
+                self.size_map = size_map
 
-        indirect_vars = [
-            s for s in original_index.free_symbols if s.name.startswith("tmp")
-        ]
-        for var in indirect_vars:
-            sizes = list(var_size[var])
-            if all(isinstance(s, sympy.Integer) for s in sizes):
-                size = min(sizes)
-            else:
-                # Should this go here or in TritonPrinter?
-                def print_min(expr):
-                    if len(expr) == 1:
-                        return texpr(expr[0])
-                    else:
-                        return f"min({texpr(expr[0])}, {print_min(expr[1:])})"
+            def __call__(self):
+                # The conditions need to be in parens because of Python's operator precedence.
+                # It'd be less # error-prone to use and/or/not, which is suported by triton
+                size = self.size_map[(self.var, self.mask)]
+                cond = f"(0 <= {self.var}) & ({self.var} < {size})"
+                cond_print = f"0 <= {self.var} < {size}"
+                if self.mask:
+                    cond = f"({cond}) | ~{self.mask}"
+                return self.line.format(cond=cond, cond_print=cond_print)
 
-                size = print_min(sizes)
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less # error-prone to use and/or/not, which is suported by triton
-            cond = f"((0 <= {var}) & ({var} < {size}))"
-            cond_print = f"0 <= {var} < {size}"
-            if not isinstance(original_index, sympy.Integer):
-                var_mask = f"({mask})" if "&" in mask else mask
-                var_mask = f" | ~{var_mask}"
+            def _new_line(self, line):
+                return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+
+        generate_assert = (
+            (check or config.debug_index_asserts)
+            and config.triton.assert_indirect_indexing
+            and torch.version.hip is None
+        )
+        if generate_assert:
+            mask_vars = set(var.mask_vars)
+            if self._load_mask:
+                mask_vars.add(self._load_mask)
+
+            mask = ""
+            if mask_vars:
+                mask = (
+                    f"{list(mask_vars)[0]}"
+                    if len(mask_vars) == 1
+                    else f"({' & '.join(str(v) for v in mask_vars)})"
+                )
+
+            # tl.device_assert doesn't work for constexpr values, and we can't
+            # tell from here if a var is constexpr or not, so promote everything
+            var_str = str(
+                self.cse.generate(
+                    self.compute, f"triton_helpers.promote_to_tensor({var})"
+                )
+            )
+
+            # An assertion line may have been written already, if so just
+            # update the max size.
+            map_key = (var_str, mask)
+            existing_size = self.indirect_max_sizes_expr.get(map_key)
+            if existing_size is not None:
+                size = sympy.Min(size, existing_size)
             else:
-                var_mask = ""
-            line = f'tl.device_assert(({cond}){var_mask}, "index out of bounds: {cond_print}")'
-            self.cse.generate(buffer, line, assignment=False)
+                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
+                self.compute.writeline(
+                    IndirectAssertLine(
+                        line, var_str, mask, self.indirect_max_sizes_printed
+                    )
+                )
+
+            self.indirect_max_sizes_expr[map_key] = size
+            self.indirect_max_sizes_printed[map_key] = texpr(
+                self.rename_indexing(self.codegen_indexing(size))
+            )
+
+        return sympy_symbol(str(var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1139,14 +1188,6 @@ class TritonKernel(Kernel):
         else:
             load_buffer = self.loads
 
-        # Assert that the loaded indices will not read garbage
-        if (
-            indirect_indexing
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        ):
-            self.gen_assert_indirect_indexing(load_buffer, original_index, mask)
-
         result_var = self.cse.generate(load_buffer, line)
         result_var.mask_vars = mask_vars
 
@@ -1164,13 +1205,6 @@ class TritonKernel(Kernel):
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index, dense_indexing=True)
-
-        if (
-            indirect_indexing
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        ):
-            self.gen_assert_indirect_indexing(self.stores, original_index, mask)
 
         # Guard against write-after-read corruption in triton.
         # See # https://github.com/openai/triton/issues/1615
@@ -1639,13 +1673,29 @@ class TritonKernel(Kernel):
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
+            assignment = False
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = pexpr(tree.numel)
             else:
+                assignment = True
                 expr = f"{name}_{tree.prefix}numel"
-                code.writeline(f"{expr} = {pexpr(tree.numel)}")
+                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
+                # The real fix here is to revisit our cross language calling convention.
+                code.writeline(
+                    f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
+                )
             if tree.prefix != "r" or self.inside_reduction:
-                call_args.append(expr)
+                if assignment:
+                    # We can get symbolic expressions here, like s0*64
+                    # It is fine to have them here, but we need to handle them correctly as their own type
+                    # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+                    # scalars as well.
+                    # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+                    # constant now, need type info. I agree, this needs type info, and while this is not true type info
+                    # it suffices as a type hint for the purposes of producing the correct code for this type.
+                    call_args.append(SymbolicCallArg(expr))
+                else:
+                    call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
@@ -1655,7 +1705,7 @@ class TritonKernel(Kernel):
             )
         else:
             # TODO: refactor generate_kernel_call
-            call_args_str = ", ".join(call_args)
+            call_args_str = ", ".join(str(item) for item in call_args)
             stream_name = code.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -1965,7 +2015,7 @@ class TritonScheduling:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
             fused_name = (
-                get_fused_kernel_name(node_schedule)
+                get_fused_kernel_name(node_schedule, config.triton.descriptive_names)
                 if config.triton.descriptive_names
                 else ""
             )
