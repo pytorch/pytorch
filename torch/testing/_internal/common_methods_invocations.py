@@ -8474,6 +8474,13 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
+
+    ForeachFuncInfo(
+        'zero',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -9555,7 +9562,7 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
@@ -11154,7 +11161,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('matmul',
            aliases=('linalg.matmul',),
-           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
@@ -12903,7 +12910,7 @@ op_db: List[OpInfo] = [
            aten_name='bilinear',
            supports_autograd=True,
            sample_inputs_func=sample_inputs_bilinear,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            skips=(
@@ -15823,6 +15830,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
                # Lazy tensor failures
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
@@ -16558,15 +16566,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
