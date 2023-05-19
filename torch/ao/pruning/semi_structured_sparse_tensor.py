@@ -90,6 +90,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
                 cslt=args[0].cslt,
                 original_shape=args[0].original_shape,
                 transposed=args[0].transposed,
+                contiguous_output=args[0].contiguous_output,
             )
 
         if func is torch.ops.aten.t.default:
@@ -100,6 +101,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
                 cslt=args[0].cslt,
                 original_shape=args[0].original_shape,
                 transposed=not args[0].transposed,
+                contiguous_output=args[0].contiguous_output,
             )
 
         if (
@@ -114,6 +116,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
             # b must be transposed so we can undo it
             elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
                 if b.contiguous_output:
+                    print("contig mode")
                     return b.t().cslt.addmm(a.T, bias, True)
                 else:
                     return b.t().cslt.addmm(a.T, bias, False).T

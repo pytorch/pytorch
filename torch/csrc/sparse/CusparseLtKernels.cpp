@@ -42,7 +42,7 @@ struct CusparseLt : torch::CustomClassHolder {
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
 
-  unsigned alignment{16};
+  uint32_t alignment{16};
   float alpha{1.0};
   float beta{0.0};
   int num_streams{0};
@@ -121,8 +121,8 @@ void CusparseLt::compress(
                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
   num_A_rows = (is_sparse_input_transposed) ? k : m;
-  auto num_A_cols = (is_sparse_input_transposed) ? m : k;
-  auto lda = (is_rowmajor) ? num_A_cols : num_A_rows;
+  int64_t num_A_cols = (is_sparse_input_transposed) ? m : k;
+  int64_t lda = (is_rowmajor) ? num_A_cols : num_A_rows;
 
 
   CHECK_CUSPARSE(cusparseLtStructuredDescriptorInit(
@@ -176,29 +176,31 @@ at::Tensor CusparseLt::cusparselt_helper(
     void* dBias,
     int64_t biasStride,
     bool transposeResult) {
-  // create tensor
+
   cusparseLtMatmulDescriptor_t matmul;
 
   int64_t k = input.size(0);
   int64_t n = input.size(1);
 
-  auto result_order = (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-
+  // create tensor
   auto res = (transposeResult) ? input.new_empty({n, num_A_rows}): input.new_empty({num_A_rows, n});
 
-  bool is_dense_input_transposed = !input.is_contiguous();
-  auto opB = is_dense_input_transposed ? CUSPARSE_OPERATION_TRANSPOSE
-                                       : CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOrder_t result_order = (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+  cusparseOrder_t dense_input_order = (input.is_contiguous()) ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
+  cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  auto num_B_rows = (is_dense_input_transposed) ? n : k;
-  auto num_B_cols = (is_dense_input_transposed) ? k : n;
-  auto num_C_rows = num_A_rows;
-  auto num_C_cols = n;
+  int64_t num_B_rows = (input.is_contiguous()) ?  n : k;
+  int64_t num_B_cols = (input.is_contiguous()) ?  k : n;
+  int64_t num_C_rows = num_A_rows;
+  int64_t num_C_cols = n;
 
-  bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
-  auto ldb = (is_rowmajor) ? num_B_cols : num_B_rows;
-  auto ldc = (transposeResult) ? num_C_cols : num_C_rows;
+  int64_t ldb = (input.is_contiguous()) ? num_B_cols : num_B_rows;
+  int64_t ldc = (transposeResult) ? num_C_rows : num_C_cols;
 
+
+  std::cout<<transposeResult<<std::endl;
+  std::cout<<dense_input_order<<std::endl;
+  std::cout<<ldb<<std::endl;
   // initalize dense input descriptor
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
       &handle,
@@ -208,7 +210,7 @@ at::Tensor CusparseLt::cusparselt_helper(
       ldb,
       alignment,
       type,
-      order))
+      dense_input_order))
 
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
       &handle,
@@ -218,7 +220,7 @@ at::Tensor CusparseLt::cusparselt_helper(
       ldc,
       alignment,
       type,
-      order))
+      result_order))
 
   // intialize matmul
   CHECK_CUSPARSE(cusparseLtMatmulDescriptorInit(
