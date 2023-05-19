@@ -1381,19 +1381,22 @@ class TritonKernel(Kernel):
         with result.indent():
             name_cnt = itertools.count()
             var_names = []
-            for arg_name in call_args:
+            for arg_name, arg_sig in zip(call_args, signature):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.get_buffer(arg_name)
                 if buf:
                     result.writeline(
-                        f"{var_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(buf.get_size())}, {V.graph.sizevars.size_hints(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
+                elif isinstance(arg_sig, SizeArg):
+                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    result.writeline(f"{var_name} = {symval_hint}")
                 else:
                     raise KeyError(
                         f"Don't find the buffer or const tensor for {arg_name}"
@@ -1413,7 +1416,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 for tree in self.range_trees:
-                    expr = pexpr(tree.numel)
+                    expr = pexpr(V.graph.sizevars.size_hint(tree.numel))
                     if tree.prefix != "r" or self.inside_reduction:
                         extra_args.append(expr)
                     if tree.prefix != "r":
