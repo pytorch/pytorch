@@ -23,7 +23,7 @@ namespace torch {
 namespace autograd {
 namespace VariableType {
 
-std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
+static std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
     at::ArrayRef<at::Backend> backends) {
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
@@ -376,7 +376,7 @@ namespace ADInplaceOrView {
       : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT \
                                     : CreationMeta::NO_GRAD_MODE)
 
-Tensor& copy_(
+static Tensor& copy_(
     c10::DispatchKeySet ks,
     Tensor& self,
     const Tensor& src,
@@ -390,7 +390,7 @@ Tensor& copy_(
   return self;
 }
 
-const Tensor& resize_(
+static const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     SymIntArrayRef size,
@@ -414,7 +414,7 @@ const Tensor& resize_(
   return self;
 }
 
-const Tensor& resize_as_(
+static const Tensor& resize_as_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     const Tensor& the_template,
@@ -439,7 +439,7 @@ const Tensor& resize_as_(
   return self;
 }
 
-Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
+static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   auto out = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::_ops::detach::redispatch(
@@ -461,7 +461,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   return result;
 }
 
-Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
+static Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
   auto tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
@@ -485,7 +485,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
 }
 
 // NB: This does not redispatch any further
-Tensor _make_dual(
+static Tensor _make_dual(
     c10::DispatchKeySet ks,
     const Tensor& primal,
     const Tensor& tangent,
