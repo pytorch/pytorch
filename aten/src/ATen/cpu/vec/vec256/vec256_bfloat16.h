@@ -21,40 +21,6 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline T down_scale(float val);
-
-template<> inline BFloat16 down_scale(float val) {
-  return BFloat16(val);
-}
-
-template<> inline Half down_scale(float val) {
-  unsigned short d[8];
-  __m256 v = _mm256_set1_ps(val);
-  __m128i o = _mm256_cvtps_ph(
-      v, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
-  _mm_storeu_si128(reinterpret_cast<__m128i*>(d), o);
-  Half result;
-  result.x = d[0];
-  return result;
-}
-
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline float up_scale(T& val);
-
-template<> inline float up_scale(BFloat16& val) {
-  return float(val);
-}
-
-template<> inline float up_scale(Half& val) {
-  float d[8];
-  __m128i v = _mm_setr_epi16(
-        val.x, 0, 0, 0, 0, 0, 0, 0);
-  __m256 o = _mm256_cvtph_ps(v);
-  _mm256_storeu_ps(d, o);
-  return d[0];
-}
-
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
   o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
@@ -1064,27 +1030,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline T down_scale(float val) {
-  return T(val);
-}
-
-template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, int> = 0>
-inline float up_scale(T& val) {
-  return float(val);
-}
-
 #endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-
-template <typename T, typename std::enable_if_t<!is_reduced_floating_point_v<T>, int> = 0>
-inline T down_scale(T val) {
-  return val;
-}
-
-template <typename T, typename std::enable_if_t<!is_reduced_floating_point_v<T>, int> = 0>
-inline T up_scale(T val) {
-  return val;
-}
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
