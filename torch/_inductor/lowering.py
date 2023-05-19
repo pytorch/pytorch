@@ -4036,16 +4036,16 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-erfinv_fallback = fallback_handler(aten.erfinv)
-
-
-@make_pointwise
-def erfinv_native(x):
-    return ops.erfinv(x)
-
 
 @register_lowering(aten.erfinv)
 def erfinv_lowering(x):
+    # aten fallback
+    erfinv_fallback = fallback_handler(aten.erfinv)
+
+    @make_pointwise
+    def erfinv_native(x):
+        return ops.erfinv(x)
+
     is_cuda = decode_device(x.get_device()).type == "cuda"
     # triton has a primitive for erfinv
     if is_cuda:
