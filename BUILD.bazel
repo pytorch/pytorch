@@ -201,6 +201,13 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_eigen_cpp",
+    srcs = glob([
+        "aten/src/ATen/native/eigen/*.cpp",
+    ]),
+)
+
+filegroup(
     name = "aten_base_vulkan",
     srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
@@ -355,6 +362,7 @@ cc_library(
         ":aten_native_mkldnn_cpp",
         ":aten_native_nested_cpp",
         ":aten_native_quantized_cpp",
+        ":aten_native_eigen_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_transformers_cpp",
         ":aten_native_xnnpack",
