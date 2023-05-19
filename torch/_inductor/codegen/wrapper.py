@@ -653,7 +653,9 @@ class WrapperCodeGen(CodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
-        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        self.wrapper_call.writeline(
+            f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
+        )
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
@@ -676,6 +678,18 @@ class WrapperCodeGen(CodeGen):
     def val_to_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
+        elif isinstance(s, sympy.Expr):
+            return pexpr(s)
+        elif isinstance(s, (tuple, list)):
+
+            @dataclasses.dataclass
+            class Shim:
+                ref: Any
+
+                def __repr__(self):
+                    return self.ref
+
+            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
         else:
             return repr(s)
 
@@ -1166,7 +1180,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if is_int(arg):
+            if isinstance(arg, torch._inductor.codegen.triton.SymbolicCallArg):
+                self.writeline(f"auto {var_name} = {arg};")
+            elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")
