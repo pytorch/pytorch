@@ -2734,7 +2734,7 @@ def _svd_meta(
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
     # Also makes sure this is CUDA and not HIP:
     # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
-    if A.numel() != 0 and is_cuda and torch.version.cuda and Vh.is_complex():
+    if A.numel() != 0 and Vh.is_complex():
         Vh = Vh.conj()
     return U, S, Vh
 
