@@ -979,7 +979,7 @@ class TypedStorage:
         return self._to(torch.cfloat)
 
     @classmethod
-    def from_file(cls, filename, fd, shared, size, offset=0):
+    def from_file(cls, filename, shared, size):
         """
         from_file(filename, shared=False, size=0) -> Storage
 
@@ -1002,10 +1002,8 @@ class TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
         untyped_storage: UntypedStorage = UntypedStorage.from_file(
             filename,
-            fd,
             shared,
-            size * torch._utils._element_size(cls.dtype),
-            offset)
+            size * torch._utils._element_size(cls.dtype))
         storage = cls(wrap_storage=untyped_storage)
         return storage
 
