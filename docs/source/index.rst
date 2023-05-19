@@ -57,6 +57,7 @@ Features described in this documentation are classified by release status:
    compile/deep-dive
    compile/performance-dashboard
    ir
+   compile/dynamic-shapes
 
 .. toctree::
    :maxdepth: 1
