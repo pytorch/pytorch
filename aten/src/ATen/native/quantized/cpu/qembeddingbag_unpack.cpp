@@ -3,7 +3,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
 
