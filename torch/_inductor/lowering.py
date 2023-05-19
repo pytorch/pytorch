@@ -4039,21 +4039,14 @@ register_pointwise_numeric(aten.nextafter)
 
 @register_lowering(aten.erfinv)
 def erfinv_lowering(x):
-    # aten fallback
-    erfinv_fallback = fallback_handler(aten.erfinv)
-
-    @make_pointwise
-    def erfinv_native(x):
-        return ops.erfinv(x)
-
     is_cuda = decode_device(x.get_device()).type == "cuda"
     # triton has a primitive for erfinv
     if is_cuda:
-        return erfinv_native(x)
+        return make_pointwise(lambda x: ops.erfinv(x))(x)
 
     # CPU doesn't have a primitive for erfinv
     # (however, one can write decomposition for the same).
-    return erfinv_fallback(x)
+    return fallback_handler(aten.erfinv)(x)
 
 
 def register_inplace(aten_op, outplace_op):
