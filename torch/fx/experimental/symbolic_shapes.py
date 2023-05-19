@@ -1778,7 +1778,10 @@ class DimConstraints:
         for i, arg in enumerate(signature.parameters.keys()):
             args_index[arg] = (i, arg)
 
-        def print_results(grouped, buf, indent, result_fn):
+        buf = ""
+        def print_results(grouped, indent, result_fn):
+            nonlocal buf
+
             space = False
             for arg, results in grouped:
                 if space:
@@ -1787,9 +1790,8 @@ class DimConstraints:
                     space = True
                 buf += f"\n{indent}# {arg}:"
                 for result in results:
-                    buf += f"\n{indent}{result_fn(result)},"
+                    buf += f"\n{indent}{result_fn(result)}"
 
-        buf = ""
         indent = 4 * " "
         if self._static_results:
             grouped_static_results = group(self._static_results, args_index)
@@ -1797,7 +1799,6 @@ class DimConstraints:
             buf += f"\n```\ndef specializations{str(signature)}:"
             print_results(
                 grouped_static_results,
-                buf,
                 indent,
                 lambda result: f"assert {result}",
             )
@@ -1810,9 +1811,8 @@ class DimConstraints:
             buf += f"\n{indent}return ["
             print_results(
                 grouped_dynamic_results,
-                buf,
                 indent*2,
-                lambda result: remove_default_lower_bound(result)
+                lambda result: f"{remove_default_lower_bound(result)},",
             )
             buf += f"\n{indent}]\n```\n"
         return buf
