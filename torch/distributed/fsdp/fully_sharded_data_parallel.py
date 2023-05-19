@@ -750,16 +750,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_config (Optional[StateDictConfig]): the configuration for the
                 target ``state_dict_type``.
         """
-        try:
-            prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
-                module,
-                state_dict_type,
-                state_dict_config,
-                optim_state_dict_config,
-            )
-            yield
-        except Exception as e:
-            raise e
+        prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        )
+        yield
         FullyShardedDataParallel.set_state_dict_type(
             module,
             prev_state_dict_settings.state_dict_type,
