@@ -766,3 +766,23 @@ class NullVariable(VariableTracker):
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
+
+
+class TreeSpecVariable(VariableTracker):
+    @classmethod
+    def create(cls, tx, proxy, tree_spec, **options):
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == tree_spec
+        if tree_spec is None:
+            tree_spec = get_fake_value(proxy.node, tx)
+        proxy.node.meta["example_value"] = tree_spec
+
+        return TreeSpecVariable(proxy, tree_spec, **options)
+
+    def __init__(self, proxy, tree_spec, **kwargs):
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.tree_spec = tree_spec
+
+    def as_proxy(self):
+        return self.proxy
