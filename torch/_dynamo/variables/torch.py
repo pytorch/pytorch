@@ -3,7 +3,7 @@ import logging
 import math
 import re
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -11,7 +11,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
-from torch._guards import GuardsCheckpointState
+from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
 from .. import config, variables
@@ -735,10 +735,83 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
+def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
+    # Will raise if not sound
+    try:
+        f.call_function(tx, sub_args, {})
+    finally:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
+
+
+# See NOTE [HigherOrderOperator tracing design] for details of the design
+# See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
+def speculate_subgraph(
+    tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
+):
+    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+
+    try:
+        with tx.output.new_subtracer() as tracer:
+            args = []
+            # One argument to graph per sub_args
+            for a in sub_args:
+                if a is None:
+                    a = ConstantVariable(None)
+                assert not isinstance(
+                    a, torch.Tensor
+                ), "Tensors should already be tracked?"
+                if isinstance(a, ConstantVariable):
+                    proxy = tracer.create_graph_input("const")
+                elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                else:
+                    raise unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input"
+                    )
+                args.append(a)
+            output = f.call_function(tx, args, {})
+            # Register output to graph
+            # Modeled off of compile_and_call_fx_graph
+            # TODO: support non single Tensor output
+            # We check always_restore because we dont use the output or side effects of always_restore code,
+            # like bwd.
+            if not isinstance(output, TensorVariable) and not always_restore:
+                unimplemented(
+                    "HigherOrderOperator with body with non single Tensor output"
+                )
+
+            if always_restore:
+                # Nothing left to do here
+                return output, tx.output.graph, tracer.lifted_freevars
+
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output",
+                "output",
+                (tracer.create_arg((output.as_proxy(),))),
+                {},
+            )
+            graph = tx.output.graph
+            lifted_freevars = tracer.lifted_freevars
+
+            return (
+                output,
+                graph,
+                lifted_freevars,
+            )
+
+    except torch._dynamo.exc.Unsupported as ex:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
+        raise
+
+
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, source: Optional[Source] = None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.source = source
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -889,55 +962,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 nn_modules,
                 comparable_state,
             )
-
-        # See NOTE [HigherOrderOperator tracing design] for details of the design
-        # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
-        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
-            try:
-                with tx.output.new_subtracer() as tracer:
-                    args = []
-                    # One argument to graph per sub_args
-                    for a in sub_args:
-                        assert not isinstance(
-                            a, torch.Tensor
-                        ), "Tensors should already be tracked?"
-                        if not isinstance(a, TensorVariable):
-                            unimplemented(
-                                "HigherOrderOperator with body that accepts non-Tensors as input"
-                            )
-                        tracer.create_graph_input(a.as_proxy().node.name)
-                        args.append(a)
-
-                    output = f.call_function(tx, args, {})
-                    # Register output to graph
-                    # Modeled off of compile_and_call_fx_graph
-                    # TODO: support non single Tensor output
-                    if not isinstance(output, TensorVariable):
-                        unimplemented(
-                            "HigherOrderOperator with body with non single Tensor output"
-                        )
-
-                    tx.output.guards.update(output.guards)
-                    tx.output.create_node(
-                        "output",
-                        "output",
-                        (tracer.create_arg((output.as_proxy(),))),
-                        {},
-                    )
-
-                    graph = tx.output.graph
-                    lifted_freevars = tracer.lifted_freevars
-
-                    return (
-                        output,
-                        graph,
-                        lifted_freevars,
-                    )
-
-            except torch._dynamo.exc.Unsupported as ex:
-                tx.output.graph = graph_checkpoint
-                tx.restore_graphstate(checkpoint)
-                raise
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -1163,6 +1187,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
+                tx,
                 args[0],
                 [
                     *args[1:],
@@ -1178,6 +1203,71 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             p_args = (
                 body_node,
                 *(arg.as_proxy() for arg in args[1:]),
+                *(arg for arg in body_lifted_freevars),
+            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
+        elif self.value.__name__ in (
+            "trampoline_autograd_fwd",
+            "trampoline_autograd_bwd",
+            "trampoline_autograd_apply",
+        ):
+            from . import AutogradFunctionVariable, UserFunctionVariable
+
+            pre_side_effects = tx.output.side_effects.clone()
+            always_restore = self.value.__name__ == "trampoline_autograd_bwd"
+            if (
+                self.value.__name__ == "trampoline_autograd_bwd"
+                or self.value.__name__ == "trampoline_autograd_fwd"
+            ):
+                fn = UserFunctionVariable(self.value, source=self.source)
+            else:
+                fn = TorchVariable(self.value)
+            checkpoint = tx.copy_graphstate()
+            pre_guards = tx.output.guards
+            graph_checkpoint = tx.output.graph
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                fn,
+                [
+                    *args,
+                ],
+                graph_checkpoint,
+                checkpoint,
+                # Backwards should never, ever be stored!
+                always_restore=always_restore,
+            )
+            post_guards = tx.output.guards
+            if body_lifted_freevars:
+                for freevar in body_lifted_freevars:
+                    if "saved_tensor_marked" not in freevar.node.meta:
+                        unimplemented("NYI - freevars in autograd function.")
+
+            post_side_effects = tx.output.side_effects
+            if post_side_effects.diff(pre_side_effects):
+                diff = (
+                    post_side_effects.id_to_variable.keys()
+                    - pre_side_effects.id_to_variable.keys()
+                )
+                for d in diff:
+                    if not isinstance(
+                        post_side_effects.id_to_variable[d].value,
+                        AutogradFunctionVariable,
+                    ):
+                        unimplemented("NYI - side effects in autograd function.")
+
+            if always_restore:
+                if post_guards - pre_guards:
+                    unimplemented("NYI - New guards discovered in a restoring state")
+                # Nothing left to do here
+                return None
+
+            p_args = (
+                *(arg.as_proxy() for arg in args),
                 *(arg for arg in body_lifted_freevars),
             )
             r = body_r.as_proxy().node.meta["example_value"]
