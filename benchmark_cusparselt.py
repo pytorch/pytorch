@@ -94,28 +94,22 @@ def test_tensor(m, k, n, dtype):
     sA = SemiStructuredSparseTensor(A)
 
     # torch.mm calculation
-    # sparse_output_addmm = torch.addmm(bias, sA, B)
-    # dense_output_addmm = torch.addmm(bias, A, B)
-    # correct_addmm = torch.allclose(
-        # sparse_output_addmm, dense_output_addmm, rtol=1e-3, atol=1e-3
-    # )
-
-    # int8 cuda mm is now using 
-    if dtype is torch.int8:
-        dense_output = torch._int_mm(A, B)
-
-        dense_measurement = benchmark.Timer(
-            stmt="torch._int_mm(A, B)",
-            globals=locals(),
-        ).blocked_autorange()
-
-    else:
+    if dtype is not torch.int8:
         dense_output = torch.mm(A, B)
 
         dense_measurement = benchmark.Timer(
             stmt="torch.mm(A, B)",
             globals=locals(),
         ).blocked_autorange()
+
+    else:
+        print("hello")
+        # dense_output = torch._int_mm(A, B)
+
+        # dense_measurement = benchmark.Timer(
+            # stmt="torch._int_mm(A, B)",
+            # globals=locals(),
+        # ).blocked_autorange()
 
     sparse_output = torch.mm(sA, B)
     sparse_measurement = benchmark.Timer(
@@ -129,9 +123,9 @@ def test_tensor(m, k, n, dtype):
         "n": n,
         "dtype": str(dtype),
         "sparse_latency (ms)": sparse_measurement.median * 1001,
-        "dense_latency (ms)": dense_measurement.median * 1000,
-        "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
-        "correct": torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3),
+        # "dense_latency (ms)": dense_measurement.median * 1000,
+        # "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
+        # "correct": torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3),
     }
 
 

@@ -12,6 +12,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         compressed_tensor=None,
         cslt=None,
         transposed=False,
+        contiguous_output=False,
     ):
         kwargs = {}
         kwargs["device"] = (
@@ -44,6 +45,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         compressed_tensor=None,
         cslt=None,
         transposed=False,
+        contiguous_output=False, 
     ):
         self.original_tensor = original_tensor
         self.original_shape = (
@@ -52,12 +54,13 @@ class SemiStructuredSparseTensor(torch.Tensor):
         self.compressed_tensor = compressed_tensor
         self.cslt = cslt
         self.transposed = transposed
+        self.contiguous_output = contiguous_output
 
         if original_tensor is not None:
             num_bytes = original_tensor.nelement() * original_tensor.element_size()
-            if original_tensor.dtype == torch.float16:
+            if original_tensor.dtype in {torch.float16, torch.bfloat16, torch.float32}:
                 compression_factor = 9
-            elif original_tensor.dtype == torch.int8:
+            elif original_tensor.dtype is torch.int8:
                 compression_factor = 10
             compressed_size_bytes = num_bytes * compression_factor // 16
             compressed_size = compressed_size_bytes // original_tensor.element_size()
@@ -107,16 +110,22 @@ class SemiStructuredSparseTensor(torch.Tensor):
             bias, a, b = args
             if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
                 # currently BIAS is broadcasted the wrong way in cuSPARSELT, so we need to call mm and then add at the end
-                return bias + a.cslt.cusparselt_mm(b)
+                return bias + a.cslt.mm(b, False)
             # b must be transposed so we can undo it
             elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                return b.t().cslt.cusparselt_addmm(a.T, bias).T
+                if b.contiguous_output:
+                    return b.t().cslt.addmm(a.T, bias, True)
+                else:
+                    return b.t().cslt.addmm(a.T, bias, False).T
 
         if func is torch.ops.aten.mm.default:
             a, b = args
             if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
-                return a.cslt.cusparselt_mm(b)
+                return a.cslt.mm(b, False)
             elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                return b.t().cslt.cusparselt_mm(a.T).T
+                if b.contiguous_output:
+                    return b.t().cslt.mm(a.T, True)
+                else:
+                    return b.t().cslt.mm(a.T, False).T
 
         raise NotImplementedError("Not implemented")

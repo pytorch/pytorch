@@ -1,12 +1,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
-//include <ATen/cuda/CUDAUtils.h>
-#include <torch/torch.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <cusparse.h>
 #include <cusparseLt.h>
 #include <torch/custom_class.h>
+#include <torch/torch.h>
 
 #define CHECK_CUDA(func)                                    \
   {                                                         \
@@ -59,12 +58,13 @@ struct CusparseLt : torch::CustomClassHolder {
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   // struct functions / constructor
-  at::Tensor cusparselt_mm(const at::Tensor& input);
-  at::Tensor cusparselt_addmm(const at::Tensor& input, const at::Tensor& bias);
+  at::Tensor cusparselt_mm(const at::Tensor& input, bool transposeResult);
+  at::Tensor cusparselt_addmm(const at::Tensor& input, const at::Tensor& bias, bool transposeResult);
   at::Tensor cusparselt_helper(
       const at::Tensor& input,
       void* dBias,
-      int64_t biasStride);
+      int64_t biasStride,
+      bool transposeResult);
   void compress(const at::Tensor& sparse_input, bool transpose_sparse);
   CusparseLt(const at::Tensor& sparse_compressed)
       : sparse_compressed{sparse_compressed} {
@@ -92,10 +92,19 @@ struct CusparseLt : torch::CustomClassHolder {
     // We create the tensor to store the compressed sparse matrix (non-pruned
     // elements + mask) in python with the same dtype as the sparse input tensor
     // so we know this wil be correct.
-    if (sparse_compressed.dtype() == torch::kInt8) {
+    if (sparse_compressed.dtype() == torch::kBFloat16) {
+      type = CUDA_R_16BF;
+    }
+    else if (sparse_compressed.dtype() == torch::kFloat32) {
+      type = CUDA_R_32F;
+      compute_type = CUSPARSE_COMPUTE_TF32_FAST;
+    }
+    else if (sparse_compressed.dtype() == torch::kInt8) {
       type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
     }
+
+
   };
 };
 
@@ -151,27 +160,31 @@ void CusparseLt::compress(
       stream))
 }
 
-at::Tensor CusparseLt::cusparselt_mm(const at::Tensor& input) {
-  return CusparseLt::cusparselt_helper(input, nullptr, 0);
+at::Tensor CusparseLt::cusparselt_mm(const at::Tensor& input, bool transposeResult) {
+  return CusparseLt::cusparselt_helper(input, nullptr, 0, transposeResult);
 }
 
 at::Tensor CusparseLt::cusparselt_addmm(
     const at::Tensor& input,
-    const at::Tensor& bias) {
-  return CusparseLt::cusparselt_helper(input, bias.data_ptr(), 0);
+    const at::Tensor& bias,
+    bool transposeResult) {
+  return CusparseLt::cusparselt_helper(input, bias.data_ptr(), 0, transposeResult);
 }
 
 at::Tensor CusparseLt::cusparselt_helper(
     const at::Tensor& input,
     void* dBias,
-    int64_t biasStride) {
+    int64_t biasStride,
+    bool transposeResult) {
   // create tensor
   cusparseLtMatmulDescriptor_t matmul;
 
   int64_t k = input.size(0);
   int64_t n = input.size(1);
 
-  auto res = input.new_empty({num_A_rows, n});
+  auto result_order = (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+
+  auto res = (transposeResult) ? input.new_empty({n, num_A_rows}): input.new_empty({num_A_rows, n});
 
   bool is_dense_input_transposed = !input.is_contiguous();
   auto opB = is_dense_input_transposed ? CUSPARSE_OPERATION_TRANSPOSE
@@ -184,7 +197,7 @@ at::Tensor CusparseLt::cusparselt_helper(
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
   auto ldb = (is_rowmajor) ? num_B_cols : num_B_rows;
-  auto ldc = (is_rowmajor) ? num_C_cols : num_C_rows;
+  auto ldc = (transposeResult) ? num_C_cols : num_C_rows;
 
   // initalize dense input descriptor
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
@@ -283,7 +296,7 @@ at::Tensor CusparseLt::cusparselt_helper(
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLt>("CusparseLt")
       .def(torch::init<const at::Tensor&>())
-      .def("cusparselt_mm", &CusparseLt::cusparselt_mm)
-      .def("cusparselt_addmm", &CusparseLt::cusparselt_addmm)
+      .def("mm", &CusparseLt::cusparselt_mm)
+      .def("addmm", &CusparseLt::cusparselt_addmm)
       .def("compress", &CusparseLt::compress);
 }
