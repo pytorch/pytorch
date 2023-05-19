@@ -185,16 +185,36 @@ class NestedTensor(Tensor):
             # Return a fake version of jagged_offsets; should be batch size + 1 offsets
             return nt.buffer.new_empty(nt.n_tensors + 1, dtype=torch.int64)
 
+        unsupported = {
+            torch.ops.aten.native_layer_norm.default,
+            torch.ops.aten.silu.default,
+            torch.ops.aten.view.default,
+            torch.ops.aten.split_with_sizes_copy.default,
+            torch.ops.aten.transpose.int,
+        }
+        if func in unsupported:
+            from torch._dynamo.exc import unimplemented
+
+            unimplemented(f"Purposefully not supporting {func} for now")
+
         # Call fallback. Currently assuming for simplicity that all arguments are NestedTensors
         def unwrap(t):
-            return t.buffer if isinstance(t, NestedTensor) else t
+            # Unwrap to jagged format: (sum(*), D)
+            return (
+                t.buffer.view(t.jagged_sizes[0], t.jagged_sizes[1])
+                if isinstance(t, NestedTensor) else t
+            )
+
+        def wrap(t):
+            return NestedTensor(
+                # Collapse buffer to 1D
+                buffer=t.view(args[0].jagged_sizes[0] * args[0].jagged_sizes[1]),
+                sizes=args[0].sizes,
+                jagged_sizes=args[0].jagged_sizes)
 
         # TODO: Fix this; the size is certainly wrong and we can't always naively operate
         # on the buffer and rewrap. Need to graph break if we're not calling a pointwise func.
-        out = NestedTensor(
-            func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)),
-            args[0].sizes,
-            args[0].jagged_sizes)
+        out = wrap(func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
 
         return out
 

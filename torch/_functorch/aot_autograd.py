@@ -1066,7 +1066,7 @@ def fn_prepped_for_autograd(
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
         for i, arg in enumerate(args_maybe_cloned):
-            if not isinstance(arg, Tensor):
+            if not isinstance(arg, Tensor) or arg.is_nested:
                 continue
             torch._sync(arg)
 

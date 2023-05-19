@@ -298,12 +298,6 @@ class MetaConverter:
                     from torch.fx.experimental.symbolic_shapes import constrain_range
                     from torch.nested._nested_tensor import NestedTensor
 
-                    buffer_size = shape_env.create_unbacked_symint()
-                    constrain_range(buffer_size, min=2, max=sys.maxsize - 1)
-                    buffer = callback(
-                        lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
-                    )
-
                     # Construct jagged symbolic sizes: (sum(*), D) as (s0, s1) for (B, *, D)
                     sizes = NestedTensor._sizes_from_shape_list(t._nested_tensor_size())
                     collapsed_size = sum(sizes[1])
@@ -329,6 +323,11 @@ class MetaConverter:
                             hint=sizes[-1],
                         ),
                     ]
+
+                    buffer_size = sym_jagged_sizes[0] * sym_jagged_sizes[1]
+                    buffer = callback(
+                        lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
+                    )
 
                     # Construct symbolic sizes: (s0, s1, s2) for (B, *, D)
                     sym_sizes = []

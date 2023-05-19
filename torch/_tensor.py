@@ -336,6 +336,8 @@ class Tensor(torch._C._TensorBase):
                     "sparse tensor __reduce_ex__ for layout `%s`" % (self.layout)
                 )
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
+        elif self.is_nested:
+            raise NotImplementedError("__reduce_ex__ NYI for nested tensors")
         elif self.layout in {
             torch.sparse_csr,
             torch.sparse_csc,
