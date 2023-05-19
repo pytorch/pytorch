@@ -1109,6 +1109,7 @@ def main():
         'include/ATen/core/dispatch/*.h',
         'include/ATen/core/op_registration/*.h',
         'include/c10/core/impl/*.h',
+        'include/c10/core/impl/cow/*.h',
         'include/c10/util/*.h',
         'include/c10/cuda/*.h',
         'include/c10/cuda/impl/*.h',
