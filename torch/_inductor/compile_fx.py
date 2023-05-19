@@ -20,6 +20,7 @@ from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -33,6 +34,7 @@ from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
+
 
 if config.is_fbcode():
     from torch._inductor.fb.logging import time_and_log
@@ -282,8 +284,6 @@ def compile_fx_inner(
                 return compiled_fn
 
     if cudagraphs:
-        import sympy
-
         # output args are tuple of first argument
         output = list(gm.graph.nodes)[-1]
         assert len(output.args) == 1
@@ -299,16 +299,7 @@ def compile_fx_inner(
         )
 
         def _has_dynamism(t):
-            if isinstance(t, torch.Tensor):
-                if not all(isinstance(s, int) for s in t.size()):
-                    return True
-                if not all(isinstance(s, int) for s in t.stride()):
-                    return True
-            elif isinstance(t, sympy.Expr):
-                if len(t.free_symbols) == 0:
-                    return False
-                return True
-            return False
+            return len(free_symbols(t)) > 0
 
         # automatic_dynamic_shapes is rejected here because it can lead to a case of bifurcated memory, wherein
         # you start off entirely static, and therefore produce cudagraphs, but on a subsequent frame you re-enter
