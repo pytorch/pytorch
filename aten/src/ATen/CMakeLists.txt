@@ -238,7 +238,7 @@ add_subdirectory(quantized)
 add_subdirectory(nnapi)
 
 if(BUILD_LITE_INTERPRETER)
-  set(all_cpu_cpp ${generated_sources} ${core_generated_sources} ${cpu_kernel_cpp})
+  set(all_cpu_cpp ${generated_sources} ${core_generated_sources} ${cpu_kernel_cpp} ${native_eigen_cpp})
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
