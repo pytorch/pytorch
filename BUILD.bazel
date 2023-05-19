@@ -382,6 +382,7 @@ cc_library(
         ":aten_headers",
         ":caffe2_for_aten_headers",
         ":torch_headers",
+        "@eigen",
         "@fbgemm",
         "@ideep",
     ],
