@@ -121,8 +121,6 @@ _efficient_attention_backward(
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
   }
-  at::globalContext().alertNotDeterministic(
-      "mem_efficient_attention_backward_cutlass");
   // TODO_DRISS utilize these tensor correctly
   // Appease the compilier for now.e These values
   // will never be used Until we wire up dropout
@@ -388,11 +386,20 @@ _efficient_attention_backward(
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {
       p.num_splits_key = 1;
     }
-    if (at::globalContext().deterministicAlgorithms()) {
-      TORCH_CHECK(
-          num_splits_key <= 1,
-          "Using `num_splits_key > 1` makes the algorithm non-deterministic, and pytorch's deterministic mode is enabled");
-      p.num_splits_key = 1;
+
+    auto& ctx = at::globalContext();
+    if (ctx.deterministicAlgorithms()) {
+      if (ctx.deterministicAlgorithmsWarnOnly()) {
+        std::cout<<"lets warn it on up buddy"<<std::endl;
+        TORCH_WARN_ONCE(
+            "Memory Efficient attention defaults to a non-deterministic algorithm. ",
+            "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+      } else {
+        TORCH_CHECK(
+            num_splits_key <= 1,
+            "Using `num_splits_key > 1` makes the algorithm non-deterministic, and pytorch's deterministic mode is enabled");
+        p.num_splits_key = 1;
+      }
     }
     int64_t size_bytes = p.workspace_size();
     if (size_bytes) {
