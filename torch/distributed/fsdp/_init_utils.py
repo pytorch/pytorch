@@ -297,7 +297,7 @@ def _init_device_handle(
             else:
                 if param.device.type != determined_device.type:
                     raise RuntimeError(
-                        f"FSDP not supports modules on different device type "
+                        f"FSDP does not support modules with different device types "
                         f"but got params on {determined_device.type} and {param.device.type}"
                     )
         determined_device = determined_device or torch.device(
