@@ -54,6 +54,7 @@ Features described in this documentation are classified by release status:
    compile/technical-overview
    compile/guards-overview
    compile/custom-backends
+   compile/inductor_profiling
    compile/deep-dive
    compile/performance-dashboard
    ir
