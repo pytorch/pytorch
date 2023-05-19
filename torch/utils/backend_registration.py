@@ -109,7 +109,7 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
         if device.split(":")[0] == custom_backend_name:
             device_idx = int(device.split(":")[-1])
         else:
-            raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
+            raise ValueError(f"Invalid device, must be {custom_backend_name} device")
     # if isinstance(device, int), we can take the index number directly
     else:
         device_idx = device
