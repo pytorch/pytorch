@@ -32,7 +32,7 @@ class TensorCheck {
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
         device_index_(v.device().index()),
-        requires_grad_(state.grad_mode_enabled && v.requires_grad()),
+        requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
         strides_(std::move(dynamic_dims_strides)) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
@@ -46,7 +46,7 @@ class TensorCheck {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
         device_index_ != v.device().index() ||
-        requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
+        requires_grad_ != v.requires_grad()) {
       return false;
     }
     auto ndim = v.ndimension();
@@ -97,8 +97,7 @@ class TensorCheck {
           << "Tensor device index mismatch. Expected device index to be "
           << device_index_ << ", actual " << v.device().index();
       return fail_reason.str();
-    } else if (
-        requires_grad_ != (state.grad_mode_enabled && v.requires_grad())) {
+    } else if (requires_grad_ != v.requires_grad()) {
       // return fmt::format("tensor requires_grad mismatch. expected {}",
       // requires_grad_);
       fail_reason << "requires_grad mismatch. expected requires_grad="

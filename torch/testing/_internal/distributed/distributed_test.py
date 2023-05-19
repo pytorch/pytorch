@@ -391,12 +391,12 @@ CUSTOM_PG_TIMEOUT = {
 def require_backend(backends):
     if BACKEND not in backends:
         return skip_but_pass_in_sandcastle(
-            "Test requires backend to be one of %s" % backends
+            f"Test requires backend {BACKEND} to be one of {backends}"
         )
     return lambda func: func
 
 
-def require_backends_available(backends):
+def require_backend_is_available(backends):
     def check(backend):
         if backend == dist.Backend.GLOO:
             return dist.is_gloo_available()
@@ -410,9 +410,9 @@ def require_backends_available(backends):
             return True
         return False
 
-    if not all(check(dist.Backend(backend)) for backend in backends):
+    if not check(dist.Backend(BACKEND)):
         return skip_but_pass_in_sandcastle(
-            "Test requires backends to be available %s" % backends
+            f"Test requires backend {BACKEND} to be available"
         )
     return lambda func: func
 
@@ -869,14 +869,14 @@ class DistributedTest:
             self.assertEqual(_build_tensor(2, value=0), tensor.to("cpu"))
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_world_size(3)
         @skip_if_lt_x_gpu(2)
         def test_backend_group(self):
             self._test_group_override_backend(self._init_group_test)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(3)
         def test_backend_full_group(self):
             self._test_group_override_backend(self._init_full_group_test)
@@ -6655,7 +6655,7 @@ class DistributedTest:
                 self.assertEqual(tensor, expected_tensor)
 
         @require_backend({"nccl"})
-        @require_backends_available({"nccl"})
+        @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allreduce(self):
             torch.cuda.set_device(self.rank)
@@ -6683,7 +6683,7 @@ class DistributedTest:
             # these once it is supported.
 
         @require_backend({"nccl"})
-        @require_backends_available({"nccl"})
+        @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allgather(self):
             torch.cuda.set_device(self.rank)
@@ -6706,7 +6706,7 @@ class DistributedTest:
             self.assertEqual(input_tensor_copy, input_tensor)
 
         @require_backend({"nccl"})
-        @require_backends_available({"nccl"})
+        @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_nccl_backend_bool_reduce(self):
             torch.cuda.set_device(self.rank)
@@ -6734,7 +6734,7 @@ class DistributedTest:
                 self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
 
         @require_backend({"nccl"})
-        @require_backends_available({"nccl"})
+        @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_broadcast(self):
             tensor_size = 10
@@ -7128,14 +7128,14 @@ class DistributedTest:
             self.assertEqual(len(events), 1)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_profiling_autograd_profiler(self):
             autograd_profiler_ctx = torch.autograd.profiler.profile()
             return self._test_ddp_profiling(profiler_ctx=autograd_profiler_ctx)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @skip_but_pass_in_sandcastle_if(
@@ -7803,7 +7803,7 @@ class DistributedTest:
                 torch.cuda.synchronize(device=self.rank)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_ignore_params_arg(self):
             self._test_ddp_ignore_params_arg(static_graph=False)
@@ -7811,7 +7811,7 @@ class DistributedTest:
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_unused_params_rebuild_buckets_exception(self):
             class ToyModel(nn.Module):
@@ -7864,7 +7864,7 @@ class DistributedTest:
             dist.barrier()
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_shared_grad_acc_unused_params(self):
             # When find_unused_parameters=True, ensure we mark unused parameters
@@ -7901,7 +7901,7 @@ class DistributedTest:
                     loss.backward()
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_device(self):
             m = nn.Linear(10, 10).to(self.rank)
@@ -8006,7 +8006,7 @@ class DistributedTest:
             train_iter(inp, type(inp))
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_namedtuple(self):
             batch = 5
@@ -8043,7 +8043,7 @@ class DistributedTest:
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_control_flow_same_across_ranks(self):
             # Control flow that is the same across ranks.
@@ -8126,7 +8126,7 @@ class DistributedTest:
             dist.barrier()
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_invalid_static_graph(self):
             world_size = dist.get_world_size()
@@ -8176,7 +8176,7 @@ class DistributedTest:
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_control_flow_different_across_ranks(self):
             # Control flow that is different across ranks.
@@ -8365,13 +8365,13 @@ class DistributedTest:
             dist.barrier(group_gloo)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=False)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=True)
@@ -8460,7 +8460,7 @@ class DistributedTest:
             dist.barrier(group_gloo)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
         )
@@ -8469,7 +8469,7 @@ class DistributedTest:
             self._test_verify_model_across_rank(use_logger=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
         )
@@ -8493,7 +8493,7 @@ class DistributedTest:
             dist.barrier(group_gloo)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
         )
@@ -8520,7 +8520,7 @@ class DistributedTest:
             )
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
         )
@@ -8738,7 +8738,7 @@ class DistributedTest:
             return ddp_model
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
             base_model = self._test_different_graph_across_ranks(
@@ -8755,7 +8755,7 @@ class DistributedTest:
                 self.assertEqual(i, j)
 
         @require_backend({"gloo"})
-        @require_backends_available({"gloo"})
+        @require_backend_is_available({"gloo"})
         @skip_but_pass_in_sandcastle_if(
             IS_MACOS or IS_WINDOWS,
             "MacOS uses uv transport which does not have as robust error handling as tcp transport",
@@ -8796,7 +8796,7 @@ class DistributedTest:
             self._barrier(timeout=30)
 
         @require_backend({"gloo"})
-        @require_backends_available({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_monitored_barrier_gloo_subgroup(self):
             # Tests that monitored_barrier works as expected on non-default
             # process groups.
@@ -8873,7 +8873,7 @@ class DistributedTest:
 
         @with_nccl_blocking_wait
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang(self):
             # tests expected behavior when nonzero rank hangs and we want to
@@ -8882,7 +8882,7 @@ class DistributedTest:
 
         @with_nccl_blocking_wait
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
             # tests expected behavior when nonzero rank hangs and we want to
@@ -8890,7 +8890,7 @@ class DistributedTest:
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)
 
         @require_backend({"gloo"})
-        @require_backends_available({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_monitored_barrier_gloo_rank_0_timeout(self):
             # tests error when rank 0 exhausts its given timeout.
             process_group = dist.new_group(ranks=list(range(int(self.world_size))))
@@ -8902,7 +8902,7 @@ class DistributedTest:
                     process_group.monitored_barrier(timeout)
 
         @require_backend({"gloo"})
-        @require_backends_available({"gloo"})
+        @require_backend_is_available({"gloo"})
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
             IS_MACOS or IS_WINDOWS,
@@ -8930,7 +8930,7 @@ class DistributedTest:
                     dist.monitored_barrier(timeout=timeout)
 
         @require_backend({"gloo"})
-        @require_backends_available({"gloo"})
+        @require_backend_is_available({"gloo"})
         @skip_if_small_worldsize
         def test_monitored_barrier_wait_all_ranks(self):
             # Tests simple case where > 1 rank does not call into monitored
@@ -8943,7 +8943,7 @@ class DistributedTest:
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_build_debug_param_to_name_mapping(self):
@@ -9153,14 +9153,14 @@ class DistributedTest:
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_multiple_nested_unused_params_error(self):
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=False)
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_multiple_nested_unused_params_err_ignore_params(self):
             # Tests unused parameter reporting when DDP is configured to ignore
@@ -9827,7 +9827,7 @@ class DistributedTest:
             self.assertIsNone(module.module.buffer.grad)
 
         @require_backend(DistTestCases.backend_feature["gpu"])
-        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_forward_backward_hook(self):
             class DummyTestModel(nn.Module):
