@@ -7,7 +7,7 @@ from tqdm import tqdm
 import pandas as pd
 import argparse
 import random
-from torch.ao.pruning import StructuredSemiSparseTensor
+from torch.ao.pruning import SemiStructuredSparseTensor
 
 
 torch.set_printoptions(
@@ -53,7 +53,7 @@ def test_linear(m, k, n, dtype):
     A = torch.rand(m, k).half().cuda() * gen_two_four_sparse_mask(m, k, torch.float16)
     B = torch.zeros(n, k).half().cuda()
 
-    sA = StructuredSemiSparseTensor(A)
+    sA = SemiStructuredSparseTensor(A)
 
     model = Model(m, k).half().cuda().eval()
     model.weight = A
@@ -65,7 +65,7 @@ def test_linear(m, k, n, dtype):
 
     temp = model(B)
 
-    model.linear.weight = nn.Parameter(StructuredSemiSparseTensor(model.linear.weight))
+    model.linear.weight = nn.Parameter(SemiStructuredSparseTensor(model.linear.weight))
     res = model(B)
 
     sparse_measurement = benchmark.Timer(
@@ -94,7 +94,7 @@ def test_tensor(m, k, n, dtype):
     B = torch.zeros(k, n).half().cuda()
     bias = torch.rand(n).half().cuda()
 
-    sA = StructuredSemiSparseTensor(A)
+    sA = SemiStructuredSparseTensor(A)
 
     # torch.mm calculation
     sparse_output_addmm = torch.addmm(bias, sA, B)
@@ -163,7 +163,7 @@ def compare_linear(m, k, n, batch_size, init_batch_size, dtype, assert_correct=F
     pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
     pruner.step()
     pruner.squash_mask()
-    model.linear.weight = nn.Parameter(StructuredSemiSparseTensor(model.linear.weight))
+    model.linear.weight = nn.Parameter(SemiStructuredSparseTensor(model.linear.weight))
 
     # print(input_tensor)
 
