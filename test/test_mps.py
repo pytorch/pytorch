@@ -710,6 +710,7 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
@@ -10500,15 +10501,15 @@ class TestConsistency(TestCaseMPS):
                     mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
-                if "softplus" in op.name and dtype in [torch.float, torch.half]:
-                    print(op.name)
-                    print("cpu_out ", cpu_out)
-                    print("mps_args ", mps_args, mps_kwargs)
+                # if "softplus" in op.name and dtype in [torch.float, torch.half]:
+                print(op.name, flush=True)
+                print("cpu_out ", cpu_out, flush=True)
+                print("mps_args ", mps_args, mps_kwargs, flush=True)
 
                 mps_out = op(*mps_args, **mps_kwargs)
-                if "softplus" in op.name and dtype in [torch.float, torch.half]:
-                    print(op.name)
-                    print("mps_out ", mps_out)
+                # if "softplus" in op.name and dtype in [torch.float, torch.half]:
+                print(op.name, flush=True)
+                print("mps_out ", mps_out, flush=True)
 
                 if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
                     atol = 1e-4
