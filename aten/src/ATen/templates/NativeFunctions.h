@@ -31,3 +31,18 @@
 ${NativeFunctions_includes}
 
 ${NativeFunctions_declarations}
+
+namespace at {
+namespace native {
+
+// Added from torch/include/ATen/ops/mul_native.h
+struct TORCH_API structured_mul_out : public at::meta::structured_mul_Tensor {
+void impl(const at::Tensor & self, const at::Tensor & other, const at::Tensor & out);
+};
+
+TORCH_API at::Tensor mul(const at::Tensor & self, const at::Scalar & other);
+TORCH_API at::Tensor & mul_(at::Tensor & self, const at::Scalar & other);
+TORCH_API at::Tensor & mul_out(const at::Tensor & self, const at::Tensor & other, at::Tensor & out);
+
+} // namespace native
+} // namespace at
