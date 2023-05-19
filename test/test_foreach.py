@@ -1,6 +1,7 @@
 # Owner(s): ["module: mta"]
 
 from contextlib import nullcontext
+from functools import partial
 from numbers import Number
 import re
 import torch
@@ -911,8 +912,33 @@ class TestForeach(TestCase):
         self.assertIsNotNone(sample.input[0].grad)
         self.assertIsNone(sample.input[1].grad)
 
+    @ops(
+        filter(
+            lambda op: op.supports_forward_ad,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        ),
+        dtypes=(torch.float,),
+    )
+    def test_forward_mode_AD(self, device, dtype, op):
+        inplace_func = partial(self._get_funcs(op)[2], is_cuda=False, is_fastpath=False, zero_size=False)
+        for sample in op.sample_inputs(
+            device, dtype, requires_grad=True, num_input_tensors=[2], same_size=True,
+        ):
+            primal_tensors = [t.clone() for t in sample.input]
+            tangent_tensors = [torch.rand_like(t) for t in primal_tensors]
+
+            values, grads = torch.func.jvp(inplace_func, ([primal_tensors],), ([tangent_tensors],),)
+
+            cloned_sample = sample.transform(clone)
+            ref_inputs = [t.clone() for t in cloned_sample.input]
+            outputs = inplace_func([ref_inputs] + list(cloned_sample.args))
+            ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
+            self.assertEqual(values, outputs)
+            self.assertEqual(grads, ref_grads)
+
 
 instantiate_device_type_tests(TestForeach, globals())
+
 
 if __name__ == "__main__":
     run_tests()

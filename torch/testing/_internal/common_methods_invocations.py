@@ -8347,19 +8347,84 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
 
 
 foreach_unary_op_db: List[OpInfo] = [
-    ForeachFuncInfo('exp', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('acos', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('asin', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('atan', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('cos', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('cosh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('log', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('log10', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('log2', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('tan', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('tanh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('sin', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
-    ForeachFuncInfo('sinh', sample_inputs_func=foreach_inputs_sample_func(1, False, False), supports_autograd=True),
+    ForeachFuncInfo(
+        'exp',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'acos',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'asin',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'atan',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'cos',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'cosh',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'log',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'log10',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'log2',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'tan',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'tanh',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'sin',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
+    ForeachFuncInfo(
+        'sinh',
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_forward_ad=True,
+    ),
 
     ForeachFuncInfo(
         'neg',
@@ -8367,6 +8432,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex(),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
+        supports_forward_ad=True,
     ),
 
     ForeachFuncInfo(
@@ -8375,6 +8441,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
+        supports_forward_ad=True,
     ),
 
     ForeachFuncInfo(
@@ -8383,6 +8450,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
+        supports_forward_ad=True,
     ),
 
     ForeachFuncInfo(
@@ -8391,6 +8459,7 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
+        supports_forward_ad=True,
     ),
 
     ForeachFuncInfo(
