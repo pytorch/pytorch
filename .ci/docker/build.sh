@@ -365,6 +365,7 @@ docker build \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
+       --build-arg "INDUCTOR_BENCHMARK=${INDUCTOR_BENCHMARK}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
