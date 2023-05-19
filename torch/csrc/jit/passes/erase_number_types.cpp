@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static void SetNumTypeToTensorType(Value* v) {
+void SetNumTypeToTensorType(Value* v) {
   if (v->type()->isSubtypeOf(*NumberType::get())) {
     v->setType(TensorType::fromNumberType(*v->type()));
   } else if (v->type()->isSubtypeOf(*BoolType::get())) {
