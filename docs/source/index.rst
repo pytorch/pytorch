@@ -58,6 +58,7 @@ Features described in this documentation are classified by release status:
    compile/performance-dashboard
    compile/torchfunc-and-torchcompile
    ir
+   compile/dynamic-shapes
    compile/fake-tensor
    logging
    compile/transformations
