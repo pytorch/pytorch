@@ -65,7 +65,7 @@ function install_torchvision() {
 
 install_huggingface
 install_timm
-install_torchaudio
-install_torchtext
-install_torchvision
+# install_torchaudio
+# install_torchtext
+# install_torchvision
 # checkout_install_torchbench
