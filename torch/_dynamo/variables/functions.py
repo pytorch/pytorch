@@ -318,18 +318,23 @@ class UserMethodVariable(UserFunctionVariable):
         #
         # It is possible that these original motivations are no longer valid,
         # and we could simplify the codepath now by removing the special case.
-        # However, it might be hard because downstream users od Dynamo might
-        # have written Fx transformations assuming presence of these modules.
+        # However, it might be too late to do this because downstream users
+        # of Dynamo might have already written Fx Transformations assuming the
+        # presence of these builtin modules.
 
         # In the following path, we check if the method belongs to the builtin
         # nn module. If it does, we redirect it to NNModule special handling of
         # methods. For example, TorchDynamo does not need to trace the
         # `children` method, we can directly get the children by constructing
-        # the relevant VariableTracker.
+        # the relevant VariableTracker. Again, it is possible to just let Dynamo
+        # trace the methods and construct the VariableTrackers, however there
+        # might be lots of graph breaks today. We can try to fix this in near
+        # future, because this does not impact the downstream users of Dynamo.
         if isinstance(self.obj, variables.NNModuleVariable):
-            # Extract the module this method belongs to. For example, for
+            # Extract the module this method belongs to. For example, a
             # non-overriden `children` method of a user-defined nn module will
-            # still use the builtin nn module `children` impl.
+            # still use the builtin nn module `children` impl. And therefore, we
+            # can redirect it to NNModuleVariable call_method.
             module_where_fn_is_defined = inspect.getmodule(self.fn)
             if module_where_fn_is_defined and is_allowed(module_where_fn_is_defined):
                 return self.obj.call_method(
