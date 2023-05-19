@@ -1414,7 +1414,6 @@ make_fx_failures = {
 fake_tensor_failures = {
     # FakeTensor fallback doesn't work
     xfail('_segment_reduce', 'lengths'),
-    xfail('multinomial'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
     # cannot do these as they rely on tensor data
