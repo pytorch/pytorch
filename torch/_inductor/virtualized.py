@@ -163,7 +163,7 @@ _interpreter = Virtualized("interpreter", NullHandler)
 
 
 class OpsValue:
-    """The turn type of most ops calls. This exists so we can do operator
+    """The return type of most ops calls. This exists so we can do operator
     overloading.
     """
 
