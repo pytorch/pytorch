@@ -156,17 +156,19 @@ def exception_handler(func):
 def time_handler(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        func(*args, **kwargs)
+        t1 = time.time()
+        func_return = func(*args, **kwargs)
+        t2 = time.time()
 
         if is_initialized():
             msg_dict = {
                 "func_name": f"{func.__name__}",
+                "time_spent": f"f'{t2-t1}')",
                 "args": f"{args}, {kwargs}",
                 "backend": f"{get_backend(kwargs.get('group'))}",
                 "world_size": f"{get_world_size(kwargs.get('group'))}",
                 "global_rank": f"{get_rank()}",
                 "local_rank": f"{get_rank(kwargs.get('group'))}",
-                "pg_group_ranks": f"{get_process_group_ranks(kwargs.get('group'))}",
             }
         else:
             msg_dict = {
@@ -174,6 +176,8 @@ def time_handler(func):
                 "args": f"{args}, {kwargs}",
             }
         _c10d_logger.debug(msg_dict)
+
+        return func_return
 
     return wrapper
 
@@ -656,6 +660,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
 _barrier_after_init = int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
 
 
+@time_handler
 def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
@@ -987,7 +992,9 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     assert pg_store is not None
     return pg_store[0]
 
+
 @exception_handler
+@time_handler
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
@@ -3786,7 +3793,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
     return Backend(backend)
 
 
-
+@time_handler
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
