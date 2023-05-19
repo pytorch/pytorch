@@ -4051,7 +4051,8 @@ def erfinv_lowering(x):
     if is_cuda:
         return erfinv_native(x)
 
-    # CPU doesn't have a primitive for erfinv.
+    # CPU doesn't have a primitive for erfinv
+    # (however, one can write decomposition for the same).
     return erfinv_fallback(x)
 
 

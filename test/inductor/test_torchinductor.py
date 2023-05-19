@@ -6151,6 +6151,7 @@ class CommonTemplate:
         def fn(x):
             return torch.erfinv(x)
 
+        # domain for erfinv is (-1, 1)
         x = torch.empty(8, 8).uniform_(-1, 1)
         self.common(fn, (x,))
 
