@@ -79,10 +79,7 @@ There are quite a lot of interesting things to note in the output
 Loading the trace into chrome ( visit chrome://tracing in the chrome
 browser and load the file as the UI suggested ) will show UI as follows:
 
-.. figure:: _static/img/inductor_profiling/trace.png
-
-   Figure showing chrome perf trace of inductor profiling.
-   :alt: image_tooltip
+.. image:: _static/img/inductor_profiling/trace.png
 
 One can zoom in and out to check the profile.
 
@@ -120,9 +117,7 @@ of the report for each kernel category.
 4. We call also zoom into a certain category of kernels, e.g. let’s
    check reduction kernels:
 
-
-.. figure:: _static/img/inductor_profiling/kernel_breakdown.png
-   :alt: Inductor Kernel breakdown of cuda and overall time.
+.. image:: _static/img/inductor_profiling/kernel_breakdown.png
 
 We can see an ordered table of execution time for each individual
 reduction kernel. We also see how many times a kernel is executed. This
@@ -147,9 +142,7 @@ We can lookup the kernel name in the fwd.py, and find comment like
 **# kernel path:
 /tmp/torchinductor_shunting/jk/cjk2vm3446xrk7rth7hr6pun7xxo3dnzubwcn6ydrpifal4eykrz.py**
 
-.. figure:: _static/img/inductor_profiling/inductor_code.png
-   :alt: Print out of generated inductor code for triton.
-
+.. image:: _static/img/inductor_profiling/inductor_code.png
 
 I’ll rename it k.py for convenience. Here is a paste for this file:
 https://gist.github.com/shunting314/96a0afef9dce53d6357bf1633094f358
@@ -159,8 +152,7 @@ benchmark.
 
 Run k.py directly will report it’s execution time and bandwidth:
 
-.. figure:: _static/img/inductor_profiling/terminal_printout.png
-   :alt: Terminal output running profiling.
+.. image:: _static/img/inductor_profiling/terminal_printout.png
 
 We can check if max-autotune helps this kernel, by running:
 
