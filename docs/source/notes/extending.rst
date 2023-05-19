@@ -450,10 +450,10 @@ This is how a ``Linear`` module can be implemented::
                 self.input_features, self.output_features, self.bias is not None
             )
 
-.. _extending-torch:
+.. _extending-torch-python:
 
-Extending :mod:`torch`
-----------------------
+Extending :mod:`torch` Python API
+---------------------------------
 
 You can create custom types that emulate :class:`Tensor` by defining a custom
 class with methods that match :class:`Tensor`. But what if you want to be able
@@ -853,6 +853,34 @@ that explicitly cannot be overrided by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
 by ``get_overridable_functions`` cannot be overriden.
 
+
+.. _extending-torch-c++:
+
+Extending :mod:`torch` native API
+---------------------------------
+
+While ``__torch_function__`` allows to effectively extend PyTorch's behavior
+for it's pure python components, it does not allow to extend the parts of
+PyTorch implemented in C++. To that end, a :class:`Tensor` subclass can also
+define ``__torch_dispatch__`` which will be able to override the behavior at the
+c++ level.
+
+TODO Intro to the dispatcher and basic key ordering.
+
+TODO Intro to the aten API.
+
+TODO link back to subclass zoo
+
+TODO Intro + link to torch.library code (unify it with the "native" framing)
+
+Extending all :mod:`torch` API with Modes
+-----------------------------------------
+
+TODO Q: what about functions that don't take tensor inputs?
+
+TODO Intro to the concept of mode
+
+TODO Example of logging mode
 
 Writing custom C++ extensions
 -----------------------------
