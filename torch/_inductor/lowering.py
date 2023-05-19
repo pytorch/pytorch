@@ -4037,7 +4037,8 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
 
-@register_lowering(aten.erfinv)
+@register_lowering(aten.erfinv,
+                   type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def erfinv_lowering(x):
     is_cuda = decode_device(x.get_device()).type == "cuda"
     # triton has a primitive for erfinv
