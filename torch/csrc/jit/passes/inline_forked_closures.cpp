@@ -16,7 +16,7 @@ namespace jit {
 // subgraph, replace the context unpacking value with the new graph input.
 // fork(foo) ->
 // def foo(a, b):
-static void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
+void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
   Node* function_context_node = fork_closure->input()->node();
 
   if (function_context_node->inputs().size() != 2 ||
@@ -58,7 +58,7 @@ static void inlineForkedClosure(Node* fork_closure, NodeKind genKind) {
   runCleanupPasses(fork_graph);
 }
 
-static void inlineForkedClosures(Block* block) {
+void inlineForkedClosures(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++;

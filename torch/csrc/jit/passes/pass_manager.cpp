@@ -21,7 +21,7 @@ GraphPassNameType registerPostPass(GraphPass p) {
   return graphPassID++;
 }
 
-static GraphPassNameType registerPass(GraphPass p) {
+GraphPassNameType registerPass(GraphPass p) {
   return registerPostPass(std::move(p));
 }
 
