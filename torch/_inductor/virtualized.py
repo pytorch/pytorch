@@ -163,8 +163,17 @@ _interpreter = Virtualized("interpreter", NullHandler)
 
 
 class OpsValue:
-    """The return type of most ops calls. This exists so we can do operator
-    overloading.
+    """The return type of most ops calls.
+
+    This exists so we can overload magic methods, and write mathematical
+    expressions much more fluently. So instead of
+
+        ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
+
+    we can write
+
+        (_Ap2 * x - _Ap3) * x * x + _1
+
     """
 
     value: Any
@@ -204,6 +213,11 @@ class OpsValue:
 
 
 class OpsWrapper:
+    """This wraps any returned IR values into an `OpsValue` instance, so that we
+    can overload the magic methods for writing mathematical expressions fluently.
+    """
+
+
     def __getattr__(self, name):
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
