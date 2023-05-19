@@ -310,7 +310,6 @@ def compile_fx_inner(
                 return True
             return False
 
-
         # automatic_dynamic_shapes is rejected here because it can lead to a case of bifurcated memory, wherein
         # you start off entirely static, and therefore produce cudagraphs, but on a subsequent frame you re-enter
         # lowering with some dynamism on inputs, and therefore, cannot produce cudagraphs.
@@ -682,9 +681,7 @@ def compile_fx(
 
     assert not config._raise_error_for_testing
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(
-        config.triton.cudagraphs
-    )
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
     forward_device = BoxedDeviceIndex(None)
 
     graph_id = next(_graph_counter)
