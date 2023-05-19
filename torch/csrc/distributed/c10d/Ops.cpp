@@ -437,7 +437,9 @@ namespace {
 // FUNC: op name
 // DEV: device
 #define REGISTER_C10D_OP1(FUNC, DEV) \
-  TORCH_LIBRARY_IMPL(c10d, DEV, m) { m.impl(#FUNC, FUNC##DEV); }
+  TORCH_LIBRARY_IMPL(c10d, DEV, m) { \
+    m.impl(#FUNC, FUNC##DEV);        \
+  }
 
 // 1st level expansion
 #define REGISTER_C10D_OP(FUNC)  \
