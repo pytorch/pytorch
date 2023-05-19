@@ -788,7 +788,7 @@
   result: auto_linear
 
 - name: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-  self: at::_unsafe_index_put(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
+  self: at::_unsafe_index_put(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad, true)
   result: auto_linear
 
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
