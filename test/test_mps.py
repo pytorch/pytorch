@@ -10469,6 +10469,14 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
+    def test_tmp(self):
+        x = torch.randn((20), dtype=torch.float16, device="cpu")
+        y = F.softplus(x, 1, 1)
+
+        x_mps = x.to("mps")
+        y_mps = F.softplus(x_mps, 1, 1)
+        self.assertEqual(y, y_mps)
+
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
@@ -10501,15 +10509,7 @@ class TestConsistency(TestCaseMPS):
                     mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
-                # if "softplus" in op.name and dtype in [torch.float, torch.half]:
-                print(op.name, flush=True)
-                print("cpu_out ", cpu_out, flush=True)
-                print("mps_args ", mps_args, mps_kwargs, flush=True)
-
                 mps_out = op(*mps_args, **mps_kwargs)
-                # if "softplus" in op.name and dtype in [torch.float, torch.half]:
-                print(op.name, flush=True)
-                print("mps_out ", mps_out, flush=True)
 
                 if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
                     atol = 1e-4
