@@ -1,1 +1,1 @@
-../../.ci/docker/ci_commit_pins/vision.txt
+689ff292e57eef932a939f70c20e893dec8f1d2b

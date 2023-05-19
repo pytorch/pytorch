@@ -637,8 +637,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 3)
-            self.assertEqual(cnts.op_count, 3)
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
 
     def test_nested_generic_context_manager_with_graph_break(self):
         def fn(x):
@@ -673,8 +673,29 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 3)
-            self.assertEqual(cnts.op_count, 3)
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
+
+    def test_graph_break_inlining(self):
+        def gn(z):
+            with torch.no_grad():
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y, z):
+            a = torch.mm(x, y)
+            z = gn(z)
+            return a
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4)
+        opt_fn(x, y, z).sum().backward()
+
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":

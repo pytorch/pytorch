@@ -1,1 +1,1 @@
-../../.ci/docker/ci_commit_pins/torchbench.txt
+f4acd1a7fcce986155c5e20beffa92b24ae0a3fa
