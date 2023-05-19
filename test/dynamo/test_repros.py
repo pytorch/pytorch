@@ -958,7 +958,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.op_count, 11)
 
     def test_reformer_train(self):
         with torch.enable_grad():
@@ -1636,6 +1636,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIs(act.act, nn.functional.gelu)
         self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
+    def test_dropout_inline(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            return torch.nn.Dropout(0.1)(x)
+
+        y = torch.randn(10)
+        torch.manual_seed(1337)
+        ref = nn.functional.dropout(y, 0.1)
+        torch.manual_seed(1337)
+        res = fn(y)
+        self.assertTrue(same(ref, res))
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
@@ -2068,6 +2080,44 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager", nopython=True)(mod)
         args = (torch.randn(3, 4),)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
+
+    def test_requires_grad_guards_with_grad_mode1(self):
+        def f(x):
+            if x.requires_grad:
+                return x + 1
+            else:
+                return x + 2
+
+        x = torch.ones(2, requires_grad=True)
+
+        f_compiled = torch.compile(f)
+        with torch.no_grad():
+            # compile an inference graph
+            f_compiled(x)
+
+        # Test: we should fail guards and recompile (even though it's still an inference graph)
+        out_ref = f(x.detach())
+        out = f_compiled(x.detach())
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(out_ref.requires_grad, out.requires_grad)
+
+    def test_requires_grad_guards_with_grad_mode2(self):
+        x = torch.ones(2, requires_grad=True)
+        x_ref = x.clone().detach().requires_grad_(True)
+
+        m = torch.nn.Linear(2, 2)
+        m_compiled = torch.compile(m)
+
+        with torch.no_grad():
+            # compile an inference graph
+            m_compiled(x)
+
+        # Test: we should fail guards and recompile a training graph
+        out_ref = m(x_ref)
+        out = m_compiled(x)
+        self.assertEqual(out_ref, out)
+        self.assertEqual(out_ref.requires_grad, out.requires_grad)
 
     def test_is_symbolic_tracing(self):
         # Ensure no graph break here
@@ -2928,11 +2978,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
-        self.assertEqual(
-            dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
-        )
-        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
