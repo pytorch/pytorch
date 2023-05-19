@@ -140,4 +140,17 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+// Bypass dispatcher by directly calling in implementations
+// Directly calling into CPU kernel
+
+TORCH_API inline at::Tensor mul(const at::Tensor & self, const at::Tensor & other) {
+return at::native::mul(self, other);
 }
+TORCH_API inline at::Tensor & mul_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other) {
+return at::native::mul_out(out, self, other);
+}
+TORCH_API inline at::Tensor & mul_outf(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
+return at::native::mul_out(self, other, out);
+}
+
+} // namespace at
