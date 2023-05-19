@@ -1720,14 +1720,23 @@ class DimConstraints:
         # expression to do the replacement to avoid traversing up
         # the source hierarchy manually.
         def extract_and_rewrite_local(dc):
-            arg = re.search(r"L\['(.+?)'\]", dc).expand(r'\1')
+            match = re.search(r"L\['(.+?)'\]", dc)
+            if match is None:
+                return
+            arg = match.expand(r'\1')
             dc = re.sub(r"L\['(.+?)'\]", r'\1', dc)
             return arg, dc
 
         def group(results, args_index):
             groups = defaultdict(list)
             for dc in results:
-                arg, dc = extract_and_rewrite_local(dc)
+                local = extract_and_rewrite_local(dc)
+                if local is None:
+                    # This can happen, e.g., with `assume_constant_result`.
+                    # In that case, we drop the constraint.
+                    # TODO(avik) Maybe we should generate an assertion here?
+                    continue
+                arg, dc = local
                 if arg in args_index:
                     groups[args_index[arg]].append(dc)
                 else:
