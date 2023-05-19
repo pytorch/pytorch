@@ -1,14 +1,15 @@
 #ifdef USE_XNNPACK
 
-#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/utils/Factory.h>
+#include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
 namespace at {
 namespace native {
 namespace xnnpack {
 
-static bool use_global_average_pool(
+bool use_global_average_pool(
   const Tensor& input) {
   return xnnpack::available() &&
           (1 <= input.ndimension()) &&
@@ -18,7 +19,7 @@ static bool use_global_average_pool(
            true;
 }
 
-static Tensor global_average_pool(
+Tensor global_average_pool(
     const Tensor& input) {
   using namespace internal;
 
