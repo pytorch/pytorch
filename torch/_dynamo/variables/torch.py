@@ -494,6 +494,28 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif self.value == torch.utils._pytree.tree_flatten:
+            if len(args) != 1:
+                unimplemented("Unsupported flatten with len(args) != 1")
+
+            items = args[0].unpack_var_sequence(tx)
+            flattened, spec = torch.utils._pytree.tree_flatten(items)
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
+        elif self.value == torch.utils._pytree.tree_unflatten:
+            if len(args) != 2:
+                unimplemented("Unsupported unflatten with len(args) != 2")
+
+            unflattened = torch.utils._pytree.tree_unflatten(
+                args[0].unpack_var_sequence(tx), args[1].value
+            )
+            if isinstance(unflattened, list):
+                return ListVariable(unflattened, **options)
+            if isinstance(unflattened, tuple):
+                return TupleVariable(unflattened, **options)
+            # TODO: Support dict, other types.
+            unimplemented(f"Unflattened of unexpected type: {type(unflattened)}")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

@@ -5389,7 +5389,7 @@ def ___make_guard_fn():
         counter = CompileCounter()
         torch._dynamo.optimize(counter, nopython=True)(fn)(xs)
         self.assertEqual(counter.frame_count, 1)
-        self.assertEqual(counter.op_count, 13)
+        self.assertEqual(counter.op_count, 3)
 
 
 class TestTracer(JitTestCase):

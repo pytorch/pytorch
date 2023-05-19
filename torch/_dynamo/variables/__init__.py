@@ -37,7 +37,6 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     SuperVariable,
-    TreeSpecVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
