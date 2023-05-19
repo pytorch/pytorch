@@ -731,9 +731,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             super(FlattenInputOutputSignature, self).placeholder(f"arg{i}", (), {})
             for i in range(0, arg_len)
         ]
-        self.old_args_gen = (
-            self.new_args[i] for i in matched_input_elements_positions
-        )
+        self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
 
     def placeholder(self, target, args, kwargs):
@@ -1007,7 +1005,7 @@ def export(
         graph,
         len(flat_args),
         matched_input_elements_positions,
-        matched_output_elements_positions
+        matched_output_elements_positions,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
