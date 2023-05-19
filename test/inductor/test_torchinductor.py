@@ -6526,7 +6526,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
                 proc = subprocess.Popen(
-                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    [
+                        sys.executable,
+                        test_path,
+                        fn,
+                        str(ndims),
+                        str(dyn_shape),
+                        "False",
+                    ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
@@ -6536,8 +6543,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "index out of bounds" in err.decode("utf-8")
                         for err in stderr.splitlines()
                     ),
-                    f"{fn}, {ndims}, {dyn_shape}",
+                    f"{fn}, {ndims}, {dyn_shape}, False",
                 )
+            proc = subprocess.Popen(
+                [sys.executable, test_path, "first_arg", "2", "False", "True"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stderr = proc.communicate()[1]
+            self.assertTrue(
+                any(
+                    "index out of bounds" in err.decode("utf-8")
+                    for err in stderr.splitlines()
+                ),
+                "first_arg 2 False True",
+            )
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
