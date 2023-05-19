@@ -43,6 +43,12 @@ bool mkldnn_bf16_gemm(
   return false;
 }
 
+bool use_mkldnn_lower_precision_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+    return false;
+}
 
 } // namespace native
 } // namespace at
