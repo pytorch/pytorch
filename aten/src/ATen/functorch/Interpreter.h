@@ -88,9 +88,9 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 // Same for Interpreter::sendToNextInterpreter :)
 
 struct VmapInterpreterMeta {
-  explicit VmapInterpreterMeta(int64_t batchSize, RandomnessType randomness) :
-    batchSize_(batchSize), randomness_(randomness) {}
-  int64_t batchSize_;
+  explicit VmapInterpreterMeta(c10::SymInt batchSize, RandomnessType randomness) :
+    batchSize_(std::move(batchSize)), randomness_(randomness) {}
+  c10::SymInt batchSize_;
   RandomnessType randomness_;
 };
 
@@ -121,8 +121,8 @@ typedef c10::variant<
 
 struct Interpreter {
   // factory functions
-  static Interpreter Vmap(int64_t level, int64_t batchSize, RandomnessType randomness) {
-    return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(batchSize, randomness));
+  static Interpreter Vmap(int64_t level, c10::SymInt batchSize, RandomnessType randomness) {
+    return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(std::move(batchSize), randomness));
   }
   static Interpreter Grad(int64_t level, bool prevGradMode) {
     return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode));

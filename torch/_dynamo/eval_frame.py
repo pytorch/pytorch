@@ -23,6 +23,7 @@ from unittest.mock import patch
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+import torch.utils.checkpoint
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -890,7 +891,7 @@ def export(
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.warning(
+            log.info(
                 "Summary of dimension constraints:%s",
                 msg,
             )
@@ -918,21 +919,10 @@ def export(
         ):
             super().__init__(m)
             arg_len = len(flat_args)
-            self.new_args = []
-            for i in range(0, arg_len):
-                arg = super(ChangeInputOutputSignature, self).placeholder(
-                    f"arg{i}", (), {}
-                )
-                # Fill node.mata["val"] with faketensolintrunner from the input,
-                # if it's not found in matched_input_elements_positions
-                if (
-                    i not in matched_input_elements_positions
-                    and fake_mode is not None
-                    and isinstance(flat_args[i], torch.Tensor)
-                ):
-                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
-                self.new_args.append(arg)
-
+            self.new_args = [
+                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
+                for i in range(0, arg_len)
+            ]
             self.old_args_gen = (
                 self.new_args[i] for i in matched_input_elements_positions
             )
@@ -1022,14 +1012,6 @@ def export(
     )
 
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
-
         # Inline constraints added by users correspond to unbacked symbols in shape_env,
         new_graph.meta["inline_constraints"] = {
             k: v
@@ -1275,6 +1257,18 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
+
+        # TorchDynamo does not step inside utils.checkpoint function.  The flow
+        # looks likes this
+        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+        #     speculatively checking if the forward function is safe to trace.
+        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+        #  3) If not, then TorchDynamo falls back to eager by performing a graph
+        #     break. And here, the following disable wrapper ensures that
+        #     TorchDynamo does not trigger again on the frames created by
+        #     utils.checkpoint innards.
+        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
