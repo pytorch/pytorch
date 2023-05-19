@@ -6119,6 +6119,16 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(*args, 256), opt_fn(*args, 256))
 
+    @patch.object(config, "disable_cpp_codegen", True)
+    def test_inf_import(self):
+        def fn(x):
+            return torch.full_like(x, -inf)
+
+        x = torch.rand((4, 4))
+        ref = fn(x)
+        res = torch._dynamo.optimize("inductor")(fn)(x)
+        same(res, ref)
+
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
