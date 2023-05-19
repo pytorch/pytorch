@@ -4032,22 +4032,10 @@ register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
 register_pointwise_numeric(aten.copysign)
 register_pointwise_numeric(aten.erfc)
+register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
-
-
-@register_lowering(aten.erfinv,
-                   type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
-def erfinv_lowering(x):
-    is_cuda = decode_device(x.get_device()).type == "cuda"
-    # triton has a primitive for erfinv
-    if is_cuda:
-        return make_pointwise(lambda x: ops.erfinv(x))(x)
-
-    # CPU doesn't have a primitive for erfinv
-    # (however, one can write decomposition for the same).
-    return fallback_handler(aten.erfinv)(x)
 
 
 def register_inplace(aten_op, outplace_op):
