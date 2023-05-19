@@ -728,7 +728,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     ):
         super().__init__(m)
         self.new_args = [
-            super().placeholder(f"arg{i}", (), {})
+            super(FlattenInputOutputSignature, self).placeholder(f"arg{i}", (), {})
             for i in range(0, arg_len)
         ]
         self.old_args_gen = (
