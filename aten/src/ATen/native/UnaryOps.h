@@ -2,6 +2,7 @@
 
 #include <ATen/native/DispatchStub.h>
 #include <ATen/Generator.h>
+#include <c10/core/Scalar.h>
 #include <stdexcept>
 
 namespace at {
