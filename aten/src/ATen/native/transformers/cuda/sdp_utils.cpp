@@ -474,14 +474,14 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
 }
 
 bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
-  // Mem Efficient attention supports hardware in the range (sm_50, sm_90]
+  // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_gte_sm50 = dprops->major >= 5;
-  bool is_le_sm90 = dprops->major < 9;
-  if (!(is_gte_sm50 && is_le_sm90)) {
+  bool is_lte_sm90 = dprops->major <= 9;
+  if (!(is_gte_sm50 && is_lte_sm90)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90). Attempting to run on a sm ",
+          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
