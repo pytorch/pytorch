@@ -23,7 +23,13 @@ TORCH_API std::string NewProcessWideShmHandle();
 class TORCH_API MapAllocator {
  public:
   MapAllocator(std::string filename, int flags, size_t size, off_t offset = 0);
-  MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size, off_t offset = 0);
+  MapAllocator(
+      WithFd,
+      std::string filename,
+      int fd,
+      int flags,
+      size_t size,
+      off_t offset = 0);
   MapAllocator(const MapAllocator&) = delete;
   MapAllocator& operator=(const MapAllocator&) = delete;
   MapAllocator(MapAllocator&&) = delete;

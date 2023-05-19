@@ -427,7 +427,8 @@ static PyObject* THPStorage_fromFileOffset(
   int shared = 0;
   off_t offset = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr const char* kwlist[] = {"filename", "fd", "shared", "nbytes", "offset", nullptr};
+  constexpr const char* kwlist[] = {
+      "filename", "fd", "shared", "nbytes", "offset", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           keywds,
@@ -443,8 +444,8 @@ static PyObject* THPStorage_fromFileOffset(
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
-  
-  int dup_fd = dup(fd); 
+
+  int dup_fd = dup(fd);
 
   shared |= at::ALLOCATOR_MAPPED_FROMFD;
 
@@ -452,7 +453,14 @@ static PyObject* THPStorage_fromFileOffset(
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       nbytes,
-      at::MapAllocator::makeDataPtr(at::WithFd(), filename, dup_fd, shared, nbytes, &actual_nbytes, offset),
+      at::MapAllocator::makeDataPtr(
+          at::WithFd(),
+          filename,
+          dup_fd,
+          shared,
+          nbytes,
+          &actual_nbytes,
+          offset),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
