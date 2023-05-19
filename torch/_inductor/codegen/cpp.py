@@ -22,7 +22,13 @@ from torch._prims_common import is_float_dtype
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
+from ..utils import (
+    cache_on_self,
+    get_fused_kernel_name,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -82,6 +88,12 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
+}
+
+PYTHON_TO_CPP = {
+    "int": "long",
+    "float": "double",
+    "bool": "bool",
 }
 
 
@@ -284,12 +296,13 @@ class RecordOptimizationContext:
         return self.current_node
 
 
+def get_opt_ctx(node: torch.fx.Node) -> OptimizationContext:
+    return node.meta.get(OptimizationContext.key, None)
+
+
 def get_current_node_opt_ctx() -> OptimizationContext:
     assert V.interpreter.current_node
-    if OptimizationContext.key in V.interpreter.current_node.meta:
-        return V.interpreter.current_node.meta[OptimizationContext.key]
-    else:
-        return None
+    return get_opt_ctx(V.interpreter.current_node)
 
 
 class CppVecOverrides(OpOverrides):
@@ -340,6 +353,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"{x}.erf()"
+
+    @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
 
     @staticmethod
     def sqrt(x):
@@ -457,10 +474,6 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.log10()"
 
     @staticmethod
-    def erfc(x):
-        return f"{x}.erfc()"
-
-    @staticmethod
     def nextafter(x):
         return f"{x}.nextafter()"
 
@@ -520,8 +533,21 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"at::vec::clamp_min({x}, decltype({x})(0))"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
+    # TODO: this seems to be dead
     @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1)/(decltype({x})(1) + {x}.neg().exp())"
@@ -586,11 +612,29 @@ class CppVecOverrides(OpOverrides):
             torch.bfloat16,
             torch.uint8,
         ], f"{__name__} does not support {dtype}"
+        node: torch.fx.Node = V.interpreter.current_node
+        assert node
+        opt_ctx_x = get_opt_ctx(node.args[1])
+        assert opt_ctx_x
+        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype == torch.bool:
+            return f"vec_convert_to_mask({x})"
+        if opt_ctx_x.dtype == torch.bool and dtype in (torch.float, torch.float32):
+            return f"mask_convert_to_float({x})"
+        # TODO(jgong5): support conversion for other types
+        # currently we only allow load/store torch.uint8 and handle conversion there
         return f"({x})"
 
     @staticmethod
     def log1p(x):
-        return f"{x}.log1p()"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x}.log1p()"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def masked(mask, body, other):
@@ -611,9 +655,12 @@ class CppVecOverrides(OpOverrides):
             other_code = (
                 "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
+        elif math.isnan(other):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::quiet_NaN())"
+            )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
-
         type = f"decltype({var}())"
         float_mask = f"to_float_mask({mask})"
         return f"{type}::blendv({other_code}, {var}(), {float_mask})"
@@ -674,6 +721,10 @@ class CppOverrides(OpOverrides):
         return f"std::erf({x})"
 
     @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
@@ -683,7 +734,15 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def log1p(x):
-        return f"std::log1p({x})"
+        bug = config.cpp.inject_log1p_bug_TESTING_ONLY
+        if bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"std::log1p({x})"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_log1p_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def tan(x):
@@ -794,10 +853,6 @@ class CppOverrides(OpOverrides):
         return f"std::hypot({x}, {y})"
 
     @staticmethod
-    def erfc(x):
-        return f"std::erfc({x})"
-
-    @staticmethod
     def log10(x):
         return f"std::log10({x})"
 
@@ -807,7 +862,19 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def relu(x):
-        return f"{x} * ({x}>0)"
+        bug = config.cpp.inject_relu_bug_TESTING_ONLY
+        if bug == "compile_error":
+            return "compile error!"
+        elif bug == "runtime_error":
+            return f"{x}; throw 1"
+        elif bug == "accuracy":
+            return f"{x} + decltype({x})(1)"
+        elif bug is None:
+            return f"{x} * ({x}>0)"
+        else:
+            raise AssertionError(
+                f"unrecognized config cpp.inject_relu_bug_TESTING_ONLY = {bug!r}"
+            )
 
     @staticmethod
     def minimum(a, b):
@@ -868,6 +935,8 @@ class CppOverrides(OpOverrides):
             other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
+        elif math.isnan(other):
+            other_code = f"std::numeric_limits<{type}>::quiet_NaN()"
         else:
             other_code = f"static_cast<{type}>({repr(other)})"
 
@@ -916,8 +985,10 @@ class CppOverrides(OpOverrides):
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
         result = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
-        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        scalar_zero = f"decltype({x})(0)"
+        scalar_one = f"decltype({x})(1)"
+        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
+        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
@@ -950,6 +1021,10 @@ class CppKernel(Kernel):
         replacement = {var: var * scale + offset}
         new_index = sympy_subs(index, replacement)
         return new_index
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1266,7 +1341,7 @@ class CppVecKernel(CppKernel):
                 f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
             )
             line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line}; "
+                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line} "
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
@@ -1947,7 +2022,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var, size, check=True):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
@@ -2260,6 +2335,9 @@ class CppKernelProxy(CppKernel):
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
+            if len(contig_vars) == 0:
+                # no contiguous vars
+                return [len(self.itervars) - 1]
             if contig_only:
                 return sorted(contig_only)[-1:]
             contig_and_const_stride = (
@@ -2381,7 +2459,7 @@ class CppScheduling:
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
 
-        kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
     def codegen_sync(self):
         pass
@@ -2399,23 +2477,28 @@ class KernelGroup:
         self.ws = WorkSharing(self.loops_code)
         self.stack = contextlib.ExitStack()
         self.stack.enter_context(self.ws)
-        self.count = 0
+        self.scheduled_nodes = []
 
     def new_kernel(self, cls, *args):
         return cls(self.args, parallel_num_threads(), *args)
 
-    def finalize_kernel(self, new_kernel, scheduler):
-        self.count += 1
+    def finalize_kernel(self, new_kernel, nodes):
+        self.scheduled_nodes += nodes
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
-        if self.count == 0:
+        if not self.scheduled_nodes:
             return
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        fused_name = (
+            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)

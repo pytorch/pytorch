@@ -3,7 +3,7 @@ import logging
 import math
 import re
 import types
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -11,7 +11,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
-from torch._guards import GuardsCheckpointState
+from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
 from .. import config, variables
@@ -370,15 +370,12 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_torch_function__func,
                 tensor_with_tf_override.subclass_type,
             )
-        elif self.value is torch.amp.autocast_mode.autocast:
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
-        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
-            assert "device_type" not in kwargs
-            if self.value is torch.cuda.amp.autocast:
-                kwargs.update({"device_type": ConstantVariable("cuda")})
-            else:
-                kwargs.update({"device_type": ConstantVariable("cpu")})
-            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]:
+            return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -530,63 +527,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     if isinstance(x.value, np.generic):
                         x.value = x.value.item()
 
-            if self.value == torch._C._nn.scaled_dot_product_attention:
-                # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
-                # in pytorch/torch/_meta_registrations.py
-                all_kwargs = kwargs.copy()
-                all_kwargs.update(
-                    dict(
-                        zip(
-                            (
-                                "query",
-                                "key",
-                                "value",
-                                "attn_mask",
-                                "dropout_p",
-                                "is_causal",
-                            ),
-                            args,
-                        )
-                    )
-                )
-                fake_query = all_kwargs["query"].as_proxy().node.meta["example_value"]
-                fake_key = all_kwargs["key"].as_proxy().node.meta["example_value"]
-                fake_value = all_kwargs["value"].as_proxy().node.meta["example_value"]
-                fake_mask = all_kwargs.get("attn_mask")
-                if isinstance(fake_mask, TensorVariable):
-                    fake_mask = fake_mask.as_proxy().node.meta["example_value"]
-                else:
-                    fake_mask = None
-                dropout_p = kwargs.get("dropout_p")
-                dropout_p = dropout_p.value if dropout_p is not None else 0.0
-                is_causal = kwargs.get("is_causal")
-                is_causal = is_causal.value if is_causal is not None else False
-                # We look through the stack to find a cuda autocast context
-                # If we do we will convert the fake tensors to torch.float16
-                is_cuda_autocast_context = False
-                for block in tx.block_stack:
-                    if (
-                        isinstance(block.with_context, AutocastModeVariable)
-                        and block.with_context.target_values[0] == "cuda"
-                    ):
-                        is_cuda_autocast_context = True
-                        break
-
-                if is_cuda_autocast_context and fake_query.device.type == "cuda":
-                    amp_dtype = torch.float16
-                    fake_query = fake_query.clone().to(amp_dtype)
-                    fake_key = fake_key.clone().to(amp_dtype)
-                    fake_value = fake_value.clone().to(amp_dtype)
-
-                backend_choice = torch._fused_sdp_choice(
-                    fake_query, fake_key, fake_value, fake_mask, dropout_p, is_causal
-                )
-                if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
-                    if dropout_p is not None and dropout_p != 0.0:
-                        unimplemented(
-                            "FlashAttention with dropout is not supported in cuda graphs"
-                        )
-
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
@@ -640,7 +580,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 # torch.sigmoid mutate the tensors in the out field. Track such
                 # tensors and rewrite the symbolic locals.
                 if isinstance(tensor_variable, TupleVariable):
-                    assert isinstance(kwargs["out"], TupleVariable)
+                    assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
                     output_tensor_names = [
                         tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
                     ]
@@ -795,10 +735,83 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchHigherOrderOperator(VariableTracker):
-    def __init__(self, value, **kwargs):
+def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
+    # Will raise if not sound
+    try:
+        f.call_function(tx, sub_args, {})
+    finally:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
+
+
+# See NOTE [HigherOrderOperator tracing design] for details of the design
+# See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
+def speculate_subgraph(
+    tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
+):
+    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+
+    try:
+        with tx.output.new_subtracer() as tracer:
+            args = []
+            # One argument to graph per sub_args
+            for a in sub_args:
+                if a is None:
+                    a = ConstantVariable(None)
+                assert not isinstance(
+                    a, torch.Tensor
+                ), "Tensors should already be tracked?"
+                if isinstance(a, ConstantVariable):
+                    proxy = tracer.create_graph_input("const")
+                elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                else:
+                    raise unimplemented(
+                        "HigherOrderOperator with body that accepts non-Tensors as input"
+                    )
+                args.append(a)
+            output = f.call_function(tx, args, {})
+            # Register output to graph
+            # Modeled off of compile_and_call_fx_graph
+            # TODO: support non single Tensor output
+            # We check always_restore because we dont use the output or side effects of always_restore code,
+            # like bwd.
+            if not isinstance(output, TensorVariable) and not always_restore:
+                unimplemented(
+                    "HigherOrderOperator with body with non single Tensor output"
+                )
+
+            if always_restore:
+                # Nothing left to do here
+                return output, tx.output.graph, tracer.lifted_freevars
+
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output",
+                "output",
+                (tracer.create_arg((output.as_proxy(),))),
+                {},
+            )
+            graph = tx.output.graph
+            lifted_freevars = tracer.lifted_freevars
+
+            return (
+                output,
+                graph,
+                lifted_freevars,
+            )
+
+    except torch._dynamo.exc.Unsupported as ex:
+        tx.output.graph = graph_checkpoint
+        tx.restore_graphstate(checkpoint)
+        raise
+
+
+class TorchHigherOrderOperatorVariable(VariableTracker):
+    def __init__(self, value, source: Optional[Source] = None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
+        self.source = source
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -813,7 +826,10 @@ class TorchHigherOrderOperator(VariableTracker):
         )
         from .builder import wrap_fx_proxy
 
-        assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
+        assert (
+            all(isinstance(value, ConstantVariable) for value in kwargs.values())
+            or not kwargs
+        ), "only constant kwargs are supported"
 
         def make_attr(name):
             node = tx.output.create_proxy(
@@ -828,7 +844,7 @@ class TorchHigherOrderOperator(VariableTracker):
             next_name = None
             i = 0
             while not next_name:
-                candidate = f"cond_{name}_{i}"
+                candidate = f"{name}_{i}"
                 if candidate in tx.output.nn_modules:
                     i += 1
                 else:
@@ -854,7 +870,14 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             )
 
-        def speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
+        # NOTE: [speculate_subgraph vs old_speculate_subgraph]
+        # We're in the middle of rewriting how Dynamo capture for HigherOrderOperators
+        # works. If you are writing a new HigherOrderOperator, please prefer using
+        # `speculate_subgraph`.
+        # The main reason why we cannot get rid of `old_speculate_subgraph` yet is
+        # that `speculate_subgraph` does not yet support calling nn.Modules or
+        # accessing attributes of nn.Modules.
+        def old_speculate_subgraph(f, sub_args, graph_checkpoint, checkpoint):
             if isinstance(f, NestedUserFunctionVariable) and f.closure is not None:
                 # closure vars other than 'self' are not in scope of generated code, so error early
                 # TODO(avik): we should eventually support this.
@@ -880,7 +903,7 @@ class TorchHigherOrderOperator(VariableTracker):
                         f"at {code.co_filename}:{code.co_firstlineno} because "
                         f"it closes over variables {closure_vars}. Please rewrite "
                         f"'{code.co_name}' to take {closure_vars} as additional args.",
-                        ref_case_id=26,
+                        case_name="cond_closed_over_variable",
                     )
 
             # Setup the subgraph we're going to capture into
@@ -891,13 +914,13 @@ class TorchHigherOrderOperator(VariableTracker):
             # One argument to graph per sub_args
             for a in sub_args:
                 if isinstance(a, TensorVariable):
-                    tx.output.create_graph_input(a.as_proxy().node.name)
+                    tx.output.current_tracer.create_graph_input(a.as_proxy().node.name)
                     args.append(a)
                 else:
                     # call_function() needs a TensorVariable, therefore we construct
                     # one with inner graph proxy.
                     assert isinstance(a, torch.Tensor)
-                    proxy = tx.output.create_graph_input("arg")
+                    proxy = tx.output.current_tracer.create_graph_input("arg")
                     args.append(wrap_fx_proxy(tx=tx, proxy=proxy, example_value=a))
                 # NB: we don't bother populating graphargs, as
                 # they won't actually get used by anything
@@ -915,7 +938,10 @@ class TorchHigherOrderOperator(VariableTracker):
                 )
             tx.output.guards.update(output.guards)
             tx.output.create_node(
-                "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
+                "output",
+                "output",
+                (tx.output.current_tracer.create_arg((output.as_proxy(),))),
+                {},
             )
 
             tx.output.side_effects.prune_dead_object_new(tx)
@@ -1009,7 +1035,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 try:
                     # NB: 0 is predicate
                     ix = 1 if branch else 2
-                    return speculate_subgraph(
+                    return old_speculate_subgraph(
                         args[ix], operands, graph_checkpoint, checkpoint
                     )
                 except ArgsMismatchError as e:
@@ -1019,14 +1045,14 @@ class TorchHigherOrderOperator(VariableTracker):
                 true_r,
                 true_graph,
                 true_guards,
-                true_nn_modules,
+                true_nn_modules_context,
                 true_cmp,
             ) = speculate_branch(True)
             (
                 false_r,
                 false_graph,
                 false_guards,
-                false_nn_modules,
+                false_nn_modules_context,
                 false_cmp,
             ) = speculate_branch(False)
 
@@ -1053,10 +1079,12 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             true_name = add_subgraph(
-                "true", torch.fx.GraphModule(true_nn_modules, true_graph)
+                "cond_true",
+                torch.fx.GraphModule(true_nn_modules_context.nn_modules, true_graph),
             )
             false_name = add_subgraph(
-                "false", torch.fx.GraphModule(false_nn_modules, false_graph)
+                "cond_false",
+                torch.fx.GraphModule(false_nn_modules_context.nn_modules, false_graph),
             )
 
             # Apply side effects (guaranteed to be equal)
@@ -1092,9 +1120,9 @@ class TorchHigherOrderOperator(VariableTracker):
                 body_r,
                 body_graph,
                 body_guards,
-                body_nn_modules,
+                body_nn_modules_context,
                 body_cmp,
-            ) = speculate_subgraph(
+            ) = old_speculate_subgraph(
                 args[0],
                 [
                     get_fake_value(args[1].as_proxy().node, tx)[0],
@@ -1121,7 +1149,8 @@ class TorchHigherOrderOperator(VariableTracker):
             )
 
             body_name = add_subgraph(
-                "body", torch.fx.GraphModule(body_nn_modules, body_graph)
+                "map_body",
+                torch.fx.GraphModule(body_nn_modules_context.nn_modules, body_graph),
             )
 
             body_node = make_attr(body_name)
@@ -1149,8 +1178,104 @@ class TorchHigherOrderOperator(VariableTracker):
             example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
             p_args = (lowered_node,) + p_args
+        elif self.value.__name__ in ("wrap", "wrap_activation_checkpoint"):
+            # See NOTE [HigherOrderOperator tracing design] for more details
+            checkpoint = tx.copy_graphstate()
+            graph_checkpoint = tx.output.graph
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                args[0],
+                [
+                    *args[1:],
+                ],
+                graph_checkpoint,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+            body_node = make_attr(body_name)
+            p_args = (
+                body_node,
+                *(arg.as_proxy() for arg in args[1:]),
+                *(arg for arg in body_lifted_freevars),
+            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
+        elif self.value.__name__ in (
+            "trampoline_autograd_fwd",
+            "trampoline_autograd_bwd",
+            "trampoline_autograd_apply",
+        ):
+            from . import AutogradFunctionVariable, UserFunctionVariable
+
+            pre_side_effects = tx.output.side_effects.clone()
+            always_restore = self.value.__name__ == "trampoline_autograd_bwd"
+            if (
+                self.value.__name__ == "trampoline_autograd_bwd"
+                or self.value.__name__ == "trampoline_autograd_fwd"
+            ):
+                fn = UserFunctionVariable(self.value, source=self.source)
+            else:
+                fn = TorchVariable(self.value)
+            checkpoint = tx.copy_graphstate()
+            pre_guards = tx.output.guards
+            graph_checkpoint = tx.output.graph
+            (
+                body_r,
+                body_graph,
+                body_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                fn,
+                [
+                    *args,
+                ],
+                graph_checkpoint,
+                checkpoint,
+                # Backwards should never, ever be stored!
+                always_restore=always_restore,
+            )
+            post_guards = tx.output.guards
+            if body_lifted_freevars:
+                for freevar in body_lifted_freevars:
+                    if "saved_tensor_marked" not in freevar.node.meta:
+                        unimplemented("NYI - freevars in autograd function.")
+
+            post_side_effects = tx.output.side_effects
+            if post_side_effects.diff(pre_side_effects):
+                diff = (
+                    post_side_effects.id_to_variable.keys()
+                    - pre_side_effects.id_to_variable.keys()
+                )
+                for d in diff:
+                    if not isinstance(
+                        post_side_effects.id_to_variable[d].value,
+                        AutogradFunctionVariable,
+                    ):
+                        unimplemented("NYI - side effects in autograd function.")
+
+            if always_restore:
+                if post_guards - pre_guards:
+                    unimplemented("NYI - New guards discovered in a restoring state")
+                # Nothing left to do here
+                return None
+
+            p_args = (
+                *(arg.as_proxy() for arg in args),
+                *(arg for arg in body_lifted_freevars),
+            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
+
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -1159,7 +1284,7 @@ class TorchHigherOrderOperator(VariableTracker):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs={},
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )

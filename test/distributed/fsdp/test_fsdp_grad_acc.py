@@ -117,12 +117,6 @@ class TestGradAcc(FSDPTest):
                 point to prefetch the next layer's full parameters during the
                 backward pass, if at all.
         """
-        # Gradient accumulation outside `no_sync()` is not currently compatible
-        # with CPU offloading
-        if cpu_offload.offload_params and any(
-            not config.use_no_sync for config in configs
-        ):
-            return
         # Initialize the FSDP model and optimizer
         fsdp_kwargs = {
             "cpu_offload": cpu_offload,
@@ -226,10 +220,6 @@ class TestGradAcc(FSDPTest):
                 BackwardPrefetch.BACKWARD_PRE,
                 BackwardPrefetch.BACKWARD_POST,
             ],
-            "cpu_offload": [
-                CPUOffload(offload_params=False),
-                CPUOffload(offload_params=True),
-            ],
             "sharding_strategy": [
                 ShardingStrategy.FULL_SHARD,
                 ShardingStrategy.SHARD_GRAD_OP,
@@ -264,20 +254,43 @@ class TestGradAcc(FSDPTest):
         use_orig_params: bool,
     ):
         """
-        Tests gradient accumulation.
+        Tests gradient accumulation without parameter CPU offloading.
 
         This exercises gradient accumulation inside and outside the
         ``no_sync()`` context manager, in particular by interleaving the two.
         It tests both interleaving starting with (and ending with, resp.)
         inside versus outside ``no_sync()`` to ensure that initial conditions
         (and final conditions, resp.) do not affect the correctness.
+        """
+        subtest_config = self._get_subtest_config()
+        subtest_config["cpu_offload"] = [CPUOffload(offload_params=False)]
+        self.run_subtests(
+            subtest_config,
+            self._test_grad_acc,
+            batch_dim=1,
+            configs=configs.configs,
+            use_orig_params=use_orig_params,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_orig_params", [False, True])
+    def test_grad_acc_cpu_offload(
+        self,
+        use_orig_params: bool,
+    ):
+        """
+        Tests gradient accumulation with parameter CPU offloading.
 
         NOTE: Gradient accumulation without using the ``no_sync()`` context
-        manager is not currently compatible with CPU offloading, so those tests
-        just return directly.
+        manager is not currently compatible with CPU offloading.
         """
+        # Only test `no_sync` since outside `no_sync()` is not supported with
+        # parameter CPU offloading
+        configs = _GradAccConfigs([_GradAccConfig(use_no_sync=True, num_iters=3)])
+        subtest_config = self._get_subtest_config()
+        subtest_config["cpu_offload"] = [CPUOffload(offload_params=True)]
         self.run_subtests(
-            self._get_subtest_config(),
+            subtest_config,
             self._test_grad_acc,
             batch_dim=1,
             configs=configs.configs,

@@ -119,7 +119,7 @@ such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://
 At the core, its CPU and GPU Tensor and neural network backends
 are mature and have been tested for years.
 
-Hence, PyTorch is quite fast – whether you run small or large neural networks.
+Hence, PyTorch is quite fast — whether you run small or large neural networks.
 
 The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
 We've written custom memory allocators for the GPU to make sure that
@@ -293,7 +293,7 @@ Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
 
 Additional libraries such as
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
+[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
 
 You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
 
@@ -362,9 +362,17 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
+
 ```bash
 make -f docker.Makefile
 # images are tagged as docker.io/${your_docker_username}/pytorch
+```
+
+You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
+See [setup.py](./setup.py) for the list of available variables.
+
+```bash
+CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 ```
 
 ### Building the Documentation
@@ -426,14 +434,14 @@ Three-pointers to get you started:
 
 ## Releases and Contributing
 
-PyTorch has a 90-day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
+To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
 
 ## The Team
 

@@ -86,7 +86,6 @@ add_needs_realized_inputs(
         aten.max_pool2d_with_indices,
         aten.max_pool2d_with_indices_backward,
         aten.mm,
-        aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
@@ -1071,6 +1070,10 @@ def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # Custom fallback lowering
+    if node.target is aten.view_as_complex.default:
+        return False
+
     def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
@@ -1231,14 +1234,14 @@ def make_rand(fn_name):
     def rand_or_randn(
         *size,
         dtype=None,
-        layout=0,
+        layout=None,
         device=None,
         pin_memory=False,
         memory_format=None,
     ):
         warn_triton_random()
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1410,7 +1413,8 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten.upsample_bilinear2d_backward, require_dense)
+
+make_fallback(aten.view_as_complex.default, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
@@ -1434,7 +1438,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfc, warn=False)
 make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
@@ -1559,6 +1562,13 @@ make_fallback(aten.zeros.names)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
+
+# ROCm specific fallback, perf issues are observed when registered
+make_fallback(aten.miopen_batch_norm, warn=False)
+
+if torch.version.hip is not None and torch.cuda.is_available():
+    # tl.reduce not available yet in ROCm's version of triton
+    make_fallback(aten.prod, warn=False)
 
 
 @register_lowering(aten.clone)
@@ -1827,13 +1837,13 @@ def tensor_constructor(fill_value):
         names=None,
         dtype=None,
         device=None,
-        layout=0,
+        layout=None,
         pin_memory=False,
         memory_format=None,
     ):
         assert names is None
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         assert memory_format in (None, torch.contiguous_format)
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
@@ -1871,10 +1881,10 @@ def create_tensor_like(creation_fn):
     """
 
     def _constant_like(
-        x, *, dtype=None, device=None, layout=0, pin_memory=False, memory_format=None
+        x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
         assert not pin_memory
-        assert layout in (0, torch.strided)
+        assert layout in (None, torch.strided)
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -1905,7 +1915,7 @@ def new_constant(fill_value):
     ):
         assert isinstance(size, (list, type))
         assert not pin_memory
-        assert not layout or layout == torch.strided
+        assert layout in (None, torch.strided)
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -1932,7 +1942,7 @@ def empty_strided(
     assert isinstance(size, (list, type))
     assert isinstance(stride, (list, type, type(None)))
     assert not pin_memory
-    assert not layout or layout == torch.strided
+    assert layout in (None, torch.strided)
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
@@ -2076,17 +2086,12 @@ def check_and_broadcast_indices(indices, device):
     return new_indices, start_offset, end_offset
 
 
-@register_lowering(aten.index, type_promotion_kind=None)
-def index(x, indices):
+def index_impl(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
-    try:
-        indices, start_offset, end_offset = check_and_broadcast_indices(
-            indices, x.get_device()
-        )
-    except NotImplementedError:
-        x.realize()
-        return fallback_handler(aten.index)(x, indices)
+    indices, start_offset, end_offset = check_and_broadcast_indices(
+        indices, x.get_device()
+    )
 
     indices_sizes = [i.get_size() for i in indices if i is not None]
     indices_loaders = [i.make_loader() for i in indices if i is not None]
@@ -2110,7 +2115,9 @@ def index(x, indices):
         assert len(idx) == len(output_size)
         assert len(indices_loaders) == len(indexed_size)
         new_index = [
-            ops.indirect_indexing(loader(idx[start_offset:end_offset]), size)
+            ops.indirect_indexing(
+                loader(idx[start_offset:end_offset]), size, check=check
+            )
             for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
@@ -2122,6 +2129,21 @@ def index(x, indices):
         inner_fn=fn,
         ranges=output_size,
     )
+
+
+@register_lowering(aten.index, type_promotion_kind=None)
+def index(x, indices):
+    try:
+        return index_impl(x, indices, check=True)
+    except NotImplementedError:
+        # Fallback to ATen for boolean indexing
+        x.realize()
+        return fallback_handler(aten.index)(x, indices)
+
+
+@register_lowering(aten._unsafe_index, type_promotion_kind=None)
+def _unsafe_index(x, indices):
+    return index_impl(x, indices, check=False)
 
 
 # All the indexing decompositions are written in terms of index, index_put, and index_put_
@@ -2428,7 +2450,7 @@ def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2
         x = ops.index_expr(x, torch.float32)
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
-        return ops.indirect_indexing(x, size)
+        return ops.indirect_indexing(x, size, check=False)
 
     def fn(idx):
         x = idx[-n:]
@@ -2468,6 +2490,10 @@ def upsample_nearest3d(
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
 
+def _create_constants(*args, dtype):
+    return tuple(ops.constant(a, dtype) for a in args)
+
+
 @register_lowering(aten.upsample_bicubic2d.default)
 def upsample_bicubic2d_default(
     x,
@@ -2498,37 +2524,39 @@ def upsample_bicubic2d_default(
 
     def compute_source_index(scale, dst_index, align_corners):
         dst_index_ie = ops.index_expr(dst_index, torch.float32)
+        scale = ops.constant(scale, torch.float32)
         if align_corners:
             return ops.mul(scale, dst_index_ie)
         else:
+            half = ops.constant(0.5, torch.float32)
             return ops.sub(
-                ops.mul(scale, ops.add(dst_index_ie, 0.5)), 0.5
+                ops.mul(scale, ops.add(dst_index_ie, half)), half
             )  # scale * (dst_index + 0.5) - 0.5
 
     def cubic_convolution1(x, A):
+        _Ap2, _Ap3, _1 = _create_constants(A + 2, A + 3, 1, dtype=torch.float32)
         # ((A + 2) * x - (A+3)) * x * x + 1
-        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(A + 2, x), A + 3), x), x), 1.0)
+        return ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
 
     def cubic_convolution2(x, A):
+        _A, _4A, _5A, _8A = _create_constants(
+            A, 4 * A, 5 * A, 8 * A, dtype=torch.float32
+        )
         # ((A * x - 5 * A) * x + 8 * A) * x - 4*A
         return ops.sub(
-            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(A, x), 5 * A), x), 8 * A), x), 4 * A
+            ops.mul(ops.add(ops.mul(ops.sub(ops.mul(_A, x), _5A), x), _8A), x), _4A
         )
 
     def get_cubic_upsample_coefficients(t):
         A = -0.75
-        c0 = cubic_convolution2(ops.add(t, 1.0), A)
+        _1 = ops.constant(1.0, torch.float32)
+        c0 = cubic_convolution2(ops.add(t, _1), A)
         c1 = cubic_convolution1(t, A)
 
-        x2 = ops.sub(1.0, t)
+        x2 = ops.sub(_1, t)
         c2 = cubic_convolution1(x2, A)
-        c3 = cubic_convolution2(ops.add(x2, 1.0), A)
-        return (
-            c0,
-            c1,
-            c2,
-            c3,
-        )
+        c3 = cubic_convolution2(ops.add(x2, _1), A)
+        return (c0, c1, c2, c3)
 
     def cubic_interp1d(xs, t):
         cs = get_cubic_upsample_coefficients(t)
@@ -2560,8 +2588,11 @@ def upsample_bicubic2d_default(
 
         def load_bounded(fy, fx):
             # TODO(Lezcano) Here we may not need to set-up a device_size
-            iy = ops.indirect_indexing(clamp(fy, 0, iH - 1), iH)
-            ix = ops.indirect_indexing(clamp(fx, 0, iW - 1), iW)
+            _0 = ops.constant(0, torch.int32)
+            iHm1 = ops.constant(iH - 1, torch.int32)
+            iWm1 = ops.constant(iW - 1, torch.int32)
+            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, check=False)
+            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, check=False)
             return x_loader([n, c, iy, ix])
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
@@ -2600,7 +2631,7 @@ def reflection_pad2d(x, padding):
         x = ops.index_expr(x, torch.int32)
         x = ops.sub(x, ops.constant(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num)
+        return ops.indirect_indexing(x, size_num, check=False)
 
     def fn(idx):
         *b, x, y = idx
@@ -2631,8 +2662,6 @@ def reflection_pad2d_backward(grad_output, x, padding):
         *b, x, y = idx
 
         def load_from_output(x, y):
-            x = ops.indirect_indexing(ops.index_expr(x, torch.int32), h_grad)
-            y = ops.indirect_indexing(ops.index_expr(y, torch.int32), w_grad)
             return grad_loader([*b, x, y])
 
         def index_range_condition(index_range):
@@ -2672,11 +2701,17 @@ def reflection_pad2d_backward(grad_output, x, padding):
         bot_reflect_x, right_reflect_y = 2 * h + top - x, 2 * w + left - y
 
         # Accumulate gradients from different areas
-        grad = load_from_output(center_x, center_y)
-        accumulate(center_x, left_reflect_y, (y, 1, left))
-        accumulate(center_x, right_reflect_y, (y, w - right, w - 1))
-        accumulate(top_reflect_x, center_y, (x, 1, top))
-        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1))
+        # If some of the padding is negative, center load is not always valid
+        range_cx = (center_x, 0, h + top + bot)
+        range_cy = (center_y, 0, w + left + right)
+        cond = ops.and_(
+            index_range_condition(range_cx), index_range_condition(range_cy)
+        )
+        grad = ops.masked(cond, lambda: load_from_output(center_x, center_y), 0.0)
+        accumulate(center_x, left_reflect_y, range_cx, (y, 1, left))
+        accumulate(center_x, right_reflect_y, range_cx, (y, w - right, w - 1))
+        accumulate(top_reflect_x, center_y, (x, 1, top), range_cy)
+        accumulate(bot_reflect_x, center_y, (x, h - bot, h - 1), range_cy)
         accumulate(top_reflect_x, left_reflect_y, (x, 1, top), (y, 1, left))
         accumulate(top_reflect_x, right_reflect_y, (x, 1, top), (y, w - right, w - 1))
         accumulate(bot_reflect_x, left_reflect_y, (x, h - bot, h - 1), (y, 1, left))
@@ -2839,17 +2874,20 @@ def max_pool2d_with_indices(
 ):
     if padding == 0:
         padding = [0, 0]
+    if dilation == 1:
+        dilation = [1, 1]
     if not stride:
         stride = kernel_size
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
+    dilation = pad_listlike(dilation, 2)
 
-    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert len(padding) == 2
+    assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
     x.realize_hint()
@@ -2866,7 +2904,7 @@ def max_pool2d_with_indices(
     new_size = list(batch) + [h_out, w_out]
     window_size = kernel_size[0] * kernel_size[1]
 
-    if window_size > 25:
+    if window_size > 25 or any(d != 1 for d in dilation):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
@@ -2922,14 +2960,16 @@ def max_pool2d_with_indices_backward(
 ):
     if padding == 0:
         padding = [0, 0]
+    if dilation == 1:
+        dilation = [1, 1]
     if not stride:
         stride = kernel_size
 
-    assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
     assert len(stride) == 2
     assert len(padding) == 2
+    assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
     # we will read this many times, so make sure it is computed
@@ -2960,8 +3000,8 @@ def max_pool2d_with_indices_backward(
             x_stride = None
     if (
         (x_stride is not None and x_stride[1] == 1)
-        or gO_stride is not None
-        and gO_stride[1] == 1
+        or (gO_stride is not None and gO_stride[1] == 1)
+        or any(d != 1 for d in dilation)
     ):
         # don't codegen channels-last, it's very slow
         return fallback_max_pool2d_with_indices_backward(
@@ -3029,10 +3069,12 @@ def max_pool2d_with_indices_backward(
                     ops.indirect_indexing(
                         ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
+                        check=False,
                     ),
                     ops.indirect_indexing(
                         ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
+                        check=False,
                     ),
                 ]
 
@@ -3471,12 +3513,14 @@ def avg_pool2d_backward(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
+                                check=False,
                             ),
                             ops.indirect_indexing(
                                 ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
+                                check=False,
                             ),
                         ]
                     ),
