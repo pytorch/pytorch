@@ -80,6 +80,8 @@ class _StorageBase:
     @classmethod
     def from_file(cls, filename, shared, nbytes) -> T: ...  # noqa: E704
     @classmethod
+    def _from_file_offset(cls, filename, fd, shared, nbytes, offset) -> T: ...  # noqa: E704
+    @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # noqa: E704
 
     def __str__(self):
@@ -977,7 +979,7 @@ class TypedStorage:
         return self._to(torch.cfloat)
 
     @classmethod
-    def from_file(cls, filename, shared, size):
+    def from_file(cls, filename, fd, shared, size, offset=0):
         """
         from_file(filename, shared=False, size=0) -> Storage
 
@@ -1000,8 +1002,10 @@ class TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
         untyped_storage: UntypedStorage = UntypedStorage.from_file(
             filename,
+            fd,
             shared,
-            size * torch._utils._element_size(cls.dtype))
+            size * torch._utils._element_size(cls.dtype),
+            offset)
         storage = cls(wrap_storage=untyped_storage)
         return storage
 

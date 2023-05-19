@@ -7045,7 +7045,7 @@ class TestTorch(TestCase):
                 fd = f.fileno()
                 s1_loaded = torch.UntypedStorage._from_file_offset(filename, fd, False, 6 * real_dtype_size, offset1)
                 s2_loaded = torch.UntypedStorage._from_file_offset(filename, fd, False, 15 * real_dtype_size, offset2)
-            
+
             typed_storage_1 = torch.storage.TypedStorage(wrap_storage=s1_loaded, dtype=dtype, _internal=True)
             t_loaded_1 = torch._utils._rebuild_tensor_v2(
                 typed_storage_1, 0, t1.shape, None, False, None, metadata=None
