@@ -10500,13 +10500,13 @@ class TestConsistency(TestCaseMPS):
                     mps_args[1] = cpu_args[1]
 
                 cpu_out = op(*cpu_args, **cpu_kwargs)
-                if op.name in ["nn.functional.softplus"] and dtype in [torch.float, torch.half]:
+                if "softplus" in op.name and dtype in [torch.float, torch.half]:
                     print(op.name)
                     print("cpu_out ", cpu_out)
                     print("mps_args ", mps_args, mps_kwargs)
-                
+
                 mps_out = op(*mps_args, **mps_kwargs)
-                if op.name in ["nn.functional.softplus"] and dtype in [torch.float, torch.half]:
+                if "softplus" in op.name and dtype in [torch.float, torch.half]:
                     print(op.name)
                     print("mps_out ", mps_out)
 
