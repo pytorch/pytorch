@@ -505,7 +505,7 @@ def profile_plot(profile, device=None):
         elif action == Action.PREEXISTING:
             kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
             w.initially_allocated(elemid)
-    viz.add_plot('Active Memory Timeline', 'trace_view', device, w.data())
+    viz.add_plot('Active Memory Timeline', 'trace_view', 0, w.data())
     return viz.to_html()
 
 def segment_plot(data: Any, device=None):
@@ -518,7 +518,7 @@ def all_plot(data: Any, device=None):
     viz = VizTemplate()
     for view in (viz.add_trace_view, viz.add_segment_view):
         for d in _choose_device(data, device):
-            view(data, d)
+            view(data, d)  # type: ignore[operator]
     return viz.to_html()
 
 class VizTemplate:
@@ -576,6 +576,7 @@ class VizTemplate:
         addr_versions: Dict[int, int] = {}
 
         next_stream = 0
+
         @cache
         def stream_id(stream):
             nonlocal next_stream
@@ -588,8 +589,8 @@ class VizTemplate:
             if stream != 0:
                 title = f"{title}, stream {stream_id(stream)}"
             frames = [title,
-                    *extra,
-                    *_frames_fmt(frames, full_filename=True)]
+                      *extra,
+                      *_frames_fmt(frames, full_filename=True)]
             return w.add_element(size, frames)
 
         for i, e in enumerate(trace):
@@ -600,7 +601,8 @@ class VizTemplate:
             elif e['action'] == free:
                 idx = addr_to_alloc.pop(e['addr'], None)
                 if idx is None:
-                    idx = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
+                    idx = add_element(e['addr'], e['size'], e['stream'], e.get('frames', []),
+                                      extra=('alloc not recorded, stack trace for free:',))
                     w.initially_allocated(idx)
                 w.free(idx)
 
@@ -620,10 +622,11 @@ class VizTemplate:
 
     def add_segment_view(self, data: Any, device: int):
         trace = data['device_traces'][device]
+
         def format_frames(frames):
             return self.intern_stack(_frames_fmt(frames, full_filename=True))
 
-        segment = {
+        segment: dict = {
             'events': {
                 'action': [],  # reference to string table
                 'addr': [],  # for OOM, this will hold device_free value
@@ -663,6 +666,7 @@ class VizTemplate:
                 i += 1
 
         seen_streams = 0
+
         @cache
         def format_stream(s):
             nonlocal seen_streams
@@ -1550,7 +1554,9 @@ function create_trace_view(dst, alloc_data, max_entries=15000) {
     })
     d.append('label').text('Detail')
 
-    let grid_container = dst.append('div').attr('style', "display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px")
+    let grid_container =
+        dst.append('div')
+           .attr('style', "display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px")
 
     let plot_svg = grid_container.append("svg").attr('display', 'block')
                                                .attr('viewBox', '0 0 1024 576')
@@ -1569,7 +1575,9 @@ function create_trace_view(dst, alloc_data, max_entries=15000) {
                                                .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;')
 
     MiniMap(mini_svg, plot, data, left_pad, 1024)
-    let  context_div = grid_container.append("div").attr('style', 'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;')
+    let context_div =
+        grid_container.append("div")
+                      .attr('style', 'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;')
     let delegate = ContextViewer(context_div.append("pre").text('none'), data)
     plot.set_delegate(delegate)
 }
