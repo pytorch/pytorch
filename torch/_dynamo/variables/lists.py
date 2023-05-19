@@ -487,6 +487,14 @@ class SliceVariable(BaseListVariable):
 
     def as_python_constant(self):
         def convert(x):
+            # This is a gross one - we generally do not support arbitrary calls turning SymNodeVariable
+            # into a const. The function is banned on SymNodeVariable. However, here, we can produce slices
+            # with dynamic values, so this is tenatively allowed.
+            # The real long term fix is to:
+            # 1) cover all coverage gaps so that we can just get sym_num out
+            # 2) Rename as_python_constant to something like underlying_wrapped_value and collapse it into
+            # the weird usage of ['example_value'] we have all over the place, as well as random accesses into
+            # .value we have.
             if isinstance(x, variables.SymNodeVariable):
                 return x.sym_num
             return x.as_python_constant()

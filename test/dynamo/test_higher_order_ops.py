@@ -437,26 +437,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             {"HigherOrderOperator with body with non single Tensor output": 1},
         )
 
-    def test_fallback_on_non_tensor_inputs(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
-        counters.clear()
-        cnt = CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def f(x):
-            return wrap(lambda x, y: x + y, x, 193)
-
-        x = torch.randn(2, 3)
-        result = f(x)
-
-        self.assertEqual(result, x + 193)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 1},
-        )
-
     def test_access_module_attr(self):
         # We can likely support this in the future, I just don't want to deal
         # with it right now
