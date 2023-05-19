@@ -63,7 +63,7 @@ const std::string unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size, off_t offset)
   : filename_(filename.empty() ? unknown_filename : std::move(filename))
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
@@ -97,6 +97,9 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
   }
 
 #ifdef _WIN32
+  if (offset != 0) {
+    TORCH_CHECK(false, "non zero memory map offset for MapAllocator not supported yet on Windows")
+  }
   if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
     // Shadowing
     const wchar_t *filename;
@@ -317,14 +320,14 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
 
     /* map it */
     if (flags_ & (ALLOCATOR_MAPPED_SHARED | ALLOCATOR_MAPPED_SHAREDMEM)) {
-      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_SHARED, fd, offset);
     } else {
-      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, offset);
     }
 
     if (base_ptr_ == MAP_FAILED) {
       base_ptr_ = nullptr; /* let's be sure it is NULL */
-      TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, ">: ", strerror(errno), " (", errno, ")");
+      TORCH_CHECK(false, "unable to mmap ", size_, " bytes from file <", filename_, "> starting at offset ", offset, " fd :", fd, strerror(errno), " (", errno, ")");
     }
 
     if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
@@ -359,8 +362,8 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
-  : MapAllocator(WITH_FD, std::move(filename), -1, flags, size)
+MapAllocator::MapAllocator(std::string filename, int flags, size_t size, off_t offset)
+  : MapAllocator(WITH_FD, std::move(filename), -1, flags, size, offset)
 {}
 
 #ifdef _WIN32
@@ -574,14 +577,14 @@ RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& d
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new MapAllocator(std::move(filename), flags, size);
+at::DataPtr MapAllocator::makeDataPtr(std::string filename, int flags, size_t size, size_t* actual_size_out, off_t offset) {
+  auto* context = new MapAllocator(std::move(filename), flags, size, offset);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
-  auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size);
+at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out, off_t offset) {
+  auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size, offset);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }

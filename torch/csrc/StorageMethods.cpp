@@ -415,6 +415,55 @@ static PyObject* THPStorage_fromFile(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_fromFileOffset(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* keywds) {
+  HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  const char* filename;
+  int fd = 0;
+  Py_ssize_t nbytes = 0;
+  int shared = 0;
+  off_t offset = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr const char* kwlist[] = {"filename", "fd", "shared", "nbytes", "offset", nullptr};
+  if (!PyArg_ParseTupleAndKeywords(
+          args,
+          keywds,
+          // FIXME: is l the correct format string for off_t?
+          "s|iinl",
+          const_cast<char**>(kwlist),
+          &filename,
+          &fd,
+          &shared,
+          &nbytes,
+          &offset)) {
+    return nullptr;
+  }
+  if (shared)
+    shared = at::ALLOCATOR_MAPPED_SHARED;
+  
+  int dup_fd = dup(fd); 
+
+  shared |= at::ALLOCATOR_MAPPED_FROMFD;
+
+  size_t actual_nbytes = -1;
+  auto storage = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      nbytes,
+      at::MapAllocator::makeDataPtr(at::WithFd(), filename, dup_fd, shared, nbytes, &actual_nbytes, offset),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+
+  if (nbytes <= 0) {
+    storage->set_nbytes(actual_nbytes);
+  }
+
+  return (PyObject*)THPStorage_New(std::move(storage));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
@@ -574,6 +623,10 @@ static PyMethodDef THPStorage_methods[] = {
      nullptr},
     {"from_file",
      castPyCFunctionWithKeywords(THPStorage_fromFile),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_from_file_offset",
+     castPyCFunctionWithKeywords(THPStorage_fromFileOffset),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},

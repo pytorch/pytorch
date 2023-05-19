@@ -7022,6 +7022,30 @@ class TestTorch(TestCase):
             with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
                 assert_with_filename(fname)
 
+    def test_from_file_offset(self):
+        def assert_with_filename(filename):
+            t = torch.randn((2, 3), dtype=torch.float32)
+            storage = t.storage()._untyped_storage
+            with open(filename, 'wb') as f:
+                f.seek(10)
+                storage._write_file(f, True, False, torch._utils._element_size(torch.uint8))
+
+            with open(filename, 'rb') as f:
+                s1 = torch.UntypedStorage._from_file_offset(filename, f.fileno(), False, 6, 10)
+            typed_storage = torch.storage.TypedStorage(
+                                wrap_storage=s1,
+                                dtype=torch.float32,
+                                _internal=True)
+            t_loaded = torch._utils._rebuild_tensor_v2(
+                typed_storage, 0, (2, 3), (3, 1), False, None, metadata=None
+            )
+            self.assertEqual(t_loaded, t)
+            # release the tensors
+            del t, s1, t_loaded
+
+        with TemporaryFileName() as fname:
+            assert_with_filename(fname)
+
     def test_torch_from_file(self):
         def assert_with_filename(filename):
             size = 10000

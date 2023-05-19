@@ -22,8 +22,8 @@ TORCH_API std::string NewProcessWideShmHandle();
 
 class TORCH_API MapAllocator {
  public:
-  MapAllocator(std::string filename, int flags, size_t size);
-  MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size);
+  MapAllocator(std::string filename, int flags, size_t size, off_t offset = 0);
+  MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size, off_t offset = 0);
   MapAllocator(const MapAllocator&) = delete;
   MapAllocator& operator=(const MapAllocator&) = delete;
   MapAllocator(MapAllocator&&) = delete;
@@ -54,14 +54,16 @@ class TORCH_API MapAllocator {
       std::string filename,
       int flags,
       size_t size,
-      size_t* actual_size_out);
+      size_t* actual_size_out,
+      off_t offset = 0);
   static at::DataPtr makeDataPtr(
       WithFd,
       const char* filename,
       int fd,
       int flags,
       size_t size,
-      size_t* actual_size_out);
+      size_t* actual_size_out,
+      off_t offset = 0);
 
   // Closes the data.  Helps us avoid destructor shenanigans
   virtual void close();
