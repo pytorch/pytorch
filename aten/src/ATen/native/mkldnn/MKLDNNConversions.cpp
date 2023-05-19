@@ -103,6 +103,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     c10::OptionalArrayRef<int64_t> input_size) {
   mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv2d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   auto w = itensor_from_mkldnn(self);
 
