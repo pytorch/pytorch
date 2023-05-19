@@ -40,11 +40,11 @@ inline C10_HOST_DEVICE Half::Half(float value)
 #elif defined(__SYCL_DEVICE_ONLY__)
       x(c10::bit_cast<uint16_t>(sycl::half(value)))
 #else
-  #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
       x(at::vec::float_to_half(value))
-  #else
+#else
       x(detail::fp16_ieee_from_fp32_value(value))
-  #endif
+#endif
 #endif
 {
 }
@@ -57,11 +57,11 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #elif defined(__SYCL_DEVICE_ONLY__)
   return float(c10::bit_cast<sycl::half>(x));
 #else
-  #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-    return at::vec::half_to_float(x);
-  #else
-    return detail::fp16_ieee_to_fp32_value(x);
-  #endif
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+  return at::vec::half_to_float(x);
+#else
+  return detail::fp16_ieee_to_fp32_value(x);
+#endif
 #endif
 }
 
