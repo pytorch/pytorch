@@ -62,6 +62,9 @@ namespace ops {
 // Below are ProcessGroup's corresponding ops for each backend. Ops are but
 // routed through the dispatcher to be dispatched to the appropriate backend.
 // Currently a no-op as the process group does not have a list of backends.
+
+namespace {
+
 #define IMPL_SEND(DEV)                                                        \
   c10::intrusive_ptr<Work> send##DEV(                                         \
       at::TensorList tensors,                                                 \
@@ -73,9 +76,9 @@ namespace ops {
         ->send(tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag)); \
   }
 
-static IMPL_SEND(CPU)
-static IMPL_SEND(CUDA)
-static IMPL_SEND(PrivateUse1)
+IMPL_SEND(CPU)
+IMPL_SEND(CUDA)
+IMPL_SEND(PrivateUse1)
 
 #define IMPL_RECV(DEV)                                                        \
   c10::intrusive_ptr<Work> recv_##DEV(                                        \
@@ -88,9 +91,9 @@ static IMPL_SEND(PrivateUse1)
         ->recv(tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag)); \
   }
 
-static IMPL_RECV(CPU)
-static IMPL_RECV(CUDA)
-static IMPL_RECV(PrivateUse1)
+IMPL_RECV(CPU)
+IMPL_RECV(CUDA)
+IMPL_RECV(PrivateUse1)
 
 #define IMPL_RECV_ANY_SOURCE(DEV)                            \
   c10::intrusive_ptr<Work> recv_any_source_##DEV(            \
@@ -102,9 +105,9 @@ static IMPL_RECV(PrivateUse1)
         ->recvAnysource(tensor_vec, static_cast<int>(tag));  \
   }
 
-static IMPL_RECV_ANY_SOURCE(CPU)
-static IMPL_RECV_ANY_SOURCE(CUDA)
-static IMPL_RECV_ANY_SOURCE(PrivateUse1)
+IMPL_RECV_ANY_SOURCE(CPU)
+IMPL_RECV_ANY_SOURCE(CUDA)
+IMPL_RECV_ANY_SOURCE(PrivateUse1)
 
 #define IMPL_REDUCE(DEV)                                     \
   c10::intrusive_ptr<Work> reduce_##DEV(                     \
@@ -125,9 +128,9 @@ static IMPL_RECV_ANY_SOURCE(PrivateUse1)
                 std::chrono::milliseconds(timeout)});        \
   }
 
-static IMPL_REDUCE(CPU)
-static IMPL_REDUCE(CUDA)
-static IMPL_REDUCE(PrivateUse1)
+IMPL_REDUCE(CPU)
+IMPL_REDUCE(CUDA)
+IMPL_REDUCE(PrivateUse1)
 
 #define IMPL_BROADCAST(DEV)                                               \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>           \
@@ -149,9 +152,9 @@ static IMPL_REDUCE(PrivateUse1)
         std::move(tensor_vec), work);                                     \
   }
 
-static IMPL_BROADCAST(CPU)
-static IMPL_BROADCAST(CUDA)
-static IMPL_BROADCAST(PrivateUse1)
+IMPL_BROADCAST(CPU)
+IMPL_BROADCAST(CUDA)
+IMPL_BROADCAST(PrivateUse1)
 
 // Return input tensors as output tensors to make inplace allreduce look like
 // a functional API, so that make_fx can correctly build the dependencies in
@@ -174,9 +177,9 @@ static IMPL_BROADCAST(PrivateUse1)
         std::move(tensor_vec), work);                                       \
   }
 
-static IMPL_ALLREDUCE(CPU)
-static IMPL_ALLREDUCE(CUDA)
-static IMPL_ALLREDUCE(PrivateUse1)
+IMPL_ALLREDUCE(CPU)
+IMPL_ALLREDUCE(CUDA)
+IMPL_ALLREDUCE(PrivateUse1)
 
 #define IMPL_ALLREDUCE_COALESCED(DEV)                             \
   c10::intrusive_ptr<Work> allreduce_coalesced_##DEV(             \
@@ -192,9 +195,9 @@ static IMPL_ALLREDUCE(PrivateUse1)
         ->allreduce_coalesced(tensor_vec, opts);                  \
   }
 
-static IMPL_ALLREDUCE_COALESCED(CPU)
-static IMPL_ALLREDUCE_COALESCED(CUDA)
-static IMPL_ALLREDUCE_COALESCED(PrivateUse1)
+IMPL_ALLREDUCE_COALESCED(CPU)
+IMPL_ALLREDUCE_COALESCED(CUDA)
+IMPL_ALLREDUCE_COALESCED(PrivateUse1)
 
 // Copy output tensors (not storage) so that this can be used in a functional
 // manner
@@ -217,9 +220,9 @@ static IMPL_ALLREDUCE_COALESCED(PrivateUse1)
             output_tensors, work);                                             \
   }
 
-static IMPL_ALLGATHER(CPU)
-static IMPL_ALLGATHER(CUDA)
-static IMPL_ALLGATHER(PrivateUse1)
+IMPL_ALLGATHER(CPU)
+IMPL_ALLGATHER(CUDA)
+IMPL_ALLGATHER(PrivateUse1)
 
 #define IMPL__ALLGATHER_BASE(DEV)                                         \
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
@@ -232,9 +235,9 @@ static IMPL_ALLGATHER(PrivateUse1)
         output_tensor, work);                                             \
   }
 
-static IMPL__ALLGATHER_BASE(CPU)
-static IMPL__ALLGATHER_BASE(CUDA)
-static IMPL__ALLGATHER_BASE(PrivateUse1)
+IMPL__ALLGATHER_BASE(CPU)
+IMPL__ALLGATHER_BASE(CUDA)
+IMPL__ALLGATHER_BASE(PrivateUse1)
 
 #define IMPL_ALLGATHER_COALESCED(DEV)                                        \
   c10::intrusive_ptr<Work> allgather_coalesced_##DEV(                        \
@@ -248,9 +251,9 @@ static IMPL__ALLGATHER_BASE(PrivateUse1)
             input_list_vec);                                                 \
   }
 
-static IMPL_ALLGATHER_COALESCED(CPU)
-static IMPL_ALLGATHER_COALESCED(CUDA)
-static IMPL_ALLGATHER_COALESCED(PrivateUse1)
+IMPL_ALLGATHER_COALESCED(CPU)
+IMPL_ALLGATHER_COALESCED(CUDA)
+IMPL_ALLGATHER_COALESCED(PrivateUse1)
 
 #define IMPL_ALLGATHER_INTO_TENSOR_COALESCED(DEV)                       \
   c10::intrusive_ptr<c10d::Work> allgather_into_tensor_coalesced_##DEV( \
@@ -263,9 +266,9 @@ static IMPL_ALLGATHER_COALESCED(PrivateUse1)
         ->allgather_into_tensor_coalesced(output_vec, input_vec);       \
   }
 
-static IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
-static IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
-static IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CPU)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(CUDA)
+IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
 
 #define IMPL_REDUCE_SCATTER(DEV)                                            \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>             \
@@ -288,9 +291,9 @@ static IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
         output_tensors_vec, work);                                          \
   }
 
-static IMPL_REDUCE_SCATTER(CPU)
-static IMPL_REDUCE_SCATTER(CUDA)
-static IMPL_REDUCE_SCATTER(PrivateUse1)
+IMPL_REDUCE_SCATTER(CPU)
+IMPL_REDUCE_SCATTER(CUDA)
+IMPL_REDUCE_SCATTER(PrivateUse1)
 
 #define IMPL__REDUCE_SCATTER_BASE(DEV)                                         \
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _reduce_scatter_base_##DEV( \
@@ -310,9 +313,9 @@ static IMPL_REDUCE_SCATTER(PrivateUse1)
         output_tensor, work);                                                  \
   }
 
-static IMPL__REDUCE_SCATTER_BASE(CPU)
-static IMPL__REDUCE_SCATTER_BASE(CUDA)
-static IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
+IMPL__REDUCE_SCATTER_BASE(CPU)
+IMPL__REDUCE_SCATTER_BASE(CUDA)
+IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 
 #define IMPL_GATHER(DEV)                                                       \
   c10::intrusive_ptr<Work> gather_##DEV(                                       \
@@ -329,9 +332,9 @@ static IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
             GatherOptions{root_rank, std::chrono::milliseconds(timeout)});     \
   }
 
-static IMPL_GATHER(CPU)
-static IMPL_GATHER(CUDA)
-static IMPL_GATHER(PrivateUse1)
+IMPL_GATHER(CPU)
+IMPL_GATHER(CUDA)
+IMPL_GATHER(PrivateUse1)
 
 #define IMPL_SCATTER(DEV)                                                      \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_##DEV( \
@@ -352,9 +355,9 @@ static IMPL_GATHER(PrivateUse1)
         std::move(output_tensors_vec), work);                                  \
   }
 
-static IMPL_SCATTER(CPU)
-static IMPL_SCATTER(CUDA)
-static IMPL_SCATTER(PrivateUse1)
+IMPL_SCATTER(CPU)
+IMPL_SCATTER(CUDA)
+IMPL_SCATTER(PrivateUse1)
 
 #define IMPL_ALLTOALL(DEV)                                                    \
   std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>               \
@@ -374,9 +377,9 @@ static IMPL_SCATTER(PrivateUse1)
         std::move(output_tensors_vec), work);                                 \
   }
 
-static IMPL_ALLTOALL(CPU)
-static IMPL_ALLTOALL(CUDA)
-static IMPL_ALLTOALL(PrivateUse1)
+IMPL_ALLTOALL(CPU)
+IMPL_ALLTOALL(CUDA)
+IMPL_ALLTOALL(PrivateUse1)
 
 #define IMPL_ALLTOALL_BASE(DEV)                                   \
   c10::intrusive_ptr<Work> alltoall_base_##DEV(                   \
@@ -395,9 +398,9 @@ static IMPL_ALLTOALL(PrivateUse1)
             AllToAllOptions{std::chrono::milliseconds(timeout)}); \
   }
 
-static IMPL_ALLTOALL_BASE(CPU)
-static IMPL_ALLTOALL_BASE(CUDA)
-static IMPL_ALLTOALL_BASE(PrivateUse1)
+IMPL_ALLTOALL_BASE(CPU)
+IMPL_ALLTOALL_BASE(CUDA)
+IMPL_ALLTOALL_BASE(PrivateUse1)
 
 #define IMPL_BARRIER(DEV)                                                    \
   c10::intrusive_ptr<Work> barrier##DEV(                                     \
@@ -410,11 +413,11 @@ static IMPL_ALLTOALL_BASE(PrivateUse1)
             BarrierOptions{device_ids, std::chrono::milliseconds(timeout)}); \
   }
 
-static IMPL_BARRIER(CPU)
-static IMPL_BARRIER(CUDA)
-static IMPL_BARRIER(PrivateUse1)
+IMPL_BARRIER(CPU)
+IMPL_BARRIER(CUDA)
+IMPL_BARRIER(PrivateUse1)
 
-static void monitored_barrier_CPU(
+void monitored_barrier_CPU(
     at::Tensor /* unused */,
     const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
@@ -425,6 +428,7 @@ static void monitored_barrier_CPU(
           BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
           wait_all_ranks);
 }
+} // namespace
 
 // register functions to dispatcher
 namespace {
@@ -433,9 +437,7 @@ namespace {
 // FUNC: op name
 // DEV: device
 #define REGISTER_C10D_OP1(FUNC, DEV) \
-  TORCH_LIBRARY_IMPL(c10d, DEV, m) { \
-    m.impl(#FUNC, FUNC##DEV);        \
-  }
+  TORCH_LIBRARY_IMPL(c10d, DEV, m) { m.impl(#FUNC, FUNC##DEV); }
 
 // 1st level expansion
 #define REGISTER_C10D_OP(FUNC)  \

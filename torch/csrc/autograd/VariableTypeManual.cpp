@@ -461,7 +461,10 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   return result;
 }
 
-static Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
+static Tensor _fw_primal(
+    c10::DispatchKeySet ks,
+    const Tensor& self,
+    int64_t level) {
   auto tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
