@@ -98,7 +98,7 @@ select = [
     "E",
     "F",
     "SIM1",
-    "UP034",
+    "UP",
     "W",
     # Not included in flake8
     "PLE",
