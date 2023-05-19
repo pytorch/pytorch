@@ -1,6 +1,6 @@
-# TorchDynamo APIs to control fine-grained tracing 
+# TorchDynamo APIs to control fine-grained tracing
 
-`torch.compile` performs TorchDynamo tracing on all the user model. However, it is possible that a small part of the model code is not amenable to PT2 compilation stack. And you want to just disable PT2 on that particular portion, while running compilation on the rest of the model. This doc shares the existing APIs that give you such control and the relevant usecases. 
+`torch.compile` performs TorchDynamo tracing on all the user model. However, it is possible that a small part of the model code is not amenable to PT2 compilation stack. And you want to just disable PT2 on that particular portion, while running compilation on the rest of the model. This doc shares the existing APIs that give you such control and the relevant usecases.
 
 Existing APIs
 
@@ -29,7 +29,7 @@ Existing APIs
 
 **Explanation** - TorchDynamo intercepts the execution of each Python function frame. So, suppose you have a code structure (image below) where the function `fn` calls functions `a_fn` and `b_fn`. And `a_fn` calls `aa_fn` and `ab_fn`. In the eager world (no torch.compile), these function frames run as-is. With torch.compile, TorchDynamo intercepts each of these function frames (indicated by the green color).
 
-.. figure:: _static/img/fine_grained_apis/api_diagram.png
+.. figure:: _../_static/img/fine_grained_apis/api_diagram.png
    :alt: Callstack diagram of differnet apis.
 
 **Usecase** - Now suppose function `a_fn` is causing troubles with `torch.compile`. And this is a non-critical portion of the model. You can use `_dynamo.disable` on function `a_fn`. As shown above, TorchDynamo will stop looking at frames originating from `a_fn` call (white color indicates original Python behavior).
@@ -45,7 +45,7 @@ You can also use the non-decorator syntax if you don’t want to change the sour
 
 **tl;dr** - Disallows an operator (not the function) to be present in the TorchDynamo extracted graph. Note that this is suitable for operators (and not general functions as in the case of `_dynamo.disable`).
 
-**Usecase** - Suppose you compile your model with PT2. TorchDynamo is able to extract a graph, but then you see the downstream compiler failing (like the meta kernel is missing, or some autograd dispatch key is set incorrectly etc) for a particular operator. Then you can mark that operator as `disallow_in_graph`, and TorchDynamo will cause a graph break and run that operator on eager. 
+**Usecase** - Suppose you compile your model with PT2. TorchDynamo is able to extract a graph, but then you see the downstream compiler failing (like the meta kernel is missing, or some autograd dispatch key is set incorrectly etc) for a particular operator. Then you can mark that operator as `disallow_in_graph`, and TorchDynamo will cause a graph break and run that operator on eager.
 
 The catch is that you will have to find the corresponding Dynamo level operator here (and not the aten level operator). See more in the Limitations section of the doc.
 
@@ -89,14 +89,14 @@ Following are rare scenarios
 
 **FAQ - Difference between disable and disallow-in-graph**
 
-Disallow-in-graph works at the level of operators, or more specifically, the operators that you see in the TorchDynamo extracted graphs. 
+Disallow-in-graph works at the level of operators, or more specifically, the operators that you see in the TorchDynamo extracted graphs.
 
-Disable works at the function frame level and decides if TorchDynamo should look into the function frame or not. 
+Disable works at the function frame level and decides if TorchDynamo should look into the function frame or not.
 
 **FAQ - Difference between disable and now-deprecated skip -** You most likely need `_dynamo.disable`. But in an unlikely scenario, you might need even finer control. Suppose you want to disable the tracing on just the function `a_fn`, but want to continue the tracing back in `aa_fn` and `ab_fn`. This is shown below
 
 
-.. figure:: _static/img/fine_grained_apis/call_stack_diagram.png
+.. figure:: _../_static/img/fine_grained_apis/call_stack_diagram.png
    :alt: diagram of torch.compile + disable(a_fn, recursive=False)
 
 
