@@ -1592,6 +1592,13 @@ class CPUReproTests(TestCase):
         x = torch.rand(16)
         self.common(f, (x,))
 
+    def test_to_channels_last_bfloat16(self):
+        def f(a):
+            return a.to(memory_format=torch.channels_last)
+
+        x = torch.rand(2, 3, 14, 14).bfloat16()
+        self.common(f, (x,))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
