@@ -1409,6 +1409,9 @@ make_fx_failures = {
     skip('to_sparse'),
     # segfaults
     skip('block_diag'),
+
+    # AssertionError: Tensor-likes are not close!
+    skip('empty_strided', '', device_type='cpu'),
 }
 
 fake_tensor_failures = {
