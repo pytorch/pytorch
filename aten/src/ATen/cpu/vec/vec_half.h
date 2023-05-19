@@ -1,6 +1,5 @@
 #include <ATen/cpu/vec/intrinsics.h>
 
-// These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(64)))
