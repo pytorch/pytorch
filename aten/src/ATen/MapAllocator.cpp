@@ -428,11 +428,11 @@ void MapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-MapAllocator::MapAllocator(std::string filename, int flags, size_t size) {
+MapAllocator::MapAllocator(std::string filename, int flags, size_t size, off_t offset) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
-MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size) {
+MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size_t size, off_t offset) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
