@@ -87,11 +87,6 @@ bool check_fast_path_restrictions(
       }
     }
 
-    // FIXME(crcrpar) This is a workaround for BinaryOpScalarList which I see numerical errors.
-    if (expected_dtype == at::ScalarType::ComplexDouble && tensorLists.size() == 1 && scalarList.size() == tensorLists[0].size()) {
-      return false;
-    }
-
     // Check if corresponding tensors in tensor lists have the same sizes and strides.
     for (const auto& tensor_list : tensorLists) {
       for (const auto j : c10::irange(tensorLists[0].size())) {

@@ -8235,8 +8235,6 @@ class foreach_inputs_sample_func:
                 raise AssertionError(f"Invalid scalar of type {rightmost_arg_type} - {rightmost_arg}")
             return disable_fastpath
         elif rightmost_arg_type == ForeachRightmostArgType.ScalarList:
-            if dtype == torch.complex128:
-                return True
             disable_fastpath = opinfo.ref == torch.div and dtype in integral_types_and(torch.bool)
             elmt_t = type(rightmost_arg[0])
             has_same_type = all(isinstance(v, elmt_t) for v in rightmost_arg)
