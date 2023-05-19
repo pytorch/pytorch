@@ -1,13 +1,14 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/utils/Factory.h>
 
 namespace at {
 namespace native {
 namespace xnnpack {
 
-static bool use_channel_shuffle(
+bool use_channel_shuffle(
     const Tensor& input,
     const int64_t groups) {
   using namespace internal;
@@ -33,7 +34,7 @@ static bool use_channel_shuffle(
       true;
 }
 
-static Tensor channel_shuffle(
+Tensor channel_shuffle(
     const Tensor& input,
     const int64_t groups) {
   using namespace internal;

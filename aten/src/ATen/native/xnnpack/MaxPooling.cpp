@@ -1,8 +1,9 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/Pool.h>
-#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/utils/Factory.h>
+#include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
 namespace at {
@@ -15,7 +16,7 @@ namespace xnnpack {
 //  - stride
 //  - dilation
 
-static bool use_max_pool2d(
+bool use_max_pool2d(
     const Tensor& input,
     const IntArrayRef kernel_,
     const IntArrayRef padding_,
@@ -134,7 +135,7 @@ static bool use_max_pool2d(
       true;
 }
 
-static Tensor max_pool2d(
+Tensor max_pool2d(
     const Tensor& input,
     const IntArrayRef kernel_,
     const IntArrayRef padding_,

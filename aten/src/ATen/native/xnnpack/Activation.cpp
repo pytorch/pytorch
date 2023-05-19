@@ -1,6 +1,7 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/native/utils/Factory.h>
 
 namespace at {
@@ -8,7 +9,7 @@ namespace native {
 namespace xnnpack {
 
 
-static bool use_hardswish(
+bool use_hardswish(
   const Tensor& input) {
   return xnnpack::available() &&
           (1 <= input.ndimension()) &&
@@ -57,7 +58,7 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
   return output;
 }
 
-static Tensor hardswish(const Tensor& input) {
+Tensor hardswish(const Tensor& input) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
     input, input.suggest_memory_format());
 
@@ -71,7 +72,7 @@ static Tensor hardswish(const Tensor& input) {
   return output.contiguous(input.suggest_memory_format());
 }
 
-static Tensor& hardswish_(Tensor& input) {
+Tensor& hardswish_(Tensor& input) {
   Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
     input, input.suggest_memory_format());
 
