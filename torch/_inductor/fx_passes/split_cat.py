@@ -578,6 +578,7 @@ getitem_split = ListOf(
             KeywordArg("split_sections"),
         ),
         Ignored(),
+        _users=MULTIPLE,
     ),
     partial=True,
 )

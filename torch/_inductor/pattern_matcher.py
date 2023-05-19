@@ -147,7 +147,7 @@ class MatchContext:
         return {
             pattern: node
             for pattern, node in self.pattern_to_node.items()
-            if pattern.has_multiple_users()
+            if pattern.has_multiple_users() and node is not None
         }
 
 
@@ -853,6 +853,18 @@ def training_graph(fn, args):
             decompositions=select_decomp_table(),
             enable_log=False,
         )(*args)
+
+    from .fx_passes.joint_graph import pointless_view
+
+    matcher_pass = PatternMatcherPass()
+
+    pattern = CallFunction(
+        torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")
+    )
+    GraphPatternEntry(
+        pattern=pattern, handler=pointless_view, extra_check=_return_true
+    ).register(matcher_pass.patterns)
+    matcher_pass.apply(gm.graph)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
