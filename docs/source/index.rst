@@ -59,6 +59,7 @@ Features described in this documentation are classified by release status:
    compile/torchfunc-and-torchcompile
    ir
    compile/dynamic-shapes
+   compile/fake-tensor
    logging
    compile/transformations
 
