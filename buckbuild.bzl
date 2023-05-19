@@ -21,6 +21,7 @@ load(
     "core_trainer_sources",
     "jit_core_headers",
     "jit_core_sources",
+    "dynamo_core_headers",
     "libtorch_profiler_sources",
     "torch_cpp_srcs",
     "torch_mobile_tracer_sources",
@@ -886,6 +887,13 @@ def define_buck_targets(
         name = "jit_core_headers",
         header_namespace = "",
         exported_headers = subdir_glob([("", x) for x in jit_core_headers]),
+        labels = labels,
+    )
+
+    fb_xplat_cxx_library(
+        name = "dynamo_core_headers",
+        header_namespace = "",
+        exported_headers = subdir_glob([("", x) for x in dynamo_core_headers]),
         labels = labels,
     )
 
@@ -1968,6 +1976,7 @@ def define_buck_targets(
                 ":generated_aten_config_header",
                 ":generated_aten_headers_cpu",
                 ":jit_core_headers",
+                ":dynamo_core_headers",
                 ":pthreadpool",
                 third_party("fmt"),
                 third_party("ruy"),
@@ -2208,6 +2217,7 @@ def define_buck_targets(
             ":aten_header",
             ":generated_aten_headers_cpu",
             ":jit_core_headers",
+            ":dynamo_core_headers",
             ":torch_mobile_headers",
             C10,
         ],

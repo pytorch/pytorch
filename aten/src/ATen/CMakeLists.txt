@@ -183,6 +183,8 @@ file(GLOB native_xnnpack "native/xnnpack/*.cpp")
 append_filelist("jit_core_headers" ATen_CORE_HEADERS)
 append_filelist("jit_core_sources" ATen_CORE_SRCS)
 
+append_filelist("dynamo_core_headers" ATen_CORE_HEADERS)
+
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
 

@@ -98,6 +98,10 @@ jit_core_sources = [
     "torch/csrc/jit/frontend/source_range.cpp",
 ]
 
+dynamo_core_headers = [
+    "torch/csrc/dynamo/eval_frame.h",
+]
+
 # copied from https://github.com/pytorch/pytorch/blob/0bde610c14b92d351b968a0228df29e92442b1cc/torch/CMakeLists.txt
 # There are some common files used in both internal lite-interpreter and full-jit. Making a separate
 # list for the shared files.
