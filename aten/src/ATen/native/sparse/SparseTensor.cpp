@@ -140,7 +140,7 @@ Tensor values_default(const Tensor& self) {
 
 /*** Helper methods ***/
 
-static SparseTensor new_sparse(
+SparseTensor new_sparse(
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,

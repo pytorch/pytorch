@@ -48,7 +48,6 @@
 #include <ATen/ops/_neg_view_copy_native.h>
 #include <ATen/ops/_reshape_alias_copy_native.h>
 #include <ATen/ops/_reshape_alias_native.h>
-#include <ATen/ops/_reshape_copy_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
@@ -1130,7 +1129,7 @@ Tensor sum_to_size_symint(const Tensor& self, SymIntArrayRef size) {
 
 // We currently do not support per-channel quant for unfold, diagonal, expand, permute.
 // TODO: Make this an aten function and replace as_strided_qtensorimpl once that is done.
-static Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
+Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, QuantizerPtr quantizer) {
   auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
   setStrided(result, size, stride, self.storage_offset());
@@ -1146,7 +1145,7 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   return result;
 }
 
-static Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
@@ -1195,7 +1194,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
 // and is currently not available through the dispatcher. The additional
 // input, quantizer, is called by the select & slice methods.
 // TODO: Make this function compatible with the dispatcher
-static Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
+Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
   QuantizerPtr quantizer) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   TORCH_CHECK(
@@ -1214,7 +1213,7 @@ const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymInt
   return self;
 }
 
-static Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
@@ -1379,7 +1378,7 @@ Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
-static _permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
+_permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
   const auto ndim = self.dim();
   TORCH_CHECK(ndim == static_cast<int64_t>(dims.size()),
       "permute(sparse_coo): number of dimensions in the tensor input ",
@@ -1725,7 +1724,7 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
 // this is an auxiliary function, called by the select&slice methods, that
 // creates a new quantizer from the given input
 // is_select is true if calling function is select()
-static QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int64_t start,
+QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int64_t start,
   int64_t end, int64_t dim, int64_t step) {
   auto quantizer_prev = get_qtensorimpl(self)->quantizer();
   if (quantizer_prev->qscheme() == QScheme::PER_TENSOR_AFFINE) {
@@ -2652,7 +2651,7 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
   return at::native::_stack_out_cpu(tensors, dim, result);
 }
 
-static void check_stack_inputs(TensorList tensors, int64_t dim) {
+void check_stack_inputs(TensorList tensors, int64_t dim) {
   at::IntArrayRef entry_shape = tensors[0].sizes();
   for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
@@ -3076,7 +3075,7 @@ Tensor & t_(Tensor & self) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-static inferSqueezeGeometry(const Tensor &tensor) {
+inferSqueezeGeometry(const Tensor &tensor) {
   SymDimVector sizes;
   SymDimVector strides;
 
@@ -3091,7 +3090,7 @@ static inferSqueezeGeometry(const Tensor &tensor) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-static inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
+inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   SymDimVector sizes;
   SymDimVector strides;
 
@@ -3105,7 +3104,7 @@ static inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 std::tuple<SymDimVector, SymDimVector>
-static inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
+inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> dim_mask) {
   const auto ndim = tensor.dim();
   const auto sym_sizes = tensor.sym_sizes();
   const auto sym_strides = tensor.sym_strides();
@@ -3142,7 +3141,7 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
-static Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
+Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   SymDimVector sizes;
   SymDimVector strides;
@@ -3418,7 +3417,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3469,7 +3468,7 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view_symint(other.sym_sizes());
 }
 
-static int64_t numel(const Tensor& self) {
+int64_t numel(const Tensor& self) {
   return self.unsafeGetTensorImpl()->numel();
 }
 
