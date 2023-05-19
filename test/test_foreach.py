@@ -1,7 +1,6 @@
 # Owner(s): ["module: mta"]
 
 from contextlib import nullcontext
-from functools import partial
 from numbers import Number
 import re
 import torch
@@ -920,21 +919,39 @@ class TestForeach(TestCase):
         dtypes=(torch.float,),
     )
     def test_forward_mode_AD(self, device, dtype, op):
-        inplace_func = partial(self._get_funcs(op)[2], is_cuda=False, is_fastpath=False, zero_size=False)
+
+        patterns_to_tolerate = "|".join([
+            _BOOL_SUB_ERR_MSG,
+            # Some non-unary in-place ops with scalar/scalarlist would error out if there's non float ones.
+            "can't be cast to the desired",
+            "clamp is not supported for complex types",
+            "Found dtype Float but expected ComplexFloat",
+        ])
+
         for sample in op.sample_inputs(
-            device, dtype, requires_grad=True, num_input_tensors=[2], same_size=True,
+            device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
         ):
+
+            def inplace_func(args):
+                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
+                op.inplace_variant(args, *sample.args, **kwargs)
+                return args
+
             primal_tensors = [t.clone() for t in sample.input]
             tangent_tensors = [torch.rand_like(t) for t in primal_tensors]
 
-            values, grads = torch.func.jvp(inplace_func, ([primal_tensors],), ([tangent_tensors],),)
-
-            cloned_sample = sample.transform(clone)
-            ref_inputs = [t.clone() for t in cloned_sample.input]
-            outputs = inplace_func([ref_inputs] + list(cloned_sample.args))
-            ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
-            self.assertEqual(values, outputs)
-            self.assertEqual(grads, ref_grads)
+            try:
+                values, grads = torch.func.jvp(inplace_func, (primal_tensors,), (tangent_tensors,),)
+            except Exception as e:
+                if not re.findall(patterns_to_tolerate, str(e)):
+                    raise e
+            else:
+                cloned_sample = sample.transform(clone)
+                ref_inputs = [t.clone() for t in cloned_sample.input]
+                outputs = inplace_func(ref_inputs)
+                ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
+                self.assertEqual(values, outputs)
+                self.assertEqual(grads, ref_grads)
 
 
 instantiate_device_type_tests(TestForeach, globals())
