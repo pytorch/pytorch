@@ -217,7 +217,6 @@ class OpsWrapper:
     can overload the magic methods for writing mathematical expressions fluently.
     """
 
-
     def __getattr__(self, name):
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
