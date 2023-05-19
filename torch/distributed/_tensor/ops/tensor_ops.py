@@ -112,7 +112,7 @@ def create_like_strategy(
     ]
 )
 def new_factory_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
 ) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
@@ -131,7 +131,7 @@ def gen_bucketize_strategy(
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
-        arg_spec = arg_strategy.output_spec
+        arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
         replica_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
         bucketize_strategy.strategies.append(
             PlacementStrategy(
@@ -161,7 +161,8 @@ def gen_slice_strategy(
         arg_spec = arg_strategy.output_spec
         if not is_tensor_dim_sharded(arg_spec, dim=slice_dim):
             # only add the strategy if the slice dim is not sharded
-            slice_strategy.strategies.append(PlacementStrategy(output_spec=arg_spec))
+            out_spec = DTensorSpec(mesh, arg_spec.placements)
+            slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
     if not slice_strategy.strategies:
         # if all strategies are filtered out, unsharding all specs on slice dim
         # of the input strategy, and use that as the op strategy

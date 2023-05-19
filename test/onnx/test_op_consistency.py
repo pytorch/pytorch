@@ -56,7 +56,9 @@ TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
+        "broadcast_to",
         "ceil",
+        "expand",
         "flatten",
         "logical_not",
         "nn.functional.scaled_dot_product_attention",

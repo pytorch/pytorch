@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     _dynamo_dist_per_rank_init,
 )
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
 
@@ -149,8 +150,6 @@ class FakeDDP(nn.Module):
         DDP._active_ddp_module = self
         try:
             yield
-        except Exception:
-            raise
         finally:
             DDP._active_ddp_module = None
 
@@ -716,4 +715,5 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

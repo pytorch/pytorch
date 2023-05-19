@@ -84,8 +84,8 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             shards_map[shard_dim] *= spec.mesh.size(i)
 
     for i, dim_size in enumerate(shape):
-        # TODO: maybe we should determine is_sharable base on the
-        #      whether it's evenly sharded or not
+        # TODO: maybe we should determine is_shardable based on
+        #       whether it's evenly sharded or not
         if dim_size < shards_map[i]:
             return False
 
