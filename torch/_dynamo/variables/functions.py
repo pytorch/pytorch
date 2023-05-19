@@ -303,18 +303,35 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
-        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
-        # since we ensure `forward` of allowed modules can be traced by AOT safely.
-        # Note this is not only for allowed modules, as user customized modules can extend from
-        # allowed modules but using parent's `forward` method, which is also covered by this branch.
+        # Here, we check if the method that we are calling belongs to the
+        # builtin (or allowed) nn modules.
+
+        # Context - We have historically avoided Dynamo tracing into the methods of
+        # builtin nn modules. Specifically for `forward` method of builtin
+        # modules, in the past we observed control-flow/hard-to-support python
+        # features, leading to unnecessary and frequent graph breaks. To avoid
+        # this, we just decided to directly put `call_module` for builtin
+        # nn.modules and `call_method` for the `forward` of builtin nn.modules.
+        # With AOT Autograd becoming an integral part of torch.compile stack,
+        # this became even a bigger moot point because AOT Autograd will skip
+        # over all those python features and give a clean aten-level graph.
+        #
+        # It is possible that these original motivations are no longer valid,
+        # and we could simplify the codepath now by removing the special case.
+        # However, it might be hard because downstream users od Dynamo might
+        # have written Fx transformations assuming presence of these modules.
+
+        # In the following path, we check if the method belongs to the builtin
+        # nn module. If it does, we redirect it to NNModule special handling of
+        # methods. For example, TorchDynamo does not need to trace the
+        # `children` method, we can directly get the children by constructing
+        # the relevant VariableTracker.
         if isinstance(self.obj, variables.NNModuleVariable):
-            module_attr = getattr(self.fn, "__module__", "")
-            if (
-                module_attr is not None
-                and module_attr.startswith("torch.nn.")
-                or self.is_constant
-            ):
+            # Extract the module this method belongs to. For example, for
+            # non-overriden `children` method of a user-defined nn module will
+            # still use the builtin nn module `children` impl.
+            module_where_fn_is_defined = inspect.getmodule(self.fn)
+            if module_where_fn_is_defined and is_allowed(module_where_fn_is_defined):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 ).add_options(self)
