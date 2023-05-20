@@ -61,7 +61,7 @@ def pad_dim(x, padded_length, dim):
     return torch.cat([x, pad], dim=dim)
 
 
-def addmm_pattern(input, mat1, mat2, beta=1, alpha=1):
+def addmm_pattern(input, mat1, mat2, beta, alpha):
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
@@ -75,7 +75,7 @@ def should_pad_addmm(match):
     )
 
 
-def addmm_replace(input, mat1, mat2, *, beta=1, alpha=1):
+def addmm_replace(input, mat1, mat2, beta, alpha):
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
@@ -297,7 +297,7 @@ def _pad_mm_init():
     else:
         device = "cpu"
 
-    # sizes/values don\\t actually matter for initial trace
+    # sizes/values dont actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
 
     dim2a = functools.partial(torch.empty, (4, 4), device=device, requires_grad=True)
@@ -310,7 +310,7 @@ def _pad_mm_init():
 
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
-    rep = {"alpha": 0.113377, "beta": 0.213377}
+    rep = {"beta": 0.213377, "alpha": 0.113377}
 
     for pattern, replacement, args, workaround, extra_check in [
         (
