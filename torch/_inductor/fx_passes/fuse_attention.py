@@ -259,9 +259,6 @@ def _sfdp_replacement_10(query, key, value):
     )
 
 
-# TODO(jansel): make these pattern work with lowmem_dropout=True
-
-
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -304,6 +301,9 @@ def _sfdp_scale_factor_check(scale_factor_op):
 
 @functools.lru_cache(None)
 def _sfdp_init():
+    from ..._dynamo.utils import counters
+
+    counters_ref = counters["inductor"].copy()
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -416,4 +416,6 @@ def _sfdp_init():
             scalar_workaround=workaround,
         )
 
-    counters["inductor"].clear()  # clear view matches encountered during sdpa tracing
+    counters[
+        "inductor"
+    ] = counters_ref  # clear view matches encountered during sdpa tracing
