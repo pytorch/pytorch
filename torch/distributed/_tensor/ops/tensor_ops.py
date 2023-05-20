@@ -247,7 +247,7 @@ def gen_slice_scatter_strategy(
 
 @register_op_strategy(aten._local_scalar_dense.default)
 def replica_only_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
 ) -> StrategyType:
     """Only allow replication on the input/ouput"""
     replicate_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
