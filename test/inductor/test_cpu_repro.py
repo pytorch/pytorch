@@ -214,10 +214,12 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
-        for input_shape, bias in options:
+        options = itertools.product(
+            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False]
+        )
+        for input_shape, out_dim, bias in options:
             mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
             ).eval()
 
             v = torch.randn(input_shape)
@@ -1588,6 +1590,13 @@ class CPUReproTests(TestCase):
             return a
 
         x = torch.rand(16)
+        self.common(f, (x,))
+
+    def test_to_channels_last_bfloat16(self):
+        def f(a):
+            return a.to(memory_format=torch.channels_last)
+
+        x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
 
 

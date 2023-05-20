@@ -1417,7 +1417,6 @@ make_fx_failures = {
 fake_tensor_failures = {
     # FakeTensor fallback doesn't work
     xfail('_segment_reduce', 'lengths'),
-    xfail('multinomial'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
     # cannot do these as they rely on tensor data
@@ -1507,7 +1506,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
