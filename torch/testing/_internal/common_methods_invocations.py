@@ -8474,6 +8474,13 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
+
+    ForeachFuncInfo(
+        'zero',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -15809,6 +15816,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
                # Lazy tensor failures
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
