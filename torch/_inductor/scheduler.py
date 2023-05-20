@@ -549,7 +549,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
-    @cache_on_self
     def is_foreach(self):
         return False
 
@@ -1064,7 +1063,7 @@ class Scheduler:
         ):
             return False
 
-        if isinstance(node1, ForeachKernelSchedulerNode) ^ isinstance(
+        if isinstance(node1, ForeachKernelSchedulerNode) is not isinstance(
             node2, ForeachKernelSchedulerNode
         ):
             return False

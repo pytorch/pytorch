@@ -1,6 +1,6 @@
 import itertools
 
-from .. import config, metrics
+from .. import metrics
 from ..utils import ceildiv, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
@@ -39,11 +39,6 @@ class ForeachKernel(Kernel):
     def __init__(self):
         super().__init__()
         self.block_size = 1024  # Try tuning this value
-        # self.grid = (
-        #    ForeachKernel._compute_num_blocks(self.tensor_elem_counts, self.block_size),
-        #    1,
-        #    1,
-        # )
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
@@ -97,7 +92,7 @@ class ForeachKernel(Kernel):
         }
         triton_meta["configs"] = [config_of(signature)]
         return (
-            f"@template(num_stages=1, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            f"@foreach(num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
         )
 
@@ -109,39 +104,29 @@ class ForeachKernel(Kernel):
         )
 
     def codegen_kernel(self, name=None):
-        # from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         code.splice(
             """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_heuristics import template
+                from torch._inductor.triton_heuristics import foreach
                 from torch._inductor.utils import instance_descriptor
             """
         )
         argdefs, _, _ = self.args.python_argdefs()
         code.writeline(self.jit_line())
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
-        if config.benchmark_kernel:
-            code.splice(
-                """
-                    from torch._dynamo.testing import rand_strided
-                    from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                    import torch
-                    from torch._inductor.triton_heuristics import grid, template
-                    from torch._inductor.utils import instance_descriptor
-                """
-            )
 
         with code.indent():
             code.splice("pid = tl.program_id(0)")
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
 
+            # Initialize all range variables to avoid a triton bug
+            # with defining vars in if/else blocks
             for i in range(next(self.iter_vars_count)):
                 code.splice(f"x{i} = tl.arange(0, XBLOCK)")
-                code.splice("xmask = tl.arange(0, XBLOCK) < XBLOCK")
+                code.splice("xmask = tl.arange(0, XBLOCK) > XBLOCK")
 
             for sub_kernel in self.sub_kernels:
                 num_elems = int(sympy_product(sub_kernel.numels))

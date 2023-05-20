@@ -848,6 +848,18 @@ def template(num_stages, num_warps, meta, filename=None):
     )
 
 
+def foreach(meta, num_warps, filename=None):
+    """
+    Compile a triton foreach kernel
+    """
+    return cached_autotune(
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
+        meta=meta,
+        heuristic_type=HeuristicType.TEMPLATE,
+        filename=filename,
+    )
+
+
 def grid(xnumel, ynumel=None, znumel=None):
     """Helper function to compute triton grids"""
 
