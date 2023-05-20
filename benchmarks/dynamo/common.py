@@ -86,7 +86,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
-    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
@@ -124,7 +123,6 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "moco",  # Please convert all Tensors to FakeTensors first
     "hf_BigBird",  # OOM
     "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
@@ -143,7 +141,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
-    "moco",
     "pytorch_struct",
     "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
@@ -185,7 +182,6 @@ CI_SKIP[CI("inductor", training=False)] = [
     "hf_GPT2_large",  # OOM
     "maml",  # accuracy
     "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
-    "moco",  # accuracy
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
@@ -220,9 +216,6 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
     # Huggingface
-    "AllenaiLongformerBase",
-    "BartForConditionalGeneration",  # OOM
-    "DebertaV2ForQuestionAnswering",  # OOM
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
@@ -268,6 +261,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
+    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
