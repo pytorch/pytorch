@@ -144,7 +144,7 @@ class MatchContext:
         return {
             pattern: node
             for pattern, node in self.pattern_to_node.items()
-            if pattern.has_multiple_users()
+            if pattern.has_multiple_users() and node is not None
         }
 
 
