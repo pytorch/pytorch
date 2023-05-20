@@ -335,8 +335,13 @@ class UserMethodVariable(UserFunctionVariable):
             # non-overriden `children` method of a user-defined nn module will
             # still use the builtin nn module `children` impl. And therefore, we
             # can redirect it to NNModuleVariable call_method.
+
             module_where_fn_is_defined = inspect.getmodule(self.fn)
-            if module_where_fn_is_defined and is_allowed(module_where_fn_is_defined):
+            if (
+                module_where_fn_is_defined
+                and is_allowed(module_where_fn_is_defined)
+                or self.is_constant
+            ):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 ).add_options(self)
