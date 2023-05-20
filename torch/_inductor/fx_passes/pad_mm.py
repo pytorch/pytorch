@@ -343,6 +343,7 @@ def _pad_mm_init():
             training_graph,
             patterns,
             extra_check=extra_check,
+            scalar_workaround=workaround
         )
         register_replacement(
             pattern,
@@ -351,6 +352,7 @@ def _pad_mm_init():
             inference_graph,
             patterns,
             extra_check=extra_check,
+            scalar_workaround=workaround
         )
 
     # copy pasta - needed ?
