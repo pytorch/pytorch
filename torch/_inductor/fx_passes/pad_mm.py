@@ -2,10 +2,10 @@ import functools
 from itertools import chain
 
 import torch
-from ..._dynamo.utils import counters
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
+from ..._dynamo.utils import counters
 
 from ..pattern_matcher import inference_graph, register_replacement, training_graph
 
@@ -343,7 +343,7 @@ def _pad_mm_init():
             training_graph,
             patterns,
             extra_check=extra_check,
-            scalar_workaround=workaround
+            scalar_workaround=workaround,
         )
         register_replacement(
             pattern,
@@ -352,7 +352,7 @@ def _pad_mm_init():
             inference_graph,
             patterns,
             extra_check=extra_check,
-            scalar_workaround=workaround
+            scalar_workaround=workaround,
         )
 
     # copy pasta - needed ?
