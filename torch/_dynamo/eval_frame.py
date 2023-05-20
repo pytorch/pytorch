@@ -782,6 +782,8 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
+    call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+    original_signature = inspect.signature(call_to_inspect)
 
     if functionalize and not aten_graph:
         raise UserError(
@@ -885,7 +887,7 @@ def export(
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
-        msg = dim_constraints.prettify_results(inspect.signature(f))
+        msg = dim_constraints.prettify_results(original_signature)
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
@@ -895,6 +897,16 @@ def export(
                 "Summary of dimension constraints:%s",
                 msg,
             )
+
+        # Error if we have any constraints on static values
+        for k in shape_env.var_to_range.keys():
+            if isinstance(k, sympy.Integer):
+                constraint_violation_error = ConstraintViolationError(
+                    f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
+                    "It appears that you're trying to set a constraint on a "
+                    f"value which we evaluated to have a static value of {k}. "
+                    "Scroll up to see where this constraint was set."
+                )
     if constraint_violation_error:
         raise constraint_violation_error
 
@@ -1061,10 +1073,7 @@ def export(
 
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
-        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-
-        sig = inspect.signature(call_to_inspect)
-        fullargspec = signature_to_fullargspec(sig)
+        fullargspec = signature_to_fullargspec(original_signature)
 
         # 1. Map `args` 1-to-1 to positional arguments in original signature.
         input_strs = fullargspec.args[: len(args)]

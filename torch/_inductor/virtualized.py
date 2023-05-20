@@ -2,6 +2,7 @@ import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -153,7 +154,7 @@ class WrapperHandler:
 
 MockHandler._init_cls()
 
-ops = Virtualized("ops", MockHandler)
+_ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
@@ -161,13 +162,92 @@ _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 
 
+class OpsValue:
+    """The return type of most ops calls.
+
+    This exists so we can overload magic methods, and write mathematical
+    expressions much more fluently. So instead of
+
+        ops.add(ops.mul(ops.mul(ops.sub(ops.mul(_Ap2, x), _Ap3), x), x), _1)
+
+    we can write
+
+        (_Ap2 * x - _Ap3) * x * x + _1
+
+    """
+
+    value: Any
+
+    def __init__(self, value):
+        self.value = value
+
+    def __str__(self):
+        return str(self.value)
+
+    def __repr__(self):
+        return f"OpsValue({self.value!r})"
+
+    def __add__(self, other):
+        return ops.add(self, other)
+
+    def __mul__(self, other):
+        return ops.mul(self, other)
+
+    def __sub__(self, other):
+        return ops.sub(self, other)
+
+    def __neg__(self):
+        return ops.neg(self)
+
+    def __truediv__(self, other):
+        return ops.truediv(self, other)
+
+    def __floordiv__(self, other):
+        return ops.floordiv(self, other)
+
+    def __mod__(self, other):
+        return ops.mod(self, other)
+
+    def __pow__(self, other):
+        return ops.pow(self, other)
+
+
+class OpsWrapper:
+    """This wraps any returned IR values into an `OpsValue` instance, so that we
+    can overload the magic methods for writing mathematical expressions fluently.
+    """
+
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            new_args = [OpsWrapper._unwrap(a) for a in args]
+            new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
+            return OpsValue(getattr(_ops, name)(*new_args, **new_kwargs))
+
+        return inner
+
+    @staticmethod
+    def _unwrap(x):
+        if isinstance(x, OpsValue):
+            return x.value
+        return x
+
+    @staticmethod
+    def indirect_indexing(index, size, check=True):
+        # Returns a sympy value, not IR value
+        index = OpsWrapper._unwrap(index)
+        return _ops.indirect_indexing(index, size, check)
+
+
+ops = OpsWrapper()
+
+
 class _V:
     MockHandler = MockHandler
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler = ops._set_handler
-    get_ops_handler = ops._get_handler
+    set_ops_handler = _ops._set_handler
+    get_ops_handler = _ops._get_handler
     set_graph_handler = _graph._set_handler
     set_fake_mode = _fake_mode._set_handler
     set_kernel_handler = _kernel._set_handler
@@ -177,7 +257,7 @@ class _V:
     @property
     def ops(self) -> MockHandler:
         """The operator handler specific to the current codegen task"""
-        return ops._get_handler()
+        return _ops._get_handler()
 
     @property
     def graph(self):

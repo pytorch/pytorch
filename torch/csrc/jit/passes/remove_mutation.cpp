@@ -75,7 +75,7 @@ Node* MutationRemover::createSpecialMappedOp(Node* n) {
   return new_node;
 }
 
-static bool removableSetItem(Node* n) {
+bool removableSetItem(Node* n) {
   if (n->kind() != aten::_set_item ||
       n->input(1)->node()->kind() != prim::Constant) {
     return false;
