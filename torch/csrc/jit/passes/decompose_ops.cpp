@@ -22,7 +22,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 // helper to determine if an optional tensor argument/value passed in is
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
-static c10::optional<bool> isDefined(Value* tensor) {
+c10::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(*TensorType::get())) {
     return true;
   }
@@ -32,7 +32,7 @@ static c10::optional<bool> isDefined(Value* tensor) {
   return {};
 }
 
-static bool isDecomposableNorm(Node* normalize_op) {
+bool isDecomposableNorm(Node* normalize_op) {
   static const OperatorSet decomposable_normalization_ops = {
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps, bool cudnn_enable) -> Tensor",
@@ -85,7 +85,7 @@ RegisterOperators reg_ops(
          },
          aliasAnalysisFromSchema())});
 
-static bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
+bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
   bool decomposed = false;
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
