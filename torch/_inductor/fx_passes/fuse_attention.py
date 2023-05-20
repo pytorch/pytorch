@@ -306,6 +306,9 @@ def _sfdp_scale_factor_check(scale_factor_op):
 @functools.lru_cache(None)
 @config.patch(lowmem_dropout=False)
 def _sfdp_init():
+    from ..._dynamo.utils import counters
+
+    counters_ref = counters["inductor"].copy()
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -418,4 +421,6 @@ def _sfdp_init():
             scalar_workaround=workaround,
         )
 
-    counters["inductor"].clear()  # clear view matches encountered during sdpa tracing
+    counters[
+        "inductor"
+    ] = counters_ref  # clear view matches encountered during sdpa tracing

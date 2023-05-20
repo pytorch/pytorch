@@ -17,7 +17,6 @@
 #include <ATen/ops/_log_softmax.h>
 #include <ATen/ops/_log_softmax_backward_data_native.h>
 #include <ATen/ops/_log_softmax_native.h>
-#include <ATen/ops/_masked_softmax_backward_native.h>
 #include <ATen/ops/_masked_softmax_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
@@ -441,7 +440,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
   }
 }
 
-static Tensor softmax(const Tensor& input_, const int64_t dim_) {
+Tensor softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_softmax(input_, dim_, false);
@@ -506,7 +505,7 @@ Tensor special_softmax(const Tensor& input_, const int64_t dim_, c10::optional<S
   return at::softmax(input_, dim_, dtype);
 }
 
-static Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
+Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
   auto result = [&]() {
     NoNamesGuard guard;
     return at::_log_softmax(input_, dim_, false);

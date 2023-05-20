@@ -220,12 +220,14 @@ from torch._dynamo.debug_utils import run_fwd_maybe_bwd
 from torch.nn import *
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
-{generate_config_string(stable_output=False)}
+import torch._dynamo.config
+import torch._inductor.config
+import torch._functorch.config
 
 {extra_imports}
 
 class GeneratedReproTestCase(torch._dynamo.test_case.TestCase):
+{textwrap.indent(generate_config_string(stable_output=False, as_patch=True), ' ' * 4)}
     def test_generated_repro_case(self):
         {textwrap.indent(model_str, ' ' * 8)}
 
@@ -356,12 +358,14 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name, produce_test):
             compiler_fn=compiler_fn,
             orig_failure=orig_failure,
         )
-        minifier(
-            gm,
-            example_inputs,
-            module_fails=fails_fn,
-            dump_state=dump_state_fn,
-        )
+        # TBD if we want produce_test to keep minifying or not
+        if not produce_test:
+            minifier(
+                gm,
+                example_inputs,
+                module_fails=fails_fn,
+                dump_state=dump_state_fn,
+            )
     return gm
 
 

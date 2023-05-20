@@ -374,8 +374,8 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-#if AT_MKLDNN_ENABLED()
 static bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
@@ -386,8 +386,9 @@ static bool use_mkldnn(const Tensor& input) {
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
     (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
-}
 #endif
+  return false;
+}
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, c10::string_view approximate, const Tensor& result

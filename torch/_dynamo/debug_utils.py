@@ -238,21 +238,34 @@ def _cuda_system_info_comment():
     return model_str
 
 
-def generate_config_string(*, stable_output=False):
+def generate_config_string(*, stable_output=False, as_patch=False):
     import torch._functorch.config
     import torch._inductor.config
 
     if stable_output:
         return "# config omitted due to stable_output=True"
 
-    return f"""\
+    imports = (
+        """\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
-{torch._functorch.config.codegen_config()}
 """
+        if not as_patch
+        else ""
+    )
+
+    lines = [
+        imports,
+        torch._dynamo.config.codegen_config(as_patch=as_patch),
+        torch._inductor.config.codegen_config(as_patch=as_patch),
+        torch._functorch.config.codegen_config(as_patch=as_patch),
+    ]
+
+    formatted_code = "\n".join(lines)
+    aligned_code = textwrap.dedent(formatted_code).strip()
+
+    return aligned_code
 
 
 def get_minifier_repro_path():

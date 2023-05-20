@@ -28,7 +28,7 @@
 namespace at {
 namespace native {
 
-static void layer_norm_with_mean_rstd_out(
+void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
     at::Tensor& mean,
     at::Tensor& rstd,

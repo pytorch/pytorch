@@ -91,7 +91,7 @@ class ConfigModule(ModuleType):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
 
-    def codegen_config(self):
+    def codegen_config(self, *, as_patch=False):
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
         """
@@ -102,7 +102,10 @@ class ConfigModule(ModuleType):
                 continue
             if v == self._default[k]:
                 continue
-            lines.append(f"{mod}.{k} = {v!r}")
+            if as_patch:
+                lines.append(f"@{mod}.patch('{k}', {v!r})")
+            else:
+                lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
     def load_config(self, data):
