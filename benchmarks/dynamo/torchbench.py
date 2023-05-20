@@ -75,14 +75,13 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
-    # https://github.com/pytorch/pytorch/issues/99438
-    "vision_maskrcnn",
 }
 
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
     "nanogpt_generate",  # timeout
+    "vision_maskrcnn",  # The size of tensor a (36) must match the size of tensor b (34)
 }
 
 SKIP_FOR_CUDA = {
@@ -123,7 +122,6 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenet_v3_large",
     "nvidia_deeprecommender",
     "timm_efficientdet",
-    "vision_maskrcnn",
 }
 
 # These models need >1e-3 tolerance
@@ -144,7 +142,6 @@ REQUIRE_COSINE_TOLERACE = {
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/98355
     "mobilenet_v3_large",
-    "vision_maskrcnn",  # eager variant
 }
 
 # These benchmarks took >600s on an i9-11900K CPU

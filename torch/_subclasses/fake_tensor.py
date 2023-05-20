@@ -14,6 +14,7 @@ import torch._custom_op
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -1394,17 +1395,24 @@ class FakeTensorMode(TorchDispatchMode):
         def wrap(e, device=None):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
+
+            if common_device is None:
+                (
+                    common_device,
+                    has_scalar_only_inputs,
+                ) = FakeTensor._find_common_device(func, args, kwargs)
+
+            if isinstance(e, FakeTensor):
+                check(
+                    e.device == common_device,
+                    lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
+                )
+
             if (
                 isinstance(e, torch.Tensor)
                 and not isinstance(e, FakeTensor)
                 and converter is not None
             ):
-                if common_device is None:
-                    (
-                        common_device,
-                        has_scalar_only_inputs,
-                    ) = FakeTensor._find_common_device(func, args, kwargs)
-
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
