@@ -12,6 +12,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
+#include <torch/csrc/utils/byte_order.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
@@ -644,6 +645,50 @@ PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
   }
 }
 
+PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
+  PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);
+  THPUtils_assert(
+      THPUtils_checkLong(_elem_size), "_byteswap(): arg must be an 'int'");
+  auto elem_size = THPUtils_unpackLong(_elem_size);
+  THPUtils_assert(
+      elem_size == 1 || elem_size == 2 || elem_size == 4 || elem_size == 8,
+      "elem_size must be 1, 2, 4, or 8");
+
+  const auto& storage = THPStorage_Unpack(self);
+  const auto nbytes = static_cast<uint64_t>(storage.nbytes());
+
+  if (elem_size == 2) {
+    THPUtils_assert(
+        nbytes % 2 == 0, "the length of data is not a multiple of 2");
+    auto buffer = static_cast<uint16_t*>(storage.mutable_data());
+    const uint64_t count = nbytes / 4;
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap16(*buffer);
+    }
+  } else if (elem_size == 4) {
+    THPUtils_assert(
+        nbytes % 4 == 0, "the length of data is not a multiple of 4");
+    auto buffer = static_cast<uint32_t*>(storage.mutable_data());
+    const uint64_t count = nbytes / 4;
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap32(*buffer);
+    }
+  } else if (elem_size == 8) {
+    THPUtils_assert(
+        nbytes % 8 == 0, "the length of data is not a multiple of 8");
+    auto buffer = static_cast<uint64_t*>(storage.mutable_data());
+    const uint64_t count = nbytes / 8;
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap64(*buffer);
+    }
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_sharingMethods[] = {
     {"_new_with_weak_ptr",
@@ -684,6 +729,7 @@ static PyMethodDef THPStorage_sharingMethods[] = {
     {"_shared_incref", THPStorage_sharedIncref, METH_NOARGS, nullptr},
     {"_get_shared_fd", THPStorage_sharedFd, METH_NOARGS, nullptr},
     {"is_shared", THPStorage_isShared, METH_NOARGS, nullptr},
+    {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getSharingMethods() {
