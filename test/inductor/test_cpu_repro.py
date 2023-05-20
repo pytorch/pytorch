@@ -118,11 +118,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
-        options = itertools.product([[3, 56, 56]], [True, False])
-        for x_shape, mode_train in options:
-            mod = torch.nn.Sequential(torch.nn.Conv2d(3, 64, 3, 3)).train(
-                mode=mode_train
-            )
+        options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
+        for x_shape, mode_train, padding in options:
+            mod = torch.nn.Sequential(
+                torch.nn.Conv2d(3, 64, 3, 3, padding=padding)
+            ).train(mode=mode_train)
             v = torch.randn(x_shape, dtype=torch.float32)
 
             with torch.no_grad():
@@ -214,10 +214,12 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
-        options = itertools.product([[2, 3, 10], [2, 10], [10]], [True, False])
-        for input_shape, bias in options:
+        options = itertools.product(
+            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False]
+        )
+        for input_shape, out_dim, bias in options:
             mod = torch.nn.Sequential(
-                torch.nn.Linear(input_shape[-1], 30, bias=bias)
+                torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
             ).eval()
 
             v = torch.randn(input_shape)
@@ -238,8 +240,11 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_transpose2d_packed(self):
-        mod = torch.nn.Sequential(torch.nn.ConvTranspose2d(3, 64, 3, 3)).eval()
-        for x_shape in [[1, 3, 28, 28], [3, 28, 28]]:
+        options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
+        for x_shape, padding in options:
+            mod = torch.nn.Sequential(
+                torch.nn.ConvTranspose2d(3, 64, 3, 3, padding=padding)
+            ).eval()
             v = torch.randn(x_shape, dtype=torch.float32)
             with torch.no_grad():
                 self.common(
@@ -298,6 +303,17 @@ class CPUReproTests(TestCase):
                 (value, mask),
             )
 
+    @config.patch(implicit_fallbacks=True)
+    def test_repeat_interleave(self):
+        def fn(y):
+            return torch.repeat_interleave(y, 2, output_size=8)
+
+        a = torch.tensor([[1, 2], [3, 4]])
+        self.common(
+            fn,
+            (a,),
+        )
+
     def test_inplace_squeeze_needed(self):
         mod = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -345,6 +361,16 @@ class CPUReproTests(TestCase):
         a = torch.randn([2])
         b = torch.randn([2])
         self.common(fn, (a, b))
+
+    def test_scalar_sign_with_min(self):
+        # https://github.com/pytorch/pytorch/issues/101340
+        def fn(a):
+            t1 = torch.tanh(a)
+            t2 = torch.sign(t1)
+            return torch.min(t1, t2)
+
+        a = torch.randn(1, 3)
+        self.common(fn, (a,))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -668,7 +694,7 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
-            "randint",
+            "randint64",
             "bitwise_and",
             "bitwise_or",
             "bitwise_xor",
@@ -1316,6 +1342,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     @config.patch({"cpp.enable_kernel_profile": True})
+    @config.patch({"cpp.descriptive_names": "original_aten"})
     def test_cpp_kernel_profile(self):
         from torch.profiler import profile
 
@@ -1330,7 +1357,7 @@ class CPUReproTests(TestCase):
 
         kernel_profile_events = []
         for e in prof.profiler.function_events:
-            if "kernel_cpp_0" in e.name:
+            if "cpp_fused_add_0" in e.name:
                 kernel_profile_events.append(e.name)
         assert len(kernel_profile_events) > 0
 
@@ -1458,6 +1485,19 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_non_contiguous_index_with_constant_stride(self):
+        def fn(x):
+            x1 = x[:, :, :, ::2]
+            x2 = x[:, :, :, 1::2]
+            x = torch.stack((-x2, x1), dim=-1)
+            return x.flatten(-2)
+
+        metrics.reset()
+        x = torch.randn(1, 32, 16, 68)
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.generated_cpp_vec_kernel_count == 2
+
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
             b = a[[0]]
@@ -1550,6 +1590,13 @@ class CPUReproTests(TestCase):
             return a
 
         x = torch.rand(16)
+        self.common(f, (x,))
+
+    def test_to_channels_last_bfloat16(self):
+        def f(a):
+            return a.to(memory_format=torch.channels_last)
+
+        x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
 
 

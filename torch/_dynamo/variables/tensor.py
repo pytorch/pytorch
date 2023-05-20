@@ -148,6 +148,10 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
 
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+
         result = None
         options = VariableTracker.propagate(self)
         if name == "ndim" and self.ndim is not None:
@@ -184,11 +188,17 @@ class TensorVariable(VariableTracker):
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
-        # It's hard to get resize_() on graph input work properly across
+        # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
-        if name in ("resize_", "unsqueeze_", "resize_as_") and self.source is not None:
-            # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_
-            return variables.misc.DelayGraphBreakVariable()
+        if self.source is not None and hasattr(torch.ops.aten, name):
+            fn = getattr(torch.ops.aten, name)
+            if (
+                hasattr(fn, "overloads")
+                and hasattr(fn, fn.overloads()[0])
+                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+            ):
+                # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -250,6 +260,9 @@ class TensorVariable(VariableTracker):
             idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
+    def _strict_mode_banned_ops(self):
+        return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
+
     def call_method(
         self,
         tx,
@@ -257,6 +270,9 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
