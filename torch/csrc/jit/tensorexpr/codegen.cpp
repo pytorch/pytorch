@@ -95,7 +95,7 @@ void CodeGen::call_with_numel(void** args, int64_t numel) {
       false, "This codegen backend does not implement call_with_numel");
 }
 
-static c10::optional<size_t> bufSize(BufPtr buf) {
+c10::optional<size_t> bufSize(BufPtr buf) {
   size_t size = elementSize(buf->dtype().scalar_type()) * buf->dtype().lanes();
   for (auto& d : buf->dims()) {
     if (!d->isConstant()) {
@@ -115,7 +115,7 @@ static c10::optional<size_t> bufSize(BufPtr buf) {
 // allocations available, we'll create memory for it. Once we are beyond the
 // liveness range of this buffer, we'll mark its corresponding memory allocation
 // as "up for grabs" for future reuse.
-static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
+std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     const std::unordered_set<BufPtr>& bufs,
     const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>& buf_ranges,
     const std::unordered_set<BufPtr>& bufs_external_allocs) {
@@ -198,7 +198,7 @@ static std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
   return buf_allocs;
 }
 
-static StmtPtr insertAllocFree(
+StmtPtr insertAllocFree(
     std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
     const std::unordered_set<BufPtr>& bufs_external_allocs,
     StmtPtr stmt) {

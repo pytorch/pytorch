@@ -65,7 +65,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   return producer_op_pair;
 }
 
-static std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
+std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
     c10::List<c10::IValue> list,
     std::string fn_name) {
   std::list<std::pair<at::RecordFunctionHandle, int>> input_op_id_list;
@@ -81,7 +81,7 @@ static std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
   return input_op_id_list;
 }
 
-static std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
+std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
     const at::RecordFunction& fn) {
   std::pair<at::RecordFunctionHandle, int> undefined_op_pair(0, -1);
   std::list<std::pair<at::RecordFunctionHandle, int>> input_producer_ops_;
@@ -110,7 +110,7 @@ static std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
   return input_producer_ops_;
 }
 
-static void updateOutputTensorTracker(const at::RecordFunction& fn) {
+void updateOutputTensorTracker(const at::RecordFunction& fn) {
   int output_nr = 0;
   auto state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");

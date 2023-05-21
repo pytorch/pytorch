@@ -81,7 +81,6 @@ SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
     "nanogpt_generate",  # timeout
-    "vision_maskrcnn",  # The size of tensor a (36) must match the size of tensor b (34)
 }
 
 SKIP_FOR_CUDA = {
@@ -188,6 +187,7 @@ DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
     "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",  # https://github.com/pytorch/benchmark/pull/1656
 }
 
 
@@ -346,6 +346,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if model_name == "maml_omniglot":
             batch_size = 5
             assert example_inputs[0].shape[0] == batch_size
+        if model_name == "vision_maskrcnn":
+            batch_size = 1
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name

@@ -76,7 +76,7 @@ Tensor & masked_fill__quantized_cpu(Tensor& self, const Tensor & mask, const Ten
   return self;
 }
 
-static Tensor & masked_fill_impl_quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
+Tensor & masked_fill_impl_quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kBool, "masked_fill only supports boolean masks, "
