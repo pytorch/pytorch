@@ -623,7 +623,7 @@ Tensor linalg_matrix_power_impl(
       // Clone input to include result in the autograd graph
       out = self.clone(at::MemoryFormat::Contiguous);
     }
-    return out.copy_(at::eye(self.size(-2), self.options()));
+    return out.copy_(at::eye(self.sym_size(-2).guard_int(__FILE__, __LINE__), self.options()));
   }
   if (n == 1) {
     return _out.has_value() ? out.copy_(self)
