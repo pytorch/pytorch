@@ -16,7 +16,7 @@ namespace jit {
 // closure block.
 // Within the closure subgraph, the context tuple is unpacked and the unpacked
 // values are used for closed over values.
-static void liftClosure(Node* closure) {
+void liftClosure(Node* closure) {
   auto block = closure->blocks().at(0);
   auto subgraph = std::make_shared<Graph>();
   // closures/forks can be nested, so use closure owning graph
@@ -56,7 +56,7 @@ static void liftClosure(Node* closure) {
   runCleanupPasses(closure->g(attr::Subgraph));
 }
 
-static void liftClosures(Block* block) {
+void liftClosures(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++;
