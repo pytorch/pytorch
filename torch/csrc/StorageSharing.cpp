@@ -663,7 +663,7 @@ PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
     THPUtils_assert(
         nbytes % 2 == 0, "the length of data is not a multiple of 2");
     auto buffer = static_cast<uint16_t*>(storage.mutable_data());
-    const uint64_t count = nbytes / 4;
+    const uint64_t count = nbytes / 2;
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap16(*buffer);
     }
