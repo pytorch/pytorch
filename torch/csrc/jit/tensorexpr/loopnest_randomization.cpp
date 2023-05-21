@@ -10,13 +10,12 @@
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
-#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 
 namespace torch::jit::tensorexpr {
 
 namespace randomization_helper {
 
-static int64_t max_transformations(int n_max_transforms) {
+int64_t max_transformations(int n_max_transforms) {
   // Reuse the env variable PYTORCH_JIT_OPT_LIMIT to control the max number of
   // transformations.  Example - set the env variable
   // PYTORCH_JIT_OPT_LIMIT="loopnest_randomization=10" to set max
@@ -32,7 +31,7 @@ static int64_t max_transformations(int n_max_transforms) {
   return max_transforms;
 }
 
-static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
+std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
     std::vector<ForPtr> loops) {
   // Find the first set of loops that can be reordered
   std::vector<std::vector<ForPtr>> all_nested_loops;
@@ -80,7 +79,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   return std::make_tuple(selected_objects, selected_indices);
 }
 
-static int find_factor(ForPtr loop) {
+int find_factor(ForPtr loop) {
   // Find valid factors
   ExprPtr loop_stop = loop->stop();
   auto loop_imm = intValue(loop_stop);
@@ -92,7 +91,7 @@ static int find_factor(ForPtr loop) {
   return -1;
 }
 
-static void printHistory(int index, std::string message) {
+void printHistory(int index, std::string message) {
   message = "Random Transform Sequence - Transformations[" +
       std::to_string(index) + "] = " + message;
   GRAPH_DEBUG(message);
@@ -107,7 +106,7 @@ std::string join(std::vector<T> indices, char sep = ',') {
   return s;
 }
 
-static std::string join(std::vector<std::string> indices, char sep = ',') {
+std::string join(std::vector<std::string> indices, char sep = ',') {
   std::string s = "";
   for (const auto& index : indices) {
     s += index + sep;

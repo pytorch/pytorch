@@ -2,7 +2,6 @@
 
 #include <c10/util/Array.h>
 #include <c10/util/TypeList.h>
-#include <array>
 #include <functional>
 #include <type_traits>
 
