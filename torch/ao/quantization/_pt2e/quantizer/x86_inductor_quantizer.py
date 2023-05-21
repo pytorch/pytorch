@@ -9,6 +9,7 @@ from .quantizer import (
     QuantizationConfig,
     QuantizationSpec,
     Quantizer,
+    QuantizationAnnotation,
 )
 from torch.ao.quantization._pt2e.quantizer.utils import (
     get_act_obs_or_fq_ctr,
@@ -217,29 +218,33 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([unary_node, binary_node, conv_node]):
             return
 
+        input_qspec_map = {}
         input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+
         weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+
         bias_node = conv_node.args[2]
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                input_node: get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
-            },
-            "_annotated": True,
-        }
-        # TODO(Leslie) Need to insert observer for the extra input node
-        # Maybe use "args_act_index"
-        binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                extra_input_node: get_act_obs_or_fq_ctr(quantization_config),
-            },
-            "_annotated": True,
-        }
-        unary_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+        binary_node_input_qspec_map = {}
+        binary_node_input_qspec_map[extra_input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=binary_node_input_qspec_map,
+            _annotated=True
+        )
+        unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
 
     def _annotate_conv2d_binary(self, node: Node, quantization_config: QuantizationConfig) -> None:
         # Conv2d + add
@@ -273,26 +278,31 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([binary_node, conv_node]):
             return
 
+        input_qspec_map = {}
         input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+
         weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+
         bias_node = conv_node.args[2]
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                input_node: get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
-            },
-            "_annotated": True,
-        }
-        # TODO(Leslie) Need to insert observer for the extra input node
-        # Maybe use "args_act_index"
-        binary_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                extra_input_node: get_act_obs_or_fq_ctr(quantization_config),
-            },
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+
+        binary_node_input_qspec_map = {}
+        binary_node_input_qspec_map[extra_input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=binary_node_input_qspec_map,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
 
     def _annotate_conv2d_unary(self, node: Node, quantization_config: QuantizationConfig) -> None:
         supported_unary_node = [torch.ops.aten.relu_.default, torch.ops.aten.relu.default]
@@ -306,21 +316,26 @@ class X86InductorQuantizer(Quantizer):
         if _is_annotated([unary_node, conv_node]):
             return
 
+        input_qspec_map = {}
         input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+
         weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+
         bias_node = conv_node.args[2]
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                input_node: get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
-            },
-            "_annotated": True,
-        }
-        unary_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+        unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
 
     def _annotate_conv2d(self, node: Node, quantization_config: QuantizationConfig) -> None:
         conv_node = node
@@ -329,18 +344,24 @@ class X86InductorQuantizer(Quantizer):
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             return
+        input_qspec_map = {}
         input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+
         weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+
         bias_node = conv_node.args[2]
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                input_node: get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
-            },
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _annotated=True
+        )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
