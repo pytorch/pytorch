@@ -291,6 +291,21 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
     return _out_wrapper
 
 
+# Similar to out.defined() from core (only use for functions decorated with
+# out_wrapper).
+def out_defined():
+    stack = inspect.stack()
+    # Gets access to the wrapper function
+    _fn = stack[2]
+    # Checks that we're inspecting _fn from out_wrapper
+    assert _fn.function == "_fn"
+    # Checks that out arg is there since get() returns None on failure
+    argvalues = inspect.getargvalues(_fn.frame)
+    assert "out" in argvalues.args
+    # Checks whether out is not None
+    return argvalues.locals.get("out") is not None
+
+
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         g = torch._C._AutoDispatchBelowAutograd()

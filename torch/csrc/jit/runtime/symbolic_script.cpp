@@ -1497,8 +1497,7 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
-static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
-    Value* closure) {
+std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
@@ -1511,7 +1510,7 @@ static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
-static Argument originalReturnType(const TupleTypePtr& tup) {
+Argument originalReturnType(const TupleTypePtr& tup) {
   TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
@@ -1524,7 +1523,7 @@ static Argument originalReturnType(const TupleTypePtr& tup) {
 // overloaded functions of `func`.
 // Remove the suffix before adding the schema string to map
 // schema_to_graphs.
-static std::string overloadedSchemaString(const FunctionSchema& schema) {
+std::string overloadedSchemaString(const FunctionSchema& schema) {
   const auto& schema_name = schema.name();
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
@@ -1540,12 +1539,12 @@ static std::string overloadedSchemaString(const FunctionSchema& schema) {
   return schema_string;
 }
 
-static bool isHelperFunction(const std::string& method_name) {
+bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-static void loadModule(const CompilationUnit& module) {
+void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
@@ -1608,7 +1607,7 @@ static void loadModule(const CompilationUnit& module) {
   }
 }
 
-static void loadFunctions() {
+void loadFunctions() {
   for (const std::string& str : functions) {
     compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
   }

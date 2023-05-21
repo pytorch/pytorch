@@ -958,7 +958,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.op_count, 11)
 
     def test_reformer_train(self):
         with torch.enable_grad():
@@ -2940,11 +2940,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
-        self.assertEqual(
-            dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
-        )
-        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
@@ -3201,6 +3198,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
+
+    @requires_cuda()
+    def test_disallow_data_parallel(self):
+        from torch.nn.parallel.data_parallel import DataParallel
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = DataParallel(torch.nn.Linear(3, 3).cuda())
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule().cuda()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(3, 3, device="cuda")
+        opt_mod(x)
 
 
 if __name__ == "__main__":

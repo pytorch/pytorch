@@ -13,7 +13,7 @@ namespace at::native {
 
 inline namespace CPU_CAPABILITY {
 
-static void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
+void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (isFloatingType(dtype) || isComplexType(dtype)) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, dtype, "pow", [&]() {
@@ -90,7 +90,7 @@ void reciprocal_kernel(TensorIteratorBase& iter);
 void rsqrt_kernel(TensorIteratorBase& iter);
 void sqrt_kernel(TensorIteratorBase& iter);
 
-static void pow_tensor_scalar_kernel(
+void pow_tensor_scalar_kernel(
     TensorIteratorBase& iter,
     const Scalar& exp_scalar) {
   // prevent multiple calls to iter.common_dtype()

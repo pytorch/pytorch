@@ -9,10 +9,7 @@
 namespace torch::jit::tensorexpr {
 
 // Move the given user of `aten::cat` op to its inputs.
-static Node* moveCatAfterUse(
-    Node* cat,
-    Node* user,
-    std::shared_ptr<Graph> subgraph) {
+Node* moveCatAfterUse(Node* cat, Node* user, std::shared_ptr<Graph> subgraph) {
   // Example IR:
   //   %1 = ...
   //   %2 = ...
@@ -84,7 +81,7 @@ static Node* moveCatAfterUse(
   return new_cat;
 }
 
-static int numTensorInputs(Node* node) {
+int numTensorInputs(Node* node) {
   int count = 0;
   for (auto v : node->inputs()) {
     if (v->type()->cast<c10::TensorType>()) {
@@ -97,7 +94,7 @@ static int numTensorInputs(Node* node) {
 // Returns true if the given `cat` node promotes types.
 // If the inputs to `cat` are of different types, then the implementation
 // of `cat` is expected to promote type.
-static bool doesCatPromoteTypes(Node* node) {
+bool doesCatPromoteTypes(Node* node) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == aten::cat,
       buildErrorMessage("Graph node is not aten::cat."));
@@ -140,7 +137,7 @@ static bool doesCatPromoteTypes(Node* node) {
 //      - When the cat op promote types, the type of inputs to cat after moving
 //        it user needs to reflect the original type. This is currently not
 //        handled. TODO
-static void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
+void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
   TORCH_INTERNAL_ASSERT(
       cat->kind() == aten::cat,
       buildErrorMessage("Graph node is not aten::cat."));
@@ -162,7 +159,7 @@ static void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
 
 // Moves the users of `aten::cat` ops to its inputs whenever possible
 // in the given subgraph.
-static void moveCatOpsToEnd(std::shared_ptr<Graph> subgraph) {
+void moveCatOpsToEnd(std::shared_ptr<Graph> subgraph) {
   std::vector<Node*> cat_nodes;
   for (Node* n : subgraph->nodes()) {
     if (n->kind() == aten::cat) {
@@ -302,7 +299,7 @@ bool isGraphCompilable(const std::shared_ptr<Graph>& graph) {
   return true;
 }
 
-static void fixupTypeInfoForValue(
+void fixupTypeInfoForValue(
     Value* v,
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<at::Device> device) {
@@ -339,7 +336,7 @@ static void fixupTypeInfoForValue(
   v->setType(new_tt);
 }
 
-static c10::optional<at::ScalarType> inferScalarType(Node* n) {
+c10::optional<at::ScalarType> inferScalarType(Node* n) {
   c10::optional<at::ScalarType> scalar_type;
   for (auto v : n->inputs()) {
     auto const& t = v->type();
@@ -358,7 +355,7 @@ static c10::optional<at::ScalarType> inferScalarType(Node* n) {
   return scalar_type;
 }
 
-static c10::optional<at::Device> inferDevice(Node* n) {
+c10::optional<at::Device> inferDevice(Node* n) {
   c10::optional<at::Device> device;
   for (auto v : n->inputs()) {
     auto const& t = v->type();
@@ -423,7 +420,7 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
   return graph;
 }
 
-static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
+bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   Node* ret = graph->return_node();
   std::unordered_set<Value*> graph_inputs(
       graph->inputs().begin(), graph->inputs().end());
@@ -454,8 +451,7 @@ static bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-static std::shared_ptr<Graph> dequantizeResults(
-    const std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
   for (auto v : graph->outputs()) {
     auto& t = v->type();
     if (t->kind() == TypeKind::TensorType) {
