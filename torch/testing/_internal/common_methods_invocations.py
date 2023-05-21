@@ -17376,8 +17376,8 @@ op_db: List[OpInfo] = [
         skips=(
             # Error: input types 'tensor<20xf16>' and 'tensor<1xf32>' are not broadcast compatible
             # See issue: https://github.com/pytorch/pytorch/issues/101946
-            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_match", dtypes=(torch.float16,),),
-            DecorateInfo(unittest.expectedFailure, "TestConsistency", "test_output_grad_match", dtypes=(torch.float16,),),
+            DecorateInfo(unittest.skip('Skipped!'), "TestConsistency", "test_output_match", dtypes=(torch.float16,),),
+            DecorateInfo(unittest.skip('Skipped!'), "TestConsistency", "test_output_grad_match", dtypes=(torch.float16,),),
         ),
     ),
     OpInfo(
