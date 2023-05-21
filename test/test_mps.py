@@ -63,6 +63,10 @@ def mps_ops_grad_modifier(ops):
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
+        # error: input types 'tensor<20xf16>' and 'tensor<1xf32>' are not broadcast compatible
+        # See issue: https://github.com/pytorch/pytorch/issues/101946
+        'nn.functional.softplus': [torch.float16],
+
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'prod': [torch.float32],  # The operator 'aten::cumprod.out'
@@ -701,6 +705,9 @@ def mps_ops_modifier(ops):
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
+        # Error: input types 'tensor<20xf16>' and 'tensor<1xf32>' are not broadcast compatible
+        # See issue: https://github.com/pytorch/pytorch/issues/101946
+        'nn.functional.softplus': [torch.float16],
     }
 
     EMPTY_OPS_SKIPLIST = {
