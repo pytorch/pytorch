@@ -849,14 +849,14 @@ std::vector<std::vector<int64_t>> matrix_chain_order(TensorList tensors) {
   const size_t n = tensors.size();
 
   // Tensor i has dimensions p[i] x p[i + 1]
-  std::vector<int64_t> p(n + 1);
+  std::vector<c10::SymInt> p(n + 1);
   for (const auto i : c10::irange(n)) {
-    p[i] = tensors[i].size(0);
+    p[i] = tensors[i].sym_size(0);
   }
-  p[n] = tensors[n - 1].size(1);
+  p[n] = tensors[n - 1].sym_size(1);
 
   // m[i, j] = k where k is the minimum cost for multiplying tensors i...j
-  std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, 0));
+  std::vector<std::vector<c10::SymInt>> m(n, std::vector<c10::SymInt>(n, 0));
 
   // s[i, j] = k where k is the index at which to split the list such that
   // optimally multiplying matrices i...k and k...j first and then the resulting
@@ -908,7 +908,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
   const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
-  std::vector<int64_t> out_shape;
+  std::vector<c10::SymInt> out_shape;
   std::vector<Tensor> tensors(n);
 
   // If the first tensor is 1D of size n view it as a row vector (1, n)
@@ -916,7 +916,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     tensors[0] = _tensors[0].unsqueeze(0);
   } else if (_tensors[0].dim() == 2) {
     tensors[0] = _tensors[0];
-    out_shape.emplace_back(tensors[0].size(0));
+    out_shape.emplace_back(tensors[0].sym_size(0));
   } else {
     TORCH_CHECK(
         false,
@@ -930,7 +930,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     tensors[n - 1] = _tensors[n - 1].unsqueeze(-1);
   } else if (_tensors[n - 1].dim() == 2) {
     tensors[n - 1] = _tensors[n - 1];
-    out_shape.emplace_back(tensors[n - 1].size(1));
+    out_shape.emplace_back(tensors[n - 1].sym_size(1));
   } else {
     TORCH_CHECK(
         false,
@@ -973,7 +973,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
         " on ",
         tensors[i].device());
     TORCH_CHECK(
-        tensors[i - 1].size(-1) == tensors[i].size(0),
+        tensors[i - 1].sym_size(-1) == tensors[i].sym_size(0),
         "multi_dot(): tensors ",
         i - 1,
         " and ",
@@ -1006,10 +1006,10 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     // output has shape (a, c). If either the first or last tensor is 1D
     // a and/or c dimensions will be implicitely size 1 and will be ommited
     // from the output. e.g. for inputs (a, b) x (b) the output has shape (a,).
-    at::native::resize_output(out, out_shape);
+    at::native::resize_output_symint(out, out_shape);
 
     // View output as 2D for simplicity of computation.
-    result = out.view({tensors[0].size(0), tensors.back().size(-1)});
+    result = out.view_symint({tensors[0].sym_size(0), tensors.back().size(-1)});
   }
 
   // The resize_ and view calls below are to ensure the
@@ -1018,17 +1018,17 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
 
   if (tensors.size() == 2) {
     return _out.has_value() ? at::mm_out(result, tensors[0], tensors[1])
-                         : at::mm(tensors[0], tensors[1]).view(out_shape);
+                         : at::mm(tensors[0], tensors[1]).view_symint(out_shape);
   }
 
   // Why the separate implementation for 3 matrices?
   // The logic for three matrices is much faster when done directly
   // Requires 1 comparison to 4 comparisons and fewer arithmetic operations
   if (tensors.size() == 3) {
-    const auto a = tensors[0].size(0);
-    const auto b = tensors[1].size(0);
-    const auto c = tensors[2].size(0);
-    const auto d = tensors[2].size(1);
+    const auto a = tensors[0].sym_size(0);
+    const auto b = tensors[1].sym_size(0);
+    const auto c = tensors[2].sym_size(0);
+    const auto d = tensors[2].sym_size(1);
 
     // The matrices are of size (a x b), (b x c), (c x d)
     // cost_1 is the cost of parenthesizing (a x b) and (b x c) and then
@@ -1040,11 +1040,11 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
     if (cost_1 > cost_2) {
       return _out.has_value()
           ? at::mm_out(result, tensors[0], at::mm(tensors[1], tensors[2]))
-          : at::mm(tensors[0], at::mm(tensors[1], tensors[2])).view(out_shape);
+          : at::mm(tensors[0], at::mm(tensors[1], tensors[2])).view_symint(out_shape);
     } else {
       return _out.has_value()
           ? at::mm_out(result, at::mm(tensors[0], tensors[1]), tensors[2])
-          : at::mm(at::mm(tensors[0], tensors[1]), tensors[2]).view(out_shape);
+          : at::mm(at::mm(tensors[0], tensors[1]), tensors[2]).view_symint(out_shape);
     }
   }
 
@@ -1061,7 +1061,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
         matrix_chain_multiplication(tensors, order, i, order[i][j]),
         matrix_chain_multiplication(tensors, order, order[i][j] + 1, j));
   }
-  return matrix_chain_multiplication(tensors, order, i, j).view(out_shape);
+  return matrix_chain_multiplication(tensors, order, i, j).view_symint(out_shape);
 }
 
 } // namespace

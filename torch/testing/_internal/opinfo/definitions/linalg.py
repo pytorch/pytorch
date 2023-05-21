@@ -1703,6 +1703,15 @@ op_db: List[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.long,),
             ),
+            # RuntimeError: The tensor has a non-zero number of elements, but
+            # its data is not allocated yet. Caffe2 uses a lazy allocation, so
+            # you will need to call mutable_data() or raw_mutable_data() to
+            # actually allocate memory.
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+            ),
         ),
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs
