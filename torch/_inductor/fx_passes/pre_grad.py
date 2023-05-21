@@ -22,9 +22,9 @@ from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
-normalize_split_pass = PatternMatcherPass()
-merge_splits_pass = PatternMatcherPass()
-merge_split_cat_pass = PatternMatcherPass()
+normalize_split_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalize_split_pass,

@@ -27,6 +27,7 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -2091,6 +2092,33 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x):
+                x.add_(4)
+                return (x.cos().sum() + self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
+
+    def test_aot_export_forward_mutation_multiple_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                y.add_(4)
+                self.buffer1.add_(5)
+                return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
+
     def test_aot_export_input_mutation_on_parameter_banned(self):
         def fn(p, x):
             p.mul_(2)
@@ -2148,7 +2176,7 @@ class <lambda>(torch.nn.Module):
             return (x + x,)
         inp = torch.randn(2)
         with self.assertRaisesRegex(
-            RuntimeError, "aot_export_joint_simple does not support input mutations"
+            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
         ):
             aot_export_joint_simple(fn, [inp], trace_joint=False)
             aot_export_joint_simple(fn, [inp], trace_joint=True)
@@ -2975,12 +3003,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
