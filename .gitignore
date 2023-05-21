@@ -227,7 +227,9 @@ docs/source/scripts/quantization_backend_configs/
 ## Caffe2
 
 # build, distribute, and bins (+ python proto bindings)
-build
+build/
+# Allow tools/build/ for build support.
+!tools/build/
 build_host_protoc
 build_android
 build_ios
