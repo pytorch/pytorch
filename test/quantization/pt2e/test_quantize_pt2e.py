@@ -25,6 +25,7 @@ from torch.ao.quantization._quantize_pt2e import (
     prepare_pt2e_quantizer,
     prepare_qat_pt2e_quantizer,
 )
+from torch.ao.quantization._pt2e.quantizer import QuantizationAnnotation
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 
 from torch.ao.quantization.qconfig import (
@@ -43,6 +44,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
 )
+from torch.fx import Node
 from torch.testing._internal.common_quantized import override_quantized_engine
 
 @skipIfNoQNNPACK
@@ -58,33 +60,26 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                _DEFAULT_TARGET_DTYPE_INFO = {
-                    "input_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                    "output_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                }
-                for node in model.graph.nodes:
-                    node.meta["target_dtype_info"] = copy.deepcopy(
-                        _DEFAULT_TARGET_DTYPE_INFO
-                    )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
                         and node.target == torch.ops.aten.convolution.default
                     ):
-                        node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_obs_or_fq_ctr": observer.default_weight_observer,
-                            "bias_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                                dtype=torch.float
-                            ),
-                            "output_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_index": 1,
-                            "bias_index": 2,
-                        }
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                                weight: observer.default_weight_observer,
+                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                            },
+                            output_qspec=observer.default_observer,
+                            _annotated=True,
+                        )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -134,32 +129,26 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                _DEFAULT_TARGET_DTYPE_INFO = {
-                    "input_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                    "output_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                }
-                for node in model.graph.nodes:
-                    node.meta["target_dtype_info"] = copy.deepcopy(
-                        _DEFAULT_TARGET_DTYPE_INFO
-                    )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
                         and node.target == torch.ops.aten.convolution.default
                     ):
-                        node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_obs_or_fq_ctr": observer.default_weight_observer,
-                            "bias_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                                dtype=torch.float
-                            ),
-                            "weight_index": 1,
-                            "bias_index": 2,
-                        }
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                                weight: observer.default_weight_observer,
+                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                            },
+                            output_qspec=observer.default_observer,
+                            _annotated=True,
+                        )
                     if (
                         node.op == "call_function"
                         and node.target == operator.getitem
@@ -167,15 +156,19 @@ class TestQuantizePT2E(QuantizationTestCase):
                     ):
                         getitem_node = node
                         maxpool_node = getitem_node.args[0]
-                        maxpool_node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "_annotated": True,
-                        }
-                        getitem_node.meta["target_dtype_info"] = {
-                            "output_act_obs_or_fq_ctr": observer.default_observer,
-                            "input_output_share_observers": True,
-                            "_annotated": True,
-                        }
+                        input_act = maxpool_node.args[0]
+                        assert isinstance(input_act, Node)
+                        maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                            },
+                            _annotated=True,
+                        )
+                        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            output_qspec=observer.default_observer,
+                            _input_output_share_observers=True,
+                            _annotated=True,
+                        )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -680,9 +673,9 @@ class TestQuantizePT2E(QuantizationTestCase):
         (maxpool_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
 
         # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
-        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta["target_dtype_info"]
-        maxpool_getitem_meta = maxpool_getitem_node.meta["target_dtype_info"]
-        conv_bn_getitem_meta = conv_bn_getitem_node.meta["target_dtype_info"]
+        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta["quantization_annotation"]
+        maxpool_getitem_meta = maxpool_getitem_node.meta["quantization_annotation"]
+        conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
         self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
         self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
 
