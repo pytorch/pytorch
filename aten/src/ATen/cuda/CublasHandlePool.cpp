@@ -3,7 +3,11 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <map>
+#include <memory>
 #include <regex>
+#include <string>
+#include <tuple>
 
 namespace at { namespace cuda {
 
