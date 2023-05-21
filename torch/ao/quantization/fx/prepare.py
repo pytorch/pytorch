@@ -523,7 +523,7 @@ def _get_output_act_obs_or_fq_ctr(
     argument in quantized graph will match what is specified by the qconfig
     """
     assert isinstance(arg, Node)
-    if "quantization_annotation" in arg.meta:
+    if "quantization_annotation" in arg.meta and arg.meta["quantization_annotation"].output_qspec is not None:
         return arg.meta["quantization_annotation"].output_qspec
 
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
