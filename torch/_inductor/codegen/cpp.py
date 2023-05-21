@@ -226,7 +226,7 @@ class CppPrinter(ExprPrinter):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+        return f"std::floor({x} / {div})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
@@ -1022,6 +1022,10 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
@@ -1552,10 +1556,10 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 if opt_ctx.is_store_fp32_as_bf16:
-                    line = f"store_float_as_bf16({storebuf}, {value})"
+                    line = f"store_float_as_bf16({storebuf}, {value});"
                 else:
                     assert opt_ctx.is_bf16_mem_copy
-                    line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                    line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
@@ -2018,7 +2022,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
+            def indirect_indexing(index_var, size, check=True):
                 return sympy.Symbol(str(index_var))
 
             @staticmethod
