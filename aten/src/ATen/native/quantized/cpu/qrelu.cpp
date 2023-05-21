@@ -35,7 +35,7 @@ DEFINE_DISPATCH(qrelu_leaky_stub);
 DEFINE_DISPATCH(qprelu_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-static Tensor qnnpack_relu(Tensor input) {
+Tensor qnnpack_relu(Tensor input) {
   Tensor qy;
   TORCH_CHECK(
       input.ndimension() > 0, "qnnpack_relu(): Got empty input tensor");

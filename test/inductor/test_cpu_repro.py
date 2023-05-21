@@ -694,7 +694,7 @@ class CPUReproTests(TestCase):
             "randn",
             "isnan",
             "rand",
-            "randint",
+            "randint64",
             "bitwise_and",
             "bitwise_or",
             "bitwise_xor",
@@ -1590,6 +1590,13 @@ class CPUReproTests(TestCase):
             return a
 
         x = torch.rand(16)
+        self.common(f, (x,))
+
+    def test_to_channels_last_bfloat16(self):
+        def f(a):
+            return a.to(memory_format=torch.channels_last)
+
+        x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
 
 
