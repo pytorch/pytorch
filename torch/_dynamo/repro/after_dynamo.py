@@ -7,7 +7,7 @@ import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Callable, Union
+from typing import Union
 
 import torch
 import torch.fx as fx
@@ -246,6 +246,8 @@ if __name__ == '__main__':
     )
 
 
+# Note - the code here for produce_test True/False is super similar, if it gets different enough,
+# we should refactor this into dump_backend_repro_as_file and dump_backend_repro_as_test
 def dump_backend_repro_as_file(
     gm, args, compiler_name, check_accuracy=False, produce_test=False
 ):
@@ -327,10 +329,9 @@ def dump_to_minify_after_dynamo(gm, args, compiler_name):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-@register_debug_backend
-def dynamo_minifier_backend(gm, example_inputs, compiler_name, produce_test):
-    from functorch.compile import minifier
-
+def _dynamo_minifier_backend_common(
+    gm, example_inputs, compiler_name, *, produce_test=False
+):
     compiler_fn = lookup_backend(compiler_name)
 
     # TODO: It's inconsistent to pass SymInt inputs but REAL tensors.
@@ -358,14 +359,30 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name, produce_test):
             compiler_fn=compiler_fn,
             orig_failure=orig_failure,
         )
-        # TBD if we want produce_test to keep minifying or not
-        if not produce_test:
-            minifier(
-                gm,
-                example_inputs,
-                module_fails=fails_fn,
-                dump_state=dump_state_fn,
-            )
+        return fails_fn, dump_state_fn
+
+
+@register_debug_backend
+def dynamo_minifier_backend(gm, example_inputs, compiler_name):
+    from functorch.compile import minifier
+
+    fails_fn, dump_state_fn = _dynamo_minifier_backend_common(
+        gm, example_inputs, compiler_name, produce_test=False
+    )
+    minifier(
+        gm,
+        example_inputs,
+        module_fails=fails_fn,
+        dump_state=dump_state_fn,
+    )
+    return gm
+
+
+@register_debug_backend
+def dynamo_produce_test_backend(gm, example_inputs, compiler_name):
+    _dynamo_minifier_backend_common(
+        gm, example_inputs, compiler_name, produce_test=True
+    )
     return gm
 
 
@@ -461,13 +478,12 @@ def repro_common(options, mod, load_args):
     return args
 
 
-def repro_minify(options, mod, load_args, *, produce_test=False):
+def repro_minify(options, mod, load_args):
     args = repro_common(options, mod, load_args)
 
     # Setup debug minifier compiler
     if not options.accuracy:
         compiler_fn = lookup_backend("dynamo_minifier_backend")
-        compiler_fn = functools.partial(compiler_fn, produce_test=produce_test)
     else:
         compiler_fn = lookup_backend("dynamo_accuracy_minifier_backend")
 
@@ -483,6 +499,28 @@ def repro_minify(options, mod, load_args, *, produce_test=False):
         compiler_fn, compiler_name=options.backend
     )
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
+
+    with torch.cuda.amp.autocast(enabled=options.autocast):
+        opt_mod(*args)
+
+
+def repro_produce_test(options, mod, load_args):
+    args = repro_common(options, mod, load_args)
+
+    compiler_fn = lookup_backend("dynamo_produce_test_backend")
+
+    if options.backend is None:
+        raise RuntimeError(
+            "Compiler name is None - this likely means that a custom compiler "
+            "was called by torchdynamo. Please remove this error, import your "
+            "custom compiler function, and replace the backend=None "
+            "line in run_repro to backend=<my_imported_custom_function>"
+        )
+
+    dynamo_produce_test_backend = functools.partial(
+        compiler_fn, compiler_name=options.backend
+    )
+    opt_mod = torch._dynamo.optimize(dynamo_produce_test_backend)(mod)
 
     with torch.cuda.amp.autocast(enabled=options.autocast):
         opt_mod(*args)
@@ -625,14 +663,10 @@ default settings on this script:
     if len(sys.argv) <= 1:
         args = [command, *sys.argv[1:]]
 
-    produce_test: Callable[[Any], Any] = functools.partial(
-        repro_minify, produce_test=True
-    )
-
     options = parser.parse_args(args)
     COMMAND_FNS = {
         "minify": repro_minify,
         "run": repro_run,
-        "produce-test": produce_test,
+        "produce-test": repro_produce_test,
     }
     COMMAND_FNS[options.command](options, mod, load_args)  # type: ignore[operator]

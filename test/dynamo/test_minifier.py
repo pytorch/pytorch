@@ -12,7 +12,9 @@ requires_cuda = functools.partial(
 
 class MinifierTests(MinifierTestBase):
     # Test that compile, runtime, and accuracy errors after dynamo can be repro'd (both CPU and CUDA)
-    def _test_after_dynamo(self, device, backend, expected_error):
+    def _test_after_dynamo(
+        self, device, backend, expected_error, *, produce_test=False
+    ):
         run_code = f"""\
 @torch._dynamo.optimize({backend!r})
 def inner(x):
@@ -25,7 +27,13 @@ def inner(x):
 
 inner(torch.randn(20, 20).to("{device}"))
 """
-        self._run_full_test(run_code, "dynamo", expected_error, isolate=False)
+        self._run_full_test(
+            run_code,
+            "dynamo",
+            expected_error,
+            isolate=produce_test,
+            produce_test=produce_test,
+        )
 
     def test_after_dynamo_cpu_compile_error(self):
         self._test_after_dynamo(
@@ -58,6 +66,58 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_dynamo_cuda_accuracy_error(self):
         self._test_after_dynamo(
             "cuda", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
+        )
+
+    # Same exact tests as above, except with produce_test=True
+    def test_after_dynamo_cpu_compile_error_produce_test(self):
+        self._test_after_dynamo(
+            "cpu",
+            "relu_compile_error_TESTING_ONLY",
+            "ReluCompileError",
+            produce_test=True,
+        )
+
+    def test_after_dynamo_cpu_runtime_error_produce_test(self):
+        self._test_after_dynamo(
+            "cpu",
+            "relu_runtime_error_TESTING_ONLY",
+            "ReluRuntimeError",
+            produce_test=True,
+        )
+
+    def test_after_dynamo_cpu_accuracy_error_produce_test(self):
+        self._test_after_dynamo(
+            "cpu",
+            "relu_accuracy_error_TESTING_ONLY",
+            "AccuracyError",
+            produce_test=True,
+        )
+
+    @requires_cuda()
+    def test_after_dynamo_cuda_compile_error_produce_test(self):
+        self._test_after_dynamo(
+            "cuda",
+            "relu_compile_error_TESTING_ONLY",
+            "ReluCompileError",
+            produce_test=True,
+        )
+
+    @requires_cuda()
+    def test_after_dynamo_cuda_runtime_error_produce_test(self):
+        self._test_after_dynamo(
+            "cuda",
+            "relu_runtime_error_TESTING_ONLY",
+            "ReluRuntimeError",
+            produce_test=True,
+        )
+
+    @requires_cuda()
+    def test_after_dynamo_cuda_accuracy_error_produce_test(self):
+        self._test_after_dynamo(
+            "cuda",
+            "relu_accuracy_error_TESTING_ONLY",
+            "AccuracyError",
+            produce_test=True,
         )
 
     # Ensure that the testing backends pass when relu is not present.

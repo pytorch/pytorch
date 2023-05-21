@@ -153,14 +153,21 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return proc, None
 
     # Runs the minifier launcher script in `repro_dir`
-    def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
+    def _run_minifier_launcher(
+        self, repro_dir, isolate, *, minifier_args=(), produce_test=False
+    ):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
         with open(launch_file, "r") as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
-        args = ["python3", launch_file, "minify", *minifier_args]
+        args = [
+            "python3",
+            launch_file,
+            "minify" if not produce_test else "produce-test",
+            *minifier_args,
+        ]
         if not isolate:
             args.append("--no-isolate")
         launch_proc = self._maybe_subprocess_run(args, isolate=isolate, cwd=repro_dir)
@@ -172,9 +179,11 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return launch_proc, launch_code
 
     # Runs the repro script in `repro_dir`
-    def _run_repro(self, repro_dir, *, isolate=True):
+    def _run_repro(self, repro_dir, *, isolate=True, produce_test=False):
         self.assertIsNotNone(repro_dir)
-        repro_file = os.path.join(repro_dir, "repro.py")
+        repro_file = os.path.join(
+            repro_dir, "repro.py" if not produce_test else "test.py"
+        )
         with open(repro_file, "r") as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
@@ -212,9 +221,16 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # isolate=True only if the bug you're testing would otherwise
     # crash the process
     def _run_full_test(
-        self, run_code, repro_after, expected_error, *, isolate, minifier_args=()
+        self,
+        run_code,
+        repro_after,
+        expected_error,
+        *,
+        isolate,
+        minifier_args=(),
+        produce_test=False,
     ):
-        if isolate:
+        if isolate and not produce_test:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
             repro_level = 4
@@ -234,10 +250,15 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         self.assertIsNotNone(repro_dir)
         print("running minifier", file=sys.stderr)
         minifier_proc, minifier_code = self._run_minifier_launcher(
-            repro_dir, isolate=isolate, minifier_args=minifier_args
+            repro_dir,
+            isolate=isolate,
+            minifier_args=minifier_args,
+            produce_test=produce_test,
         )
         print("running repro", file=sys.stderr)
-        repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
+        repro_proc, repro_code = self._run_repro(
+            repro_dir, isolate=isolate, produce_test=produce_test
+        )
         self.assertIn(expected_error, repro_proc.stderr.decode("utf-8"))
         self.assertNotEqual(repro_proc.returncode, 0)
         return MinifierTestResult(minifier_code=minifier_code, repro_code=repro_code)
