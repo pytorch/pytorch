@@ -119,6 +119,17 @@ class TestRearrange(TestCase):
                 result1 = rearrange(arrays1, '...->...')
                 torch.testing.assert_close(result0, result1)
 
+    def test_unsqueeze(self) -> None:
+        x = torch.randn((2, 3, 4, 5))
+        actual = rearrange(x, 'b h w c -> b 1 h w 1 c')
+        expected = x.unsqueeze(1).unsqueeze(-2)
+        torch.testing.assert_close(actual, expected)
+
+    def test_squeeze(self) -> None:
+        x = torch.randn((2, 1, 3, 4, 1, 5))
+        actual = rearrange(x, 'b 1 h w 1 c -> b h w c')
+        expected = x.squeeze()
+        torch.testing.assert_close(actual, expected)
 
 if __name__ == '__main__':
     run_tests()
