@@ -819,9 +819,8 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "edb_mps:" + getMPSTypeString(grad_) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" +
-        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
-        std::to_string(scale_grad_by_freq);
+    string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" + std::to_string(num_weights) +
+        ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
 
