@@ -277,12 +277,12 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_fused_kernel_name(node_schedule):
+def get_fused_kernel_name(node_schedule, descriptive_names):
     all_origins = functools.reduce(
         operator.or_,
         [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
-    if config.triton.descriptive_names == "original_aten":
+    if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
@@ -290,7 +290,7 @@ def get_fused_kernel_name(node_schedule):
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "torch":
+    elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
@@ -300,7 +300,7 @@ def get_fused_kernel_name(node_schedule):
                 else:
                     sources.append(origin.meta["source_fn"][1].__name__)
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "inductor_node":
+    elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
@@ -458,7 +458,7 @@ def fresh_inductor_cache(cache_entries=None):
                         )
 
 
-def argsort(seq):
+def argsort(seq) -> List[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -892,6 +892,16 @@ def is_cpu_device(inputs):
         for item in inputs
         if isinstance(item, torch.Tensor)
     )
+
+
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
 
 
 @contextlib.contextmanager

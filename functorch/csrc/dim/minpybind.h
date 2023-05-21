@@ -12,7 +12,7 @@
 #include <memory>
 
 #define PY_BEGIN try {
-#define PY_END(v) } catch(py::exception_set & err) { return (v); }
+#define PY_END(v) } catch(mpy::exception_set & err) { return (v); }
 
 #if PY_VERSION_HEX < 0x03080000
     #define PY_VECTORCALL _PyObject_FastCallKeywords
@@ -48,7 +48,7 @@ struct irange {
     int64_t step_;
 };
 
-namespace py {
+namespace mpy {
 
 struct exception_set {
 };
@@ -73,9 +73,9 @@ struct handle {
 
     template<typename... Args>
     object call(Args&&... args);
-    object call_object(py::handle args);
-    object call_object(py::handle args, py::handle kwargs);
-    object call_vector(py::handle* begin, Py_ssize_t nargs, py::handle kwnames);
+    object call_object(mpy::handle args);
+    object call_object(mpy::handle args, mpy::handle kwargs);
+    object call_vector(mpy::handle* begin, Py_ssize_t nargs, mpy::handle kwnames);
     object call_vector(vector_args args);
     bool operator==(handle rhs) {
         return ptr_ == rhs.ptr_;
@@ -226,7 +226,7 @@ struct base {
         }
         auto self = (T*) type->tp_alloc(type, 0);
         if (!self) {
-            throw py::exception_set();
+            throw mpy::exception_set();
         }
         new (self) T;
         return obj<T>::steal(self);
@@ -267,7 +267,7 @@ struct base {
         ((T*)self)->~T();
         Py_TYPE(self)->tp_free(self);
     }
-    static void ready(py::handle mod, const char* name) {
+    static void ready(mpy::handle mod, const char* name) {
         if (PyType_Ready(&T::Type)) {
             throw exception_set();
         }
@@ -294,16 +294,16 @@ inline object handle::call(Args&&... args) {
     return object::checked_steal(PyObject_CallFunctionObjArgs(ptr_, args.ptr()..., nullptr));
 }
 
-inline object handle::call_object(py::handle args) {
+inline object handle::call_object(mpy::handle args) {
     return object::checked_steal(PyObject_CallObject(ptr(), args.ptr()));
 }
 
 
-inline object handle::call_object(py::handle args, py::handle kwargs) {
+inline object handle::call_object(mpy::handle args, mpy::handle kwargs) {
     return object::checked_steal(PyObject_Call(ptr(), args.ptr(), kwargs.ptr()));
 }
 
-inline object handle::call_vector(py::handle* begin, Py_ssize_t nargs, py::handle kwnames) {
+inline object handle::call_vector(mpy::handle* begin, Py_ssize_t nargs, mpy::handle kwnames) {
     return object::checked_steal(PY_VECTORCALL(ptr(), (PyObject*const*) begin, nargs, kwnames.ptr()));
 }
 
@@ -323,22 +323,22 @@ struct list : public object {
     : object(checked_steal(PyList_New(size))) {}
 };
 
-py::object unicode_from_format(const char* format, ...) {
+mpy::object unicode_from_format(const char* format, ...) {
     va_list args;
     va_start(args, format);
     auto r = PyUnicode_FromFormatV(format, args);
     va_end(args);
-    return py::object::checked_steal(r);
+    return mpy::object::checked_steal(r);
 }
-py::object unicode_from_string(const char * str) {
-    return py::object::checked_steal(PyUnicode_FromString(str));
+mpy::object unicode_from_string(const char * str) {
+    return mpy::object::checked_steal(PyUnicode_FromString(str));
 }
 
-py::object from_int(Py_ssize_t s) {
-    return py::object::checked_steal(PyLong_FromSsize_t(s));
+mpy::object from_int(Py_ssize_t s) {
+    return mpy::object::checked_steal(PyLong_FromSsize_t(s));
 }
-py::object from_bool(bool b) {
-    return py::object::borrow(b ? Py_True : Py_False);
+mpy::object from_bool(bool b) {
+    return mpy::object::borrow(b ? Py_True : Py_False);
 }
 
 bool is_sequence(handle h) {
@@ -352,7 +352,7 @@ struct sequence_view : public handle {
     Py_ssize_t size() const {
         auto r = PySequence_Size(ptr());
         if (r == -1 && PyErr_Occurred()) {
-            throw py::exception_set();
+            throw mpy::exception_set();
         }
         return r;
     }
@@ -365,18 +365,18 @@ struct sequence_view : public handle {
         }
         return sequence_view(h);
     }
-    py::object operator[](Py_ssize_t i) const {
-        return py::object::checked_steal(PySequence_GetItem(ptr(), i));
+    mpy::object operator[](Py_ssize_t i) const {
+        return mpy::object::checked_steal(PySequence_GetItem(ptr(), i));
     }
 };
 
 
-py::object repr(handle h) {
-    return py::object::checked_steal(PyObject_Repr(h.ptr()));
+mpy::object repr(handle h) {
+    return mpy::object::checked_steal(PyObject_Repr(h.ptr()));
 }
 
-py::object str(handle h) {
-    return py::object::checked_steal(PyObject_Str(h.ptr()));
+mpy::object str(handle h) {
+    return mpy::object::checked_steal(PyObject_Str(h.ptr()));
 }
 
 
@@ -399,7 +399,7 @@ bool is_bool(handle h) {
 Py_ssize_t to_int(handle h) {
     Py_ssize_t r = PyLong_AsSsize_t(h.ptr());
     if (r == -1 && PyErr_Occurred()) {
-        throw py::exception_set();
+        throw mpy::exception_set();
     }
     return r;
 }
@@ -407,7 +407,7 @@ Py_ssize_t to_int(handle h) {
 double to_float(handle h) {
     double r = PyFloat_AsDouble(h.ptr());
     if (PyErr_Occurred()) {
-        throw py::exception_set();
+        throw mpy::exception_set();
     }
     return r;
 }
@@ -423,7 +423,7 @@ bool to_bool(handle h) {
 struct slice_view {
     slice_view(handle h, Py_ssize_t size)  {
         if(PySlice_Unpack(h.ptr(), &start, &stop, &step) == -1) {
-            throw py::exception_set();
+            throw mpy::exception_set();
         }
         slicelength = PySlice_AdjustIndices(size, &start, &stop, step);
     }
@@ -484,24 +484,24 @@ struct dict_view : public handle {
     dict_view() = default;
     dict_view(handle h) : handle(h) {}
     object keys() const {
-        return py::object::checked_steal(PyDict_Keys(ptr()));
+        return mpy::object::checked_steal(PyDict_Keys(ptr()));
     }
     object values() const {
-        return py::object::checked_steal(PyDict_Values(ptr()));
+        return mpy::object::checked_steal(PyDict_Values(ptr()));
     }
     object items() const {
-        return py::object::checked_steal(PyDict_Items(ptr()));
+        return mpy::object::checked_steal(PyDict_Items(ptr()));
     }
     bool contains(handle k) const {
         return PyDict_Contains(ptr(), k.ptr());
     }
     handle operator[](handle k) {
-        return py::handle::checked(PyDict_GetItem(ptr(), k.ptr()));
+        return mpy::handle::checked(PyDict_GetItem(ptr(), k.ptr()));
     }
     static bool check(handle h) {
         return PyDict_Check(h.ptr());
     }
-    bool next(Py_ssize_t* pos, py::handle* key, py::handle* value) {
+    bool next(Py_ssize_t* pos, mpy::handle* key, mpy::handle* value) {
         PyObject *k = nullptr, *v = nullptr;
         auto r = PyDict_Next(ptr(), pos, &k, &v);
         *key = k;
@@ -538,11 +538,11 @@ struct kwnames_view : public handle {
     }
 };
 
-inline py::object funcname(py::handle func) {
+inline mpy::object funcname(mpy::handle func) {
     if (func.hasattr("__name__")) {
         return func.attr("__name__");
     } else {
-        return py::str(func);
+        return mpy::str(func);
     }
 }
 
@@ -550,23 +550,23 @@ struct vector_args {
     vector_args(PyObject *const *a,
                       Py_ssize_t n,
                       PyObject *k)
-    : vector_args((py::handle*)a, n, k) {}
-    vector_args(py::handle* a,
+    : vector_args((mpy::handle*)a, n, k) {}
+    vector_args(mpy::handle* a,
                     Py_ssize_t n,
-                    py::handle k)
-    : args((py::handle*)a), nargs(n), kwnames(k) {}
-    py::handle* args;
+                    mpy::handle k)
+    : args((mpy::handle*)a), nargs(n), kwnames(k) {}
+    mpy::handle* args;
     Py_ssize_t nargs;
     kwnames_view kwnames;
 
-    py::handle* begin() {
+    mpy::handle* begin() {
         return args;
     }
-    py::handle* end() {
+    mpy::handle* end() {
         return args + size();
     }
 
-    py::handle operator[](int64_t i) const {
+    mpy::handle operator[](int64_t i) const {
         return args[i];
     }
     bool has_keywords() const {
@@ -591,7 +591,7 @@ struct vector_args {
     // provide a kwonly argument positionally
     // provide keyword arguments in the wrong order
     // provide only keyword arguments
-    void parse(const char * fname_cstr, std::initializer_list<const char*> names, std::initializer_list<py::handle*> values, int required, int kwonly=0) {
+    void parse(const char * fname_cstr, std::initializer_list<const char*> names, std::initializer_list<mpy::handle*> values, int required, int kwonly=0) {
         auto error = [&]() {
             // rather than try to match the slower infrastructure with error messages exactly, once we have detected an error, just use that
             // infrastructure to format it and throw it
@@ -698,7 +698,7 @@ inline object handle::call_vector(vector_args args) {
     static char* kwlist[] = { FORALL_ARGS(MPY_ARGS_NAME) nullptr}; \
     FORALL_ARGS(MPY_ARGS_DECLARE) \
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, fmt, kwlist, FORALL_ARGS(MPY_ARGS_POINTER) nullptr)) { \
-        throw py::exception_set(); \
+        throw mpy::exception_set(); \
     }
 
 #define MPY_PARSE_ARGS_KWNAMES(fmt, FORALL_ARGS) \
@@ -706,5 +706,5 @@ inline object handle::call_vector(vector_args args) {
     FORALL_ARGS(MPY_ARGS_DECLARE) \
     static _PyArg_Parser parser = {fmt, kwlist, 0}; \
     if (!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, FORALL_ARGS(MPY_ARGS_POINTER) nullptr)) { \
-        throw py::exception_set(); \
+        throw mpy::exception_set(); \
     }

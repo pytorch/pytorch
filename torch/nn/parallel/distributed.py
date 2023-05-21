@@ -1364,8 +1364,6 @@ class DistributedDataParallel(Module, Joinable):
         DistributedDataParallel._active_ddp_module = self
         try:
             yield
-        except Exception:
-            raise
         finally:
             DistributedDataParallel._active_ddp_module = None
 
