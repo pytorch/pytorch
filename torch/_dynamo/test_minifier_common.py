@@ -230,7 +230,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
         minifier_args=(),
         produce_test=False,
     ):
-        if isolate and not produce_test:
+        if isolate:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
             repro_level = 4

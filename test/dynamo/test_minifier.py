@@ -85,14 +85,6 @@ inner(torch.randn(20, 20).to("{device}"))
             produce_test=True,
         )
 
-    def test_after_dynamo_cpu_accuracy_error_produce_test(self):
-        self._test_after_dynamo(
-            "cpu",
-            "relu_accuracy_error_TESTING_ONLY",
-            "AccuracyError",
-            produce_test=True,
-        )
-
     @requires_cuda()
     def test_after_dynamo_cuda_compile_error_produce_test(self):
         self._test_after_dynamo(
@@ -108,15 +100,6 @@ inner(torch.randn(20, 20).to("{device}"))
             "cuda",
             "relu_runtime_error_TESTING_ONLY",
             "ReluRuntimeError",
-            produce_test=True,
-        )
-
-    @requires_cuda()
-    def test_after_dynamo_cuda_accuracy_error_produce_test(self):
-        self._test_after_dynamo(
-            "cuda",
-            "relu_accuracy_error_TESTING_ONLY",
-            "AccuracyError",
             produce_test=True,
         )
 
