@@ -29,6 +29,12 @@ const IrBuilder* getIrBuilder() {
   return builder;
 }
 
+at::Tensor MakeTensorFromComputationData(
+    const BackendDataPtr data,
+    c10::optional<at::ScalarType> logical_scalar_type) {
+  return getBackend()->MakeTensorFromComputationData(data, logical_scalar_type);
+}
+
 std::unique_ptr<LoweringContext> LoweringContext::Create(
     const std::string& name,
     BackendDevice device,

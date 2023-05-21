@@ -86,7 +86,7 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-static Tensor contiguous(const Tensor & self) {
+Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }
 
