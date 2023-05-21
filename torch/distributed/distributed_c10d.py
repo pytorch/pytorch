@@ -861,7 +861,8 @@ def is_ucc_available() -> bool:
 
 def is_backend_available(backend: str) -> bool:
     """
-    Checks if the given backend is available and supports the built-in backends or third-party backends through function ``Backend.register_backend``.
+    Checks if the given backend is available and supports the built-in backends or
+    third-party backends through function ``Backend.register_backend``.
 
     Args:
         backend (str): Backend name.
@@ -872,7 +873,7 @@ def is_backend_available(backend: str) -> bool:
     available_func = getattr(torch.distributed, f"is_{backend.lower()}_available", None)
     if available_func:
         return available_func()
-    
+
     return backend.lower() in Backend.backend_list
 
 
