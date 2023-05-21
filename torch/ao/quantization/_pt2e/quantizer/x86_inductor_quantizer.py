@@ -8,6 +8,7 @@ from .quantizer import (
     QuantizationConfig,
     QuantizationSpec,
     Quantizer,
+    QuantizationAnnotation,
 )
 from torch.ao.quantization._pt2e.quantizer.utils import (
     get_act_obs_or_fq_ctr,
@@ -166,18 +167,24 @@ class X86InductorQuantizer(Quantizer):
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             return
+        input_qspec_map = {}
         input_node = conv_node.args[0]
+        assert isinstance(input_node, Node)
+        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+
         weight_node = conv_node.args[1]
+        assert isinstance(weight_node, Node)
+        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+
         bias_node = conv_node.args[2]
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr_map": {
-                input_node: get_act_obs_or_fq_ctr(quantization_config),
-                weight_node: get_weight_obs_or_fq_ctr(quantization_config),
-                bias_node: get_bias_obs_or_fq_ctr(quantization_config),
-            },
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        if isinstance(bias_node, Node):
+            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _annotated=True
+        )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

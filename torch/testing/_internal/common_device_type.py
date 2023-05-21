@@ -168,6 +168,20 @@ except ImportError:
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
 #
+# In addition to parametrizing over device, dtype, and ops via OpInfos, the
+#   @parametrize decorator is supported for arbitrary parametrizations:
+# --------------------------------------------------------
+# # A template test that can be specialized with a device, dtype, and value for x
+# @parametrize("x", range(5))
+# def test_car(self, device, dtype, x)
+#   pass
+# --------------------------------------------------------
+#
+# See the documentation for @parametrize in common_utils.py for additional details
+#   on this. Note that the instantiate_device_type_tests() function will handle
+#   such parametrizations; there is no need to additionally call
+#   instantiate_parametrized_tests().
+#
 # Clever test filtering can be very useful when working with parametrized
 #   tests. "-k test_car" would run every instantiated variant of the test_car()
 #   test template, and "-k test_car_add" runs every variant instantiated with
@@ -550,6 +564,32 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class PrivateUse1TestBase(DeviceTypeTestBase):
+    primary_device: ClassVar[str]
+    device_mod = None
+    device_type = 'privateuse1'
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        primary_device_idx = int(cls.get_primary_device().split(':')[1])
+        num_devices = cls.device_mod.device_count()
+        prim_device = cls.get_primary_device()
+        device_str = f'{cls.device_type}:{{0}}'
+        non_primary_devices = [device_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
+        return [prim_device] + non_primary_devices
+
+    @classmethod
+    def setUpClass(cls):
+        cls.device_type = torch._C._get_privateuse1_backend_name()
+        cls.device_mod = getattr(torch, cls.device_type, None)
+        assert cls.device_mod is not None, f'''torch has no module of `{cls.device_type}`, you should register
+                                            a module by `torch._register_device_module`.'''
+        cls.primary_device = '{device_type}:{id}'.format(device_type=cls.device_type, id=cls.device_mod.current_device())
+
 # Adds available device-type-specific test base classes
 def get_device_type_test_bases():
     # set type to List[Any] due to mypy list-of-union issue:
@@ -567,6 +607,10 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        device_type = torch._C._get_privateuse1_backend_name()
+        device_mod = getattr(torch, device_type, None)
+        if hasattr(device_mod, "is_available") and device_mod.is_available():
+            test_bases.append(PrivateUse1TestBase)
         # Disable MPS testing in generic device testing temporarily while we're
         # ramping up support.
         # elif torch.backends.mps.is_available():
@@ -624,7 +668,10 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
-# generic_test_class.
+# generic_test_class. This function should be used instead of
+# instantiate_parametrized_tests() if the test class contains
+# device-specific tests (NB: this supports additional @parametrize usage).
+#
 # See note "Writing Test Templates"
 def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
