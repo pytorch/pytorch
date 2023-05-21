@@ -188,9 +188,7 @@ bool is(const Type& type) {
 }
 } // namespace
 
-static void restoreContainerTypeTags(
-    const IValue& ivalue,
-    const TypePtr& type) {
+void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
