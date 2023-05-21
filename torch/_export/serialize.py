@@ -41,7 +41,7 @@ _LAYOUTS = {
     torch.sparse_csc: Layout.SparseCsc,
     torch.sparse_bsr: Layout.SparseBsr,
     torch.sparse_bsc: Layout.SparseBsc,
-    torch._mkldnn: Layout._mkldnn,  # noqa: F401
+    torch._mkldnn: Layout._mkldnn,  # type: ignore[attr-defined]
     torch.strided: Layout.Strided,
 }
 
