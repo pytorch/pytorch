@@ -253,7 +253,7 @@ bool matchCallFuncToUse(
 
 // Check any use of `v` matches the aten function call
 // or CallFunction patterns
-static bool matchArgPattern(
+bool matchArgPattern(
     Value* v,
     const AtenFuncArgs& aten_func_args,
     const CallFuncArgs& call_func_args) {
@@ -395,8 +395,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   return {};
 }
 
-static std::vector<NodeKind> toAtenSymbol(
-    const std::vector<std::string>& func_names) {
+std::vector<NodeKind> toAtenSymbol(const std::vector<std::string>& func_names) {
   std::vector<NodeKind> symbols;
   std::transform(
       func_names.begin(),
@@ -406,18 +405,18 @@ static std::vector<NodeKind> toAtenSymbol(
   return symbols;
 }
 
-static bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
+bool isAtenFunc(Node* n, const std::vector<NodeKind>& aten_funcs) {
   return std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
 }
 
-static bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
+bool isAtenFunc(Node* n, const std::vector<std::string>& aten_funcs) {
   const auto& symbols = toAtenSymbol(aten_funcs);
   return isAtenFunc(n, symbols);
 }
 
 // TODO: factor out isCallFunc
-static bool isFunctionNode(
+bool isFunctionNode(
     Node* n,
     const std::vector<std::string>& call_funcs,
     const std::vector<std::string>& aten_funcs) {
@@ -670,7 +669,7 @@ bool is_int_constant(
   return v && v->isInt() && v->toInt() == value;
 }
 
-static bool is_functional(
+bool is_functional(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,
@@ -694,7 +693,7 @@ c10::optional<std::string> getModuleName(Value* value) {
   return c10::nullopt;
 }
 
-static bool is_module(
+bool is_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap,
     const std::string& vname,

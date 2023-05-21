@@ -30,7 +30,7 @@ Tensor empty_meta_symint(
 }
 
 // Kept only for BC with XLA
-static Tensor empty_strided_meta(
+Tensor empty_strided_meta(
   IntArrayRef size,
   IntArrayRef stride,
   c10::optional<ScalarType> dtype_opt,

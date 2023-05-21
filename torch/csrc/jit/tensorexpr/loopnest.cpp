@@ -878,7 +878,7 @@ class FunctionInliner : public IRMutator {
   bool success_ = true;
 };
 
-static StmtPtr computeInlineImpl(
+StmtPtr computeInlineImpl(
     BufPtr b,
     StmtPtr stmt,
     const std::unordered_set<BufPtr>& output_bufs) {
@@ -1116,6 +1116,40 @@ class ContainedStmtsFinder : public IRVisitor {
 
   std::unordered_set<StmtPtr> contained_;
 };
+
+bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, BlockPtr b) {
+  std::unordered_set<StmtPtr> not_found;
+  for (const auto& use : uses) {
+    not_found.insert(use.s);
+  }
+
+  ContainedStmtsFinder csf;
+  const std::unordered_set<StmtPtr>& contained = csf.findContainedStmts(b);
+  for (const auto& s : contained) {
+    not_found.erase(s);
+  }
+  return not_found.empty();
+}
+
+BlockPtr findParentBlock(StmtPtr s) {
+  while (s) {
+    if (auto b = to<Block>(s)) {
+      return b;
+    }
+    s = s->get_parent();
+  }
+  return nullptr;
+}
+
+BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
+  // TODO: we're not using the most efficient algorithm here for simplicity.
+  // Replace with something more performant in case it becomes a bottleneck.
+  BlockPtr b = findParentBlock(uses[0].s);
+  while (b && !containsAll(uses, b)) {
+    b = findParentBlock(b->get_parent());
+  }
+  return b;
+}
 
 class StmtDeleter : public IRMutator {
  public:
@@ -1760,12 +1794,12 @@ std::vector<ForPtr> LoopNest::distributeLoopAndParentsOverInnerLoops(
   return result;
 }
 
-static bool areEqual(ExprPtr expr1, ExprPtr expr2) {
+bool areEqual(ExprPtr expr1, ExprPtr expr2) {
   auto diff = IRSimplifier::simplify(alloc<Sub>(expr1, expr2));
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
 };
 
-static bool doesExprContainAnyVar(
+bool doesExprContainAnyVar(
     ExprPtr expr,
     const std::unordered_set<VarPtr>& vars) {
   for (const auto& v : VarFinder::find(expr)) {
@@ -1779,7 +1813,7 @@ static bool doesExprContainAnyVar(
 // Returns true if the given list of indices refer to two accesses
 // that are loop-independent w.r.t. the given list of outer loop
 // variables.
-static bool areIndicesLoopIndependent(
+bool areIndicesLoopIndependent(
     const std::vector<ExprPtr>& expr_list1,
     const std::vector<ExprPtr>& expr_list2,
     const std::unordered_set<VarPtr>& outer_loop_vars) {
@@ -2156,7 +2190,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   }
 }
 
-static bool isTrivialPermutation(const std::vector<size_t>& permutation) {
+bool isTrivialPermutation(const std::vector<size_t>& permutation) {
   for (size_t i = 0; i < permutation.size(); ++i) {
     if (permutation[i] != i) {
       return false;
@@ -2165,7 +2199,7 @@ static bool isTrivialPermutation(const std::vector<size_t>& permutation) {
   return true;
 }
 
-static bool isValidPermutation(std::vector<size_t> permutation) {
+bool isValidPermutation(std::vector<size_t> permutation) {
   std::sort(permutation.begin(), permutation.end());
   return isTrivialPermutation(permutation);
 }
