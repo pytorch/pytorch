@@ -181,7 +181,7 @@ TORCH_IMPL_FUNC(triu_cpu)(const Tensor& self, int64_t k, const Tensor &result) {
   compute_triu_tril<UpperTriangle>(self, k, result);
 }
 
-static Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
+Tensor trace_backward(const Tensor& grad, at::IntArrayRef sizes) {
     return at::native::trace_backward_symint(grad, c10::fromIntArrayRefSlow(sizes));
 }
 

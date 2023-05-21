@@ -95,7 +95,7 @@ uint64_t _get_model_bytecode_version(
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
 
-static uint64_t _get_model_bytecode_version_zip(
+uint64_t _get_model_bytecode_version_zip(
     std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
     TORCH_CHECK(
