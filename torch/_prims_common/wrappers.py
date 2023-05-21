@@ -253,7 +253,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     # These two operations are done in-place
                     _maybe_resize_out(out, result.shape)
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
-                    torch._C._set_conj(out, result.is_conj())
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
                     utils.check(
@@ -265,7 +264,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                         # These two operations are done in-place
                         _maybe_resize_out(o, r.shape)
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
-                        torch._C._set_conj(o, r.is_conj())
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
@@ -289,21 +287,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         return _fn
 
     return _out_wrapper
-
-
-# Similar to out.defined() from core (only use for functions decorated with
-# out_wrapper).
-def out_defined():
-    stack = inspect.stack()
-    # Gets access to the wrapper function
-    _fn = stack[2]
-    # Checks that we're inspecting _fn from out_wrapper
-    assert _fn.function == "_fn"
-    # Checks that out arg is there since get() returns None on failure
-    argvalues = inspect.getargvalues(_fn.frame)
-    assert "out" in argvalues.args
-    # Checks whether out is not None
-    return argvalues.locals.get("out") is not None
 
 
 def backwards_not_supported(prim):
