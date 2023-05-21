@@ -49,7 +49,7 @@ pattern_matcher = True
 split_cat_fx_passes = True
 
 # enable reordering pass
-reordering = False
+reordering = True
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -105,10 +105,13 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
+# Enable constant and index_expr folding
+constant_and_index_propagation = True
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 
 def is_fbcode():
@@ -222,6 +225,9 @@ class cpp:
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing.
     vec_isa_ok = None
+
+    # similar to config.triton.descriptive_names
+    descriptive_names = "original_aten"
 
 
 # config specific to codegen/triton.py

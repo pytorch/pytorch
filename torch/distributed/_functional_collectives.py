@@ -11,18 +11,7 @@ from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
 
-"""
-The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
-https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
-
-The new check is a bit more hackish, but that's all we have for now.
-
-"""
-def _is_running_under_torch_deploy():
-    return torch._meta_registrations is object
-
-
-if _is_running_under_torch_deploy():
+if torch._running_with_deploy():
     def is_torchdynamo_compiling():
         """Can't import torchdynamo in torchdeploy builds currently."""
         return False
@@ -519,7 +508,7 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-if not _is_running_under_torch_deploy():
+if not torch._running_with_deploy():
     # Library MUST be defined at module scope or it doesn't work
     # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
     #   guarded against running inside it

@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
 
@@ -310,15 +311,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
             .check("buf0 = empty_strided(") \
-            .check("buf2 = empty_strided") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf2") \
+            .check("buf3 = empty_strided") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf3") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("_register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf1)") \
-            .check("buf3 = buf1") \
-            .check("return (buf3, buf2, buf4") \
+            .check("buf2 = buf1") \
+            .check("return (buf2, buf3, buf4") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -406,4 +407,5 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

@@ -1104,12 +1104,28 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_i0e);
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> minimum(const Vectorized<T>& other) const {
-    return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> maximum(const Vectorized<T>& other) const {
-    return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T> {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T> {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
   }
 
   template <
@@ -1232,21 +1248,21 @@ inline Vectorized<uint8_t> operator~(const Vectorized<uint8_t>& a) {
 #define DEFINE_CLAMP_MAXMIN_FUNCS(typex)                          \
   DEFINE_MAXMIN_FUNCS(typex)                                      \
   template <>                                                     \
-  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
-      const Vectorized<typex>& a,                                 \
-      const Vectorized<typex>& min,                               \
-      const Vectorized<typex>& max) {                             \
-    return minimum(maximum(a, min), max);                         \
-  }                                                               \
-  template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_min(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& min) { \
-    return maximum(a, min);                                       \
+    return a.clamp_min(min);                                      \
   }                                                               \
   template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_max(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& max) { \
-    return minimum(a, max);                                       \
+    return a.clamp_max(max);                                      \
+  }                                                               \
+  template <>                                                     \
+  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
+      const Vectorized<typex>& a,                                 \
+      const Vectorized<typex>& min,                               \
+      const Vectorized<typex>& max) {                             \
+    return clamp_min(clamp_max(a, max), min);                     \
   }
 
 DEFINE_CLAMP_MAXMIN_FUNCS(int8_t)
@@ -1257,21 +1273,21 @@ DEFINE_CLAMP_MAXMIN_FUNCS(int64_t)
 DEFINE_CLAMP_MAXMIN_FUNCS(float)
 DEFINE_CLAMP_MAXMIN_FUNCS(double)
 
+namespace { /* unnamed namespace */
+
 #if !defined(vec_float) || __ARCH__ < 13
 #warning \
     "float->int and int->float conversion is simulated. compile for z15 for improved performance"
-ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
+inline ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
   return ZSimdVect<float>{float(x[0]), float(x[1]), float(x[2]), float(x[3])};
 }
-ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
+inline ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
   return ZSimdVect<int>{int(x[0]), int(x[1]), int(x[2]), int(x[3])};
 }
 #else
 #define vec_int_flt vec_float
 #define vec_flt_int vec_signed
 #endif
-
-namespace { /* unnamed namespace */
 
 Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
@@ -1790,6 +1806,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     return Vectorized<T>{_vec.le(other._vec)};
   }
 
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T>{_vec.clamp_min(min._vec)};
+  }
+
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T>{_vec.clamp_max(max._vec)};
+  }
+
   Vectorized<T> minimum(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec.minimum(other._vec)};
   }
@@ -2300,6 +2324,13 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   Vectorized<T> exp2() const {
     return mapOrdinary(exp2_impl);
+  }
+  Vectorized<T> expm1() const {
+    return mapOrdinary(std::expm1);
+  }
+
+  Vectorized<T> expm1() const {
+    return mapOrdinary(std::expm1);
   }
 
   Vectorized<T> log() const {

@@ -270,9 +270,11 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
-                if cur_module.weight.device != torch.device(
-                    "cpu"
-                ) or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]:
+                if (
+                    cur_module.weight.device != torch.device("cpu")
+                    or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]
+                    or any(size == 0 for size in cur_module.weight.shape)
+                ):
                     continue
                 if cur_module.training:
                     continue
@@ -294,6 +296,8 @@ def pack_module(gm: torch.fx.GraphModule):
                     computation_node_input_size = (
                         node.args[0].meta.get("tensor_meta").shape
                     )
+                    if any(size == 0 for size in computation_node_input_size):
+                        continue
                     if type(cur_module) in [torch.nn.Linear]:
                         # for fp32 linear, only packed when has mkl.
                         if (
@@ -311,9 +315,16 @@ def pack_module(gm: torch.fx.GraphModule):
                 # TODO: remove this when group depthwise ConvTranspose is supported
                 if type(cur_module) in [nn.ConvTranspose2d] and (
                     is_group_depthwise_conv_transpose(cur_module)
-                    or dynamo_config.dynamic_shapes
                     or len(node.args) > 1
                     or len(node.kwargs) > 0
+                    or any(
+                        not isinstance(output_padding, int)
+                        or not isinstance(stride, int)
+                        or output_padding >= stride
+                        for output_padding, stride in zip(
+                            cur_module.output_padding, cur_module.stride
+                        )
+                    )  # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
                 ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](
