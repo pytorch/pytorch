@@ -608,7 +608,7 @@ def repro_analyze(options, mod, load_args):
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         assert not new_args
@@ -629,7 +629,7 @@ def repro_analyze(options, mod, load_args):
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args

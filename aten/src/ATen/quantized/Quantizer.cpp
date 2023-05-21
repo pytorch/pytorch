@@ -83,7 +83,7 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-static int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
+int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t element_per_byte;
   switch(t) {
@@ -178,7 +178,7 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-static void per_tensor_affine_dequantize_impl(
+void per_tensor_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const double scale,
@@ -228,7 +228,7 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-static void per_channel_affine_dequantize_impl(
+void per_channel_affine_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,
@@ -278,7 +278,7 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
   return qtensor;
 }
 
-static void per_channel_affine_float_q_params_dequantize_impl(
+void per_channel_affine_float_q_params_dequantize_impl(
     Tensor& rtensor,
     const Tensor& qtensor,
     const Tensor& scale,

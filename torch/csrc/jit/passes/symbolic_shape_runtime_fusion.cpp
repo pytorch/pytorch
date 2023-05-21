@@ -20,7 +20,7 @@ namespace jit {
 
 // Inserts the Compute for Each Symbolic Shape in the TensorExpr Graph
 // and returns back a map from Symbolic Shape Value to its runtime Value *
-static std::map<int64_t, Value*> InsertSymbolicShapesCompute(
+std::map<int64_t, Value*> InsertSymbolicShapesCompute(
     const ShapeComputeGraphMapping& shape_mapping,
     Node* tensorexpr_graph) {
   WithInsertPoint guard(tensorexpr_graph);
@@ -140,7 +140,7 @@ inline StrideInput summarizeStrideDim(
   }
 }
 
-static std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
+std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
   auto strides = *tt.strides().concrete_sizes();
   auto sizes = *tt.sizes().concrete_sizes();
   if (c10::is_contiguous_strides(sizes, strides)) {
@@ -158,7 +158,7 @@ static std::vector<StrideInput> summarizeInputStrides(const TensorType& tt) {
 };
 
 // Todo: incorporate in codegen
-static StrideInput summarizeOutputStrides(const TensorType& tt) {
+StrideInput summarizeOutputStrides(const TensorType& tt) {
   auto strides = *tt.strides().concrete_sizes();
   auto sizes = *tt.sizes().concrete_sizes();
   // We only try to maintain output striding for channels last tensors,
@@ -178,7 +178,7 @@ static StrideInput summarizeOutputStrides(const TensorType& tt) {
 // Also summarize input striding behavior. The Size information is stored on the
 // type, The striding is returned. See StrideInput for description of stride
 // specializations
-static c10::optional<std::vector<std::vector<StrideInput>>>
+c10::optional<std::vector<std::vector<StrideInput>>>
 TryGeneralizeInputDimensionsToSymbolicShapes(
     std::shared_ptr<Graph> tensorexpr_graph) {
   std::map<size_t, int64_t> shape_to_sym_shape;
@@ -212,7 +212,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
   return input_striding;
 }
 
-static void moveConstantTensorsOutOfSubgraph(
+void moveConstantTensorsOutOfSubgraph(
     Node* tensorexpr_graph_node,
     std::shared_ptr<Graph> tensorexpr_graph) {
   auto parent = tensorexpr_graph_node->owningGraph();
@@ -304,7 +304,7 @@ bool GenerateGuard(Node* tensorexpr_graph_node, bool add_composed_op) {
   return true;
 }
 
-static void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
+void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   Node* n = nullptr;
@@ -495,7 +495,7 @@ void insertDynamicShapesGuard(
 // tensors
 // Note: this logic is meant to reflect the invocation of the TE Kernel
 // and `runWithAllocatedOutputs` in tensorexpr_fuser.cpp
-static Operation StaticRuntimeCopyOuts(const Node* node) {
+Operation StaticRuntimeCopyOuts(const Node* node) {
   auto num_ten_inputs = node->inputs().size();
   return [num_ten_inputs](Stack& stack) {
     std::vector<IValue> inputs = pop(stack, num_ten_inputs);
@@ -721,7 +721,7 @@ void runTensorExprDynamicGroup(const Code& code, Stack& stack) {
   interpreter.run(stack);
 }
 
-static Operation createTensorExprDynamicGroup(const Node* node) {
+Operation createTensorExprDynamicGroup(const Node* node) {
   const auto& graph = node->g(attr::Subgraph);
   Code code(graph, "");
   // This implementation creates a Code object and InterpreterState on every
