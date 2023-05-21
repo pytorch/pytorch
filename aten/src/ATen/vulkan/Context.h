@@ -22,9 +22,6 @@ class VulkanImplRegistrar {
 };
 
 at::Tensor& vulkan_copy_(at::Tensor& self, const at::Tensor& src);
-namespace native {
-  bool is_vulkan_available();
-}// namespace native
 
 } // namespace vulkan
 } // namespace at

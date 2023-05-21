@@ -128,7 +128,7 @@ Tensor fake_quantize_per_channel_affine_cachemask_backward(
   return dY * mask;
 }
 
-static Tensor _get_rounded_zero_point(
+Tensor _get_rounded_zero_point(
     const Tensor& zero_point,
     int64_t quant_min,
     int64_t quant_max) {
