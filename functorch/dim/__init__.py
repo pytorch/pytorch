@@ -2,6 +2,7 @@ import torch
 from typing import Union, Sequence
 import inspect
 import dis
+from .einops import rearrange as rearrange
 from .tree_map import tree_flatten, tree_map
 from .wrap_type import wrap_type
 import functorch._C
