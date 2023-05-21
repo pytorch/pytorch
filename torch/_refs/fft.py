@@ -7,11 +7,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch._decomp import register_decomposition
 from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
-from torch._prims_common.wrappers import (
-    _maybe_convert_to_dtype,
-    out_defined,
-    out_wrapper,
-)
+from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
 __all__ = [
     # Transforms
@@ -134,7 +130,6 @@ def _fft_c2r(
 
 def _fft_r2c(
     func_name: str,
-    out_defined: bool,
     input: TensorLikeType,
     n: Optional[int],
     dim: int,
@@ -155,11 +150,7 @@ def _fft_r2c(
 
     ret = prims.fft_r2c(input, dim=dims, onesided=onesided)
     ret = _apply_norm(ret, norm, input.shape[dim], forward)
-
-    if not forward:
-        return torch.conj_physical(ret) if out_defined else ret.conj()
-    else:
-        return ret
+    return ret if forward else torch.conj(ret)
 
 
 def _fft_c2c(
@@ -195,9 +186,7 @@ def fft(
     if input.dtype.is_complex:
         return _fft_c2c("fft", input, n, dim, norm, forward=True)
     else:
-        return _fft_r2c(
-            "fft", out_defined(), input, n, dim, norm, forward=True, onesided=False
-        )
+        return _fft_r2c("fft", input, n, dim, norm, forward=True, onesided=False)
 
 
 @register_decomposition(aten.fft_ifft)
@@ -211,9 +200,7 @@ def ifft(
     if input.dtype.is_complex:
         return _fft_c2c("ifft", input, n, dim, norm, forward=False)
     else:
-        return _fft_r2c(
-            "ifft", out_defined(), input, n, dim, norm, forward=False, onesided=False
-        )
+        return _fft_r2c("ifft", input, n, dim, norm, forward=False, onesided=False)
 
 
 @register_decomposition(aten.fft_rfft)
@@ -224,9 +211,7 @@ def rfft(
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
-    return _fft_r2c(
-        "rfft", out_defined(), input, n, dim, norm, forward=True, onesided=True
-    )
+    return _fft_r2c("rfft", input, n, dim, norm, forward=True, onesided=True)
 
 
 @register_decomposition(aten.fft_irfft)
@@ -259,9 +244,7 @@ def ihfft(
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
-    return _fft_r2c(
-        "ihfft", out_defined(), input, n, dim, norm, forward=False, onesided=True
-    )
+    return _fft_r2c("ihfft", input, n, dim, norm, forward=False, onesided=True)
 
 
 class _ShapeAndDims(NamedTuple):
@@ -416,9 +399,9 @@ def ihfftn(
 
     if len(dim) == 1:
         tmp = _apply_norm(tmp, norm=norm, signal_numel=shape[0], forward=False)
-        return torch.conj_physical(tmp) if out_defined() else tmp.conj()
+        return prims.conj(tmp)
 
-    tmp = torch.conj_physical(tmp)
+    tmp = prims.conj_physical(tmp)
     tmp = prims.fft_c2c(tmp, dim=dim[:-1], forward=False)
     return _apply_norm(tmp, norm=norm, signal_numel=_prod(shape), forward=False)
 
@@ -550,29 +533,15 @@ def hfft2(
     return torch.fft.hfftn(input, s=s, dim=dim, norm=norm)
 
 
-# DO NOT use out_wrapper and DO NOT dispatch to C++ here! Previously, this ref
-# used out_wrapper and called torch.fft.ihfftn, which dispatches to C++. This
-# wasn't correct with respect to handling conjugation since the C++ code has
-# conditional logic for that. In fft_ihfftn_impl, out.defined() is called to
-# check whether to conjugate or to just set the conj bit. Without an explicit
-# out argument passed from this ref to the C++ code, out.defined() on the C++
-# side would always return False. That would be incorrect when this ref is
-# called with an out parameter. While passing an explicit out parameter to
-# torch.fft.ihfftn works to resolve the out.defined() issue, it breaks out tests
-# for this ref, like test_out__refs_fft_ihfft2_cpu_float32. Instead, this ref
-# now calls the ihfftn ref since it resolves both of the mentioned problems.
-# The ihfftn ref implements the same conditional logic as the C++ code and
-# doesn't cause issues with out tests.
 @register_decomposition(aten.fft_ihfft2)
+@out_wrapper()
 def ihfft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
     dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
-    *,
-    out: TensorLikeType = None,
 ) -> TensorLikeType:
-    return ihfftn(input, s=s, dim=dim, norm=norm, out=out)
+    return torch.fft.ihfftn(input, s=s, dim=dim, norm=norm)
 
 
 def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> List[int]:
