@@ -998,7 +998,9 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train:
+    if train and p != 0:
+        if p == 1:
+            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -2780,9 +2782,7 @@ def upsample_bilinear2d(
         if align_corners:
             h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
-            h_scale_factor = (
-                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
-            )
+            h_scale_factor = 1.0 / scales_h if scales_h is not None else in_h / out_h
     else:
         h_scale_factor = 0.0
 
@@ -2790,9 +2790,7 @@ def upsample_bilinear2d(
         if align_corners:
             w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
-            w_scale_factor = (
-                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
-            )
+            w_scale_factor = 1.0 / scales_w if scales_w is not None else in_w / out_w
     else:
         w_scale_factor = 0.0
 

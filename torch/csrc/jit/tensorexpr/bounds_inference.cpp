@@ -70,7 +70,7 @@ BoundsInfo mergeTensorAccesses(
   return ret;
 }
 
-static std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
+std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(s);
@@ -80,7 +80,7 @@ static std::unordered_map<VarPtr, BufPtr> getAllBufs(StmtPtr s) {
   return varToBuf;
 }
 
-static std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
+std::unordered_map<VarPtr, BufPtr> getAllBufs(ExprPtr e) {
   std::unordered_map<VarPtr, BufPtr> varToBuf;
 
   auto bufs = NodeFinder<Buf>::find(e);
@@ -195,7 +195,7 @@ std::vector<ExprPtr> getBoundExtents(
 
 using BoundSet = std::unordered_set<Bound, BoundHash>;
 
-static BoundSet convertBounds(
+BoundSet convertBounds(
     const std::vector<TensorAccessBoundsInfo>& bounds,
     TensorAccessKind filter = kMutate) {
   BoundSet ret;
@@ -209,7 +209,7 @@ static BoundSet convertBounds(
   return ret;
 }
 
-static BoundSet convertBounds(
+BoundSet convertBounds(
     BoundsInfo& bounds,
     BufPtr buf,
     TensorAccessKind filter = kMutate) {
@@ -271,7 +271,7 @@ HazardKind getPotentialHazards(
   return HazardKind::NoDependency;
 }
 
-static IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
+IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   TORCH_INTERNAL_ASSERT(
       tabi.start.size() == tabi.stop.size(), buildErrorMessage());
   IndexBounds ret(tabi.start.size());
@@ -284,7 +284,7 @@ static IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   return ret;
 }
 
-static std::vector<IndexBounds> getIndexBounds(
+std::vector<IndexBounds> getIndexBounds(
     const std::vector<TensorAccessBoundsInfo>& vTABI,
     TensorAccessKind filter = kMutate) {
   std::vector<IndexBounds> bounds;
@@ -296,7 +296,7 @@ static std::vector<IndexBounds> getIndexBounds(
   return bounds;
 }
 
-static bool hasConflictingOverlap(
+bool hasConflictingOverlap(
     const BoundsInfo& aBounds,
     const BoundsInfo& bBounds,
     TensorAccessKind aFilter = kMutate,
