@@ -58,6 +58,9 @@ log = logging.getLogger(__name__)
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# Suppress torch.profiler spam
+os.environ["KINETO_LOG_LEVEL"] = "5"
+
 current_name = ""
 current_device = ""
 current_batch_size = None
@@ -337,7 +340,7 @@ def output_csv(filename, headers, row):
     with open(filename, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
-            writer.writerow(line + ["0"] * (len(headers) - len(line)))
+            writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
 def nothing(f):
