@@ -715,12 +715,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
             return (
                 # TODO(jansel): this heuristic has not been well tuned
                 reuse_score,
-                sum(map(score_dep, external_writes)),
-                sum(map(score_dep, external_reads)),
+                sum(map(score_dep, external_writes | external_reads)),
+                # sum(map(score_dep, external_reads)),
                 sum(map(score_dep, internal_deps)),
             )
 
-        def score_dep(dep: dependencies.MemoryDep, limit=2):
+        def score_dep(dep: dependencies.MemoryDep, limit=8):
             # TODO(jansel): include indirect?
             if (
                 isinstance(dep, dependencies.StarDep)
