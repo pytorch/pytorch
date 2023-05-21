@@ -146,7 +146,6 @@ class TestQuantizePT2E(QuantizationTestCase):
                                 weight: observer.default_weight_observer,
                                 bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
                             },
-                            output_qspec=observer.default_observer,
                             _annotated=True,
                         )
                     if (
