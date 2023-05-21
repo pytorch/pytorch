@@ -118,8 +118,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   if (randomness == RandomnessType::Different) {
-    std::vector<at::Tensor> stackedList(batch_size);
-    stackedList.reserve(batch_size);
+    std::vector<at::Tensor> stackedList(batch_size.guard_int(__FILE__, __LINE__));
     for (int64_t idx = 0; idx < batch_size; ++idx) {
       // since this is done in a loop, need to pass by reference for generator to update
       stackedList[idx] = Func(n, extra_args...);
@@ -144,12 +143,12 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, tensor_bdim.has_value());
   auto shape = tensor_value.sizes();
-  VmapDimVector shapeVec(1, maybe_layer->batchSize());
+  VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
   shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
   if (randomness == RandomnessType::Different && !tensor_bdim) {
-    tensor_value = tensor_value.expand(shapeVec);
+    tensor_value = tensor_value.expand_symint(shapeVec);
   }
   auto out = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
   if (randomness == RandomnessType::Same && !tensor_bdim) {
@@ -175,10 +174,10 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
     tensor_value = tensor_value[0];
   } else if (randomness == RandomnessType::Different && !tensor_bdim) {
     auto shape = tensor_value.sizes();
-    VmapDimVector shapeVec(1, maybe_layer->batchSize());
+    VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
     shapeVec.reserve(shape.size() + 1);
     shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    tensor_value = tensor_value.expand(shapeVec);
+    tensor_value = tensor_value.expand_symint(shapeVec);
   }
 
   auto res = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
@@ -206,10 +205,10 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
       // if tensor is unbatched, add batch dim before
       // calling dropout.
       auto shape = tensor_value.sizes();
-      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
       shapeVec.reserve(shape.size() + 1);
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-      tensor_value = tensor_value.expand(shapeVec);
+      tensor_value = tensor_value.expand_symint(shapeVec);
     }
     auto [output, mask] = at::native_dropout(tensor_value, p, train);
     return std::make_tuple(
@@ -255,7 +254,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
     }
     auto out = multinomial(self_value, num_samples, replacement, generator);
     if (is_2D_case) {
-      out = reshape_dim_outof(0, maybe_layer->batchSize(), out);
+      out = reshape_dim_outof_symint(0, maybe_layer->batchSize(), out);
     }
     return makeBatched(out, 0, cur_level);;
   }
