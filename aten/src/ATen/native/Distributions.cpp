@@ -9,7 +9,6 @@
 
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
-#include <ATen/TensorIndexing.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
@@ -232,34 +231,7 @@ struct ExponentialStub {
 };
 
 Tensor& exponential_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  at::native::templates::exponential_impl_<ExponentialStub, Generator>(self, lambda, std::move(gen));
-  #if (AT_MKL_ENABLED() && !USE_CUDA) 
-  {
-    at::Tensor zero_idx;
-    int64_t n_zeros;
-    bool has_zero;
-
-    zero_idx = (self == 0.).nonzero();
-    n_zeros = zero_idx.size(0);
-    has_zero = n_zeros != 0;
-
-    while C10_UNLIKELY((has_zero)) {
-        Tensor self_resample = at::empty(n_zeros, self.options());
-        at::native::templates::exponential_impl_<ExponentialStub, Generator>(self_resample, lambda, std::move(gen));
-
-        std::vector<at::indexing::TensorIndex> indexing;
-        for (const auto i : c10::irange(self.dim())) {
-            indexing.emplace_back(zero_idx.select(1, i));
-        }
-        self.index_put_(indexing, self_resample);
-
-        zero_idx = (self == 0.).nonzero();
-        n_zeros = zero_idx.size(0);
-        has_zero = n_zeros != 0;
-    }
-  }
-  #endif
-  return self;
+  return at::native::templates::exponential_impl_<ExponentialStub, Generator>(self, lambda, std::move(gen));
 }
 
 // =================================================== Geometric ======================================================
