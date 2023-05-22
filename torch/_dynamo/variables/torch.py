@@ -782,6 +782,15 @@ def speculate_subgraph(
             ):
                 unimplemented("HigherOrderOperator with body with pytree output")
 
+            if isinstance(output, (ListVariable, TupleVariable)):
+                if any(
+                    not isinstance(var, TensorVariable)
+                    for var in output.unpack_var_sequence(tx)
+                ):
+                    unimplemented(
+                        "HigherOrderOperator body's output must consist of tensors only"
+                    )
+
             if always_restore:
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
@@ -1206,8 +1215,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 *(arg.as_proxy() for arg in args[1:]),
                 *(arg for arg in body_lifted_freevars),
             )
-            example_value = pytree.tree_map(
-                lambda a: a.node.meta["example_value"], body_r.as_proxy()
+            example_value = pytree.tree_map_only(
+                torch.fx.Proxy,
+                lambda a: a.node.meta["example_value"],
+                body_r.as_proxy(),
             )
         elif self.value.__name__ in (
             "trampoline_autograd_fwd",
