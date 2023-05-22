@@ -188,6 +188,20 @@ def enable_dynamic(enable: bool = True, export: bool = False):
         yield
 
 
+def should_wrap_inline(fn):
+    try:
+        filename = inspect.getsourcefile(fn)
+    except TypeError:
+        filename = None
+    return (
+        (filename is None or skipfiles.check(filename))
+        and (
+            getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+        )
+        and filename not in DONT_WRAP_FILES
+    )
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -245,17 +259,7 @@ class _TorchDynamoContext:
             return new_mod
         assert callable(fn)
 
-        try:
-            filename = inspect.getsourcefile(fn)
-        except TypeError:
-            filename = None
-        if (
-            (filename is None or skipfiles.check(filename))
-            and (
-                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
-            )
-            and filename not in DONT_WRAP_FILES
-        ):
+        if should_wrap_inline(fn):
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
 
@@ -921,7 +925,7 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None and not should_wrap_inline(f):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
