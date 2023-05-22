@@ -12,7 +12,7 @@ struct VmapInterpreterPtr {
   int64_t level() const { return base_->level(); }
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
-  int64_t batchSize() const {
+  c10::SymInt batchSize() const {
     return c10::get<VmapInterpreterMeta>(base_->meta()).batchSize_;
   }
   RandomnessType randomness() const {
