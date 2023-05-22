@@ -22,7 +22,6 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -932,7 +931,7 @@ class FSDPTest(MultiProcessTestCase):
         model_device = next(model.parameters()).device
         if sharded_grad_scaler_kwargs is None:
             sharded_grad_scaler_kwargs = {}
-        sharded_grad_scaler = ShardedGradScaler(
+        sharded_grad_scaler = torch.cuda.amp.ShardedGradScaler(
             enabled=enable_sharded_grad_scaler, **sharded_grad_scaler_kwargs
         )
         # use SGD with momentum instead of Adam, since Adam is scale invariant

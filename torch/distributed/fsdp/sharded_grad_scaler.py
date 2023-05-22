@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.cuda import FloatTensor  # type: ignore[attr-defined]
-from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
+from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.optim.sgd import SGD
 
@@ -32,7 +32,7 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
 
-class ShardedGradScaler(GradScaler):
+class _ShardedGradScaler(torch.cuda.amp.GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
     functionality from GradScaler:
@@ -370,3 +370,5 @@ class ShardedGradScaler(GradScaler):
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
+
+torch.cuda.amp.ShardedGradScaler = _ShardedGradScaler

@@ -20,7 +20,6 @@ from torch.distributed.fsdp import (
     MixedPrecision,
     ShardingStrategy,
 )
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
@@ -420,7 +419,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 True,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
-                scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
+                scaler = torch.cuda.amp.ShardedGradScaler(enabled=enable_sharded_grad_scaler)
                 optim = torch.optim.Adam(model.parameters())
 
                 for _ in range(3):

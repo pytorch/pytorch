@@ -11,7 +11,6 @@ from torch import distributed as dist
 from torch.cuda.amp.common import amp_definitely_not_available
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -71,7 +70,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_grad_scaling(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = torch.cuda.amp.ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
         t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t1 = torch.full((1,), 8.0, dtype=torch.float32, device="cpu")
         outputs = [t1.clone(), (t0.clone(), t1.clone()), [t0.clone(), t1.clone()]]
@@ -87,7 +86,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_scaling_unscaling_sparse(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = torch.cuda.amp.ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
         inv_scale = torch.full((1,), 0.5, dtype=torch.float, device="cpu")
         found_inf = torch.full((1,), 0, dtype=torch.float, device="cpu")
 
@@ -132,7 +131,7 @@ class TestShardGradScaler(TestCase):
     )
     def test_inf_gradients_skip_optim_step(self):
         pg = DummyProcessGroup(0, 1)
-        scaler = ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
+        scaler = torch.cuda.amp.ShardedGradScaler(init_scale=2.0, process_group=pg, enabled=True)
         loss = torch.full((1,), 4.0, dtype=torch.float32, device="cpu")
         t0 = torch.tensor([float("inf")], dtype=torch.float32, device="cpu")
         t0.grad = t0.clone()
