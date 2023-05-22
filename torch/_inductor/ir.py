@@ -2189,8 +2189,12 @@ class ComputedBuffer(Buffer):
 
     def make_loader(self):
         # Inline constants and index_expressions
-        num_reads = lambda: len(self.get_read_writes().reads)
-        if hasattr(self.data, "make_loader") and num_reads() == 0:
+        can_inline = (
+            hasattr(self.data, "make_loader") and
+            self.name not in V.graph.mutated_buffers and
+            len(self.get_read_writes().reads) == 0
+        )
+        if can_inline:
             return self.data.make_loader()
         return super().make_loader()
 
