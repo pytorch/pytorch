@@ -111,7 +111,9 @@ def has_required_labels(pr: "GitHubPR") -> bool:
 
 
 def is_label_err_comment(comment: GitHubComment) -> bool:
+    # comment.body_text returns text without markdown
+    no_format_title = LABEL_ERR_MSG_TITLE.replace("`", "")
     return (
-        comment.body_text.lstrip(" #").startswith(LABEL_ERR_MSG_TITLE)
+        comment.body_text.lstrip(" #").startswith(no_format_title)
         and comment.author_login in BOT_AUTHORS
     )

@@ -15,14 +15,14 @@ namespace native {
 
 DEFINE_DISPATCH(qelu_stub);
 
-static Tensor quantized_elu(
+Tensor quantized_elu(
     const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(), output_scale, output_zero_point);
   qelu_stub(qx.device().type(), qx, alpha, scale, input_scale, qy);
   return qy;
 }
 
-static Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha) {
+Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t output_zero_point, const Scalar& alpha) {
   TORCH_CHECK(alpha.to<double>() != 0,
       "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();

@@ -148,6 +148,10 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
 
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+
         result = None
         options = VariableTracker.propagate(self)
         if name == "ndim" and self.ndim is not None:
@@ -256,6 +260,9 @@ class TensorVariable(VariableTracker):
             idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
+    def _strict_mode_banned_ops(self):
+        return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
+
     def call_method(
         self,
         tx,
@@ -263,6 +270,9 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 

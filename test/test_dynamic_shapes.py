@@ -559,15 +559,12 @@ class TestSymNumberMagicMethods(TestCase):
             lambda_apply = getattr(operator, fn)
 
         def guard_fn(v):
-            try:
-                if type(v) in (SymBool, bool):
-                    return guard_bool(v)
-                elif type(v) in (SymFloat, float):
-                    return guard_float(v)
-                else:  # SymInt, int
-                    return guard_int(v)
-            except Exception as e:
-                raise e
+            if type(v) in (SymBool, bool):
+                return guard_bool(v)
+            elif type(v) in (SymFloat, float):
+                return guard_float(v)
+            else:  # SymInt, int
+                return guard_int(v)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
