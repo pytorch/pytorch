@@ -489,6 +489,26 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3, expected_opcount=2)
 
+    def test_nested_wrap(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule()
+
+        # Two levels of wrap ops
+        def gn(x):
+            return torch.cos(x) + wrap(mod, x)
+
+        def fn(x):
+            return wrap(gn, x)
+
+        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
