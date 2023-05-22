@@ -484,6 +484,8 @@ class TorchVariable(VariableTracker):
             torch.func.grad,
             torch.func.vjp,
             torch.func.jvp,
+            torch.func.jacrev,
+            torch.func.jacfwd,
         ):
             # Raise hard-error as even graph-break can't handle functorch transform under torch.compile.
             tfms_name = {
@@ -491,6 +493,8 @@ class TorchVariable(VariableTracker):
                 torch.func.grad: "torch.func.grad",
                 torch.func.vjp: "torch.func.vjp",
                 torch.func.jvp: "torch.func.jvp",
+                torch.func.jacrev: "torch.func.jacrev",
+                torch.func.jacfwd: "torch.func.jacfwd",
             }[self.value]
             raise RuntimeError(f"{tfms_name} transform is currently not supported.")
         elif (
