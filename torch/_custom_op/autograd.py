@@ -127,12 +127,12 @@ def gen_autograd_function(name, forward, backward):
     return generated_cls
 
 
-@functools.cache
+@functools.lru_cache
 def namedtuple_args_cls(schema):
     attribs = [arg.name for arg in schema.arguments.flat_all]
     name = str(schema.name) + "_args"
-    # mypy doesn't support dynamic namedtuple
-    tuple_cls = namedtuple(name, attribs)  # typing: ignore [misc]
+    # mypy doesn't support dynamic namedtuple name
+    tuple_cls = namedtuple(name, attribs)  # typing: ignore[misc]
     return tuple_cls
 
 
