@@ -915,7 +915,7 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=(torch.float,),
     )
-    def test_forward_mode_AD(self, device, dtype, op):
+    def test_inplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
 
@@ -935,26 +935,37 @@ class TestForeach(TestCase):
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
         ):
 
-            def inplace_func(args):
+            def inplace_func(tensorlist):
                 kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
-                op.inplace_variant(args, *sample.args, **kwargs)
-                return args
+                op.inplace_variant(tensorlist, *sample.args, **kwargs)
+                return tensorlist
 
             primal_tensors = [t.clone() for t in sample.input]
             tangent_tensors = [torch.rand_like(t) for t in primal_tensors]
 
-            try:
-                values, grads = torch.func.jvp(inplace_func, (primal_tensors,), (tangent_tensors,),)
-            except Exception as e:
-                if not re.findall(patterns_to_tolerate, str(e)):
-                    raise e
-            else:
-                cloned_sample = sample.transform(clone)
-                ref_inputs = [t.clone() for t in cloned_sample.input]
-                outputs = inplace_func(ref_inputs)
-                ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
-                self.assertEqual(values, outputs)
-                self.assertEqual(grads, ref_grads)
+            with torch.autograd.forward_ad.dual_level():
+                dual_inputs = [
+                    torch.autograd.forward_ad.make_dual(primal, tangent)
+                    for primal, tangent in zip(primal_tensors, tangent_tensors)
+                ]
+
+                try:
+                    dual_outputs = inplace_func(dual_inputs)
+                except Exception as e:
+                    if not re.findall(patterns_to_tolerate, str(e)):
+                        raise e
+                else:
+                    results, forward_mode_grads = [], []
+                    for dual in dual_outputs:
+                        unpacked_dual = torch.autograd.forward_ad.unpack_dual(dual)
+                        results.append(unpacked_dual.primal)
+                        forward_mode_grads.append(unpacked_dual.tangent)
+                    cloned_sample = sample.transform(clone)
+                    ref_inputs = [t.clone() for t in cloned_sample.input]
+                    outputs = inplace_func(ref_inputs)
+                    ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
+                    self.assertEqual(results, outputs)
+                    self.assertEqual(forward_mode_grads, ref_grads)
 
 
 instantiate_device_type_tests(TestForeach, globals())
