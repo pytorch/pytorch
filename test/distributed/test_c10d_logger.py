@@ -10,7 +10,7 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 
-from torch.distributed.c10d_error_logger import _get_or_create_logger
+from torch.distributed.c10d_logger import _get_or_create_logger
 from torch.distributed.distributed_c10d import exception_handler
 
 if not dist.is_available():

@@ -1,7 +1,6 @@
 import itertools
 import collections.abc
 import contextlib
-import functools
 import hashlib
 import io
 import logging
@@ -35,7 +34,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
-from .c10d_error_logger import _get_or_create_logger
+from .c10d_logger import exception_handler, timer_handler
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 __all__ = [
@@ -57,7 +56,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'exception_handler'
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
 ]
 
 _MPI_AVAILABLE = True
@@ -122,65 +121,6 @@ except ImportError:
     _UCC_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-global _c10d_logger
-_c10d_logger = _get_or_create_logger()
-
-
-def exception_handler(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as error:
-            if is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend(kwargs.get('group'))}",
-                    "world_size": f"{get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{get_rank()}",
-                    "local_rank": f"{get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_logger.debug(error_msg_dict)
-            raise
-    return wrapper
-
-
-def time_handler(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        t1 = time.time()
-        func_return = func(*args, **kwargs)
-        t2 = time.time()
-
-        if is_initialized():
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "time_spent": f"f'{t2-t1}')",
-                "args": f"{args}, {kwargs}",
-                "backend": f"{get_backend(kwargs.get('group'))}",
-                "world_size": f"{get_world_size(kwargs.get('group'))}",
-                "global_rank": f"{get_rank()}",
-                "local_rank": f"{get_rank(kwargs.get('group'))}",
-            }
-        else:
-            msg_dict = {
-                "func_name": f"{func.__name__}",
-                "args": f"{args}, {kwargs}",
-            }
-        _c10d_logger.debug(msg_dict)
-
-        return func_return
-
-    return wrapper
-
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
@@ -660,7 +600,7 @@ def _get_object_coll_device(group: Optional[ProcessGroup] = None):
 _barrier_after_init = int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
 
 
-@time_handler
+@timer_handler
 def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
@@ -994,7 +934,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
 
 
 @exception_handler
-@time_handler
+@timer_handler
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
@@ -3793,7 +3733,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
     return Backend(backend)
 
 
-@time_handler
+@timer_handler
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
