@@ -1,4 +1,6 @@
+import inspect
 import os
+import re
 import sys
 import tempfile
 from os.path import abspath, dirname
@@ -224,6 +226,10 @@ allow_rnn = False
 # been seen before.
 error_on_recompile = False
 
+# reports why guards fail. Useful to identify the guards failing frequently and
+# causing recompilations.
+report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
+
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
@@ -253,6 +259,20 @@ _save_config_ignore = {
     # workaround: "cannot pickle module"
     "skipfiles_inline_module_allowlist",
 }
+
+capture_autograd_function = True
+
+_autograd_backward_strict_mode_banned_ops = [
+    "stride",
+    "requires_grad",
+    "storage_offset",
+    "layout",
+    "data",
+]
+
+_autograd_backward_strict_mode_banned_ops.extend(
+    [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
+)
 
 
 from .config_utils import install_config_module

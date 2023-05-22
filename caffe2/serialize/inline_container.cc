@@ -14,6 +14,7 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
+#include <c10/util/uuid.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/serialize/file_adapter.h"
@@ -21,6 +22,7 @@
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
+#include "caffe2/serialize/versions.h"
 #include "miniz.h"
 
 namespace caffe2 {
@@ -131,6 +133,14 @@ void PyTorchStreamReader::init() {
   }
   archive_name_ = buf.substr(0, pos);
   archive_name_plus_slash_ = archive_name_ + "/";
+
+  // read serialization id
+  if (hasRecord(kSerializationIdRecordName)) {
+    at::DataPtr serialization_id_ptr;
+    size_t serialization_id_size;
+    std::tie(serialization_id_ptr, serialization_id_size) = getRecord(kSerializationIdRecordName);
+    serialization_id_.assign(static_cast<const char*>(serialization_id_ptr.get()), serialization_id_size);
+  }
 
   // version check
   at::DataPtr version_ptr;
@@ -320,6 +330,51 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   return stat.m_uncomp_size;
 }
 
+size_t PyTorchStreamReader::getRecord(
+    const std::string& name,
+    void* dst,
+    size_t n,
+    size_t chunk_size,
+    const std::function<void(void*, const void*, size_t)>& memcpy_func) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return 0;
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  TORCH_CHECK(
+      n == stat.m_uncomp_size,
+      "record size ",
+      stat.m_uncomp_size,
+      " mismatch with dst size ",
+      n);
+  valid("retrieving file meta-data for ", name.c_str());
+
+  mz_zip_reader_extract_iter_state* iter =
+      mz_zip_reader_extract_iter_new(ar_.get(), key, 0);
+  TORCH_CHECK(
+      iter != nullptr,
+      "Failed to create zip reader iter: ",
+      mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
+  std::vector<uint8_t> buf(chunk_size);
+  for (size_t offset = 0; offset < stat.m_uncomp_size; offset += chunk_size) {
+    size_t want_size =
+        std::min(chunk_size, (size_t)stat.m_uncomp_size - offset);
+    size_t read_size =
+        mz_zip_reader_extract_iter_read(iter, buf.data(), want_size);
+    TORCH_CHECK(
+        read_size == want_size,
+        "Failed to advance zip reader iter: ",
+        mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
+    memcpy_func((char*)dst + offset, buf.data(), read_size);
+  }
+  valid("reading file ", name.c_str());
+  mz_zip_reader_extract_iter_free(iter);
+
+  return stat.m_uncomp_size;
+}
+
 static int64_t read_le_16(uint8_t* buf) {
   return buf[0] + (buf[1] << 8);
 }
@@ -381,6 +436,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   ar_ = std::make_unique<mz_zip_archive>();
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
   archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
+  serialization_id_ = uuid::generate_uuid_v4();
 
   if (archive_name_.size() == 0) {
     CAFFE_THROW("invalid file name: ", file_name);
@@ -424,6 +480,15 @@ void PyTorchStreamWriter::writeRecord(
   AT_ASSERT(!archive_name_plus_slash_.empty());
   TORCH_INTERNAL_ASSERT(
       files_written_.count(name) == 0, "Tried to serialize file twice: ", name);
+  if (name == kSerializationIdRecordName) {
+    std::string serialization_id_str(static_cast<const char*>(data), size);
+    if(serialization_id_str != serialization_id_) {
+      // In case of copying records from another file, skip writing a different
+      // serialization_id than the one set up in this writer.
+      // This is to ensure serialization_id stays unique per serialization.
+      return;
+    }
+  }
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
@@ -473,6 +538,11 @@ void PyTorchStreamWriter::writeEndOfFile() {
     } else {
       writeRecord("version", version.c_str(), version.size());
     }
+  }
+  // In setup(), the value of serialization_id_ is initialized.
+  // Here, after done with writing all records, the serialization_id record is written.
+  if (allRecords.find(kSerializationIdRecordName) == allRecords.end()) {
+    writeRecord(kSerializationIdRecordName, serialization_id_.c_str(), serialization_id_.size());
   }
 
   AT_ASSERT(!finalized_);

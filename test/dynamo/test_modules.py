@@ -1843,6 +1843,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             torch.save(opt_model.state_dict(), file_path)
             torch.load(file_path)
 
+    def test_unspecialized_seq(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+
+        def fn(x):
+            models[0].training = False
+            return models(x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.randn(1, 3)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

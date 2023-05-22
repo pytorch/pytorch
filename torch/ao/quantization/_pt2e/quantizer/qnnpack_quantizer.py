@@ -6,6 +6,7 @@ import operator
 from typing import Callable, Dict, List, Optional, Set
 
 import torch
+import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 
 from torch.ao.quantization._pt2e.quantizer.utils import (
@@ -17,12 +18,17 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
 from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
+from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
+
 from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
     QuantizationConfig,
     QuantizationSpec,
     Quantizer,
+    QuantizationAnnotation,
+    _annotate_input_qspec_map,
+    _annotate_output_qspec,
 )
 
 __all__ = [
@@ -31,6 +37,34 @@ __all__ = [
 ]
 
 _QUANT_CONFIG_TO_ANNOTATOR = {}
+
+
+def _mark_nodes_as_annotated(nodes: List[Node]):
+    for node in nodes:
+        if node is not None:
+            if "quantization_annotation" not in node.meta:
+                node.meta["quantization_annotation"] = QuantizationAnnotation()
+            node.meta["quantization_annotation"]._annotated = True
+
+def _get_dynamo_graph(function: Callable, inputs) -> torch.fx.Graph:
+    gm, _ = torchdynamo.export(function, *inputs, aten_graph=True)
+    gm.graph.eliminate_dead_code()
+    return gm.graph
+
+
+def _get_linear_patterns(input_size: List[int]):
+    in_channels = input_size[-1]
+    out_channels = 8  # hard coding but this should not matter
+    weight = torch.ones((out_channels, in_channels))
+    bias = torch.ones((out_channels,))
+    act = torch.ones(input_size)
+
+    def linear_op(act, weight, bias=None):
+        return F.linear(act, weight, bias)
+
+    pattern_w_bias = _get_dynamo_graph(linear_op, (act, weight, bias))
+    pattern_wo_bias = _get_dynamo_graph(linear_op, (act, weight))
+    return [pattern_w_bias, pattern_wo_bias]
 
 
 def register_annotator(quantization_configs: List[QuantizationConfig]):
@@ -133,8 +167,8 @@ def _is_annotated(nodes: List[Node]):
     annotated = False
     for node in nodes:
         annotated = annotated or (
-            "target_dtype_info" in node.meta
-            and node.meta["target_dtype_info"].get("_annotated", False)
+            "quantization_annotation" in node.meta
+            and node.meta["quantization_annotation"]._annotated
         )
     return annotated
 
@@ -206,36 +240,36 @@ class QNNPackQuantizer(Quantizer):
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
+        self._annotate_linear(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
             if config.is_qat:
+                self._annotate_conv2d_bn_relu(node, config)
                 self._annotate_conv2d_bn(node, config)
             self._annotate_conv2d_relu(node, config)
             self._annotate_conv2d(node, config)
-            self._annotate_linear(node, config)
             self._annotate_maxpool2d(node, config)
             self._annotate_add_relu(node, config)
             self._annotate_add(node, config)
             self._annotate_hardtanh(node, config)
             self._annotate_mean(node, config)
             self._annotate_adaptive_avg_pool2d(node, config)
-
         return model
 
     def _annotate_conv2d_bn(
-        self, node: Node, quantization_config: Optional[QuantizationConfig]
+        self, node: Node, quantization_config: QuantizationConfig
     ) -> None:
         """
         Match the following pattern:
 
-          ... -> conv -> bn -> getitem[0] - ...
+          ... -> conv -> bn -> getitem[0] -> ...
 
         Annotate it to get the following pattern after prepare:
 
-                weight -> obs1
-                           |
-          ...  -> obs0 -> conv -> bn -> getitem[0] -> obs2 -> ...
+               weight -> fq1
+                          |
+          ...  -> fq0 -> conv -> bn -> getitem[0] -> fq2 -> ...
 
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
@@ -263,23 +297,106 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([getitem_node, bn_node, conv_node]):
             return
 
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
-            "_annotated": True,
-        }
-        bn_node.meta["target_dtype_info"] = {
-            "_annotated": True,
-        }
-        getitem_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
-            "_annotated": True,
-        }
+        input_qspec_map = {}
+        input_act = conv_node.args[0]
+        assert isinstance(input_act, Node)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
+
+        weight = conv_node.args[1]
+        assert isinstance(weight, Node)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
+
+        bias = conv_node.args[2]
+        if isinstance(bias, Node):
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+
+        bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            _annotated=True
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
+
+    def _annotate_conv2d_bn_relu(
+        self, node: Node, quantization_config: QuantizationConfig
+    ) -> None:
+        """
+        Match the following pattern:
+
+          ... -> conv -> bn -> getitem[0] -> relu -> ...
+
+        Annotate it to get the following pattern after prepare:
+
+               weight -> fq1
+                          |
+          ...  -> fq0 -> conv -> bn -> getitem[0] -> relu -> fq2 -> ...
+
+        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
+        """
+        if node.op != "call_function" or node.target not in [
+            torch.ops.aten.relu_.default,
+            torch.ops.aten.relu.default,
+        ]:
+            return
+        relu_node = node
+        getitem_node = relu_node.args[0]
+        assert isinstance(getitem_node, Node)
+        if (
+            getitem_node.op != "call_function"
+            or getitem_node.target != operator.getitem
+            or getitem_node.args[1] != 0
+        ):
+            return
+        bn_node = getitem_node.args[0]
+        assert isinstance(bn_node, Node)
+        if (
+            bn_node.op != "call_function"
+            or bn_node.target != torch.ops.aten._native_batch_norm_legit.default
+        ):
+            return
+        conv_node = bn_node.args[0]
+        assert isinstance(conv_node, Node)
+        if (
+            conv_node.op != "call_function"
+            or conv_node.target != torch.ops.aten.convolution.default
+        ):
+            return
+        if _is_annotated([relu_node, getitem_node, bn_node, conv_node]):
+            return
+
+        input_qspec_map = {}
+        input_act = conv_node.args[0]
+        assert isinstance(input_act, Node)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
+
+        weight = conv_node.args[1]
+        assert isinstance(weight, Node)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
+
+        bias = conv_node.args[2]
+        if isinstance(bias, Node):
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+        bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            _annotated=True
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            _annotated=True
+        )
+        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
 
     def _annotate_conv2d_relu(
         self, node: Node, quantization_config: QuantizationConfig
@@ -300,20 +417,27 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([relu_node, conv_node]):
             return
 
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
-            "_annotated": True,
-        }
-        relu_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        input_qspec_map = {}
+        input_act = conv_node.args[0]
+        assert isinstance(input_act, Node)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
+
+        weight = conv_node.args[1]
+        assert isinstance(weight, Node)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
+
+        bias = conv_node.args[2]
+        if isinstance(bias, Node):
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True
+        )
+        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            _annotated=True
+        )
 
     def _annotate_conv2d(
         self, node: Node, quantization_config: QuantizationConfig
@@ -327,58 +451,77 @@ class QNNPackQuantizer(Quantizer):
         # skip annotation if it is already annotated
         if _is_annotated([conv_node]):
             return
-        conv_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "weight_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            # TODO: validation of weight_index must be set if weight_obs_or_fq_ctr is set
-            "weight_index": 1,
-            # TODO: validation of bias_index must be set if bias_obs_or_fq_ctr is set
-            "bias_index": 2,
-            "_annotated": True,
-        }
+
+        input_qspec_map = {}
+        input_act = conv_node.args[0]
+        assert isinstance(input_act, Node)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
+
+        weight = conv_node.args[1]
+        assert isinstance(weight, Node)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
+
+        bias = conv_node.args[2]
+        if isinstance(bias, Node):
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
+
+        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _annotated=True
+        )
 
     def _annotate_linear(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        addmm_node = node
-        if (
-            addmm_node.op != "call_function"
-            or addmm_node.target != torch.ops.aten.addmm.default
-        ):
-            return
-        view_node = addmm_node.args[1]
-        assert isinstance(view_node, Node)
-        if (
-            view_node.op != "call_function"
-            or view_node.target != torch.ops.aten.view.default
-        ):
-            return
-        t_node = addmm_node.args[2]
-        assert isinstance(t_node, Node)
-        if t_node.op != "call_function" or t_node.target != torch.ops.aten.t.default:
-            return
-        if _is_annotated([addmm_node, view_node, t_node]):
-            return
-
-        # bias and output act
-        addmm_node.meta["target_dtype_info"] = {
-            "bias_obs_or_fq_ctr": get_bias_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "bias_index": 0,
-            "_annotated": True,
-        }
-        # input act
-        view_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
-        # weight
-        t_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_weight_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
+        )
+        for module_or_fn_type, partitions in module_partitions.items():
+            if module_or_fn_type == torch.nn.Linear:
+                for p in partitions:
+                    act_node = p.input_nodes[0]
+                    output_node = p.output_nodes[0]
+                    weight_node = None
+                    bias_node = None
+                    for node in p.params:
+                        weight_or_bias = getattr(gm, node.target)  # type: ignore[arg-type]
+                        if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
+                            weight_node = node
+                        if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
+                            bias_node = node
+                    if weight_node is None:
+                        raise ValueError("No weight found in Linear pattern")
+                    # find use of act node within the matched pattern
+                    act_use_node = None
+                    for node in p.nodes:
+                        if node in act_node.users:  # type: ignore[union-attr]
+                            act_use_node = node
+                            break
+                    if act_use_node is None:
+                        raise ValueError(
+                            "Could not find an user of act node within matched pattern."
+                        )
+                    if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
+                        _annotate_input_qspec_map(
+                            act_use_node,
+                            act_node,
+                            get_act_obs_or_fq_ctr(quantization_config),
+                        )
+                    if bias_node and _is_annotated([bias_node]) is False:
+                        _annotate_output_qspec(
+                            bias_node, get_bias_obs_or_fq_ctr(quantization_config)
+                        )
+                    if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
+                        _annotate_output_qspec(
+                            weight_node, get_weight_obs_or_fq_ctr(quantization_config)
+                        )
+                    if _is_annotated([output_node]) is False:
+                        _annotate_output_qspec(
+                            output_node, get_act_obs_or_fq_ctr(quantization_config)
+                        )
+                    nodes_to_mark_annotated = list(p.nodes)
+                    _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     # TODO: move to `_pt2e/_propagate_annotation.py` after we have
     # decided on the how we want to use pattern matching for annotation
@@ -402,15 +545,19 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([getitem_node, maxpool_node]):
             return
 
-        maxpool_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
-        getitem_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "input_output_share_observers": True,
-            "_annotated": True,
-        }
+        input_act = maxpool_node.args[0]
+        assert isinstance(input_act, Node)
+        maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                input_act: get_act_obs_or_fq_ctr(quantization_config)
+            },
+            _annotated=True,
+        )
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _input_output_share_observers=True,
+            _annotated=True,
+        )
 
     def _annotate_input_out_obs_sharing_op(
         self,
@@ -427,12 +574,16 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([io_obs_sharing_node]):
             return
 
-        io_obs_sharing_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "input_output_share_observers": True,
-            "_annotated": True,
-        }
+        input_act = io_obs_sharing_node.args[0]
+        assert isinstance(input_act, Node)
+        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                input_act: get_act_obs_or_fq_ctr(quantization_config)
+            },
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _input_output_share_observers=True,
+            _annotated=True,
+        )
 
     def _annotate_hardtanh(
         self, node: Node, quantization_config: QuantizationConfig
@@ -477,14 +628,23 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([relu_node, add_node]):
             return
 
-        add_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
-        relu_node.meta["target_dtype_info"] = {
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        input_qspec_map = {}
+        input_act0 = add_node.args[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = get_act_obs_or_fq_ctr(quantization_config)
+
+        input_act1 = add_node.args[1]
+        if isinstance(input_act1, Node):
+            input_qspec_map[input_act1] = get_act_obs_or_fq_ctr(quantization_config)
+
+        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            _annotated=True,
+        )
+        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _annotated=True,
+        )
 
     def _annotate_add(
         self, node: Node, quantization_config: QuantizationConfig
@@ -498,11 +658,20 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([add_node]):
             return
 
-        add_node.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "output_act_obs_or_fq_ctr": get_act_obs_or_fq_ctr(quantization_config),
-            "_annotated": True,
-        }
+        input_qspec_map = {}
+        input_act0 = add_node.args[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = get_act_obs_or_fq_ctr(quantization_config)
+
+        input_act1 = add_node.args[1]
+        if isinstance(input_act1, Node):
+            input_qspec_map[input_act1] = get_act_obs_or_fq_ctr(quantization_config)
+
+        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            _annotated=True,
+        )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
