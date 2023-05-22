@@ -173,7 +173,17 @@ class FlatParamShardMetadata(NamedTuple):
     param_offsets: Tuple[Tuple[int, int], ...]
 
 
-class FlatParameter(nn.Parameter):
+class _FlatParameterMeta(torch._C._TensorMeta):
+    # Make `isinstance(t, FlatParameter)` return True for custom tensor
+    # instances that have the _is_flat_param flag for BC
+    def __instancecheck__(self, instance):
+        return super().__instancecheck__(instance) or (
+            isinstance(instance, torch.Tensor)
+            and getattr(instance, "_is_flat_param", False)
+        )
+
+
+class FlatParameter(metaclass=_FlatParameterMeta):
     """
     This is the flat parameter used by :class:`FullyShardedDataParallel`. It is
     comprised of one or more original parameters, which are flattened and
@@ -199,6 +209,11 @@ class FlatParameter(nn.Parameter):
     (``_numels``). The former may have length longer than the other data
     structures, while the latter has the same length as the number of actual
     original parameters like the other per-parameter data structures.
+
+    NOTE: This is not a real class; instead, you will always get a Parameter
+    back out if you try to create one of these.  This is similar to the trick
+    we implemented for Parameter to get it to work with subclasses; this
+    is primarily so that FlatParameter supports combination with FakeTensor.
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
@@ -289,7 +304,18 @@ class FlatParameter(nn.Parameter):
             of zeros) as needed.
     """
 
+    def __new__(cls, data=None, requires_grad=True):
+        assert cls is FlatParameter, "subclasses FlatParameter not supported"
+        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)
+        r._is_flat_param = True
+        return r
+
+    # NB: This is not a regular method, because FlatParameter are not actually
+    # instances of this class (see __new__ above).  So you must indirectly
+    # call this directly through the classmethod.
+    @classmethod
     def _init_metadata(
+        cls,
         self,
         param_infos: List[ParamInfo],
         numels: List[int],
@@ -617,7 +643,8 @@ class FlatParamHandle:
             aligned_numel=0,
             requires_grad=flat_param_requires_grad,
         )
-        self.flat_param._init_metadata(
+        FlatParameter._init_metadata(
+            self.flat_param,
             param_infos,
             numels,
             shapes,
