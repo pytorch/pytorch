@@ -40,7 +40,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def exception_logger(func):
+def exception_handler(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
