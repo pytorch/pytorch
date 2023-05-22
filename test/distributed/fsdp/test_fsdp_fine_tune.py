@@ -11,16 +11,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import (
-    FSDPTest,
-)
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_WITH_DEV_DBG_ASAN,
-)
+from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -36,12 +31,13 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestFSDPFineTune(FSDPTest):
     """Tests fine-tuning cases where some parameters are frozen."""
+
     NUM_LINEARS = 6
 
     @property
     def world_size(self) -> int:
         return 2
-    
+
     def _init_seq_module(self) -> nn.Module:
         torch.manual_seed(42)
         modules = []
@@ -97,7 +93,7 @@ class TestFSDPFineTune(FSDPTest):
             nonlocal post_backward_reshard_count
             post_backward_reshard_count += 1
             return orig_post_backward_reshard(*args, **kwargs)
-        
+
         with mock.patch(
             "torch.distributed.fsdp._runtime_utils._post_backward_reshard",
             _post_backward_reshard_with_count,
@@ -108,8 +104,12 @@ class TestFSDPFineTune(FSDPTest):
             # If the input does not require gradient, then the 0th frozen
             # linear gets resharded in the catch-all reshard since we cannot
             # register an autograd hook on it
-            expected_post_backward_reshard_count = self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
-            self.assertEqual(post_backward_reshard_count, expected_post_backward_reshard_count)
+            expected_post_backward_reshard_count = (
+                self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
+            )
+            self.assertEqual(
+                post_backward_reshard_count, expected_post_backward_reshard_count
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_parity_with_ddp(self):
@@ -130,10 +130,10 @@ class TestFSDPFineTune(FSDPTest):
         )
 
     def _test_parity_with_ddp(
-            self,
-            sharding_strategy: ShardingStrategy,
-            use_orig_params: bool,
-        ):
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+    ):
         seq = self._init_seq_module()
         policy = ModuleWrapPolicy({nn.Linear})
         fsdp_seq = FSDP(
