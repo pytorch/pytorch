@@ -205,6 +205,9 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_cuda()
+    @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_fallback(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])

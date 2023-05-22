@@ -415,17 +415,22 @@ def make_pointwise(
 
 def make_foreach_pointwise(aten_fn, pw_fn):
     def inner(*inputs: List[List[TensorBox]], alpha=1.0):
+        def is_dynamic(t):
+            return any(
+                x.free_symbols for x in itertools.chain(t.layout.size, t.layout.stride)
+            )
+
         def group_by_device(tensor_pairs):
             out = defaultdict(list)
             for i, (l, r) in enumerate(tensor_pairs):
                 assert l.get_device() == r.get_device()
-                out[l.get_device()].append((i, l, r))
+                out[(l.get_device(), is_dynamic(l) or is_dynamic(r))].append((i, l, r))
             return out
 
         device_groups = group_by_device(zip(*inputs))
         outputs = [None] * len(inputs[0])
-        for device, group in device_groups.items():
-            if device.type == "cpu":
+        for (device, dyn_shapes), group in device_groups.items():
+            if device.type == "cpu" or dyn_shapes:
                 ls = []
                 rs = []
                 for output_ind, left, right in group:
@@ -434,7 +439,6 @@ def make_foreach_pointwise(aten_fn, pw_fn):
                 output = fallback_handler(aten_fn, False)(ls, rs, alpha=alpha)
                 for ind, (output_ind, _, _) in enumerate(group):
                     outputs[output_ind] = output[ind]
-
             else:
                 assert device.type == "cuda"
                 buffer_list = []
