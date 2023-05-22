@@ -732,7 +732,7 @@ def linalg_lu_solve_meta(
         out = _maybe_resize_out(out, result.shape)
         out = _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
         # sets conj bit in out (not done by out_wrapper)
-        torch._C._set_conj(out, result.is_conj())
+        torch._C._set_conj(out, result.is_conj())  # type: ignore[arg-type]
         return out
     return result
 
