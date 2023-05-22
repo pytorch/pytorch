@@ -1697,6 +1697,36 @@ pybind_extension(
     ],
 )
 
+cc_library(
+    name = "functorch",
+    hdrs = glob([
+        "functorch/csrc/dim/*.h",
+    ]),
+    srcs = glob([
+        "functorch/csrc/dim/*.cpp",
+    ]),
+    deps = [
+        ":aten_nvrtc",
+        ":torch_python",
+        "@pybind11",
+    ],
+)
+
+pybind_extension(
+    name = "functorch/_C",
+    copts=[
+        "-DTORCH_EXTENSION_NAME=_C"
+    ],
+    srcs = [
+        "functorch/csrc/init_dim_only.cpp",
+    ],
+    deps = [
+        ":functorch",
+        ":torch_python",
+        ":aten_nvrtc",
+    ],
+)
+
 cc_binary(
     name = "torch/bin/torch_shm_manager",
     srcs = [
@@ -1725,7 +1755,7 @@ template_rule(
 rules.py_library(
     name = "pytorch_py",
     visibility = ["//visibility:public"],
-    srcs = glob(["torch/**/*.py"], exclude = ["torch/version.py"]) + [":torch/version.py"],
+    srcs = glob(["torch/**/*.py"], exclude = ["torch/version.py"]) + [":torch/version.py"] + glob(["functorch/**/*.py"]),
     deps = [
         rules.requirement("future"),
         rules.requirement("numpy"),
@@ -1738,6 +1768,7 @@ rules.py_library(
     ],
     data = [
         ":torch/_C.so",
+        ":functorch/_C.so",
         ":torch/bin/torch_shm_manager",
     ],
 )
@@ -1904,7 +1935,8 @@ cc_test(
 
 py_test(
     name = "test_bazel",
-    srcs = ["test/test_bazel.py"],
+    srcs = ["test/_test_bazel.py"],
+    main = "test/_test_bazel.py",
     deps = [":pytorch_py"],
 )
 
