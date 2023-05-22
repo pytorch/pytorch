@@ -39,7 +39,7 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule):
+def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -50,8 +50,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if config.reordering:
-        # has some issues with mutation in inference mode
+    if locality_reorder:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
