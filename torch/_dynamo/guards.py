@@ -382,7 +382,7 @@ class GuardBuilder(GuardBuilderBase):
             # For now, we skip installing the guard.
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        self._produce_guard_code(guard, [f"{name}()"])
+        self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""

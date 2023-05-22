@@ -478,14 +478,14 @@ static const char* module_guard_attrs[] = {
 };
 
 typedef struct {
-  PyObject_HEAD PyObject* wr;
+  PyObject_HEAD PyObject* mod; // borrowed reference
   unsigned int version_tag;
   uint64_t dict_version_tag;
   AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
 } NNModuleGuard;
 
 static void NNModuleGuard_dealloc(NNModuleGuard* self) {
-  Py_CLEAR(self->wr);
+  self->mod = NULL;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -499,8 +499,13 @@ static PyObject* NNModuleGuard_call(
     PyObject* kwargs) {
   NNModuleGuard* guard = (NNModuleGuard*)callable;
 
-  PyObject* mod = PyWeakref_GetObject(guard->wr);
-  if (mod == NULL) {
+  if (PyTuple_GET_SIZE(args) != 1) {
+    PyErr_SetString(PyExc_TypeError, "NNModuleGuardType: expected one argument");
+    return NULL;
+  }
+
+  PyObject *mod = PyTuple_GET_ITEM(args, 0);
+  if (guard->mod != mod) {
     Py_RETURN_FALSE;
   }
 
@@ -536,11 +541,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
     return NULL;
   }
 
-  guard->wr = PyWeakref_NewRef(obj, NULL);
-  if (guard->wr == NULL) {
-    Py_DECREF(guard);
-    return NULL;
-  }
+  guard->mod = obj;
 
   PyObject* dict = PyObject_GenericGetDict(obj, NULL);
   if (dict == NULL) {
