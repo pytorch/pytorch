@@ -96,10 +96,13 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
-            trace_fn(replacement_fn, [arg.meta["val"] for arg in args]),
+            replacement,
             args,
         )
 
@@ -144,7 +147,7 @@ class MatchContext:
         return {
             pattern: node
             for pattern, node in self.pattern_to_node.items()
-            if pattern.has_multiple_users()
+            if pattern.has_multiple_users() and node is not None
         }
 
 
@@ -319,7 +322,7 @@ class _TargetArgsExpr(_TargetExpr):
             return FailedMatch("function_mismatch")
 
         if not self._match_users(node, ctx):
-            return FailedMatch("multiple_users")
+            return FailedMatch(f"multiple_users {node}")
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
@@ -404,10 +407,11 @@ class ListOf(PatternExpr):
     Matches a repeated pattern
     """
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, partial=False):
         super().__init__()
         assert isinstance(pattern, PatternExpr)
         self.pattern = pattern
+        self.partial = partial
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.pattern})"
@@ -419,15 +423,21 @@ class ListOf(PatternExpr):
         # Propogating patterns with multiple users will ensure we don't revisit
         # the same nodes
         pattern_to_node = ctx.filter_multi_user_patterns()
+        matched = False
         for i, child_node in enumerate(node):
             child_ctx = MatchContext(
                 ctx.outputs, pattern_to_node, graph=child_node.graph
             )
             child_match = child_ctx.match(self.pattern, child_node)
-            if not child_match:
-                return FailedMatch(f"list[{i}]: {child_match}")
             pattern_to_node = child_ctx.filter_multi_user_patterns()
+            if not child_match:
+                if not self.partial:
+                    return FailedMatch(f"list[{i}]: {child_match}")
+                continue
+            matched = True
             m.extend(child_match.bundle())
+        if not matched:
+            return FailedMatch("list: no_match")
         return m.bundle()
 
 
@@ -659,7 +669,7 @@ def register_replacement(
         search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
-            ignore_types=(int, float, torch.device, torch.dtype),
+            ignore_types=(int, float, list, torch.device, torch.dtype),
             argnames=argnames,
             scalar_workaround=scalar_workaround,
         )
@@ -711,10 +721,54 @@ def register_graph_pattern(
     return decorator
 
 
+def is_start_of_fx_graph(graph, node):
+    # first node in the graph
+    return node is next(iter(graph.nodes))
+
+
+def is_mutation_op(node):
+    if node.op == "call_function":
+        if node.target.__name__.endswith("_"):
+            return True
+    elif node.op == "call_method":
+        if node.target.endswith("_"):
+            return True
+    if "out" in node.kwargs:
+        if node.kwargs["out"] in node.all_input_nodes:
+            return True
+    return False
+
+
+def get_mutation_region_id(graph, node):
+    n = node
+    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
+        n = n.prev
+    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    while n is not node:
+        n = n.next
+        if is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+    return mutation_region_id
+
+
+def should_compute_mutation_region_ids(graph):
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+
+
+def compute_mutation_region_ids(graph):
+    mutation_region_id = 0
+    for nd in graph.nodes:
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+
+
 class PatternMatcherPass:
-    def __init__(self):
+    def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
         self.patterns = defaultdict(list)
+        self.prevent_match_across_mutations = prevent_match_across_mutations
 
     def __getitem__(self, item):
         return self.patterns[item]
@@ -724,6 +778,12 @@ class PatternMatcherPass:
             return 0
         if isinstance(graph, torch.fx.GraphModule):
             graph = graph.graph
+        if self.prevent_match_across_mutations:
+            if should_compute_mutation_region_ids(graph):
+                compute_mutation_region_ids(graph)
+            get_mutation_region_id_partial = functools.partial(
+                get_mutation_region_id, graph
+            )
         count = 0
         for node in reversed(graph.nodes):
             if (
@@ -740,6 +800,13 @@ class PatternMatcherPass:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if (
+                        self.prevent_match_across_mutations
+                        and m
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                    ):
+                        continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if m and entry.extra_check(m):
@@ -748,6 +815,9 @@ class PatternMatcherPass:
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
+
+    def clear(self):
+        self.patterns.clear()
 
 
 def _not_implemented(*args, **kwargs):
@@ -769,6 +839,8 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
             return KeywordArg(inv_scalar_workaround[x])
         if type(x) in ignore_types:
+            return Ignored()
+        if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
         return x
 
@@ -792,6 +864,10 @@ def fx_to_pattern(gm, ignore_types=(), argnames=(), scalar_workaround=()):
 
         def call_function(self, target, args, kwargs):
             args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            if list in ignore_types:
+                # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
+                args = [process_arg(a) for a in args]
+                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n):
@@ -834,6 +910,18 @@ def training_graph(fn, args):
             decompositions=select_decomp_table(),
             enable_log=False,
         )(*args)
+
+    from .fx_passes.joint_graph import pointless_view
+
+    matcher_pass = PatternMatcherPass()
+
+    pattern = CallFunction(
+        torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")
+    )
+    GraphPatternEntry(
+        pattern=pattern, handler=pointless_view, extra_check=_return_true
+    ).register(matcher_pass.patterns)
+    matcher_pass.apply(gm.graph)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()

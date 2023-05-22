@@ -2,6 +2,8 @@
 import functools
 import unittest
 
+import functorch.experimental.control_flow as control_flow
+
 import torch
 
 import torch._dynamo.test_case
@@ -185,6 +187,107 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
+    def test_map_subgraph_name_is_valid(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        xs = torch.randn(2, 3, 3)
+        y = torch.randn(3)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def map_f(xs, y):
+            def inner(x, y):
+                def inner2(x, y):
+                    return x + y
+
+                return control_flow.map(inner2, x, y)
+
+            return control_flow.map(inner, xs, y)
+
+        result = map_f(xs, y)
+        self.assertEqual(result, xs + y)
+
+        map_gm = backend.graphs[0]
+        name_set = set()
+        for name, _ in map_gm.named_modules():
+            name_set.add(name)
+        self.assertEqual(name_set, {"", "map_body_0.map_body_0", "map_body_0"})
+
+    def test_cond_subgraph_name_is_valid(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        pred = torch.tensor(True)
+        pred2 = torch.tensor(False)
+        xs = torch.randn(2, 3, 3)
+        y = torch.randn(3, 3)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def cond_f(pred, pred2, x, y):
+            def true_fn(pred2, x, y):
+                return x + y
+
+            def false_fn(pred2, x, y):
+                def true_fn2(x, y):
+                    return x.sin() - y.cos()
+
+                def false_fn2(x, y):
+                    return x.cos() - y.sin()
+
+                return control_flow.cond(pred2, true_fn2, false_fn2, [x, y])
+
+            return control_flow.cond(pred, true_fn, false_fn, [pred2, x, y])
+
+        result = cond_f(pred, pred2, xs, y)
+        self.assertEqual(result, xs + y)
+
+        cond_gm = backend.graphs[0]
+        name_set = set()
+        for name, _ in cond_gm.named_modules():
+            name_set.add(name)
+        self.assertEqual(
+            name_set,
+            {
+                "",
+                "cond_true_0",
+                "cond_false_0",
+                "cond_false_0.cond_false_0",
+                "cond_false_0.cond_true_0",
+            },
+        )
+
+    def test_wrap_subgraph_name_is_valid(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def inner(x, y):
+            z = x + y
+            return wrap(lambda x: wrap(lambda x: x + z, x), x)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x, y):
+            return wrap(inner, x, y)
+
+        result = f(x, y)
+
+        self.assertEqual(result, x + y + x)
+        wrap_gm = backend.graphs[0]
+        names = set()
+        for mod_name, _ in wrap_gm.named_modules():
+            names.add(mod_name)
+        self.assertEqual(
+            names,
+            {
+                "",
+                "wrap_body_2",
+                "wrap_body_2.wrap_body_1",
+                "wrap_body_2.wrap_body_1.wrap_body_0",
+            },
+        )
+
     def test_capture_global_num(self):
         def f(x):
             return wrap(lambda x: x + global_num, x)
@@ -332,26 +435,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             dict(counters["graph_break"]),
             {"HigherOrderOperator with body with non single Tensor output": 1},
-        )
-
-    def test_fallback_on_non_tensor_inputs(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
-        counters.clear()
-        cnt = CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def f(x):
-            return wrap(lambda x, y: x + y, x, 193)
-
-        x = torch.randn(2, 3)
-        result = f(x)
-
-        self.assertEqual(result, x + 193)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 1},
         )
 
     def test_access_module_attr(self):
