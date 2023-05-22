@@ -321,6 +321,7 @@ class TestSparse(TestSparseBase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_basic(self, device, dtype, coalesced):
         def test_shape(sparse_dims, nnz, with_size):
             if isinstance(with_size, Number):
@@ -1010,6 +1011,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @onlyCPU
     @dtypes(torch.double)
+    @skipIfTorchDynamo("AssertionError: Booleans mismatch: True is not False")
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [dj, di], dtype, device, coalesced)

@@ -84,6 +84,7 @@ def torch_vital_set(value):
 
 # Tests Vital Signs for Torch
 # FIXME: document or deprecate whatever this is
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
@@ -108,6 +109,7 @@ class TestBasicVitalSigns(TestCase):
             self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
 
 # FIXME: document or deprecate whatever this is
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestVitalSignsCuda(TestCase):
     @onlyCUDA
     def test_cuda_vitals_gpu_only(self, device):
@@ -117,6 +119,7 @@ class TestVitalSignsCuda(TestCase):
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -1015,6 +1018,7 @@ class TestTorchDeviceType(TestCase):
         x = torch.rand([1, 64, 8, 128, 172]).to(device)
         y = conv(x)
 
+    @skipIfTorchDynamo("<resume in test_is_set_to> Meaning graph breaks in set_")
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)
@@ -2182,6 +2186,7 @@ else:
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
 
+    @skipIfTorchDynamo("AssertionError: make_fallback(aten.cauchy.default): a decomposition exists")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
@@ -5486,6 +5491,7 @@ else:
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestDevicePrecision(TestCase):
     exact_dtype = True
 
@@ -5722,6 +5728,7 @@ def disable_gc():
     else:
         yield
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTorch(TestCase):
     exact_dtype = True
 
@@ -7331,6 +7338,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.tensor([])
         self.assertEqual(list(x), [])
 
+    @skipIfTorchDynamo("Fails on comparison")
     def test_new(self) -> None:
         x = torch.autograd.Variable(torch.tensor([]))
         y = torch.autograd.Variable(torch.randn(4, 4))

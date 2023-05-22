@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import operator
 import types
 from typing import Dict, List
@@ -133,16 +132,6 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
         return props
 
     def var_getattr(self, tx, name):
@@ -237,9 +226,7 @@ class TensorVariable(VariableTracker):
         return result
 
     def has_unpack_var_sequence(self, tx):
-        return (self.size is not None and len(self.size) > 0) or (
-            self.size is None and config.dynamic_shapes
-        )
+        return (self.size is not None and len(self.size) > 0) or (self.size is None)
 
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy
@@ -293,7 +280,7 @@ class TensorVariable(VariableTracker):
                 dim = kwargs.pop("dim")
                 constant_result = constant_result.getitem_const(dim)
 
-        elif name == "size" and self.size is None and config.dynamic_shapes:
+        elif name == "size" and self.size is None:
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -368,14 +355,6 @@ class TensorVariable(VariableTracker):
                     [constant_result.getitem_const(a) for a in args], **options
                 )
             return constant_result
-        elif (
-            name == "repeat"
-            and not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            )
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
             if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
                 unimplemented(
@@ -403,18 +382,8 @@ class TensorVariable(VariableTracker):
             )
         elif name in ("tolist", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
-        elif name == "nonzero" and not config.dynamic_shapes:
-            unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
-        elif (
-            name == "item"
-            and config.capture_scalar_outputs
-            and not config.dynamic_shapes
-        ):
-            raise AssertionError(
-                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
-            )
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
@@ -488,6 +457,7 @@ class TensorVariable(VariableTracker):
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
+            # TODO(voz): Fix this to work without rewriting it as new_empty.
             if (
                 name == "new"
                 and len(args) == 1
@@ -520,7 +490,9 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int)):
-            return ConstantVariable(int(sym_num))
+            if isinstance(sym_num, sympy.Integer):
+                sym_num = int(sym_num)
+            return ConstantVariable(sym_num)
 
         return SymNodeVariable(proxy, sym_num, **options)
 

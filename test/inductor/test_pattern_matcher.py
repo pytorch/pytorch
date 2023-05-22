@@ -55,32 +55,41 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
 
-        args_list = [
-            (
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-            ),
-            (
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(1, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-            ),
-            (
-                torch.randn(1, 16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-                torch.randn(16, 16, device="cuda"),
-            ),
-            (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
-        ]
-        for args in args_list:
-            counters.clear()
-            e1, e2 = fn(*args)
-            a1, a2 = torch.compile(fn)(*args)
-            torch.testing.assert_close(a1, e1)
-            torch.testing.assert_close(a2, e2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        for dynamic in [False, True]:
+            torch._dynamo.reset()
+            with torch._dynamo.config.patch(
+                dynamic_shapes=dynamic, specialize_int=True
+            ):
+                args_list = [
+                    (
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                    ),
+                    (
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(1, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                    ),
+                    (
+                        torch.randn(1, 16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                    ),
+                    (
+                        4,
+                        torch.randn(16, 16, device="cuda"),
+                        torch.randn(16, 16, device="cuda"),
+                    ),
+                ]
+                for args in args_list:
+                    counters.clear()
+                    e1, e2 = fn(*args)
+                    a1, a2 = torch.compile(fn)(*args)
+                    torch.testing.assert_close(a1, e1)
+                    torch.testing.assert_close(a2, e2)
+                    self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+                    self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     def test_cat_mm(self):
         def fn(a, b, c):

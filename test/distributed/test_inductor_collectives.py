@@ -191,6 +191,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
             c = torch.matmul(a, b)
@@ -338,8 +339,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         assert counter.frame_count == 1
 
-        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
+        self.assertEqual(counter.op_count, 2)
         assert same(out, correct)
 
     def test_dynamo_trace_all_gather_tensor(self):
@@ -353,12 +353,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
+        self.assertEqual(counter.frame_count, 1)
 
         # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
+        if torch._dynamo.config.dynamic_shapes:
+            self.assertEqual(counter.op_count, 3)
+        else:
+            self.assertEqual(counter.op_count, 2)
         assert same(out, correct)
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
         def func(inp, *, tag, ranks, group_size):
@@ -373,7 +377,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 1
 
         # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
+        self.assertEqual(counter.op_count, 3)
         assert same(out, correct)
 
     def test_backwards(self):

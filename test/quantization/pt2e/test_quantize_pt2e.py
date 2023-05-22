@@ -285,6 +285,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                 *copy.deepcopy(example_inputs),
                 aten_graph=True,
                 tracing_mode="real",
+                assume_static_by_default=True,
             )
 
             m = prepare_pt2e_quantizer(m, quantizer)
