@@ -390,7 +390,6 @@ _efficient_attention_backward(
     auto& ctx = at::globalContext();
     if (ctx.deterministicAlgorithms()) {
       if (ctx.deterministicAlgorithmsWarnOnly()) {
-        std::cout<<"lets warn it on up buddy"<<std::endl;
         TORCH_WARN_ONCE(
             "Memory Efficient attention defaults to a non-deterministic algorithm. ",
             "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");

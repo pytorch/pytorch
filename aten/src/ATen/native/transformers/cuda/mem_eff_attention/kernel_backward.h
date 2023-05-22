@@ -1321,7 +1321,7 @@ struct AttentionBackwardKernel {
     OutputFragments output_frags;
 
     curandStatePhilox4_32_10_t rng_state_init;
-#ifdef HAS_PYTORCH
+
     if (kApplyDropout) {
       auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
       // each element of the attention matrix P with shape
@@ -1338,7 +1338,7 @@ struct AttentionBackwardKernel {
           std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
           &rng_state_init);
     }
-#endif
+
     CUTLASS_PRAGMA_UNROLL
     for (; key_start < p.num_keys;
          key_start += p.num_splits_key_device() * kBlockSizeJ) {

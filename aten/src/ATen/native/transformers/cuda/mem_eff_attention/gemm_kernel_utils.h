@@ -53,7 +53,7 @@
       using ArchTag = cutlass::arch::Sm50;                                \
       func();                                                             \
     } else {                                                              \
-      XFORMERS_CHECK(                                                     \
+      TORCH_CHECK(                                                     \
           false,                                                          \
           "Your device is too old. We require compute capability >= 50"); \
     }                                                                     \
