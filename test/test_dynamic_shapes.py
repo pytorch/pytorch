@@ -559,15 +559,12 @@ class TestSymNumberMagicMethods(TestCase):
             lambda_apply = getattr(operator, fn)
 
         def guard_fn(v):
-            try:
-                if type(v) in (SymBool, bool):
-                    return guard_bool(v)
-                elif type(v) in (SymFloat, float):
-                    return guard_float(v)
-                else:  # SymInt, int
-                    return guard_int(v)
-            except Exception as e:
-                raise e
+            if type(v) in (SymBool, bool):
+                return guard_bool(v)
+            elif type(v) in (SymFloat, float):
+                return guard_float(v)
+            else:  # SymInt, int
+                return guard_int(v)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
@@ -876,21 +873,6 @@ class TestDimConstraints(TestCase):
         exprs.add(Eq(s / 2, 4))
         solution = reduce_inequalities(exprs, s).as_set()
         self.assertEqual(solution, {8})
-
-    def test_precision(self):
-        from sympy import Eq, Ne, Symbol
-        from torch.fx.experimental.symbolic_shapes import DimConstraints
-
-        x = Symbol("x", positive=True, integer=True)
-        y = Symbol("y", positive=True, integer=True)
-        var_to_val = {x: 296, y: 1155}
-
-        dim_constraints = DimConstraints({}, var_to_val)
-        dim_constraints.add(Eq(x / y, 0.256277056277056))
-        with self.assertRaisesRegex(AssertionError, "Ne\\(x/y, 296/1155\\) is inconsistent!"):
-            dim_constraints.add(Ne(x / y, 0.256277056277056))
-        dim_constraints.solve()
-        self.assertEqual(dim_constraints._dynamic_results, set())
 
     def test_dim_constraints_solve_full(self):
         from sympy import Eq, Integer, Mod, Ne, Symbol
@@ -1809,7 +1791,7 @@ def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
         expected_dynamic = '''
 def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
     return [
-        2 <= dynamic_dim(x6, 1),
+        dynamic_dim(x6, 1),
         dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
         dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
     ]

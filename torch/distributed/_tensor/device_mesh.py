@@ -390,7 +390,7 @@ class DeviceMesh(object):
     def all_reduce(
         self,
         tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
         async_op: bool = False,
     ) -> torch.Tensor:
@@ -409,7 +409,7 @@ class DeviceMesh(object):
             A :class:`torch.Tensor` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        op_name: str = op.name  # type: ignore[attr-defined]
+        op_name: str = op.name
         return funcol.all_reduce(
             tensor,
             reduceOp=op_name,
@@ -422,7 +422,7 @@ class DeviceMesh(object):
     def reduce_scatter(
         self,
         input: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
         scatter_dim: int = 0,
     ) -> torch.Tensor:
@@ -441,7 +441,7 @@ class DeviceMesh(object):
         Returns:
             A :class:`torch.Tensor` object
         """
-        op_name: str = op.name  # type: ignore[attr-defined]
+        op_name: str = op.name
         if self._backend == "nccl" or self._backend == "threaded":
             dim_group = self._dim_groups[mesh_dim]
             scatter_tensor = funcol.reduce_scatter_tensor(

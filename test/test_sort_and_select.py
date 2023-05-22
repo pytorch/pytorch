@@ -689,6 +689,21 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_y_inverse_nan, y_inverse)
                 self.assertEqual(expected_y_counts_nan, y_counts)
 
+            # Test dim is sorted same as NumPy with dims >= 3
+            x = torch.tensor([[[[1, 0, 1, 0, 1, 1],
+                                [0, 1, 1, 0, 1, 1]],
+                               [[0, 1, 1, 0, 0, 1],
+                                [0, 0, 0, 1, 0, 0]]],
+                              [[[0, 1, 0, 1, 1, 1],
+                                [0, 1, 1, 0, 1, 1]],
+                               [[0, 0, 1, 1, 0, 1],
+                                [1, 1, 0, 0, 0, 0]]]], dtype=dtype, device=device)
+            xn = x.cpu().numpy()
+            for d in range(x.dim()):
+                t = torch.unique(x, dim=d)
+                n = np.unique(xn, axis=d)
+                self.assertEqual(t.cpu().numpy(), n)
+
         run_test(device, torch.float)
         run_test(device, torch.double)
         run_test(device, torch.long)

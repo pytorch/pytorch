@@ -100,6 +100,8 @@ class dtype:
     is_complex: _bool
     is_signed: _bool
     itemsize: _int
+    def to_real(self) -> dtype: ...
+    def to_complex(self) -> dtype: ...
 
 # Defined in torch/csrc/TypeInfo.cpp
 class iinfo:

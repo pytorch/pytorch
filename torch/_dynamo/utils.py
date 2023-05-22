@@ -48,12 +48,15 @@ except ModuleNotFoundError:
 import importlib
 
 import torch
+import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -1540,6 +1543,17 @@ def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
+forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+state_dict_hook_names = [
+    "_state_dict_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+]
+all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
+
+
 def nnmodule_has_hooks(
     mod,
     check_forward_hooks=False,
@@ -1557,28 +1571,11 @@ def nnmodule_has_hooks(
         and not check_state_dict_hooks
     )
     if check_forward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_forward_pre_hooks",
-                "_forward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(forward_hook_names)
     if check_backward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(state_dict_hook_names)
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
 
 
@@ -1622,3 +1619,48 @@ def defake(x):
     )
     y.zero_()
     return y
+
+
+# NB: The dictionary has to be created lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+@functools.lru_cache(None)
+def higher_order_op_converter():
+    import torch._higher_order_ops.wrap
+
+    return {
+        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
+    }
+
+
+def requires_higher_order_op(obj):
+    return obj in higher_order_op_converter()
+
+
+def get_higher_order_op(obj):
+    if (
+        obj is torch.utils.checkpoint.checkpoint
+        and not torch._functorch.config.functionalize_rng_ops
+    ):
+        from .exc import unimplemented
+
+        # TODO - functionalize_rng_ops flags cannot be turned ON by default
+        # because 1) Performance concerns - seed and offset are read and passed
+        # to each AOT graph 2) Inductor has rand-specific optimizations and
+        # there is work remaining to compose them together with
+        # functionalization.
+        #
+        # Until we make it ON by default, we will have to ask users to turn on
+        # this flag manually.  TODO - Revisit if there is a simpler way to
+        # resolve this problem.
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
+        unimplemented(
+            "torch.compile requires functioanlization of rng ops to be turned on"
+        )
+    return higher_order_op_converter().get(obj)

@@ -50,6 +50,20 @@ test_failures = {
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
+if TEST_WITH_ROCM:
+    # Tensor-likes are not close
+    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
+    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
+    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
+    # aten.miopen_batch_norm is not registered for lowering
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
@@ -203,5 +217,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
