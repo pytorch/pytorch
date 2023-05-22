@@ -723,7 +723,7 @@ void Reducer::all_reduce_local_used_map() {
     // local_used_map_
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
-        optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
+        at::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
         local_used_map_.options().layout_opt(),
         local_used_map_.options().device_opt(),
         true /* pinned_memory */);

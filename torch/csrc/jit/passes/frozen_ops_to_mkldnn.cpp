@@ -263,7 +263,7 @@ Operation createUnaryOp(
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
-          optTypeMetaToScalarType(a.options().dtype_opt()),
+          at::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
@@ -378,13 +378,13 @@ Operation BroadOp(const Node* node) {
         auto a_options = exp_a.options();
         auto a_out = at::native::new_with_itensor_mkldnn(
             std::move(a_it),
-            optTypeMetaToScalarType(a_options.dtype_opt()),
+            at::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
         auto b_out = at::native::new_with_itensor_mkldnn(
             std::move(b_it),
-            optTypeMetaToScalarType(b_options.dtype_opt()),
+            at::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
         push(stack, b_out);
       };
@@ -543,7 +543,7 @@ jit::RegisterOperators reg_fut_ops({
                 stack,
                 at::native::empty_mkldnn(
                     o,
-                    optTypeMetaToScalarType(input.options().dtype_opt()),
+                    at::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
                     input.options().device_opt(),
                     input.options().pinned_memory_opt()));
@@ -575,7 +575,7 @@ jit::RegisterOperators reg_fut_ops({
           Tensor self = pop(stack).toTensor();
           auto out = at::native::empty_mkldnn(
               self.sizes(),
-              optTypeMetaToScalarType(self.options().dtype_opt()),
+              at::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
               self.options().device_opt(),
               self.options().pinned_memory_opt());

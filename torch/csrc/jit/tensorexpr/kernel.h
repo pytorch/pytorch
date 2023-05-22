@@ -281,7 +281,7 @@ class TORCH_API TensorExprKernel {
     c10::optional<bool> pinned_memory;
 
     UnpackedTensorOptions(const c10::TensorOptions& opts)
-        : dtype(optTypeMetaToScalarType(opts.dtype_opt())),
+        : dtype(at::optTypeMetaToScalarType(opts.dtype_opt())),
           layout(opts.layout_opt()),
           device(opts.device_opt()),
           pinned_memory(opts.pinned_memory_opt()) {}
