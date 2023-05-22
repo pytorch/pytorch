@@ -1473,7 +1473,7 @@ class TestMkldnn(TestCase):
             torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
             torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported,
         }
-        for dtype in [torch.bfloat16,  torch.float16]:
+        for dtype in [torch.bfloat16, torch.float16]:
             if support_check[dtype]():
                 a1 = torch.randn([64, 1, 33], dtype=dtype)
                 # a2 is contiguous tensor but it's strides is not default contiguous strides.

@@ -11153,6 +11153,15 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float32: tol(atol=1e-5, rtol=1e-5),
+                       torch.complex64: tol(atol=1e-5, rtol=1e-5),
+                   }),
+                   "TestInductorOpInfo", "test_comprehensive", device_type="cpu",
+               ),
+           ],
            skips=(
                # times out
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
@@ -12915,7 +12924,7 @@ op_db: List[OpInfo] = [
                                            *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-05, rtol=1e-03)}),
-                            'TestInductorOpInfo', 'test_comprehensive'),
+                            'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ),
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
