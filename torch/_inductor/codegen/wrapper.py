@@ -1167,7 +1167,14 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(arg, torch._inductor.codegen.triton.SymbolicCallArg):
+            if isinstance(
+                arg,
+                (
+                    sympy.Integer,
+                    sympy.Symbol,
+                    torch._inductor.codegen.triton.SymbolicCallArg,
+                ),
+            ):
                 self.writeline(f"auto {var_name} = {arg};")
             elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
