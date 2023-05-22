@@ -132,8 +132,9 @@ class CallTypeHelper final {
   template <size_t C, typename T, typename FunctorT, typename... Args>
   static void map(T& t, FunctorT& f, Args&&... args) {
     f(std::get<C>(t), args...);
-    c10::guts::if_constexpr<C + 1 < End>(
-        [&](auto _) { map<C + 1>(_(t), f, std::forward<Args>(args)...); });
+    if constexpr (C + 1 < End) {
+      map<C + 1>(t, f, std::forward<Args>(args)...);
+    }
   }
 
  public:
