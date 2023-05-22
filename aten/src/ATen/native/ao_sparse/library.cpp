@@ -3,7 +3,11 @@
 
 #include <torch/custom_class.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
-#include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
+
+namespace ao {
+namespace sparse {
+int register_linear_params();
+}}
 
 // Register operators
 TORCH_LIBRARY(sparse, m) {

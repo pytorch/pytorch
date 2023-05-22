@@ -45,7 +45,7 @@ class Library:
         filename, lineno = frame.filename, frame.lineno
         self.m = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
-        self._op_impls = set()
+        self._op_impls: Set[str] = set()
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -139,8 +139,7 @@ class Library:
 
 
 def _del_library(captured_impls, op_impls):
-    for key in op_impls:
-        captured_impls.remove(key)
+    captured_impls -= op_impls
 
 
 # decorator to register python functions for library ops
