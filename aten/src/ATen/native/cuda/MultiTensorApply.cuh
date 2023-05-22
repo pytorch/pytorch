@@ -19,6 +19,7 @@ static constexpr int64_t kBlockSize = 512;
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
 static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
+static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {72, 60};
 
 template<typename T>
 __device__ __forceinline__ bool is_aligned(T* p){
@@ -49,17 +50,17 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata {
 
 // note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of 4kb with `c10::complex<double>`
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 1> {
-  const void* addresses[1][72];
-  int64_t numel_for_tensor[72];
-  c10::complex<double> scalar_vals[72];
+  const void* addresses[1][depth_to_max_tensors_scalarlist_of_complex_double[0]];
+  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[0]];
+  c10::complex<double> scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[0]];
   unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
   int block_to_chunk[depth_to_max_blocks[1-1]];
 };
 
 template<> struct TensorListScalarListMetadata<c10::complex<double>, 2> {
-  const void* addresses[2][60];
-  int64_t numel_for_tensor[60];
-  c10::complex<double> scalar_vals[60];
+  const void* addresses[2][depth_to_max_tensors_scalarlist_of_complex_double[1]];
+  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[1]];
+  c10::complex<double> scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[1]];
   unsigned char block_to_tensor[depth_to_max_blocks[2-1]];
   int block_to_chunk[depth_to_max_blocks[2-1]];
 };
