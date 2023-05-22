@@ -43,6 +43,17 @@ bool mkldnn_bf16_gemm(
   return false;
 }
 
+bool mkldnn_fp16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::Half *a, int64_t lda,
+    const c10::Half *b, int64_t ldb,
+    float beta,
+    c10::Half *c, int64_t ldc) {
+  return false;
+}
+
 bool use_mkldnn_lower_precision_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
@@ -71,6 +82,71 @@ static bool use_mkldnn_fp16_matmul() {
   return (
       at::globalContext().userEnabledMkldnn() &&
       mkldnn_fp16_device_check());
+}
+
+bool mkldnn_fp16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::Half *a_data, int64_t lda,
+    const c10::Half *b_data, int64_t ldb,
+    float beta,
+    c10::Half *c_data, int64_t ldc) {
+  if (!use_mkldnn_fp16_matmul() ||
+      (m * n * k <= 16 * 16 * 16) ||
+      (alpha == 0.0f)) {
+    return false;
+  }
+
+  ideep::attr_t op_attr;
+  // Use mkldnn post ops to perform the add.
+  if (beta != 0.0f) {
+    op_attr = ideep::attr_t::fuse_sum();
+  }
+
+  // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
+  // Use identity: C = AB <=> C^T = B^T A^T
+  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
+  if (transa != TransposeType::NoTranspose) {
+    std::swap(a_strides[0], a_strides[1]);
+  }
+  if (transb != TransposeType::NoTranspose) {
+    std::swap(b_strides[0], b_strides[1]);
+  }
+
+  ideep::tensor a({
+      /*sizes=*/{k, m},
+      ideep::tensor::data_type::f16,
+      /*strides=*/a_strides},
+    const_cast<c10::Half*>(a_data));
+  ideep::tensor b({
+      /*sizes=*/{n, k},
+      ideep::tensor::data_type::f16,
+      /*strides=*/b_strides},
+    const_cast<c10::Half*>(b_data));
+  ideep::tensor c({
+      /*sizes=*/{n, m},
+      ideep::tensor::data_type::f16,
+      /*strides=*/c_strides},
+    c_data);
+
+  ideep::matmul_forward::compute(
+      b, a, c, alpha, beta,
+      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+
+  if (c.get_data_handle() != c_data){
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
+    // under this case, we need copy the re-inited buffer back to given buffer
+    ideep::tensor real_output({
+        /*sizes=*/{n, m},
+        ideep::tensor::data_type::f16,
+        /*strides=*/c_strides},
+      c_data);
+    c.reorder_to(real_output);
+  }
+
+  return true;
 }
 
 bool mkldnn_bf16_gemm(

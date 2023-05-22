@@ -11165,6 +11165,8 @@ op_db: List[OpInfo] = [
            skips=(
                # times out
                DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               # Does not support bf16 and fp16
+               DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive', device_type="cpu"),
            ),
            supports_out=False,
            ),

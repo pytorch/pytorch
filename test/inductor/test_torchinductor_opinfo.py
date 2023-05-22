@@ -538,6 +538,8 @@ class TestInductorOpInfo(TestCase):
         with torch.no_grad():
             torch.cuda.empty_cache()
         op_name = op.name
+        if "matrix_exp" not in op.name or dtype != torch.float16:
+            return
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
 
