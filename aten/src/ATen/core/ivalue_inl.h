@@ -1055,16 +1055,16 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 #endif
     auto childFut = createInstance(std::move(type));
     addCallback([childFut,
-                 cb = std::move(callback)](Future& parentFut) mutable {
+                 cb = ::std::move(callback)](Future& parentFut) mutable {
       try {
         if constexpr (::std::is_convertible_v<typename c10::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
           auto [ivalue, storages] = cb(parentFut);
-          childFut->markCompleted(std::move(ivalue), std::move(storages));
+          childFut->markCompleted(::std::move(ivalue), std::move(storages));
         } else {
           childFut->markCompleted(cb(parentFut));
         }
-      } catch (std::exception&) {
-        childFut->setError(std::current_exception());
+      } catch (::std::exception&) {
+        childFut->setError(::std::current_exception());
       }
     });
     return childFut;
