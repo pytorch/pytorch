@@ -1,5 +1,6 @@
 from typing import Callable, Dict, Optional, Tuple
 
+import torch
 import torch.distributed._tensor.api as dtensor
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
