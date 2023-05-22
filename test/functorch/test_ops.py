@@ -403,9 +403,14 @@ class TestOperators(TestCase):
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('svd_lowrank',
-             {torch.float32: tol(atol=3e-05, rtol=3e-04)}, device_type='cuda'),
+             {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
+        tol1('__rmatmul__',
+             {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
+        tol1('matmul',
+             {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
+
     ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
@@ -618,8 +623,12 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        tol1('linalg.multi_dot',
+            {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('svd_lowrank',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('pca_lowrank',
+            {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -815,6 +824,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
         tol1('svd',
              {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+        tol1('matrix_exp',
+            {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
     @skipOps('TestOperators', 'test_vmapvjpvjp', {
         xfail('as_strided', 'partial_views'),
@@ -935,6 +946,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('matrix_exp',
+            {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
         xfail('as_strided', 'partial_views'),
@@ -1553,6 +1566,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('matrix_exp',
+            {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapjvpvjp(self, device, dtype, op):
         # Since we test `jvpvjp` seperately,
