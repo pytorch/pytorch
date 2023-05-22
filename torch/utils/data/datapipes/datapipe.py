@@ -121,7 +121,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             if attribute_name in _iter_deprecated_functional_names:
                 kwargs = _iter_deprecated_functional_names[attribute_name]
                 _deprecation_warning(**kwargs)
-            function = functools.partial(IterDataPipe.functions[attribute_name], self)
+            f = IterDataPipe.functions[attribute_name]
+            function = functools.partial(f, self)
+            functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
@@ -144,7 +146,12 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
             return result_pipe
 
-        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
+        function = functools.partial(
+            class_function, cls_to_register, enable_df_api_tracing
+        )
+        functools.update_wrapper(
+            wrapper=function, wrapped=cls_to_register, assigned=("__doc__",)
+        )
         cls.functions[function_name] = function
 
     def __getstate__(self):
@@ -253,7 +260,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             if attribute_name in _map_deprecated_functional_names:
                 kwargs = _map_deprecated_functional_names[attribute_name]
                 _deprecation_warning(**kwargs)
-            function = functools.partial(MapDataPipe.functions[attribute_name], self)
+            f = MapDataPipe.functions[attribute_name]
+            function = functools.partial(f, self)
+            functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
@@ -272,6 +281,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             return result_pipe
 
         function = functools.partial(class_function, cls_to_register)
+        functools.update_wrapper(
+            wrapper=function, wrapped=cls_to_register, assigned=("__doc__",)
+        )
         cls.functions[function_name] = function
 
     def __getstate__(self):
