@@ -958,7 +958,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.op_count, 11)
 
     def test_reformer_train(self):
         with torch.enable_grad():
@@ -2940,11 +2940,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
-        self.assertEqual(
-            dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
-        )
-        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
