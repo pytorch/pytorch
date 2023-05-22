@@ -3343,6 +3343,47 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
+void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
+  at::TensorOptions options(at::kCPU);
+  options = options.dtype(at::kFloat);
+
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::unsqueeze(in_cpu, dim);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::unsqueeze(in_vulkan, dim);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unsqueeze_dim0) {
+  c10::InferenceMode mode;
+  test_unsqueeze({5, 7}, 0);
+  test_unsqueeze({5, 7}, -3);
+  test_unsqueeze({111, 222}, 0);
+  test_unsqueeze({111, 222}, -3);
+}
+
+TEST_F(VulkanAPITest, unsqueeze_dim1) {
+  c10::InferenceMode mode;
+  test_unsqueeze({5, 7}, 1);
+  test_unsqueeze({5, 7}, -2);
+  test_unsqueeze({111, 222}, 1);
+  test_unsqueeze({111, 222}, -2);
+}
+
+TEST_F(VulkanAPITest, unsqueeze_dim2) {
+  c10::InferenceMode mode;
+  test_unsqueeze({5, 7}, 2);
+  test_unsqueeze({5, 7}, -1);
+  test_unsqueeze({111, 222}, 2);
+  test_unsqueeze({111, 222}, -1);
+}
+
 TEST_F(VulkanAPITest, upsample_nearest2d) {
   const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
