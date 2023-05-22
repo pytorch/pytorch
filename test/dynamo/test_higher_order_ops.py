@@ -396,15 +396,13 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # leading to four graphs being compiled: clone, sin, sin, clone
         self.assertEqual(cnt.frame_count, 4)
 
-    def test_fallback_on_modules(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
+    def test_modules(self):
         counters.clear()
         cnt = CompileCounter()
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return wrap(lambda x: mod(x), x)
 
@@ -412,10 +410,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, mod(x))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"Invoking an nn.Module inside HigherOrderOperator": 1},
-        )
 
     def test_fallback_on_non_single_tensor_output(self):
         # We can likely support this in the future, I just don't want to deal
@@ -438,25 +432,19 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_access_module_attr(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
         cnt = CompileCounter()
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             y = mod(x)
             return wrap(lambda y: y - mod.bias, y)
 
         result = f(x)
         self.assertEqual(result, mod(x) - mod.bias)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"accessing attribute of nn.Module inside HigherOrderOperator": 1},
-        )
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_make_closure(self):
         def f(x, y):
@@ -628,8 +616,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    # Higher order op does not support nn.Modules yet
-    @unittest.expectedFailure
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
@@ -648,10 +634,12 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10, 10, requires_grad=True)
 
-        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
         bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
