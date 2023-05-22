@@ -552,9 +552,11 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           .scopes(scopes);
 
   if constexpr (use_global_callback) {
-    registration_state_ptr->setCallbackHandle(at::addGlobalCallback(recordFunctionCallback));
+    registration_state_ptr->setCallbackHandle(
+        at::addGlobalCallback(recordFunctionCallback));
   } else {
-    registration_state_ptr->setCallbackHandle(at::addThreadLocalCallback(recordFunctionCallback));
+    registration_state_ptr->setCallbackHandle(
+        at::addThreadLocalCallback(recordFunctionCallback));
   }
 }
 
