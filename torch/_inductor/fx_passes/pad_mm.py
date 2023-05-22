@@ -89,7 +89,7 @@ def should_pad_addmm(match):
     )
 
 
-def addmm_replace(input, mat1, mat2, beta, alpha):
+def addmm_replace(input, mat1, mat2, beta=1., alpha=1.):
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
@@ -110,7 +110,7 @@ def addmm_replace(input, mat1, mat2, beta, alpha):
 
 
 def pad_addmm(
-    input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length, beta, alpha
+    input, mat1, mat2, m_padded_length, k_padded_length, n_padded_length, beta=1., alpha=1.,
 ):
     # addmm decomp with padding will go through pad_addmm multiple times if multiple dimensions are needed to be padded
     if k_padded_length != 0:
