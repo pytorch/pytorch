@@ -9,7 +9,6 @@
 
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/core/DistributionsHelper.h>
-#include <ATen/TensorIndexing.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
