@@ -1,6 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+
+import os
+
+import tempfile
 import traceback
 import types
 import unittest
@@ -9,6 +13,7 @@ from functools import partial
 from typing import Tuple
 from unittest.mock import patch
 
+import pytest
 import torch
 
 import torch._dynamo.test_case
@@ -1817,6 +1822,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_torch_save_error(self):
+        mod = BasicModule()
+        opt_model = torch.compile(mod)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = os.path.join(temp_dir, "foo.pt")
+            with pytest.raises(TypeError) as excinfo:
+                torch.save(opt_model, file_path)
+
+        assert "state_dict" in str(excinfo.value)
+
+    def test_torch_save_state_dict(self):
+        mod = BasicModule()
+        opt_model = torch.compile(mod)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = os.path.join(temp_dir, "foo.pt")
+            torch.save(opt_model.state_dict(), file_path)
+            torch.load(file_path)
 
 
 if __name__ == "__main__":

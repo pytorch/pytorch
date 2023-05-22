@@ -496,7 +496,16 @@ def save(
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
-
+    from torch._dynamo import OptimizedModule
+    if isinstance(obj, OptimizedModule):
+        raise TypeError(
+            """
+        You are trying to `torch.save()` an OptimizedModule which is a wrapper around `nn.Module`
+        Instead you should `torch.save(opt_model.state_dict(), 'foo.pt'))`
+        Read https://pytorch.org/get-started/pytorch-2.0/#serialization for more information
+        And if you must preserve the class object (which we don't recommend)
+        use the :func:`module.compile()` API instead
+        """)
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
             _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
