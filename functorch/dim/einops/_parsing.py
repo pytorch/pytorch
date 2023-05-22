@@ -14,11 +14,8 @@ class AnonymousAxis:
 
     def __init__(self, value: str) -> None:
         self.value = int(value)
-        if self.value <= 1:
-            if self.value == 1:
-                raise ValueError('No need to create anonymous axis of length 1. Report this as an issue')
-            else:
-                raise ValueError(f'Anonymous axis should have positive length, not {self.value}')
+        if self.value < 1:
+            raise ValueError(f'Anonymous axis should have positive length, not {self.value}')
 
     def __repr__(self) -> str:
         return f"{self.value}-axis"

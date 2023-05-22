@@ -99,15 +99,26 @@ def rearrange(
         n_ellipsis_dims = 0
         total_n_dims = n_dims = len(left.identifiers)
 
+    n_anon_dims = sum(not dim for dim in left.composition)
+    total_n_dims += n_anon_dims
+
     first_class_dims: Tuple[Dim, ...] = (dims(total_n_dims),) if total_n_dims == 1 else dims(total_n_dims)
-    identifier_dim_map: Dict[str, Tuple[Dim, ...]] = {}
+    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
 
     # map the left-hand side identifiers to first class dims
     dims_i = 0
     for dimension in left.composition:
         if isinstance(dimension, list):
             for identifier in dimension:
+                # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
+                assert isinstance(identifier, str)
                 identifier_dim_map[identifier] = (first_class_dims[dims_i],)
+                dims_i += 1
+            if not dimension:
+                # unitary anonymous axis
+                anon_axis = AnonymousAxis("1")
+                identifier_dim_map[anon_axis] = (first_class_dims[dims_i],)
+                dimension.append(anon_axis)
                 dims_i += 1
         elif dimension == _ellipsis:
             identifier = _ellipsis
