@@ -1893,7 +1893,7 @@ The behavior depends on the dimensionality of the Tensors as follows:
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
   there's more than one
 */
-Tensor _matmul_impl(
+static Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {

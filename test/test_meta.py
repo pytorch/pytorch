@@ -329,6 +329,12 @@ CHECK_STRIDES_SKIPS = {
     # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
+CHECK_CONJ_SKIPS = {
+    # The conj bit is not copied, see:
+    # https://github.com/pytorch/pytorch/pull/101836
+    aten.linalg_lu_solve.out,
+}
+
 class CheckStrides(Enum):
     NONE = 0
     SIGNIFICANT = 1
@@ -377,7 +383,8 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
         test_assert(meta_r.requires_grad == r.requires_grad, f"but real requires_grad was {r.requires_grad}")
-        test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
+        if func not in CHECK_CONJ_SKIPS:
+            test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
         test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
 
 
