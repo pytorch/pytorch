@@ -1802,6 +1802,7 @@ def emit_body(
                 is_input_tensorlist = is_inplace_foreach and is_tensor_list_type(
                     refargname2inplace_foreacharg[inp.name].type
                 )
+                input_suffix = "[i]" if is_input_tensorlist else ""
                 if is_inplace_foreach:
                     if inp.name in refargname2inplace_foreacharg:
                         inp_name = refargname2inplace_foreacharg[inp.name].name
@@ -1814,7 +1815,7 @@ def emit_body(
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                             inp_name=inp.name,
-                            inp=inp_name + ("[i]" if is_input_tensorlist else ""),
+                            inp=inp_name + input_suffix,
                             zeros_fn=zeros_fn,
                         )
                     )
@@ -1822,18 +1823,19 @@ def emit_body(
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(
                             inp_name=inp.name,
-                            inp=inp_name + ("[i]" if is_input_tensorlist else ""),
+                            inp=inp_name + input_suffix,
                         )
                     )
             if derivative.required_original_self_value:
+                input_suffix = "s[i]" if is_input_tensorlist else ""
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(
                     inp_name="original_self",
-                    inp="original_self" + ("s[i]" if is_input_tensorlist else ""),
+                    inp="original_self" + input_suffix,
                     zeros_fn=zeros_fn,
                 )
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(
                     inp_name="original_self",
-                    inp="original_self" + ("s[i]" if is_input_tensorlist else ""),
+                    inp="original_self" + input_suffix,
                 )
             elif inplace and derivative.is_reusing_outplace_formula:
                 # The gradient wasn't already cloned, do it if grad mode is enabled
