@@ -419,7 +419,9 @@ class TestFSDPMixedPrecision(FSDPTest):
                 True,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
-                scaler = torch.cuda.amp.ShardedGradScaler(enabled=enable_sharded_grad_scaler)
+                scaler = torch.cuda.amp.ShardedGradScaler(
+                    enabled=enable_sharded_grad_scaler
+                )
                 optim = torch.optim.Adam(model.parameters())
 
                 for _ in range(3):

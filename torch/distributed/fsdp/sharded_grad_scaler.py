@@ -370,5 +370,3 @@ class _ShardedGradScaler(torch.cuda.amp.GradScaler):
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
-
-torch.cuda.amp.ShardedGradScaler = _ShardedGradScaler
