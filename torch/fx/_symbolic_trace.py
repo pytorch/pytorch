@@ -580,7 +580,7 @@ class Tracer(TracerBase):
                     out = self.create_proxy(
                         "placeholder", f"{name}_{str(cnt)}", default, {}
                     )
-                    if x == PH:
+                    if isinstance(x, PHBase):
                         return out
                     # Union[int, bool] == bool in Python <= 3.6
                     if (
