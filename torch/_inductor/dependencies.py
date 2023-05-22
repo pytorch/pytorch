@@ -45,7 +45,7 @@ class MemoryDep(typing.NamedTuple):
             )
         return self
 
-    def numbytes_hint(self):
+    def numel_hint(self):
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
@@ -54,9 +54,10 @@ class MemoryDep(typing.NamedTuple):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return V.graph.sizevars.size_hint(numel) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+        return V.graph.sizevars.size_hint(numel)
+
+    def numbytes_hint(self):
+        return self.numel_hint() * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
@@ -121,10 +122,11 @@ class StarDep(typing.NamedTuple):
             return StarDep(renames[self.name])
         return self
 
+    def numel_hint(self):
+        return V.graph.sizevars.size_hint(V.graph.get_numel(self.name))
+
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(
-            V.graph.get_numel(self.name)
-        ) * get_dtype_size(V.graph.get_dtype(self.name))
+        return self.numel_hint() * get_dtype_size(V.graph.get_dtype(self.name))
 
     def is_contiguous(self) -> bool:
         return False
@@ -152,6 +154,9 @@ class WeakDep(typing.NamedTuple):
         if self.name in renames:
             return WeakDep(renames[self.name])
         return self
+
+    def numel_hint(self):
+        return 1  # Purely inserted for ordering, not an actual dep
 
     def numbytes_hint(self):
         return 1  # Purely inserted for ordering, not an actual dep

@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import pprint
 import textwrap
@@ -211,6 +212,15 @@ class BaseSchedulerNode:
 
     def is_extern(self):
         return False
+
+    @cache_on_self
+    def numel_hint(self):
+        r1, r2 = self.get_ranges()
+        return functools.reduce(
+            operator.mul,
+            (*V.graph.sizevars.size_hints(r1), *V.graph.sizevars.size_hints(r2)),
+            1,
+        )
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
         return False
@@ -699,15 +709,20 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 combined.update(union)
 
                 for dep in order.read_writes.reads:
-                    if dep.name in all_node_names:
+                    if dep.name in all_node_names or dep.numel_hint() != numel_hint:
                         internal_deps.add(dep)
                     else:
                         external_reads.add(dep)
+
                 for dep in order.read_writes.writes:
-                    if all(u.get_name() in all_node_names for u in (node.users or ())):
+                    if (
+                        all(u.get_name() in all_node_names for u in (node.users or ()))
+                        or dep.numel_hint() != numel_hint
+                    ):
                         internal_deps.add(dep)
                     else:
                         external_writes.add(dep)
+
                 # TODO(jansel): include this?
                 # for dep in order.read_writes.index_exprs:
                 #    internal_deps.add(dep)
@@ -740,6 +755,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
             return max(-limit, score)
 
         all_node_names = functools.reduce(set.union, (n.get_names() for n in snodes))
+        numel_hint = max(n.numel_hint() for n in snodes)
         orderings: List[Dict[SchedulerNode, LoopOrder]] = [dict()]
         backend = snodes[0].scheduler.get_backend(snodes[0].get_device())
         for node in snodes:
@@ -869,6 +885,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
+
+    @cache_on_self
+    def numel_hint(self):
+        return max(x.numel_hint() for x in self.snodes)
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
