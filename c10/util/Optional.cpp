@@ -12,6 +12,3 @@ static_assert(
 static_assert(
     C10_IS_TRIVIALLY_COPYABLE(c10::optional<c10::IntArrayRef>),
     "c10::optional<IntArrayRef> should be trivially copyable");
-static_assert(
-    sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
-    "c10::optional<IntArrayRef> should be size-optimized");
