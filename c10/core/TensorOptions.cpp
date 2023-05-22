@@ -2,7 +2,6 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 
 #include <iostream>
@@ -33,6 +32,7 @@ std::ostream& operator<<(std::ostream& stream, const TensorOptions& options) {
   // default
   stream << ", memory_format=";
   if (options.has_memory_format()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     stream << *options.memory_format_opt();
   } else {
     stream << "(nullopt)";
