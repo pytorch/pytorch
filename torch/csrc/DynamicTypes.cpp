@@ -94,8 +94,6 @@ bool isStorage(PyObject* obj) {
   if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
     return true;
   }
-  // TODO: Find look at the call sites of isStorage to find out if this change
-  // could break any of them
   return THPStorage_Check(obj);
 }
 

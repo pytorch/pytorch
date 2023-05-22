@@ -70,8 +70,6 @@ PyObject* THPStorage_NewWithStorage(
 
   auto s = (THPStorage*)obj;
 
-  // TODO: Is this `new` necessary? It seems to work without it, but
-  // THPVariable has it
   new (&s->cdata) c10::MaybeOwned<c10::Storage>();
 
   s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));

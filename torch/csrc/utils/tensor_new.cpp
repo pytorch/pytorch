@@ -698,7 +698,6 @@ Tensor legacy_tensor_generic_ctor_new(
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type{at::ScalarType::Undefined};
     bool is_typed_storage = false;
-    // TODO: Check that this reuses the same StorageImpl
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
     if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
       TORCH_CHECK(
