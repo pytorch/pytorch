@@ -28,7 +28,9 @@
         cusparseGetErrorString(status),                         \
         status);                                                \
   }
-
+namespace torch {
+namespace ao {
+namespace pruning {
 // create a container that holds relevant data for cusparselt linear
 struct CusparseLt : torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
@@ -191,17 +193,14 @@ at::Tensor CusparseLt::cusparselt_helper(
       (input.is_contiguous()) ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  int64_t num_B_rows = (input.is_contiguous()) ? n : k;
-  int64_t num_B_cols = (input.is_contiguous()) ? k : n;
+  int64_t num_B_rows = (input.is_contiguous()) ? k : n;
+  int64_t num_B_cols = (input.is_contiguous()) ? n : k;
   int64_t num_C_rows = num_A_rows;
   int64_t num_C_cols = n;
 
   int64_t ldb = (input.is_contiguous()) ? num_B_cols : num_B_rows;
   int64_t ldc = (transposeResult) ? num_C_rows : num_C_cols;
 
-  std::cout << transposeResult << std::endl;
-  std::cout << dense_input_order << std::endl;
-  std::cout << ldb << std::endl;
   // initalize dense input descriptor
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
       &handle,
@@ -303,3 +302,6 @@ TORCH_LIBRARY(cusparselt, m) {
       .def("addmm", &CusparseLt::cusparselt_addmm)
       .def("compress", &CusparseLt::compress);
 }
+} // namespace pruning
+} // namespace ao
+} // namespace torch
