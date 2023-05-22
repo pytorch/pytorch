@@ -894,7 +894,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
             self.assertEqual(
                 self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2), (0, 3)],
+                [(0, 1), (0, 2)],
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 

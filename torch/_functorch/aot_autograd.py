@@ -3198,6 +3198,7 @@ Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}""")
+
             # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
             # and turning it on will require a non-trivial calling convention change for any export runtime.
             if config.functionalize_rng_ops:
@@ -3224,6 +3225,19 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
+
+            mutated_user_inp_locs = [
+                idx - aot_config.num_params_buffers
+                for idx in fw_metadata.mutated_inp_indices
+                if idx >= aot_config.num_params_buffers
+            ]
+            if len(mutated_user_inp_locs) > 0:
+                raise RuntimeError(f"""
+Found following user inputs located at {mutated_user_inp_locs} are mutated. This is currently banned in the aot_export workflow.
+If you need this functionality, please file a github issue.
+
+fw_metadata={str(fw_metadata)}""")
+
             # During export, we don't get back a callable - we get back the raw fx graph
             # (either a joint or an inference-only graph)
             assert isinstance(compiled_fn, torch.fx.GraphModule)
