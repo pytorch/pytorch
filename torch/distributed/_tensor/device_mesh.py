@@ -151,7 +151,7 @@ class DeviceMesh(object):
                 # automatically set the current cuda device base on num of gpu devices available in each host
                 # NOTE: This device selection would only work for homogeneous hardware.
                 num_gpus_per_host = torch.cuda.device_count()
-                if world_size() % num_gpus_per_host != 0:
+                if world_size % num_gpus_per_host != 0:
                     raise RuntimeError(
                         f"DeviceMesh only support homogeneous hardware, but found "
                         f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
