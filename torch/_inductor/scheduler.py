@@ -600,8 +600,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(cls, node1, node2):
         fused_nodes = [
-            FusedSchedulerNode.fuse(left, right)
-            for left, right in zip(node1.snodes, node2.snodes)
+            FusedSchedulerNode.fuse(l, r) for l, r in zip(node1.snodes, node2.snodes)
         ]
         return cls(node1.scheduler, fused_nodes)
 
@@ -632,6 +631,11 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     def get_nodes(self):
         """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
         return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+
+    def can_fuse(self, other: "ForeachKernelSchedulerNode"):
+        return len(self.snodes) == len(other.snodes) and all(
+            self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
+        )
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -1063,9 +1067,9 @@ class Scheduler:
         ):
             return False
 
-        if isinstance(node1, ForeachKernelSchedulerNode) is not isinstance(
-            node2, ForeachKernelSchedulerNode
-        ):
+        node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
+        node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
+        if node1_is_foreach is not node2_is_foreach:
             return False
 
         device = node1.get_device()
@@ -1086,6 +1090,8 @@ class Scheduler:
             if not self.can_fuse_vertical(node1, node2):
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
+        elif node1_is_foreach and node2_is_foreach:
+            return False
         else:  # nodes don't depend on each other, but may have common reads
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 

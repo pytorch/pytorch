@@ -1691,9 +1691,7 @@ class TritonScheduling:
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
             node2, scheduler.ForeachKernelSchedulerNode
         ):
-            # If node 1 writes to all of the reads of node 2, then we can fuse,
-            # we are guaranteed at this point that ForeachKernels only process valid lists of buffers.
-            return True
+            return node1.can_fuse(node2)
 
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
             node2, scheduler.ForeachKernelSchedulerNode

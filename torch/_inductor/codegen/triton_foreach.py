@@ -125,6 +125,7 @@ class ForeachKernel(Kernel):
             # Initialize all range variables to avoid a triton bug
             # with defining vars in if/else blocks
             for i in range(next(self.iter_vars_count)):
+                code.splice("# Note: initialize vars to work around triton bug")
                 code.splice(f"x{i} = tl.arange(0, XBLOCK)")
                 code.splice("xmask = tl.arange(0, XBLOCK) > XBLOCK")
 
