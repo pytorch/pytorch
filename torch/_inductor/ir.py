@@ -170,11 +170,21 @@ def get_stride_order(seq: Sequence[int]):
         out[elem] = i
     return out
 
+def _in_faketensormode():
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    for m in _get_current_dispatch_mode_stack():
+        if isinstance(m, FakeTensorMode):
+            return True
+    return False
 
 def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
-    if not guard_shape:
+
+    # for some operators we can not run them in FakeTensorMode (check FallbackKernel.create).
+    # Without FakeTensorMode size/stride have to be int. So we need call size_hint.
+    if not guard_shape or not _in_faketensormode():
         shape_fn = V.graph.sizevars.size_hint
     else:
         shape_fn = identity

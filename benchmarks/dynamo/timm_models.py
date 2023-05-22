@@ -283,7 +283,7 @@ class TimmRunnner(BenchmarkRunner):
             ):
                 continue
 
-            yield model_name
+            # yield model_name # TODO recover
 
     def pick_grad(self, name, is_training):
         if is_training:

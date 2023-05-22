@@ -29,6 +29,7 @@ from ..virtualized import V
 from .mm_common import filtered_configs
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)  # TODO
 
 
 aten = torch.ops.aten

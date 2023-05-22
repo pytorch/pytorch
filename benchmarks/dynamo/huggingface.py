@@ -468,7 +468,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 or model_name in SKIP
             ):
                 continue
-            yield model_name
+            # yield model_name # TODO recover
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):

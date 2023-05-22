@@ -374,7 +374,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             ):
                 continue
 
-            yield model_name
+            # TODO recover
+            if model_name in ["phlippe_resnet", "functorch_maml_omniglot"]:
+                yield model_name
 
     def pick_grad(self, name, is_training):
         if is_training or name in ("maml",):

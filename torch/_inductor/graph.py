@@ -51,6 +51,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG) # TODO
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
