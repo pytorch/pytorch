@@ -7,11 +7,6 @@
 
 namespace at { namespace native {
 
-Tensor cudnn_mha(const Tensor& self, const Tensor& qkv_weight, const Tensor& out_weight, const Tensor& qkv_bias, const Tensor& out_bias, const long inputSize, const long seqLength, const long batchSize, const long outputSize, const long head_size, const long num_heads) {
-    AT_ERROR("cudnn_mha: ATen not compiled with cuDNN support");
-  }
-
-
 }} // namespace at::native
 
 #else // AT_CUDNN_ENABLED
@@ -102,10 +97,7 @@ void update(const KeyType& key, T& results) {
 
 BenchmarkCache<cudnn_frontend::ExecutionPlan, MHAParams> benchmark_cache;
 
-// typedef __half half1;
-
 #include <cudnn_frontend.h>
-// #include "error_util.h"
 
 #define Q_ID 1
 #define K_ID 2
@@ -810,7 +802,6 @@ createSVBMM(int64_t b,
 
 #endif
 
-} // namespace
 
 void run_mha_plan(cudnnHandle_t handle,
           cudnn_frontend::ExecutionPlan& plan,
@@ -858,6 +849,7 @@ void run_mha_plan(cudnnHandle_t handle,
                            .build();
     AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
+
 
 
 void
@@ -961,7 +953,7 @@ run_bf16_LLM_fprop(int64_t b,
   }
 }
 
-// END COPY-PASTE FRO CUDNN-FRONTEND SAMPLE
+} // namespace
 
 void
 run_cudnn_LLM_fprop(int64_t b,
@@ -1004,10 +996,6 @@ run_cudnn_LLM_fprop(int64_t b,
                    dropoutseed.data_ptr(),
                    dropoutoffset.data_ptr(),
                    tensorType);
-}
-
-Tensor cudnn_mha(const Tensor& self, const Tensor& qkv_weight, const Tensor& out_weight, const Tensor& qkv_bias, const Tensor& out_bias, const long inputSize, const long seqLength, const long batchSize, const long outputSize, const long head_size, const long num_heads) {
-  AT_ERROR("cudnn_mha: ATen not compiled with cuDNN support");
 }
 
 }} // namespace at::native
