@@ -152,17 +152,18 @@ def gen_slice_strategy(
     defaults = (None, 0, None, None, 1)
     input_node, dim, start, end, step = node.args + defaults[len(node.args) :]
     assert isinstance(input_node, Node)
-    assert isinstance(dim, int)
-    assert start is None or isinstance(start, int)
-    assert end is None or isinstance(end, int)
-    assert isinstance(step, int)
-
     input_val = input_node.meta["val"]
-    slice_dim = normalize_dim(dim, input_val.ndim)
+    assert isinstance(dim, int)
     if start is None:
         start = 0
     if end is None or end > input_val.shape[dim]:
         end = input_val.shape[dim]
+    assert isinstance(start, int)
+    assert isinstance(end, int)
+    assert isinstance(step, int)
+
+    # normalize args
+    slice_dim = normalize_dim(dim, input_val.ndim)
     if start < 0:
         start += input_val.shape[dim]
     if end < 0:
