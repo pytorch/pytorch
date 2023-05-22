@@ -39,6 +39,16 @@ class FakeTensorTest(TestCase):
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
 
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_initialized(self):
+        # doesnt error
+        with FakeTensorMode():
+            p = torch.randn(4, 2, requires_grad=True, device='cuda')
+            x = torch.randn(8, 4, device='cuda')
+            y = torch.mm(x, p).square().sum()
+            y.backward()
+
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty(4, 2, 2, device="cpu")
