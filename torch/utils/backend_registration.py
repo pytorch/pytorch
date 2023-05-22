@@ -110,6 +110,7 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
             device_idx = _get_current_device_index()
         else:
             device_idx = device.index
+    # if isinstance(device, int), we can take the index number directly
     else:
         device_idx = device
     return device_idx
