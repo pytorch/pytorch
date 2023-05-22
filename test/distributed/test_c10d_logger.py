@@ -104,15 +104,15 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
         try:
             tensor = torch.arange(2, dtype=torch.int64)
             dist.broadcast(tensor, self.world_size + 1)
-        except Exception as exception:
+        except Exception:
             pass
 
     @with_comms
     def test_exception_handler_with_dist(self) -> None:
-        with self.assertRaises(Exception) as exception:
+        with self.assertRaises(Exception):
             self.failed_broadcast_raise_exception()
 
-        with self.assertLogs(dist._c10d_error_logger, level="DEBUG") as captured:
+        with self.assertLogs(dist._c10d_logger, level="DEBUG") as captured:
             self.failed_broadcast_not_raise_exception()
             error_msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
