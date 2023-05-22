@@ -582,12 +582,14 @@ class TestModule(TestCase):
                         if cpu_output.requires_grad:
                             check_backward(cpu_output, gpu_output)
 
+    @with_tf32_off
     @modules(module_db)
     @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
-        is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6) \
+            or torch.cuda.get_device_capability(0) == (8, 0))
         # TODO tighten it to a specific module
-        atol, rtol = (3e-3, 7e-3) if is_sm86 else (None, None)
+        atol, rtol = (3e-3, 7e-3) if is_sm86or80 else (None, None)
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
