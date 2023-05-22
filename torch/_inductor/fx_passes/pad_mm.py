@@ -1,5 +1,6 @@
 import functools
 from itertools import chain
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -41,10 +42,26 @@ def check_device(a: Tensor, b: Tensor):
     return a.is_cuda and b.is_cuda
 
 
-def is_symbolic(a: Tensor, b: Tensor):
-    return any(
-        isinstance(x, torch.SymInt)
-        for x in chain(a.size(), a.stride(), b.size(), b.stride())
+def check_dtype(a: Tensor, b: Tensor):
+    return a.is_floating_point() and b.is_floating_point()
+
+
+def is_symbolic(a: Optional[Tensor]):
+    return a is not None and any(
+        isinstance(x, torch.SymInt) for x in chain(a.size(), a.stride())
+    )
+
+
+def any_is_symbolic(*args):
+    return any(is_symbolic(a) for a in args)
+
+
+def should_pad_common(mat1, mat2, input=None):
+    return (
+        torch._inductor.config.shape_padding
+        and check_device(mat1, mat2)
+        and check_dtype(mat1, mat2)
+        and not any_is_symbolic(mat1, mat2, input)
     )
 
 
@@ -67,11 +84,8 @@ def addmm_pattern(input, mat1, mat2, beta, alpha):
 
 def should_pad_addmm(match):
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
-    return (
-        torch._inductor.config.shape_padding
-        and check_device(mat1, mat2)
-        and not is_symbolic(mat1, mat2)
-        and should_pad_bench(mat1, mat2, torch.ops.aten.addmm, input=input)
+    return should_pad_common(mat1, mat2, input) and should_pad_bench(
+        mat1, mat2, torch.ops.aten.addmm, input=input
     )
 
 
@@ -217,11 +231,8 @@ def mm_pattern(mat1, mat2):
 
 def should_pad_mm(match):
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
-    return (
-        torch._inductor.config.shape_padding
-        and check_device(mat1, mat2)
-        and not is_symbolic(mat1, mat2)
-        and should_pad_bench(mat1, mat2, torch.ops.aten.mm)
+    return should_pad_common(mat1, mat2) and should_pad_bench(
+        mat1, mat2, torch.ops.aten.mm
     )
 
 
@@ -253,11 +264,8 @@ def bmm_pattern(mat1, mat2):
 
 def should_pad_bmm(match):
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
-    return (
-        torch._inductor.config.shape_padding
-        and check_device(mat1, mat2)
-        and not is_symbolic(mat1, mat2)
-        and should_pad_bench(mat1, mat2, torch.ops.aten.bmm)
+    return should_pad_common(mat1, mat2) and should_pad_bench(
+        mat1, mat2, torch.ops.aten.bmm
     )
 
 
@@ -278,13 +286,13 @@ def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
         mat1 = pad_dim(mat1, k_padded_length, 2)
         mat2 = pad_dim(mat2, k_padded_length, 1)
 
-        return aten.ops.bmm(mat1, mat2)
+        return aten.bmm(mat1, mat2)
     elif n_padded_length != 0:
         mat2 = pad_dim(mat2, n_padded_length, 2)
-        return aten.ops.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
+        return aten.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
     else:
         mat1 = pad_dim(mat1, m_padded_length, 1)
-        return aten.ops.bmm(mat1, mat2)[:, :-m_padded_length, :].contiguous()
+        return aten.bmm(mat1, mat2)[:, :-m_padded_length, :].contiguous()
 
 
 @functools.lru_cache(None)
