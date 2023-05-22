@@ -20,7 +20,7 @@ namespace native {
 DEFINE_DISPATCH(quantized_normalize_stub);
 DEFINE_DISPATCH(quantized_groupnorm_nhwc_stub);
 
-static Tensor quantized_layer_norm_impl(
+Tensor quantized_layer_norm_impl(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
@@ -53,7 +53,7 @@ static Tensor quantized_layer_norm_impl(
   return Y;
 }
 
-static Tensor quantized_group_norm_impl(
+Tensor quantized_group_norm_impl(
     const Tensor& qx,
     int64_t num_groups,
     const Tensor& weight, // optional
@@ -107,7 +107,7 @@ static Tensor quantized_group_norm_impl(
   return Y;
 }
 
-static Tensor quantized_instance_norm_impl(
+Tensor quantized_instance_norm_impl(
     const Tensor& qx,
     const Tensor& weight, // optional
     const Tensor& bias, // optional

@@ -451,14 +451,53 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
-@register_decomposition([aten.native_dropout])
-def native_dropout(input: Tensor, p: float, train: bool):
-    if not train or p == 0:
-        return (input, torch.ones_like(input, dtype=torch.bool))
-    if p == 1:
-        return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
-    # intentionally don't decompose to improve pattern matching
-    return NotImplemented
+@register_decomposition(aten.rand_like)
+def rand_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.rand(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randn_like)
+def randn_like(self, *, dtype=None, device=None, **kwargs):
+    return torch.randn(
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randint_like.default)
+def randint_like(self, high, *, dtype=None, device=None, **kwargs):
+    return aten.randint.low(
+        0,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randint_like.low_dtype)
+def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
+    return aten.randint.low(
+        low,
+        high,
+        [*self.size()],
+        dtype=dtype or self.dtype,
+        device=device or self.device,
+        **kwargs,
+    )
+
+
+@register_decomposition(aten.randint.default)
+def randint(high, size, **kwargs):
+    return aten.randint.low(0, high, size, **kwargs)
 
 
 # The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is

@@ -1,14 +1,24 @@
 import torch
 import torch.utils._pytree as pytree
 from collections import namedtuple
+import functools
 
 
 # NOTE [CustomOp autograd kernel indirection]
+# We register `inner` as the autograd kernel for this custom_op.
+# `inner` either calls the autograd formula registered by the user,
+# or goes into an `autograd_not_implemented` kernel.
+#
+# The reason why this indirection exists is
+# so that we can swap out the autograd kernel (the PyTorch dispatcher
+# doesn't actually allow us to do this). By default, we want
+# the `autograd_not_implemented` behavior, but then the user may come
+# and register something that is actually a backward formula
 def autograd_kernel_indirection(custom_op):
     # TODO(#101191): Use the actual C++ autograd not implemented fallback,
     # or change the default autograd fallback to the autograd not implemented fallback.
     def autograd_not_implemented(*args, **kwargs) -> None:
-        if pytree.tree_any(
+        if torch.is_grad_enabled() and pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
         ):
             raise RuntimeError("Autograd has not been implemented for operator")
@@ -22,6 +32,10 @@ def autograd_kernel_indirection(custom_op):
         if custom_op._has_impl('autograd'):
             kernel = custom_op._get_impl('autograd').func
             return kernel(*args, **kwargs)
+        # As explained in NOTE ["backward", "save_for_backward", and "autograd"],
+        # after the user gives us "backward" and "save_for_backward", we generate
+        # the "autograd" impl. If the user only provided one, then we tell
+        # the user they've done something wrong.
         if custom_op._has_impl('save_for_backward') or custom_op._has_impl('backward'):
             missing = (
                 'save_for_backward' if custom_op._has_impl('backward')
@@ -52,7 +66,7 @@ def construct_autograd_kernel(
 
         def forward(ctx, *flat_args):
             ctx.set_materialize_grads(True)
-            args = pytree.tree_unflatten(flat_args, spec)
+            args = pytree.tree_unflatten(list(flat_args), spec)
             guard = torch._C._AutoDispatchBelowAutograd()
             try:
                 output = forward_op(*args)
@@ -95,7 +109,7 @@ def construct_autograd_kernel(
             return grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info)
 
         generated_cls = gen_autograd_function(
-            forward_op._opname + 'CustomOp', forward, backward)
+            forward_op._opname + '_customop', forward, backward)
 
         return generated_cls.apply(*flat_args)
     return apply
@@ -113,11 +127,18 @@ def gen_autograd_function(name, forward, backward):
     return generated_cls
 
 
+@functools.cache
+def namedtuple_args_cls(schema):
+    attribs = [arg.name for arg in schema.arguments.flat_all]
+    name = str(schema.name) + "_args"
+    # mypy doesn't support dynamic namedtuple
+    tuple_cls = namedtuple(name, attribs)  # typing: ignore [misc]
+    return tuple_cls
+
+
 def namedtuple_args(schema, args):
     assert isinstance(args, tuple)
-    attribs = [arg.name for arg in schema.arguments.flat_all]
-    name = str(schema.name) + "Args"
-    tuple_cls = namedtuple(name, attribs)
+    tuple_cls = namedtuple_args_cls(schema)
     return tuple_cls(*args)
 
 
@@ -134,7 +155,7 @@ def validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info):
 
     expected_keys = {arg.name for arg in forward_op._schema.arguments.flat_all
                      if arg.type.is_tensor_like()}
-    actual_keys = {k for k, _ in grad_inputs_dict.items()}
+    actual_keys = grad_inputs_dict.keys()
     if expected_keys != actual_keys:
         error(f"expected the returned grad_input dict to have keys "
               f"{expected_keys} but got {actual_keys}. The backward "

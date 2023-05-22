@@ -16,7 +16,6 @@
 #include <ATen/ops/mean_native.h>                     // for mean_out_quanti...
 #include <ATen/ops/quantize_per_tensor.h>             // for quantize_per_te...
 #include <ATen/ops/std.h>
-#include <ATen/ops/std_native.h>
 #include <ATen/ops/zeros_like_ops.h>
 #endif
 
@@ -55,7 +54,7 @@ inline bool is_mean_inner_dim_fast_path(
 }
 
 #ifdef USE_PYTORCH_QNNPACK
-static Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
+Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim, bool keepdim) {
   Tensor output;
   TORCH_CHECK(
       input.ndimension() == 4,
@@ -172,7 +171,7 @@ Tensor mean_quantized_cpu(
   return result;
 }
 
-static Tensor& mean_out_quantized_cpu(
+Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     DimnameList dim,
@@ -237,7 +236,7 @@ Tensor std_quantized_cpu(
   return result;
 }
 
-static Tensor std_quantized_cpu(
+Tensor std_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     const c10::optional<Scalar>& correction,
@@ -246,7 +245,7 @@ static Tensor std_quantized_cpu(
       self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
-static Tensor& std_out_quantized_cpu(
+Tensor& std_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     DimnameList dim,

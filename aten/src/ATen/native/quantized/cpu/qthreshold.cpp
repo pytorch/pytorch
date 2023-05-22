@@ -19,7 +19,7 @@ namespace native {
 DEFINE_DISPATCH(qthreshold_stub);
 
 // the underlying implementation for quantized threshold kernel
-static Tensor quantized_threshold_impl(
+Tensor quantized_threshold_impl(
     const Tensor& qx,
     const Scalar& threshold,
     const Scalar& value) {

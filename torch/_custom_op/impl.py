@@ -415,8 +415,11 @@ class CustomOp:
 
         return inner
 
-    # Should be lazily registered when both backward and save_for_backward
-    # have been provided.
+    # NOTE ["backward", "save_for_backward", and "autograd"]
+    # As a part of the explicit autograd API, a user must provide us
+    # a "save_for_backward" function and a "backward" function.
+    # When both of these have been provided, then we automatically
+    # construct the "autograd" kernel.
     def _register_autograd_kernel(self):
         assert self._has_impl("backward")
         assert self._has_impl("save_for_backward")

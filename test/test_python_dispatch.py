@@ -750,6 +750,21 @@ class TestCustomOp(TestCase):
             foo(y, x)
         foo._destroy()
 
+    def test_autograd_notimplemented_gradmode(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu'])
+        def foo_impl(x, y):
+            return x * y
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3)
+        with torch.no_grad():
+            # Shouldn't raise, because we are in no_grad
+            foo(y, x)
+
     def test_impl_cpu(self):
         @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1030,7 +1045,7 @@ class TestCustomOp(TestCase):
         with self.assertRaisesRegex(RuntimeError, "list of gradients"):
             y.backward()
 
-    def test_backward_output_differentiability_validation(self):
+    def test_backward_output_differentiability_type(self):
         @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
             ...
@@ -1040,7 +1055,7 @@ class TestCustomOp(TestCase):
             def foo_backward(ctx, saved, grad):
                 return {'xs': None}
 
-    def test_backward_output_differentiability_elements(self):
+    def test_backward_output_differentiability_numel(self):
         @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(xs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
             ...
@@ -1225,6 +1240,13 @@ class TestCustomOp(TestCase):
         gm = make_fx(f, tracing_mode='symbolic')(x)
         result = gm(x)
         self.assertEqual(result, f(x))
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
+    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    return numpy_view_copy""")  # noqa: B950
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
