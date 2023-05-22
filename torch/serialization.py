@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import warnings
 from contextlib import closing, contextmanager
+from enum import Enum
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
 from torch._sources import get_source_lines_and_file
@@ -51,6 +52,12 @@ __all__ = [
 
 class SourceChangeWarning(Warning):
     pass
+
+
+class DefaultLoadEndian(Enum):
+    NATIVE = 1
+    LITTLE = 2
+    BIG = 3
 
 
 @contextmanager
@@ -663,6 +670,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
+    default_load_endian: DefaultLoadEndian = DefaultLoadEndian.NATIVE,
     weights_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
@@ -791,10 +799,18 @@ def load(
                     return torch.jit.load(opened_file, map_location=map_location)
                 if weights_only:
                     try:
-                        return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
+                        return _load(opened_zipfile,
+                                     map_location,
+                                     _weights_only_unpickler,
+                                     _default_load_endian=default_load_endian,
+                                     **pickle_load_args)
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
-                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+                return _load(opened_zipfile,
+                             map_location,
+                             pickle_module,
+                             _default_load_endian=default_load_endian,
+                             **pickle_load_args)
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
@@ -1076,7 +1092,15 @@ class StorageType():
     def __str__(self):
         return f'StorageType(dtype={self.dtype})'
 
-def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
+
+def _load(
+    zip_file,
+    map_location,
+    pickle_module,
+    pickle_file='data.pkl',
+    _default_load_endian=DefaultLoadEndian.NATIVE,
+    **pickle_load_args
+):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
@@ -1088,6 +1112,12 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
+    elif _default_load_endian == DefaultLoadEndian.LITTLE:
+        byteorderdata = b'little'
+    elif _default_load_endian == DefaultLoadEndian.BIG:
+        byteorderdata = b'big'
+    elif _default_load_endian != DefaultLoadEndian.NATIVE:
+        raise ValueError('Invalid load endianness type')
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
