@@ -12913,6 +12913,10 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16,
                                            *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else []),
+           decorators=(
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-05, rtol=1e-03)}),
+                            'TestInductorOpInfo', 'test_comprehensive'),
+           ),
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),

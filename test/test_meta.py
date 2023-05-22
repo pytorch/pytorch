@@ -861,7 +861,7 @@ meta_dispatch_expected_failures = {
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
     aten.linalg_matrix_exp.default : {f16, bf16, f32, c64},
-    aten.tensordot.out: {f16}, # NotImplementedError: 'aten::tensordot.out'
+    aten.tensordot.out: {f16, bf16, f32, c64, c128},  # NotImplementedError: 'aten::tensordot.out'
 
 }
 
