@@ -3589,6 +3589,36 @@ class TestSparseCompressedTritonKernels(TestCase):
                     self.assertEqual(res_tri, res_tri_grid)
 
 
+    @parametrize("block_size", [16, 32, 64])
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.float)
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @precisionOverride({torch.float32: 2e-5})
+    def test_triton_sampled_addmm_fused_softmax(self, device, dtype, block_size):
+        from functools import partial
+        from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr, tile_to_blocksize
+
+        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
+        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
+
+        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
+        batches = [(), (2,)]
+        # TODO: add 0 to sizes.
+        size = [64, 128]
+
+        for bi, bm1, bm2, m, n, k in itertools.product(batches, batches, batches, size, size, size):
+            input = tensor(bi + (m, n))
+            input.diagonal(dim1=-2, dim2=-1).fill_(5.)
+            bsr = input.to_sparse_bsr(block_size)
+            mat1 = tensor(bm1 + (m, k))
+            mat2 = tensor(bm2 + (k, n))
+
+            res_tri = sampled_addmm(bsr, mat1, mat2, fuse_softmax=True)
+            res_dense = (input + mat1 @ mat2).softmax(-1)
+            self.assertEqual(res_tri, res_dense)
+
+
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
 instantiate_device_type_tests(TestSparseCompressed, globals())

@@ -160,11 +160,14 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
         kernel(grid, *sliced_tensors)
 
 
-def prepare_inputs(bsr, *dense_tensors):
+def prepare_inputs(bsr, *dense_tensors, bsr_values_proc_op=None):
+    if bsr_values_proc_op is None:
+        bsr_values_proc_op = make_triton_contiguous
+
     # Introduce fake batch dimension if not present for convenience.
     crow_indices = bsr.crow_indices().unsqueeze(0)
     col_indices = bsr.col_indices().unsqueeze(0)
-    values = make_triton_contiguous(bsr.values().unsqueeze(0))
+    values = bsr_values_proc_op(bsr.values().unsqueeze(0))
     tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
 
     # Compute broadcasted batch dimension
@@ -229,6 +232,8 @@ if _has_triton():
         BLOCKSIZE_COL: tl.constexpr,
         k,
         TILE_K: tl.constexpr,
+        N_NEXT_POW_OF_2: tl.constexpr,
+        nnz,
         values_ptr,
         values_batch_stride,
         values_nnz_stride,
@@ -253,7 +258,8 @@ if _has_triton():
         mat2_row_block_stride,
         mat2_col_block_stride,
         acc_dtype: tl.constexpr,
-        allow_tf32: tl.constexpr,
+        ALLOW_TF32: tl.constexpr,
+        FUSE_SOFTMAX: tl.constexpr,
     ):
         batch_pid = tl.program_id(axis=1)
         row_block_pid = tl.program_id(axis=0)
@@ -319,17 +325,19 @@ if _has_triton():
                 mat1_block = tl.load(
                     mat1_block_ptrs
                     + mat1_col_block_stride * k_offsets[None, :],
-                    mask=mask_k[None, :], other=0.0
+                    mask=mask_k[None, :],
+                    other=0.0
                 )
 
                 mat2_block = tl.load(
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    mask=mask_k[:, None], other=0.0
+                    mask=mask_k[:, None],
+                    other=0.0
                 )
 
-                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32)
+                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=ALLOW_TF32)
 
             if IS_BETA_ZERO:
                 acc_block *= alpha
@@ -342,6 +350,36 @@ if _has_triton():
             # advance val/col_index ptrs to the next block in the row.
             values_block_ptrs += values_nnz_stride
             col_index_nnz_ptr += col_indices_stride
+
+        if FUSE_SOFTMAX:
+            row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+            row_block_stride = nnz * BLOCKSIZE_COL
+            col_arange = tl.arange(0, N_NEXT_POW_OF_2)
+
+            values_stripe_ptrs = (
+                values_ptr
+                + values_batch_stride * batch_pid
+                + row_block_stride * row_block_arange[:, None]
+                + nnz_offset * BLOCKSIZE_COL + col_arange[None, :]
+            )
+
+            values_stripe = tl.load(
+                values_stripe_ptrs,
+                mask=(col_arange[None, :] < row_nnz * BLOCKSIZE_COL),
+                other=-float('inf'),
+            ).to(acc_dtype)
+
+            vals_transl = values_stripe - tl.max(values_stripe, 1)[:, None]
+            num = tl.exp(vals_transl)
+            denom = tl.sum(num, 1)
+            softmax = num / denom[:, None]
+
+            tl.store(
+                values_stripe_ptrs,
+                softmax.to(values_ptr.dtype.element_ty),
+                mask=(col_arange[None, :] < row_nnz * BLOCKSIZE_COL)
+            )
+
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
@@ -509,9 +547,10 @@ if _has_triton():
 
     def _run_sampled_addmm_kernel(
         alpha, beta, is_beta_zero,
-        blocksize, k, tile_k,
+        blocksize, k, tile_k, n_next_pow_of_2, nnz,
         values, crow_indices, col_indices,
         mat1, mat2,
+        fuse_softmax,
         max_grid
     ):
         n_batches = values.size(0)
@@ -539,10 +578,11 @@ if _has_triton():
         def kernel(grid, *sliced_tensors):
             _sampled_addmm_kernel[grid](
                 alpha, beta, is_beta_zero,
-                *blocksize, k, tile_k,
+                *blocksize, k, tile_k, n_next_pow_of_2, nnz,
                 *ptr_stride_extractor(*sliced_tensors),
                 acc_dtype=acc_dtype,
-                allow_tf32=allow_tf32,
+                ALLOW_TF32=allow_tf32,
+                FUSE_SOFTMAX=fuse_softmax,
                 num_stages=1,
                 num_warps=4
             )
@@ -558,6 +598,7 @@ if _has_triton():
         beta=1.0,
         alpha=1.0,
         out: Optional[torch.Tensor] = None,
+        fuse_softmax: bool = False,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
     ):
@@ -603,8 +644,22 @@ if _has_triton():
             return out
 
         # prepare inputs by reshaping them to be kernel-compatible
+        if not fuse_softmax:
+            bsr_values_proc_op = None
+        else:
+
+            def fuse_nnz_with_block_col_dim(vals):
+                return vals.transpose(-3, -2).contiguous().transpose(-3, -2)
+            bsr_values_proc_op = fuse_nnz_with_block_col_dim
+        # will only be used if fuse_softmax is True
+        n_next_pow_of_2 = triton.next_power_of_2(n)
+        nnz = out._nnz()
+
         out_backup = out
-        crow_indices, col_indices, values, mat1, mat2 = prepare_inputs(out, mat1, mat2)
+        crow_indices, col_indices, values, mat1, mat2 = prepare_inputs(
+            out, mat1, mat2,
+            bsr_values_proc_op=bsr_values_proc_op
+        )
 
         mat1 = tile_to_blocksize(mat1, (blocksize[0], k))
         mat2 = tile_to_blocksize(mat2, (k, blocksize[1]))
@@ -612,9 +667,10 @@ if _has_triton():
 
         _run_sampled_addmm_kernel(
             alpha, beta, beta == 0.0,
-            blocksize, k, tile_k,
+            blocksize, k, tile_k, n_next_pow_of_2, nnz,
             values, crow_indices, col_indices,
             mat1, mat2,
+            fuse_softmax,
             max_grid
         )
 
