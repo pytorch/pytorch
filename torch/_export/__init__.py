@@ -129,9 +129,8 @@ def _export(
 
             # Fix the graph output signature to be tuple if scalar
             return_val = f(*args)
-            # this means it is scalar return value
             out_spec = orig_out_spec = gm_torch_level._out_spec
-
+            # this means it is scalar return value
             if not isinstance(return_val, (list, tuple, dict)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
@@ -252,23 +251,7 @@ class MultiMethodExportedProgram:
         "it only contains a single method or it contains a `forward` method. "
         "Please look up one of its methods first via "
         "`MultiMethodExportedProgram.find_method(method_name)`."""
-
-        assert EXPORT_METADATA in gm.meta, "Exported graph module must have EXPORT_METADATA field"
-        meta = gm.meta[EXPORT_METADATA]
-
-        params = {
-            **dict(gm.named_parameters(remove_duplicate=False)),
-            **dict(gm.named_buffers(remove_duplicate=False)),
-        }
-
-        params_flat, params_spec = pytree.tree_flatten(params)
-        params_flat = tuple(params_flat)
-
-        user_flat_args = pytree.tree_flatten(args)[0]
-
-        output = gm(*params_flat, *user_flat_args)
-
-        return output
+        return gm(*args, **kwargs)
 
     def __repr__(self) -> str:
         # TODO(gmagogsfm): Implement.

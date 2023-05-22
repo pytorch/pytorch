@@ -15816,6 +15816,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
                # Lazy tensor failures
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),

@@ -51,7 +51,7 @@ class ExportMetadata:
     input_name_to_example_inputs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     mutation_data: "MutationData" = None
 
-@dataclass.dataclass
+@dataclasses.dataclass
 class MutationData:
     parameters: List[FQN]
     buffers: List[FQN]
@@ -153,21 +153,29 @@ class ExportGraphModuleMixin:
             except Exception as e:
                 raise error.InternalError("The in_spec is not correctly maintained.") from e
 
+        params = {
+            **dict(self.named_parameters(remove_duplicate=False)),
+            **dict(self.named_buffers(remove_duplicate=False)),
+        }
+
+        params_flat, params_spec = pytree.tree_flatten(params)
+        params_flat = tuple(params_flat)
+
         with torch.fx.traceback.preserve_node_meta(), torch.no_grad():
-            res = torch.fx.Interpreter(self).run(*args, enable_io_processing=False)
+            res = torch.fx.Interpreter(self).run(*params_flat, *args, enable_io_processing=False)
+
+        mutation = meta.mutation_data
+        num_mutated = len(mutation.buffers_to_mutate) if mutation is not None else 0
+        user_flat_outputs = res[num_mutated:]
+
+        # TODO update the mutated buffers
 
         if getattr(meta, "out_spec", None) is not None:
             try:
-                mutation = meta.mutation
-                num_mutated = len(mutation) if mutation is not None else 0
-                res = pytree.tree_unflatten(
-                    res[num_mutated:],
-                    meta.out_spec,
-                )
-                return res
+                return pytree.tree_unflatten(user_flat_outputs, meta.out_spec)
             except Exception as e:
                 raise error.InternalError("The out_spec is not correctly maintained.") from e
-        return res
+        return user_flat_outputs
 
     def recompile(self) -> torch.fx.graph_module.PythonCode:
         """
@@ -246,7 +254,7 @@ def make_export_graph_module(
     in_spec: Optional[pytree.TreeSpec] = None,
     out_spec: Optional[pytree.TreeSpec] = None,
     example_inputs: Any = None,
-    graph_signature: GraphSignature = None,
+    mutation_data: MutationData = None,
     class_name: str = "ExportGraphModule",
 ) -> fx.GraphModule:
 
@@ -267,14 +275,16 @@ def make_export_graph_module(
 
     input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
     input_name_to_example_inputs: Dict[str, Any] = {}
+    num_params_buffers = len(mutation_data.parameters) + len(mutation_data.buffers) if mutation_data is not None else 0
     if example_inputs is not None:
         input_tracker = 0
         for node in gm.graph.nodes:
             if node.op == "placeholder":
-                example_input = example_inputs[input_tracker]
-                if id(example_input) in input_shape_constraints_by_tensor_id:
-                    input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
-                input_name_to_example_inputs[node.name] = example_input
+                if input_tracker >= num_params_buffers:
+                    example_input = example_inputs[input_tracker - num_params_buffers]
+                    if id(example_input) in input_shape_constraints_by_tensor_id:
+                        input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
+                    input_name_to_example_inputs[node.name] = example_input
                 input_tracker += 1
 
     meta = ExportMetadata(
@@ -284,7 +294,7 @@ def make_export_graph_module(
         input_shape_constraints=input_shape_constraints_by_src_name,
         inline_constraints=inline_constraints,
         input_name_to_example_inputs=input_name_to_example_inputs,
-        graph_signature=graph_signature
+        mutation_data=mutation_data,
     )
     attach_export_graph_metadata(gm, meta)
     return gm
