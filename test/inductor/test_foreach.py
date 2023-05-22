@@ -13,9 +13,9 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
-        from .test_torchinductor import check_model_cuda, requires_cuda
+        from .test_torchinductor import check_model, check_model_cuda, requires_cuda
     except ImportError:
-        from test_torchinductor import check_model_cuda, requires_cuda
+        from test_torchinductor import check_model, check_model_cuda, requires_cuda
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -24,7 +24,8 @@ except (unittest.SkipTest, ImportError) as e:
 
 
 class ForeachTests(TestCase):
-    check_model = check_model_cuda
+    check_model_cuda = check_model_cuda
+    check_model_cpu = check_model
 
     def setUp(self):
         super().setUp()
@@ -39,7 +40,7 @@ class ForeachTests(TestCase):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -57,7 +58,7 @@ class ForeachTests(TestCase):
             c = torch._foreach_add([a0, a1], [b0, b1])
             return c, torch._foreach_add([a0, a1], c)
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -132,7 +133,7 @@ class ForeachTests(TestCase):
             c = torch._foreach_add([a0, a1], [b0, b1])
             return torch._foreach_add([a0, b0], [c[0], c[0]])
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -150,7 +151,7 @@ class ForeachTests(TestCase):
             c = torch._foreach_add([a0, a1], [b0, b1])
             return torch.mul(c[0], a0)
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -169,7 +170,7 @@ class ForeachTests(TestCase):
             c1 = torch.mul(a1, b1)
             return torch._foreach_add([a0, a1], [c0, c1])
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -191,7 +192,7 @@ class ForeachTests(TestCase):
             e1 = torch.mul(d[1], a1)
             return [e0, e1]
 
-        self.check_model(
+        self.check_model_cuda(
             fn,
             (
                 torch.rand(10, 10, device="cuda:0"),
@@ -202,6 +203,37 @@ class ForeachTests(TestCase):
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+
+    @requires_cuda()
+    def test_dynamic_shapes_fallback(self):
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+
+        self.check_model_cuda(fn, inputs)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_cpu_cpp_fallback(self):
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        inputs = (
+            torch.rand(10, 10, device="cpu"),
+            torch.rand(20, 20, device="cpu"),
+            torch.rand(10, 10, device="cpu"),
+            torch.rand(20, 20, device="cpu"),
+        )
+
+        self.check_model_cpu(fn, inputs)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
 
 if __name__ == "__main__":

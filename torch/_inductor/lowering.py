@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 import warnings
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -208,12 +209,9 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
     return args
 
 
-def _register_foreach_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
-):
+def _register_foreach_lowering(aten_fn, decomp_fn):
     """
-    Add a foreach lowering to lowerings dict. This is special because args are paired up differently
-    for broadcasting and type promotion.
+    Add a foreach lowering to lowerings dict.
 
     Arguments:
         aten_fn: torch.ops.aten.* fn we are lowering
@@ -415,11 +413,42 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(fn):
-    def inner(*inputs: List[List[TensorBox]], alpha=None):
-        for t in itertools.chain(*inputs):
-            assert isinstance(t, TensorBox)
-            t.realize()
+def make_foreach_pointwise(aten_fn, pw_fn):
+    def inner(*inputs: List[List[TensorBox]], alpha=1.0):
+        def group_by_device(tensor_pairs):
+            out = defaultdict(list)
+            for i, (l, r) in enumerate(tensor_pairs):
+                assert l.get_device() == r.get_device()
+                out[l.get_device()].append((i, l, r))
+            return out
+
+        device_groups = group_by_device(zip(*inputs))
+        outputs = [None] * len(inputs[0])
+        for device, group in device_groups.items():
+            if device.type == "cpu":
+                ls = []
+                rs = []
+                for output_ind, left, right in group:
+                    ls.append(left)
+                    rs.append(right)
+                output = fallback_handler(aten_fn, False)(ls, rs, alpha=alpha)
+                for ind, (output_ind, _, _) in enumerate(group):
+                    outputs[output_ind] = output[ind]
+
+            else:
+                assert device.type == "cuda"
+                buffer_list = []
+                for output_ind, left, right in group:
+                    left.realize()
+                    right.realize()
+                    output = pw_fn(left, right, alpha=alpha)
+                    buffer_list.append(output.realize())
+                    outputs[output_ind] = output
+
+                V.graph.register_list(buffer_list)
+
+        assert all(x is not None for x in outputs)
+        return outputs
 
         outputs = [fn(*x, alpha=alpha) for x in zip(*inputs)]
         V.graph.register_list([output.realize() for output in outputs])
@@ -501,26 +530,9 @@ def register_pointwise(
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
-    name=None,
-    broadcast=True,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    convert_input_to_bool=False,
-    override_return_dtype=None,
-    override_fn_when_input_bool=None,
-    allow_alpha=False,
-    use_libdevice_for_f64=False,
 ):
-    """A pointwise function that maps ops.{name} to inputs"""
-    name = name or aten_fn.__name__
-
-    fn = make_foreach_pointwise(pointwise_lowering_fn)
-    fn = _register_foreach_lowering(
-        aten_fn,
-        fn,
-        broadcast=broadcast,
-        type_promotion_kind=type_promotion_kind,
-        convert_input_to_bool=convert_input_to_bool,
-    )
+    fn = make_foreach_pointwise(aten_fn, pointwise_lowering_fn)
+    fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
 
