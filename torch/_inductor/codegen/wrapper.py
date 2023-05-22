@@ -22,7 +22,6 @@ from ..utils import (
     LineContext,
     sympy_dot,
     sympy_product,
-    sympy_symbol,
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
@@ -253,7 +252,6 @@ class WrapperCodeGen(CodeGen):
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
         self.lines = []
-        self.need_seed = False
         self.declare = ""
         self.ending = ""
         self.open_bracket = "["
@@ -300,6 +298,7 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                from math import inf, nan
                 from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
@@ -358,10 +357,6 @@ class WrapperCodeGen(CodeGen):
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
-            for name in V.graph.randomness_seeds:
-                self.prefix.writeline(
-                    f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
-                )
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
     def append_precomputed_sizes_to_prefix(self):
@@ -495,10 +490,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
 
         @functools.lru_cache(None)
         def sizeof(name):
@@ -653,7 +644,9 @@ class WrapperCodeGen(CodeGen):
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
-        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        self.wrapper_call.writeline(
+            f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
+        )
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args, device_index=None, cpp=False):
@@ -676,6 +669,18 @@ class WrapperCodeGen(CodeGen):
     def val_to_str(self, s):
         if isinstance(s, SymTypes):
             return pexpr(sympy.expand(repr(s)))
+        elif isinstance(s, sympy.Expr):
+            return pexpr(s)
+        elif isinstance(s, (tuple, list)):
+
+            @dataclasses.dataclass
+            class Shim:
+                ref: Any
+
+                def __repr__(self):
+                    return self.ref
+
+            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
         else:
             return repr(s)
 
@@ -815,16 +820,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
 
-    def seed(self):
-        """
-        Seed is a special variable used to hold the rng seed for a graph.
-
-        Note this is only used by the CPU backend, we put seeds in a
-        1-element tensor for the CUDA backend.
-        """
-        self.need_seed = True
-        return sympy_symbol("seed")
-
     def write_header(self):
         if V.graph.aot_mode:
             self.header.splice(
@@ -889,11 +884,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.wrapper_call.writeline(f"at::Tensor {input_key};")
                         self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
 
-            for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(f"at::Tensor {name};")
-                self.wrapper_call.writeline(
-                    f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
-                )
             self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
 
             self.wrapper_call.splice(
@@ -1174,7 +1164,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if is_int(arg):
+            if isinstance(arg, torch._inductor.codegen.triton.SymbolicCallArg):
+                self.writeline(f"auto {var_name} = {arg};")
+            elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")
