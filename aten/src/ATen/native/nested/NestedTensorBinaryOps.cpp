@@ -23,7 +23,7 @@ DEFINE_DISPATCH(nested_dense_elementwise_stub);
 REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
-static get_elementwise_nested_tensor_impl(
+get_elementwise_nested_tensor_impl(
     const Tensor& self,
     const Tensor& other,
     const std::string& op_name) {
