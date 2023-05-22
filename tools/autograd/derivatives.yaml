@@ -788,7 +788,7 @@
   result: auto_linear
 
 - name: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
+  self: at::_unsafe_index_put(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad, true)
   result: auto_linear
 
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
@@ -828,6 +828,11 @@
   self: "accumulate ? grad : grad.index_put(indices, zeros_like(values), false)"
   values: grad.index(indices)
   result: self_t.index_put(indices, values_t, accumulate)
+
+- name: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  self: "accumulate ? grad : at::_unsafe_index_put(grad, indices, zeros_like(values), false)"
+  values: at::_unsafe_index(grad, indices)
+  result: at::_unsafe_index_put(self_t, indices, values_t, accumulate)
 
 - name: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   self: "accumulate ? grad : grad.index_put(indices, zeros_like(values), false)"

@@ -2989,6 +2989,12 @@
   dispatch:
     CompositeExplicitAutograd: index_put
 
+- func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_index_put
+
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
