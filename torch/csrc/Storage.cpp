@@ -375,14 +375,6 @@ static PyObject* THPStorage_pynew(
     // torch.Storage(size, *, ...)
   } else if (r.idx == 1) {
     int64_t size = r.toInt64(0);
-    self->cdata = c10::MaybeOwned<c10::Storage>::owned(make_storage_impl(
-        c10::StorageImpl::use_byte_size_t(),
-        size,
-        allocator,
-        /*resizable=*/true,
-        allocator_opt,
-        device_opt));
-    return (PyObject*)self.release();
     self = THPStorage_NewWithStorage(
         type,
         make_storage_impl(
@@ -408,13 +400,6 @@ static PyObject* THPStorage_pynew(
         THPStorageStr,
         "(): Could not obtain the length of sequence of type ",
         THPUtils_typename(sequence));
-    self->cdata = c10::MaybeOwned<c10::Storage>::owned(make_storage_impl(
-        c10::StorageImpl::use_byte_size_t(),
-        length,
-        allocator,
-        /*resizable=*/true,
-        allocator_opt,
-        device_opt));
     self = THPStorage_NewWithStorage(
         type,
         make_storage_impl(
