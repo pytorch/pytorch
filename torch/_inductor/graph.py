@@ -156,7 +156,10 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
-        self.decide_layout_opt()
+        if self.decide_layout_opt():
+            print("add back the constraint for convolution") # TODO
+            from .lowering import add_layout_constraint, constrain_to_fx_strides
+            add_layout_constraint(torch.ops.aten.convolution, constrain_to_fx_strides)
 
         # Convert view to reshape if we are doing layout optimization.
         # It's needed because when we do layout optimization, an contiguous tensor
@@ -210,8 +213,11 @@ class GraphLowering(torch.fx.Interpreter):
         self._warned_fallback = {"aten.convolution_backward"}
 
     def decide_layout_opt(self):
+        """
+        Return true if layout_opt is disabled by this method.
+        """
         if not config.layout_opt:
-            return
+            return False
 
         gm = self.module
         conv_nodes = [
@@ -220,7 +226,7 @@ class GraphLowering(torch.fx.Interpreter):
         nconv = len(conv_nodes)
 
         if nconv == 0:
-            return
+            return False
 
         # Followering models are skipped due to this:
         # jx_nest_base
@@ -228,7 +234,7 @@ class GraphLowering(torch.fx.Interpreter):
         if len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("ONLY A FEW CONV, SKIP LAYOUT OPT")
             config.layout_opt = False
-            return
+            return True
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
@@ -252,7 +258,7 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("FOUND GROUPED CONVOLUTION with >1 in_channels!")
             config.layout_opt = False
-            return
+            return True
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
         # channels last hurts performance.
@@ -270,7 +276,7 @@ class GraphLowering(torch.fx.Interpreter):
                 "SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL"
             )
             config.layout_opt = False
-            return
+            return True
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
@@ -280,7 +286,7 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
             config.layout_opt = False
-            return
+            return True
 
         # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
         # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
@@ -299,7 +305,9 @@ class GraphLowering(torch.fx.Interpreter):
                     "SKIP LAYOUT OPT BECAUSE _scaled_dot_product_flash_attention found"
                 )
                 config.layout_opt = False
-                return
+                return True
+
+        return False
 
     def find_nodes_prefer_channels_last(self):
         """
