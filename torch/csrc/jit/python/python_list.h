@@ -119,13 +119,13 @@ class ScriptList final {
   }
 
   // Get the size of the list.
-  diff_type len() const {
+  ssize_t len() const {
     return list_.size();
   }
 
   // Count the number of times a value appears in the list.
-  diff_type count(const IValue& value) const {
-    diff_type total = 0;
+  ssize_t count(const IValue& value) const {
+    ssize_t total = 0;
 
     for (const auto& elem : list_) {
       if (elem == value) {
