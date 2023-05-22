@@ -222,7 +222,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
                 SELECT.substitute(
                     cond="tracer_state->force_outplace",
                     true="\n".join(outplace),
-                    false=inplace,
+                    false="\n".join(inplace),
                 )
             ],
         )
