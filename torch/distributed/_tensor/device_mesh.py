@@ -116,20 +116,6 @@ class DeviceMesh(object):
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
-        # validate that all calling ranks pass in the same `mesh` argument.
-        mesh_list = [
-            torch.empty_like(self.mesh, device=self.device_type)
-            for _ in range(get_world_size())
-        ]
-        self_mesh = self.mesh.to(self.device_type)
-        all_gather(mesh_list, self_mesh)
-        for other_rank, other_mesh in enumerate(mesh_list):
-            if not torch.equal(self_mesh, other_mesh):
-                raise RuntimeError(
-                    f"DeviceMesh.__init__ does not allow different mesh argument:"
-                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
-                    f"has mesh {other_mesh}!"
-                )
         if _init_process_groups:
             self._dim_groups = self._init_process_groups()
 
@@ -171,11 +157,6 @@ class DeviceMesh(object):
                         f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
                     )
                 torch.cuda.set_device(get_rank() % num_gpus_per_host)
-            # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-            # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-            # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-            # this attribute, so we will implement this logic once we figure out the answer.
-            self._seed = torch.cuda.initial_seed()
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
@@ -191,11 +172,31 @@ class DeviceMesh(object):
 
     def _init_process_groups(self):
         default_pg = _get_default_group()
+        # check mesh tensor validity
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
+        # validate that all calling ranks pass in the same `mesh` argument.
+        mesh_list = [
+            torch.empty_like(self.mesh, device=self.device_type)
+            for _ in range(get_world_size())
+        ]
+        self_mesh = self.mesh.to(self.device_type)
+        all_gather(mesh_list, self_mesh)
+        for other_rank, other_mesh in enumerate(mesh_list):
+            if not torch.equal(self_mesh, other_mesh):
+                raise RuntimeError(
+                    f"DeviceMesh initialization does not allow different mesh argument:"
+                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
+                    f"has mesh {other_mesh}!"
+                )
+        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
+        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
+        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
+        # this attribute, so we will implement this logic once we figure out the answer.
+        self._seed = torch.cuda.initial_seed()
 
         # groups created by dimension, each dimension should have exact
         # one valid process group per rank
