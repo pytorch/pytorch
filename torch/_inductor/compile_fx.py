@@ -75,15 +75,6 @@ def index_expanded_dims(t, expanded_dims):
     return t
 
 
-def view_to_reshape(gm):
-    """
-    Replace view ops in the GraphModule to reshape ops.
-    """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
-
-
 def complex_memory_overlap(t):
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
@@ -216,20 +207,6 @@ def compile_fx_inner(
     is_inference=False,
     boxed_forward_device_index=None,
 ):
-    # Convert view to reshape if we are doing layout optimization.
-    # It's needed because when we do layout optimization, an contiguous tensor
-    # in eager mode may becomes a channels last tensor. A view op previously
-    # can be applied to the contiguous tensor may not be able to be applied
-    # on the channels tensor any more. An error like
-    #   RuntimeError: view size is not compatible with input tensor's size and stride
-    #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-    # will be printed.
-    #
-    # Replace view op to reshape op in this case.
-    # As an example, timm_resnest will fail if we don't do this.
-    if config.layout_opt:
-        view_to_reshape(gm)
-
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
 

@@ -92,6 +92,14 @@ def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
 
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default
+            print("View To reshape") # TODO
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -149,6 +157,21 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.decide_layout_opt()
+
+        # Convert view to reshape if we are doing layout optimization.
+        # It's needed because when we do layout optimization, an contiguous tensor
+        # in eager mode may becomes a channels last tensor. A view op previously
+        # can be applied to the contiguous tensor may not be able to be applied
+        # on the channels tensor any more. An error like
+        #   RuntimeError: view size is not compatible with input tensor's size and stride
+        #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+        # will be printed.
+        #
+        # Replace view op to reshape op in this case.
+        # As an example, timm_resnest will fail if we don't do this.
+        if config.layout_opt:
+            view_to_reshape(gm)
+
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
