@@ -2738,7 +2738,7 @@ def constant_pad_nd(x, padding, fill_value=0):
         mask = []
         for idx, (low, high), length in zip(index[n:], bounds, mask_sizes):
             if low != 0:
-                mask.append(range_mask_low(idx))
+                mask.append(range_mask_low(idx, 0))
             if high != 0:
                 mask.append(range_mask_high(idx, length))
         mask = functools.reduce(ops.and_, mask)
@@ -2760,39 +2760,51 @@ def constant_pad_nd(x, padding, fill_value=0):
     )
 
 
-def range_mask_low(i: sympy.Expr):
+def range_mask_low(i: sympy.Expr, low: sympy.Expr):
     return ops.ge(
         ops.index_expr(i, torch.int64),
-        ops.index_expr(sympy.Integer(0), torch.int64),
+        ops.index_expr(sympy.Integer(low), torch.int64),
     )
 
 
-def range_mask_high(i: sympy.Expr, length: sympy.Expr):
+def range_mask_high(i: sympy.Expr, high: sympy.Expr):
     return ops.lt(
         ops.index_expr(i, torch.int64),
-        ops.index_expr(length, torch.int64),
+        ops.index_expr(high, torch.int64),
     )
 
 
-def range_mask(i: sympy.Expr, length: sympy.Expr):
+def range_mask(i: sympy.Expr, high: sympy.Expr, low: sympy.Expr):
     return ops.and_(
-        range_mask_low(i),
-        range_mask_high(i, length),
+        range_mask_low(i, low),
+        range_mask_high(i, high),
     )
 
 
-def constant_boundary_condition_2d(x, fill_value, padding):
+def constant_boundary_condition_2d(x, fill_value, padding=None, pad_fill_value=1.0):
     *_, h, w = x.get_size()
     x_loader = x.make_loader()
+    padding_h = padding[0] if padding else 0
+    padding_w = padding[1] if padding else 0
 
     def load(index):
         *prefix, ih, iw = index
 
         mask = ops.and_(
-            range_mask(ih, h),
-            range_mask(iw, w),
+            range_mask(ih, h + padding_h, -padding_h),
+            range_mask(iw, w + padding_w, -padding_w),
         )
-        return ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
+        return (
+            ops.masked(
+                mask,
+                lambda: constant_boundary_condition_2d(x, pad_fill_value)(
+                    [*prefix, ih, iw]
+                ),
+                fill_value,
+            )
+            if padding
+            else ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
+        )
 
     return load
 
@@ -2851,7 +2863,7 @@ def max_pool2d_with_indices(
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, float("-inf"), padding)
+        x_loader = constant_boundary_condition_2d(x, float("-inf"))
     else:
         x_loader = x.make_loader()
 
@@ -3271,7 +3283,7 @@ def avg_pool2d(
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, 0.0, padding)
+        x_loader = constant_boundary_condition_2d(x, 0.0)
         had_padding = True
     else:
         x_loader = x.make_loader()
@@ -3306,7 +3318,7 @@ def avg_pool2d(
                 total = ops.add(val, total)
         return total
 
-    if count_include_pad or not had_padding or divisor_override:
+    if not had_padding or divisor_override:
         if divisor_override:
             scale = 1 / divisor_override
         else:
@@ -3316,7 +3328,9 @@ def avg_pool2d(
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
 
     else:
-        ones_loader = constant_boundary_condition_2d(ones_like(x), 0.0, padding)
+        ones_loader = constant_boundary_condition_2d(
+            ones_like(x), 0.0, padding if count_include_pad else None
+        )
 
         def fn(idx):
             # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`

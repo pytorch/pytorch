@@ -97,7 +97,7 @@ Tensor repeat_interleave(
   return ret;
 }
 
-Tensor repeat_interleave(
+static Tensor repeat_interleave(
     const Tensor& self,
     int64_t repeats,
     c10::optional<int64_t> dim,

@@ -232,6 +232,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z1 = z1.cpu()
             self.assertFalse(self.module.custom_add_called())
             self.assertFalse(z1.is_foo)
+            z1 = z1.foo(device="foo:0", non_blocking=False)
+            self.assertFalse(self.module.custom_add_called())
+            self.assertTrue(z1.is_foo)
+            with self.assertRaisesRegex(RuntimeError, "Invalid device"):
+                z1.foo(device="cuda:0", non_blocking=False)
             # check UntypedStorage
             y = torch.empty(4, 4)
             z2 = y.untyped_storage()
