@@ -11,7 +11,7 @@ from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -156,6 +156,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
 
+    @skipIfRocm
     @requires_cuda()
     def test_aot_ts_nvfuser(self):
         self._check_backend_works("aot_ts_nvfuser")
