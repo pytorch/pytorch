@@ -114,6 +114,7 @@ def _export(
                 decomposition_table=DECOMP_TABLE,
                 constraints=constraints,
                 assume_static_by_default=True,
+                functionalize=True,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))

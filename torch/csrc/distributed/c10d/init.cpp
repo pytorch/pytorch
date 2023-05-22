@@ -832,7 +832,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
       .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
-      .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BarrierOptions::timeout)
+      .def_readwrite("device", &::c10d::BarrierOptions::device);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())

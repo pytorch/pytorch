@@ -394,6 +394,8 @@ class NNModuleVariable(VariableTracker):
             assert args[1].is_python_constant()
             assert isinstance(args[0], TupleVariable)
             mod_var = args[0].items[args[1].value]
+            if isinstance(mod_var, UnspecializedNNModuleVariable):
+                return mod_var
             key = mod_var.module_key
             submod = tx.output.get_submodule(key)
             return tx.output.register_attr_or_module(
