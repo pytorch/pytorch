@@ -252,14 +252,13 @@ class ShardingPropagator:
         op_overload: OpOverload,
         op_schema: OpSchema,
     ) -> Optional[torch.fx.GraphModule]:
-        # right now we only use the graph for metadata prop, but next we will use
-        # the graph to do sharding prop together
-
+        # prepare the op graph for sharding propagation
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
             torch.ops.aten._local_scalar_dense.default,
             torch.ops.aten.equal.default,
+            torch.ops.aten.is_same_size.default,
         ]
         if op_overload in skip_prop_list:
             return None
