@@ -919,6 +919,10 @@ class TestForeach(TestCase):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
 
+        # note(crcrpar): These patterns are to skip "sample"s that are incompatible with some
+        # in-place foreach functions' forward path, not forward mode AD.
+        # Raising / xfailing them would rather lose coverage since `sample_inputs` yields
+        # different Scalars and ScalarLists.
         patterns_to_tolerate = "|".join([
             _BOOL_SUB_ERR_MSG,
             # Some non-unary in-place ops with scalar/scalarlist would error out if there's non float ones.
