@@ -342,16 +342,6 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 }
 } // namespace
 
-static constexpr bool is_mkl_supported() {
-#ifdef _MSC_VER
-  return false;
-#elif __APPLE__ || __MACH__
-  return false;
-#else
-  return true;
-#endif
-}
-
 // Only accept squares sparse matrices or dense input as a vector
 // TODO: Check what happens with MKL, the output error reported with non square
 // matrices tends to be high See:
