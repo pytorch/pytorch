@@ -2596,7 +2596,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
   return work;
 }
 
-at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
+static at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
     TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
   }
@@ -2610,7 +2610,7 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   return tensor;
 }
 
-uint32_t checkTag(int32_t tag) {
+static uint32_t checkTag(int32_t tag) {
   TORCH_CHECK(tag >= 0, "Tag must be nonnegative");
   return (uint32_t)tag;
 }

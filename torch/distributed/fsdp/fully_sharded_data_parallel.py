@@ -41,6 +41,7 @@ from torch.distributed.fsdp._init_utils import (
     _get_default_comm_hook,
     _init_buffer_state,
     _init_core_state,
+    _init_device_handle,
     _init_ignored_module_states,
     _init_param_handle_from_module,
     _init_prefetching_state,
@@ -389,6 +390,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
         _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
+        _init_device_handle(self, module, self._ignored_params, device_id)
 
         # Add module annotations for Dynamo support (see function for details)
         _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
@@ -748,16 +750,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_config (Optional[StateDictConfig]): the configuration for the
                 target ``state_dict_type``.
         """
-        try:
-            prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
-                module,
-                state_dict_type,
-                state_dict_config,
-                optim_state_dict_config,
-            )
-            yield
-        except Exception as e:
-            raise e
+        prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        )
+        yield
         FullyShardedDataParallel.set_state_dict_type(
             module,
             prev_state_dict_settings.state_dict_type,

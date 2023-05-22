@@ -194,7 +194,9 @@ Tensor mkldnn_linear_pointwise(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight_t.size(0));
   auto output = at::empty(output_size, input.options());
-
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   if (dim != 2) {
     std::vector<int64_t> output_size_reshaped = {input_reshaped.size(0),
                                                  weight_t.size(0)};
@@ -274,6 +276,9 @@ Tensor mkldnn_linear_pointwise_binary(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(weight_t.size(0));
   auto output = at::empty(output_size, input.options());
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   auto other_reshaped = other_t.contiguous();
 
   if (dim != 2) {
@@ -357,6 +362,13 @@ Tensor mkl_linear(
   std::vector<int64_t> output_size(input_size.begin(), input_size.end() - 1);
   output_size.push_back(origin_weight_t.size(0));
   auto output = at::empty(output_size, self.options());
+  if (self.sym_numel() == 0) {
+    // avoid to call self.numel() / 0 when self.size(self.dim() - 1)==0.
+    return output.fill_(0);
+  }
+  if (output.sym_numel() == 0) {
+    return output;
+  }
   int64_t M = self.numel() / self.size(self.dim() - 1);
   if (M == prepack_batch_size && mkl_weight_t.is_mkldnn()) {
     auto self_ = self.is_contiguous() ? self : self.contiguous();
