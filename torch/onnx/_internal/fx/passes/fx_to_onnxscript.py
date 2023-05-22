@@ -355,57 +355,10 @@ def _export_fx_node_to_onnxscript(
 
             fx_name_to_onnxscript_value[node.name] = output
             return
-        if node.target == operator.getitem:
-            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
-            exporter_key = "getitem"
-        elif (
-            isinstance(node.target, types.BuiltinFunctionType)
-            and node.target
-            in function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
-        ):
-            for node_arg in node.args:
-                if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
-                    isinstance(node_arg, torch.fx.Node)
-                    and not isinstance(
-                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
-                    )
-                ):
-                    raise ValueError(
-                        f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
-                        " only int/float/SymInt/SymFloat is supported with built-in ops!"
-                    )
 
-            # symbolic fx.graph contains built-in functions to calculate python values.
-            exporter_key = function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[
-                node.target  # type: ignore[index]
-            ]
-        elif (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target
-            ]
-        elif isinstance(node.target, torch._ops.OpOverloadPacket):
-            # aten::sym_size is the only OverloadPacket that we support.
-            # schema: aten::sym_size(Tensor self, int dim) -> Tensor
-            if node.target != torch.ops.aten.sym_size:
-                raise ValueError(
-                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
-                )
-            # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
-            # overloadpacket for some reasons.
-            # https://github.com/pytorch/pytorch/issues/97201
-            # We manually assigned overload for aten::sym_size.
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                torch.ops.aten.sym_size.int
-            ]
-        else:
-            raise RuntimeError(f"Unknown call_function target: {node.target}")
-        # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = function_dispatcher._ATENLIB_FUNCTIONS.get(exporter_key)
-        if symbolic_fn is None:
-            raise RuntimeError(f"Cannot find function for {exporter_key}")
+        symbolic_fn = function_dispatcher.get_symbolic_function(
+            diagnostic_context, node
+        )
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         complete_args, complete_kwargs = _fill_in_default_kwargs(node)

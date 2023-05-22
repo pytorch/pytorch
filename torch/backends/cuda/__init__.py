@@ -251,8 +251,6 @@ def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_e
         enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
         yield{}
-    except RuntimeError as err:
-        raise err
     finally:
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)
