@@ -86,7 +86,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
-    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
@@ -99,7 +98,7 @@ CI_SKIP[CI("eager", training=True)] = [
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
     "llama",  # Accuracy failed: allclose not within tol=0.001
-    "vision_maskrcnn",  # shape mismatch in accuracy check!
+    "vision_maskrcnn",  # The size of tensor a (29) must match the size of tensor b (33) (doesn't repro)
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -143,7 +142,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
     "pytorch_struct",
-    "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -250,7 +248,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "cm3leon_generate",  # Could not validate constraint UnspecConstraint
     "hf_T5_generate",  # Could not validate constraint UnspecConstraint
-    "vision_maskrcnn",  # nothing in example_inputs had a dim with 4
+    "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -262,6 +260,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
+    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
