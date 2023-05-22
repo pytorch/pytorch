@@ -23,6 +23,7 @@ from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from typing import Dict, Tuple, Union, Any
+from torch.ao.quantization._pt2e.quantizer import QuantizationAnnotation
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -52,12 +53,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # default (no observer)
     new_arg = arg
 
-    # TODO: we are assuming "target_dtype_info" exists here, maybe
-    # a default value also need to be provided here
-    target_dtype_info = node.meta["target_dtype_info"]
-    # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
-    # we'll default to False, this makes configuring this field optional for users
-    reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
+    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    reuse_input_obs_or_fq = quantization_annotation._reuse_input_obs_or_fq
     arg_as_input_act_obs_or_fq_ctr = _get_arg_as_input_act_obs_or_fq_ctr(arg, node, named_modules)
     act_post_process_ctr = arg_as_input_act_obs_or_fq_ctr
 
@@ -146,7 +143,7 @@ def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule
 ):
-    this_node_dtype_info = node.meta["target_dtype_info"] if "target_dtype_info" in node.meta else None
+    this_node_dtype_info = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
     if "val" in node.meta:
         output_is_a_tensor = (
             this_node_dtype_info is not None and
@@ -205,9 +202,8 @@ def _maybe_insert_input_and_output_observers_for_node(
         user_node.replace_input_with(node, maybe_output_obs_node)
     _is_observer_in_same_graph_ = _is_observer_in_same_graph(node, named_modules)
 
-    # TODO: target_dtype_info rename
-    input_output_share_observers = node.meta["target_dtype_info"].get("input_output_share_observers", False)
-    reuse_input_obs_or_fq = node.meta["target_dtype_info"].get("reuse_input_obs_or_fq", False)
+    input_output_share_observers = node.meta["quantization_annotation"]._input_output_share_observers
+    reuse_input_obs_or_fq = node.meta["quantization_annotation"]._reuse_input_obs_or_fq
     if (input_output_share_observers and _is_observer_in_same_graph_) or \
        reuse_input_obs_or_fq:
         if not _maybe_make_input_output_share_observers(node, model, named_modules):

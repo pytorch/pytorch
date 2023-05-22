@@ -221,6 +221,19 @@ class TestPasses(TestCase):
         self.assertTrue(pass_result.modified)
         self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
 
+    def test_functionalization_with_view_copy(self) -> None:
+        def foo(x):
+            x.add_(4)
+            y = x.view(x.shape)
+            return x.cos() + y.cos()
+
+        x = torch.zeros(4, 2, 3)
+
+        ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        # After this pass, there shouldn't be any view nodes in the graph
+        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view.default) == 0)
+        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view_copy.default) > 0)
+
     def test_views_op_having_view_copy(self) -> None:
         schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
         aten_schemas = [s[6:] for s in schemas if s.startswith("aten::")]
@@ -306,12 +319,12 @@ class TestPasses(TestCase):
                 def true_fn(x, y):
                     b = x.item()
                     constrain_as_value(b, min=2, max=5)
-                    return x
+                    return x - b
 
                 def false_fn(x, y):
                     c = y.item()
                     constrain_as_value(c, min=2, max=5)
-                    return y
+                    return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
                 return ret
