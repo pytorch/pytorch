@@ -20,7 +20,7 @@ import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from copy import copy
+from copy import copy, deepcopy
 from ctypes import cdll
 from dataclasses import field
 from functools import partial
@@ -347,6 +347,18 @@ class CompiledFxGraph:
             ).call
 
         return self.compiled_artifact(inputs)
+
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k == "cache_linemap":
+                setattr(result, k, copy(v))
+            else:
+                setattr(result, k, deepcopy(v, memo))
+        return result
+
 
 
 def cpp_compiler():
