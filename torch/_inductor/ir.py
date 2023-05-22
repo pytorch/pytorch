@@ -2187,6 +2187,13 @@ class ComputedBuffer(Buffer):
                     self.data.get_size(),
                 )
 
+    def make_loader(self):
+        # Inline constants and index_expressions
+        num_reads = lambda: len(self.get_read_writes().reads)
+        if hasattr(self.data, "make_loader") and num_reads() == 0:
+            return self.data.make_loader()
+        return super().make_loader()
+
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
         if self.data.get_reduction_type():

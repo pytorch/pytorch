@@ -6482,6 +6482,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(flip_opt(x), flip(x))
 
+        def test_computed_buffer_inlining(self):
+            def flip(x):
+                idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+                return x[idx], idx
+
+            flip_opt = torch._dynamo.optimize("inductor")(flip)
+            x = torch.randn(8, device="cuda")
+            code = run_and_get_triton_code(flip_opt, x)
+
+            expect = {
+                # First kernel filling the index tensor
+                "    tmp0 = 7 + ((-1)*x0)",
+                # Second kernel performing the flip, with index computation inlined
+                "    tmp0 = tl.load(in_ptr0 + (7 + ((-1)*x0)), xmask)",
+            }
+
+            lines = set(code.split("\n"))
+            self.assertTrue(
+                expect.issubset(lines), msg=f"Expected lines not found in code:\n{code}"
+            )
+
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
             def fn1(x):
