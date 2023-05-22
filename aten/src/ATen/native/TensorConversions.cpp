@@ -812,7 +812,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
-Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+static Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   // This code turns a matrix into a sequence of blocks
   //
   // Given matrix
@@ -841,7 +841,7 @@ Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
       .contiguous();
 }
 
-Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64_t dense_dim) {
+static Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64_t dense_dim) {
   if (self.dim() == 2 + dense_dim) {
     return _tile_tensor(self, blocksize);
   }
@@ -860,7 +860,7 @@ Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64
   return self.reshape(tiled_sizes).transpose(n_batch_dim + 1, n_batch_dim + 2).contiguous();
 }
 
-Tensor _mask_to_indices(const Tensor& mask) {
+static Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
   // boolean mask is True. at::nonzero can achieve the same, but
   // we yet have to compare the performance difference.
@@ -871,7 +871,7 @@ Tensor _mask_to_indices(const Tensor& mask) {
       .masked_select(mask);
 }
 
-std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
+static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask,
     ScalarType index_dtype,
     Device index_device) {
@@ -1009,7 +1009,7 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optio
   return dense_to_sparse_compressed<Layout::SparseBsc>(self, blocksize, dense_dim_opt);
 }
 
-void _check_blocksize_matches(
+static void _check_blocksize_matches(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize_opt,
     const std::string& name) {
@@ -1023,7 +1023,7 @@ void _check_blocksize_matches(
   }
 }
 
-Tensor sparse_compressed_clone(
+static Tensor sparse_compressed_clone(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
@@ -1046,7 +1046,7 @@ Tensor sparse_compressed_clone(
       values.device());
 }
 
-Tensor sparse_compressed_to_flipped(
+static Tensor sparse_compressed_to_flipped(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
