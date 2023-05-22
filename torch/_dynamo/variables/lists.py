@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
@@ -405,10 +405,7 @@ class SizeVariable(TupleVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
         return super().call_method(tx, name, args, kwargs)
 
@@ -489,7 +486,20 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        return slice(*[x.as_python_constant() for x in self.items])
+        def convert(x):
+            # This is a gross one - we generally do not support arbitrary calls turning SymNodeVariable
+            # into a const. The function is banned on SymNodeVariable. However, here, we can produce slices
+            # with dynamic values, so this is tenatively allowed.
+            # The real long term fix is to:
+            # 1) cover all coverage gaps so that we can just get sym_num out
+            # 2) Rename as_python_constant to something like underlying_wrapped_value and collapse it into
+            # the weird usage of ['example_value'] we have all over the place, as well as random accesses into
+            # .value we have.
+            if isinstance(x, variables.SymNodeVariable):
+                return x.sym_num
+            return x.as_python_constant()
+
+        return slice(*[convert(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)

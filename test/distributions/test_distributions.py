@@ -3476,6 +3476,7 @@ class TestRsample(DistributionsTestCase):
             ]))
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionShapes(DistributionsTestCase):
     def setUp(self):
         super().setUp()

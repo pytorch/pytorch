@@ -523,6 +523,9 @@ def _get_output_act_obs_or_fq_ctr(
     argument in quantized graph will match what is specified by the qconfig
     """
     assert isinstance(arg, Node)
+    if "quantization_annotation" in arg.meta:
+        return arg.meta["quantization_annotation"].output_qspec
+
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
     # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
     # Since we modified the graph in this case, we must trace back from the args through
@@ -535,13 +538,18 @@ def _get_output_act_obs_or_fq_ctr(
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        if "quantization_annotation" in observed_arg.meta:
+            output_act_obs_or_fq_ctr = observed_arg.meta["quantization_annotation"].output_qspec
+        else:
+            assert "target_dtype_info" in observed_arg.meta
+            output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
     else:
         if "target_dtype_info" in arg.meta:
             output_act_obs_or_fq_ctr = \
                 arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
         else:
             output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
+
     return output_act_obs_or_fq_ctr
 
 def _get_arg_target_dtype_as_output(
@@ -561,17 +569,17 @@ def _get_arg_as_input_act_obs_or_fq_ctr(
     to Node `node`
     """
     assert isinstance(arg, Node)
-    # "input_act_obs_or_fq_ctr_map" is the more general design we'll use for pt2e path
+    # "input_qspec_map" is the more general design we'll use for pt2e path
     # it is a map from input argument node to observer or fake quant constructor, for example
     # for the following graph:
     # x -> conv -> output
     #
     # we may annotate conv node like the following:
-    # conv.meta[...] = {"input_act_obs_or_fq_ctr_map": {x: MinMaxObserver.with_args(dtype=torch.qint8)}, ...}
+    # conv.meta[...] = QuantizationAnnotation("input_qspec_map": {x: MinMaxObserver.with_args(dtype=torch.qint8)}, ...)
     #
-    if "target_dtype_info" in node.meta and "input_act_obs_or_fq_ctr_map" in node.meta["target_dtype_info"]:
+    if "quantization_annotation" in node.meta:
         input_act_obs_or_fq_ctr = \
-            node.meta["target_dtype_info"]["input_act_obs_or_fq_ctr_map"].get(arg, _DEFAULT_FP32_OBS_OR_FQ_CTR)
+            node.meta["quantization_annotation"].input_qspec_map.get(arg, _DEFAULT_FP32_OBS_OR_FQ_CTR)
         return input_act_obs_or_fq_ctr
 
     # we can remove the following path in the future if fx graph mode quantization is
@@ -631,12 +639,16 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # node.meta now
         # regular flow for most nodes, except standalone modules
 
-        # TODO: we are assuming "target_dtype_info" exists here, maybe
-        # a default value also need to be provided here
-        target_dtype_info = node.meta["target_dtype_info"]
-        # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
-        # we'll default to False, this makes configuring this field optional for users
-        reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
+        if "quantization_annotation" in node.meta:
+            reuse_input_obs_or_fq = node.meta["quantization_annotation"]._reuse_input_obs_or_fq
+        else:
+            assert "target_dtype_info" in node.meta
+            # TODO: we are assuming "target_dtype_info" exists here, maybe
+            # a default value also need to be provided here
+            target_dtype_info = node.meta["target_dtype_info"]
+            # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
+            # we'll default to False, this makes configuring this field optional for users
+            reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
         arg_as_input_act_obs_or_fq_ctr = _get_arg_as_input_act_obs_or_fq_ctr(arg, node, named_modules)
         act_post_process_ctr = arg_as_input_act_obs_or_fq_ctr
 
@@ -825,9 +837,14 @@ def _maybe_insert_output_observer_for_node(
     """
     assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-    is_standalone_module = node.meta["target_dtype_info"].get("_is_standalone_module", False)
+    is_standalone_module = False
+    if "quantization_annotation" in node.meta:
+        output_act_obs_or_fq_ctr = node.meta["quantization_annotation"].output_qspec
+    else:
+        assert "target_dtype_info" in node.meta
+        is_standalone_module = node.meta["target_dtype_info"].get("_is_standalone_module", False)
 
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
+        output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
     target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # uncomment after we support reuse_input_obs_or_fq properly by having separate
     # implemntations for this key instead of reusing the input_output_share_observers

@@ -26,7 +26,7 @@ import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
-from torch._inductor.utils import run_and_get_triton_code
+from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
@@ -76,6 +76,15 @@ skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
 vec_dtypes = [torch.float, torch.bfloat16]
+
+
+def run_fw_bw_and_get_code(fn):
+    def run_with_backward():
+        result = fn()
+        result.sum().backward()
+        return result
+
+    return run_and_get_code(run_with_backward)
 
 
 class TestCase(TorchTestCase):
@@ -4610,28 +4619,19 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(55)], assert_equal=False)
 
-    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_0(self):
         def fn1(a):
             return torch.nn.functional.dropout(a, 0.0, True) + a
 
         self.common(fn1, [torch.randn(55)])
 
-    @config.patch({"lowmem_dropout": False})
     def test_dropout_trivial_1(self):
         def fn2(a):
             return torch.nn.functional.dropout(a, 1.0, True) + a
 
         self.common(fn2, [torch.randn(55)])
 
-    @config.patch({"lowmem_dropout": True})
-    def test_dropout_trivial_1_lowmem(self):
-        def fn2(a):
-            return torch.nn.functional.dropout(a, 1.0, True) + a
-
-        self.common(fn2, [torch.randn(55)])
-
-    @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @config.patch({"triton.cudagraphs": True})
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4770,6 +4770,36 @@ class CommonTemplate:
         x = torch.rand(10, 3, 0)
 
         self.common(model, (x,))
+
+    def test_randint(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return (
+                torch.randint(10, [1024], device=x.device),
+                torch.randint(-4, 7, [1024], dtype=torch.int32, device=x.device),
+                torch.randint_like(x, 2**50),
+            )
+
+        torch.manual_seed(12345)
+        a0, b0, c0 = fn(torch.zeros([40, 40], device=self.device))
+        self.assertEqual(a0.shape, [1024])
+        self.assertEqual(b0.shape, [1024])
+        self.assertEqual(c0.shape, [40, 40])
+        torch.manual_seed(12345)
+        a1, b1, c1 = fn(torch.zeros([40, 40], device=self.device))
+        self.assertEqual(a0, a1)
+        self.assertEqual(b0, b1)
+        self.assertEqual(c0, c1)
+
+        self.assertEqual(a0.min(), 0)
+        self.assertEqual(a0.max(), 9)
+
+        self.assertEqual(b0.min(), -4)
+        self.assertEqual(b0.max(), 6)
+
+        self.assertGreaterEqual(c0.min(), 0)
+        self.assertGreater(c0.max(), 2**40)
+        self.assertLess(c0.max(), 2**50)
 
     @config.patch(fallback_random=True)
     def test_like_rands(self):
@@ -5092,8 +5122,7 @@ class CommonTemplate:
             torch._inductor.metrics.disable_cpp_wrapper, expected_disable_cpp_wrapper
         )
 
-    @config.patch({"triton.cudagraphs": False})
-    def test_lowmem_dropout1(self):
+    def test_dropout2(self):
         n = 100000
         weight = torch.ones(
             n, device=self.device, dtype=torch.float32, requires_grad=True
@@ -5130,8 +5159,10 @@ class CommonTemplate:
 
         torch.manual_seed(1234)
         weight.grad.zero_()
-        r2 = run(ones)
-        r2.sum().backward()
+        r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -5147,9 +5178,7 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    def test_lowmem_dropout2(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("lowmem_dropout only supports cuda")
+    def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
@@ -5162,10 +5191,17 @@ class CommonTemplate:
             return m(x)
 
         torch._inductor.metrics.generated_kernel_count = 0
-        result = run(torch.randn([8, 32], device=self.device))
-        result.sum().backward()
 
-        expected_kernel = 4
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(
+            lambda: run(torch.randn([8, 32], device=self.device))
+        )
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(bw_code.count("tl.rand"), 0)
+            expected_kernel = 4
+        else:
+            expected_kernel = 6
+
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
@@ -6244,15 +6280,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def interpret(*args, **kwargs):
                     return Interpreter(model_).run(*args[0:], **kwargs)
 
-                fake_flat_tensor_args = [
-                    fake_mode.from_tensor(x) for x in example_inputs_
-                ]
+                def convert(x):
+                    if isinstance(x, torch.Tensor):
+                        return fake_mode.from_tensor(x)
+                    return x
+
+                fake_flat_tensor_args = [convert(x) for x in example_inputs_]
                 fw_module = make_fx(interpret, select_decomp_table())(
                     *fake_flat_tensor_args
                 )
                 self.model = fw_module
                 self.example_args = fake_flat_tensor_args
-                return lambda x: example_inputs_
+                return fw_module
 
         def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
@@ -6276,30 +6315,55 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             return kernels
 
+        @patch.object(torch._dynamo.config, "assume_static_by_default", False)
         def test_divisibile_by_16_covers_numel_args(self):
-            torch._dynamo.reset()
+            for dynamic_shapes in [True, False]:
+                with patch.object(
+                    torch._dynamo.config, "dynamic_shapes", dynamic_shapes
+                ):
+                    torch._dynamo.reset()
 
-            def fn(a: torch.Tensor) -> torch.Tensor:
-                return torch.sum(a)
+                    def fn(a: torch.Tensor) -> torch.Tensor:
+                        return torch.sum(a)
 
-            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
-            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+                    kernels = self.get_kernels(
+                        fn, [torch.randn([256, 256], device="cuda")]
+                    )
+                    if dynamic_shapes:
+                        self.assertTrue(
+                            len(kernels) == 1, "SUM should result in one kernel"
+                        )
+                        # kernel0 reduces from 8 elements to a single scalar.
+                        arguments_that_are_divisible_by_16_in_kernel1 = (
+                            kernels[0].meta["configs"][0].divisible_by_16
+                        )
+                        self.assertEqual(
+                            arguments_that_are_divisible_by_16_in_kernel1, (0, 1)
+                        )
+                    else:
+                        self.assertTrue(
+                            len(kernels) == 2, "SUM should result in two kernels"
+                        )
+                        # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+                        # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+                        # at slot 3 should be in the divisible by 16 descriptor
+                        arguments_that_are_divisible_by_16_in_kernel0 = (
+                            kernels[0].meta["configs"][0].divisible_by_16
+                        )
+                        self.assertEqual(
+                            arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3)
+                        )
 
-            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
-            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
-            # at slot 3 should be in the divisible by 16 descriptor
-            arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+                        # kernel1 reduces from 8 elements to a single scalar.
+                        arguments_that_are_divisible_by_16_in_kernel1 = (
+                            kernels[1].meta["configs"][0].divisible_by_16
+                        )
+                        self.assertEqual(
+                            arguments_that_are_divisible_by_16_in_kernel1, (0, 1)
+                        )
+                    torch._dynamo.reset()
 
-            # kernel1 reduces from 8 elements to a single scalar.
-            arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
-            torch._dynamo.reset()
-
+        @patch.object(torch._dynamo.config, "dynamic_shapes", False)
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
@@ -6374,6 +6438,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
+        @patch.object(torch._dynamo.config, "dynamic_shapes", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6526,7 +6591,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
                 proc = subprocess.Popen(
-                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    [
+                        sys.executable,
+                        test_path,
+                        fn,
+                        str(ndims),
+                        str(dyn_shape),
+                        "False",
+                    ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
@@ -6536,8 +6608,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "index out of bounds" in err.decode("utf-8")
                         for err in stderr.splitlines()
                     ),
-                    f"{fn}, {ndims}, {dyn_shape}",
+                    f"{fn}, {ndims}, {dyn_shape}, False",
                 )
+            proc = subprocess.Popen(
+                [sys.executable, test_path, "first_arg", "2", "False", "True"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stderr = proc.communicate()[1]
+            self.assertTrue(
+                any(
+                    "index out of bounds" in err.decode("utf-8")
+                    for err in stderr.splitlines()
+                ),
+                "first_arg 2 False True",
+            )
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

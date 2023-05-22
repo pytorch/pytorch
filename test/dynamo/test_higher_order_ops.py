@@ -11,7 +11,7 @@ import torch._functorch.config
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, ifdyn, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -483,6 +483,17 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         # np.number are lifted to graph inputs
         self._test_wrap_simple(f, (x,), 3)
+
+    @torch._dynamo.config.patch(specialize_int=False, dynamic_shapes=True)
+    def test_capture_uncommon_int(self):
+        y = 328
+
+        def f(x):
+            return wrap(lambda x: x + y, x)
+
+        x = torch.randn(3)
+        # Under this specific config, uncommon ints are lifted to graph inputs.
+        self._test_wrap_simple(f, (x,), ifdyn(ifdynstaticdefault(2, 3), 3))
 
     def test_freevars_as_inputs_to_wrap(self):
         y = torch.randn(3)

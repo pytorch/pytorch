@@ -6,6 +6,7 @@ import importlib
 import sys
 import unittest
 import warnings
+from unittest.mock import patch
 
 import torch
 
@@ -99,6 +100,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     def all_live_block_count():
         return len(all_live_blocks())
 
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     class CudaGraphTreeTests(TestCase):
         def setUp(self):
             super().setUp()
@@ -894,7 +896,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
             self.assertEqual(
                 self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2), (0, 3)],
+                [(0, 1), (0, 2)],
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 

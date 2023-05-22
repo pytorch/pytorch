@@ -24,7 +24,7 @@
 
 namespace at { namespace native {
 
-static bool is_cuda(const Tensor& self) {
+bool is_cuda(const Tensor& self) {
   return self.is_cuda();
 }
 
@@ -60,15 +60,15 @@ bool is_neg(const Tensor& self) {
   return self.is_neg();
 }
 
-static bool is_sparse(const Tensor& self) {
+bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }
 
-static bool is_sparse_csr(const Tensor& self) {
+bool is_sparse_csr(const Tensor& self) {
   return self.is_sparse_csr();
 }
 
-static bool is_quantized(const Tensor& self) {
+bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }
 
