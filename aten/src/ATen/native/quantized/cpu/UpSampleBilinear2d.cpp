@@ -219,7 +219,7 @@ Tensor upsample_bilinear2d_quantized_cpu(
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-static Tensor upsample_bilinear2d_quantized_cpu(
+Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
       bool align_corners,
