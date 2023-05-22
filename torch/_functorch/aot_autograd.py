@@ -2815,6 +2815,17 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
                     placeholder_list = fx_placeholder_vals(bw_module)
 
+                    # restride
+                    import os
+                    if os.environ.get("SHUNTING_RESTRIDE", "1") == "1":
+                        for i in range(len(placeholder_list)):
+                            ph_arg = placeholder_list[i]
+                            real_arg = all_args[i]
+                            if not isinstance(ph_arg, torch.Tensor):
+                                continue
+                            if ph_arg.stride() != real_arg.stride():
+                                placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+
                     # We can not reuse tracing context and fake tensors from
                     # backward pass if any real tensor has a different stride.
                     # This can happen if the compiler compiles the fwd module
