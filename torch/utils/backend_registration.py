@@ -106,10 +106,7 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
             device_idx = device.index
     # if isinstance(device, str), this means that the parameter passed in is in the string format "foo:0"
     elif isinstance(device, str):
-        if device.split(":")[0] == custom_backend_name:
-            device_idx = int(device.split(":")[-1])
-        else:
-            raise ValueError(f"Invalid device, must be {custom_backend_name} device")
+        device_idx = torch.device(device).index
     # if isinstance(device, int), we can take the index number directly
     else:
         device_idx = device
