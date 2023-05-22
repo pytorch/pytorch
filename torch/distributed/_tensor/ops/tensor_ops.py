@@ -149,17 +149,34 @@ def gen_slice_strategy(
     """
     forwards all shardings except the slice dimension.
     """
-    input_node = cast(Node, node.args[0])
-    input_ndim = input_node.meta["val"].ndim
-    slice_dim = cast(int, node.args[1]) if len(node.args) > 1 else 0
-    slice_dim = normalize_dim(slice_dim, input_ndim)
+    defaults = (None, 0, None, None, 1)
+    input_node, dim, start, end, step = node.args + defaults[len(node.args) :]
+    assert isinstance(input_node, Node)
+    assert isinstance(dim, int)
+    assert start is None or isinstance(start, int)
+    assert end is None or isinstance(end, int)
+    assert isinstance(step, int)
+
+    input_val = input_node.meta["val"]
+    slice_dim = normalize_dim(dim, input_val.ndim)
+    if start is None:
+        start = 0
+    if end is None or end > input_val.shape[dim]:
+        end = input_val.shape[dim]
+    if start < 0:
+        start += input_val.shape[dim]
+    if end < 0:
+        end += input_val.shape[dim]
+
+    redundant_slice = start == 0 and end == input_val.shape[dim] and step == 1
+
     input_strategy = node_to_strategy[input_node]
     assert isinstance(input_strategy, OpStrategy)
-
     slice_strategy = OpStrategy([])
+
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim):
+        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
             slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
