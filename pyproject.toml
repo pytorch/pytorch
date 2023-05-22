@@ -66,6 +66,7 @@ select = [
     "W",
     # Not included in flake8
     "PLE",
+    "TRY302",
 ]
 
 [tool.ruff.per-file-ignores]

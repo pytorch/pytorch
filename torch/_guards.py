@@ -344,6 +344,52 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
         self.nn_modules = state.nn_modules
 
 
+class GlobalContextCheckpointState:
+    global_state: Dict[str, bool] = {}
+
+    def __init__(self, global_states):
+        self.global_state = global_states
+
+    """
+    Produces a delta against another GlobalContextCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    global key names.
+    """
+
+    def diff(self, other):
+        r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
+class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
+    """
+    This keeps track of the global torch state during tracing of a function.
+    For example, torch.is_grad_enabled.
+    """
+
+    def __init__(self):
+        self.global_state: Dict[str, bool] = {}
+
+    def copy_graphstate(self):
+        return GlobalContextCheckpointState(dict(self.global_state))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, GlobalContextCheckpointState)
+        self.global_state = state.global_state
+        assert (
+            len(self.global_state) == 1
+            and list(self.global_state.keys())[0] == "is_grad_enabled"
+        ), "Only grad state is supported today in the global state"
+        for key, value in self.global_state.items():
+            torch.set_grad_enabled(value)
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -401,6 +447,7 @@ class TracingContext:
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
+        self.global_context = GlobalContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None

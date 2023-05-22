@@ -2942,6 +2942,13 @@
   dispatch:
     CPU, CUDA, MPS: index_out
 
+# Used by inductor to signal indexing without bounds checks
+# Note that we don't support boolean indexing, to avoid dynamic output shapes
+- func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: _unsafe_index
+
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -5115,27 +5122,6 @@
   device_check: NoCheck
   device_guard: False
 
-- func: sym_size.int(Tensor self, int dim) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: core
-  manual_cpp_binding: True
-
-- func: sym_numel(Tensor self) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: core
-  manual_cpp_binding: True
-
-- func: sym_storage_offset(Tensor self) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: core
-  manual_cpp_binding: True
-
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5410,13 +5396,6 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-
-- func: sym_stride.int(Tensor self, int dim) -> SymInt
-  variants: function
-  device_check: NoCheck
-  device_guard: False
-  tags: core
-  manual_cpp_binding: True
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -9188,46 +9167,46 @@
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: histogram_histc_cpu_out
+    CPU, MPS: histogram_histc_out
     CUDA: _histc_out_cuda
 
 - func: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   variants: method, function
   dispatch:
-    CPU: histogram_histc_cpu
+    CPU, MPS: histogram_histc
     CUDA: _histc_cuda
 
 - func: histogram.bins_tensor_out(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
-    CPU: histogram_out_cpu
+    CPU, MPS: histogram_out
 
 - func: histogram.bins_tensor(Tensor self, Tensor bins, *, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
-    CPU: histogram_cpu
+    CPU, MPS: histogram
 
 - func: histogram.bin_ct_out(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False, Tensor(a!) hist, Tensor(b!) bin_edges) -> (Tensor(a!) hist, Tensor(b!) bin_edges)
   dispatch:
-    CPU: histogram_out_cpu
+    CPU, MPS: histogram_out
 
 - func: histogram.bin_ct(Tensor self, int bins=100, *, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor bin_edges)
   variants: method, function
   dispatch:
-    CPU: histogram_cpu
+    CPU, MPS: histogram
 
 - func: _histogramdd_bin_edges(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor[]
   dispatch:
-    CPU: histogramdd_bin_edges_cpu
+    CPU, MPS: histogramdd_bin_edges
   autogen: _histogramdd_bin_edges.out
 
 - func: _histogramdd_from_bin_cts(Tensor self, int[] bins, *, float[]? range=None, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
-    CPU: histogramdd_cpu
+    CPU, MPS: _histogramdd
   autogen: _histogramdd_from_bin_cts.out
 
 - func: _histogramdd_from_bin_tensors(Tensor self, Tensor[] bins, *, Tensor? weight=None, bool density=False) -> Tensor
   dispatch:
-    CPU: histogramdd_cpu
+    CPU, MPS: _histogramdd
   autogen: _histogramdd_from_bin_tensors.out
 
 - func: histogramdd(Tensor self, int[] bins, float[]? range=None, Tensor? weight=None, bool density=False) -> (Tensor hist, Tensor[] bin_edges)
@@ -14108,7 +14087,7 @@
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
 
-- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
@@ -14135,12 +14114,14 @@
     CUDA: _flash_attention_backward
 
 # Returns ouput, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False, *, float? scale=None) -> (Tensor, Tensor)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
+  tags: nondeterministic_seeded
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor rng_seed, Tensor rng_offset, int custom_mask_type, *, float? scale=None) -> (Tensor, Tensor, Tensor, Tensor)
+  device_check: NoCheck
   variants: function
   dispatch:
     CUDA: _efficient_attention_backward
