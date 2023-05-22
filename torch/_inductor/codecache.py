@@ -20,7 +20,7 @@ import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from copy import copy, deepcopy
+from copy import copy
 from ctypes import cdll
 from dataclasses import field
 from functools import partial
@@ -305,8 +305,6 @@ class FxGraphCache:
                     disk_compiled_graph = copy(compiled_graph)
                     # Important as compiled models are not pickeable
                     disk_compiled_graph.compiled_artifact = None
-                    # TODO: Figure out if linemaps are important to save, work on pickling if it's the case
-                    disk_compiled_graph.cache_linemap = None
                     print(disk_compiled_graph)
                     write(pickle.dumps(disk_compiled_graph), key, "cg")
                 else:
@@ -347,18 +345,6 @@ class CompiledFxGraph:
             ).call
 
         return self.compiled_artifact(inputs)
-
-    def __deepcopy__(self, memo):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        for k, v in self.__dict__.items():
-            if k == "cache_linemap":
-                setattr(result, k, copy(v))
-            else:
-                setattr(result, k, deepcopy(v, memo))
-        return result
-
 
 
 def cpp_compiler():
@@ -882,7 +868,7 @@ class PyCodeCache:
                 for f, l, n in reversed(matches)
             ]
 
-        return parse_stack_trace(entry.stack_trace)
+        return parse_stack_trace(entry)
 
 
 class TritonCodeCache:
