@@ -191,6 +191,9 @@ def ir_node_to_tensor(x, guard_shape=True):
 
 
 class OptionalAttr:
+    def __init__(self):
+        self.name = "optional_attr"
+
     def __repr__(self):
         return self.name
 
