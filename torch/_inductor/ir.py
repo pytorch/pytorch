@@ -211,15 +211,7 @@ class OptionalScalar(OptionalAttr):
 
 
 def may_convert_to_optional(optional_value, value):
-    if not value and V.graph.cpp_wrapper:
-        optional_name = optional_value.__repr__()
-        assert (
-            optional_name in V.graph.optional_variable
-        ), f"key {optional_name} not found in V.graph.optional_variable"
-        V.graph.optional_variable[optional_name] = True
-        return optional_value
-    else:
-        return value
+    return optional_value if not value and V.graph.cpp_wrapper else value
 
 
 class ModularIndexing(sympy.Function):
