@@ -11,7 +11,7 @@ import logging
 import time
 from typing import List, Tuple
 
-from torch.distributed.logging_handlers import _log_handlers
+from torch.distributed._logging_handlers import _log_handlers
 import torch.distributed as dist
 
 __all__: List[str] = []
@@ -40,7 +40,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def exception_handler(func):
+def exception_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
@@ -67,7 +67,7 @@ def exception_handler(func):
     return wrapper
 
 
-def time_handler(func):
+def time_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         t1 = time.time()
@@ -77,17 +77,18 @@ def time_handler(func):
         if dist.is_initialized():
             msg_dict = {
                 "func_name": f"{func.__name__}",
-                "time_spent": f"f'{t2-t1}')",
                 "args": f"{args}, {kwargs}",
                 "backend": f"{dist.get_backend(kwargs.get('group'))}",
                 "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
                 "global_rank": f"{dist.get_rank()}",
                 "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
+                "time_spent": f"{t2-t1}",
             }
         else:
             msg_dict = {
                 "func_name": f"{func.__name__}",
                 "args": f"{args}, {kwargs}",
+                "time_spent": f"{t2-t1}",
             }
         _c10d_logger.debug(msg_dict)
 
