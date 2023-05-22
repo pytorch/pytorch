@@ -58,9 +58,7 @@ void GroupNormKernelImplInternal(
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * inner_size;
-      opmath_t mean_val;
-      opmath_t rstd_val;
-      std::tie(mean_val, rstd_val) = RowwiseMoments(X_ptr, inner_size);
+      opmath_t [mean_val, rstd_val] = RowwiseMoments(X_ptr, inner_size);
       rstd_val = opmath_t(1) / std::sqrt(std::max(rstd_val, opmath_t(0)) + eps);
       if (gamma_null && beta_null) {
         T* Y_ptr = Y_data + i * inner_size;
@@ -139,14 +137,14 @@ ColumnwiseMoments(
     for (; d < inner_size; d += K) {
       Vec x_bvec = Vec::loadu(X_ptr + d);
       fVec x_fvec0, x_fvec1;
-      std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+      fVec [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
       acc0_fvec += x_fvec0 + x_fvec1;
       acc1_fvec += x_fvec0 * x_fvec0 + x_fvec1 * x_fvec1;
     }
     if (D - d > 0) {
       Vec x_bvec = Vec::loadu(X_ptr + d, D - d);
       fVec x_fvec0, x_fvec1;
-      std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+      fVec [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
       if (D - d > fVec::size()) {
         x_fvec1 = fVec::set(zero, x_fvec1, D - d - fVec::size());
         acc0_fvec += x_fvec0 + x_fvec1;
@@ -202,8 +200,7 @@ CalcMeanVar(
     fVec mean_fvec1 = fVec::loadu(mean_ptr + d + fVec::size());
     fVec rstd_fvec0 = fVec::loadu(rstd_ptr + d);
     fVec rstd_fvec1 = fVec::loadu(rstd_ptr + d + fVec::size());
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<T>(data_bvec);
+    fVec [data_fvec0, data_fvec1] = convert_to_float<T>(data_bvec);
     mean_fvec0 = data_fvec0 + mean_fvec0;
     mean_fvec1 = data_fvec1 + mean_fvec1;
     rstd_fvec0 = data_fvec0 * data_fvec0 + rstd_fvec0;
@@ -219,8 +216,7 @@ CalcMeanVar(
     fVec mean_fvec1 = fVec::loadu(mean_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
     fVec rstd_fvec0 = fVec::loadu(rstd_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
     fVec rstd_fvec1 = fVec::loadu(rstd_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<T>(data_bvec);
+    fVec [data_fvec0, data_fvec1] = convert_to_float<T>(data_bvec);
     mean_fvec0 = data_fvec0 + mean_fvec0;
     mean_fvec1 = data_fvec1 + mean_fvec1;
     rstd_fvec0 = data_fvec0 * data_fvec0 + rstd_fvec0;
@@ -268,10 +264,9 @@ ApplyScaleBias(
     fVec scale_fvec1 = fVec::loadu(scale_ptr + d + fVec::size());
     fVec bias_fvec0 = fVec::loadu(bias_ptr + d);
     fVec bias_fvec1 = fVec::loadu(bias_ptr + d + fVec::size());
-    fVec data_fvec0, data_fvec1, out0, out1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<T>(data_bvec);
-    out0 = data_fvec0 * scale_fvec0 + bias_fvec0;
-    out1 = data_fvec1 * scale_fvec1 + bias_fvec1;
+    fVec [data_fvec0, data_fvec1] = convert_to_float<T>(data_bvec);
+    fVec out0 = data_fvec0 * scale_fvec0 + bias_fvec0;
+    fVec out1 = data_fvec1 * scale_fvec1 + bias_fvec1;
     convert_from_float<T>(out0, out1).store(Y_ptr + d);
   }
   if (C - d > 0) {
@@ -280,10 +275,9 @@ ApplyScaleBias(
     fVec scale_fvec1 = fVec::loadu(scale_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
     fVec bias_fvec0 = fVec::loadu(bias_ptr + d, (C - d) > fVec::size() ? fVec::size() : (C - d));
     fVec bias_fvec1 = fVec::loadu(bias_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
-    fVec data_fvec0, data_fvec1, out0, out1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<T>(data_bvec);
-    out0 = data_fvec0 * scale_fvec0 + bias_fvec0;
-    out1 = data_fvec1 * scale_fvec1 + bias_fvec1;
+    fVec [data_fvec0, data_fvec1] = convert_to_float<T>(data_bvec);
+    fVec out0 = data_fvec0 * scale_fvec0 + bias_fvec0;
+    fVec out1 = data_fvec1 * scale_fvec1 + bias_fvec1;
     convert_from_float<T>(out0, out1).store(Y_ptr + d, C - d);
   }
 }
@@ -354,7 +348,7 @@ void GroupNormKernelImplChannelsLastInternal(
         // and do a horizontal add just once for each {n, g}.
         //
         opmath_t mean_val, rstd_val;
-        std::tie(mean_val, rstd_val) = ColumnwiseMoments(
+        opmath_t [mean_val, rstd_val] = ColumnwiseMoments(
                 X_data + n * HxW * C + g * D,
                 HxW,
                 C,
@@ -589,9 +583,8 @@ ComputeInternalGradients(
       for (; j < inner_size; j += K) {
         const Vec dy_bvec = Vec::loadu(dY_ptr + j);
         const Vec x_bvec = Vec::loadu(X_ptr + j);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
+        fVec [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        fVec [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
         ds_vec = ds_vec + dy_fvec0 * x_fvec0;
         ds_vec = ds_vec + dy_fvec1 * x_fvec1;
         db_vec = db_vec + dy_fvec0 + dy_fvec1;
@@ -600,9 +593,8 @@ ComputeInternalGradients(
       if (j < HxW) {
         const Vec dy_bvec = Vec::loadu(dY_ptr + j, HxW - j);
         const Vec x_bvec = Vec::loadu(X_ptr + j, HxW - j);
-        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<T>(dy_bvec);
+        fVec [x_fvec0, x_fvec1] =  convert_to_float<T>(x_bvec);
+        fVec [dy_fvec0, dy_fvec1] = convert_to_float<T>(dy_bvec);
         if (HxW - j > fVec::size()) {
           x_fvec1 = fVec::set(zero, x_fvec1, HxW - j - fVec::size());
           dy_fvec1 = fVec::set(zero, dy_fvec1, HxW - j - fVec::size());
@@ -674,8 +666,7 @@ CalcDsDb(
   int64_t j = 0;
   for (; j < d; j += K) {
     const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j);
-    fVec gamma_vec0, gamma_vec1;
-    std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
+    fVec [gamma_vec0, gamma_vec1] = convert_to_float<PT>(gamma_vec);
     ds_vec += fVec::loadu(ds_ptr + j) * gamma_vec0;
     ds_vec += fVec::loadu(ds_ptr + j + fVec::size()) * gamma_vec1;
     db_vec += fVec::loadu(db_ptr + j) * gamma_vec0;
@@ -683,8 +674,7 @@ CalcDsDb(
   }
   if (j < D) {
     const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j, D - j);
-    fVec gamma_vec0, gamma_vec1;
-    std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
+    fVec [gamma_vec0, gamma_vec1] = convert_to_float<PT>(gamma_vec);
     if (D - j > fVec::size()) {
       gamma_vec1 = fVec::set(zero, gamma_vec1, D - j - fVec::size());
       ds_vec += fVec::loadu(ds_ptr + j) * gamma_vec0;
@@ -727,8 +717,7 @@ void GroupNormInputBackward(
       const opmath_t* ds_ptr = ds + i * D;
       const opmath_t* db_ptr = db + i * D;
       const PT* gamma_ptr = gamma + g * D;
-      opmath_t ds_val, db_val;
-      std::tie(ds_val, db_val) = CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, D);
+      opmath_t [ds_val, db_val] = CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, D);
       const opmath_t c2 =
           (db_val * opmath_t(mean[i]) - ds_val) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * opmath_t(rstd[i]) * s;
       const opmath_t c3 = -c2 * opmath_t(mean[i]) - db_val * opmath_t(rstd[i]) * s;
@@ -1029,9 +1018,8 @@ DsDbRowwiseMomentsChannelsLast(
     fVec db_vec1 = fVec::loadu(db_ptr + d + fVec::size());
     Vec x_vec = Vec::loadu(X_ptr + d);
     Vec dy_vec = Vec::loadu(dY_ptr + d);
-    fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
-    std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-    std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+    fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+    fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
     ds_dev0 += x_vec0 * dy_vec0;
     ds_dev1 += x_vec1 * dy_vec1;
     db_vec0 += dy_vec0;
@@ -1050,9 +1038,8 @@ DsDbRowwiseMomentsChannelsLast(
     fVec db_vec1 = fVec::loadu(db_ptr + d + fVec::size(), (C - d) > fVec::size() ? (C - d - fVec::size()) : 0);
     Vec x_vec = Vec::loadu(X_ptr + d, C - d);
     Vec dy_vec = Vec::loadu(dY_ptr + d, C - d);
-    fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
-    std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-    std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+    fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+    fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
     ds_dev0 += x_vec0 * dy_vec0;
     ds_dev1 += x_vec1 * dy_vec1;
     db_vec0 += dy_vec0;
@@ -1157,8 +1144,7 @@ ApplyInputGradientsChannelsLastColMov(
   auto K = Vec::size();
   int64_t d = 0;
   for (; d < D / K * K; d += K) {
-    fVec c1_0, c1_1;
-    std::tie(c1_0, c1_1) = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
+    fVec [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
                                       : load_util(gamma + d, K);
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
@@ -1169,17 +1155,15 @@ ApplyInputGradientsChannelsLastColMov(
 
       Vec dy_vec = Vec::loadu(dY_ptr + d);
       Vec x_vec = Vec::loadu(X_ptr + d);
-      fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-      std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-      std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+      fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+      fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
       fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
       fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
       convert_from_float<T>(dx_vec0, dx_vec1).store(dX_ptr + d);
     }
   }
   if (D - d > 0) {
-    fVec c1_0, c1_1;
-    std::tie(c1_0, c1_1) = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
+    fVec [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
                                       : load_util(gamma + d, D - d);
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
@@ -1189,9 +1173,8 @@ ApplyInputGradientsChannelsLastColMov(
       T* dX_ptr = dX_data + m * C;
       Vec dy_vec = Vec::loadu(dY_ptr + d, D - d);
       Vec x_vec = Vec::loadu(X_ptr + d, D - d);
-      fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-      std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-      std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+      fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+      fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
       fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
       fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
       convert_from_float<T>(dx_vec0, dx_vec1).store(dX_ptr + d, D - d);
@@ -1254,31 +1237,27 @@ ApplyInputGradientsChannelsLastRowMov(
   auto K = Vec::size();
   int64_t d = 0;
   for (; d < D / K * K; d += K) {
-    fVec c1_0, c1_1;
-    std::tie(c1_0, c1_1) = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
+    fVec [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
                                       : load_util(gamma + d, K);
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     Vec dy_vec = Vec::loadu(dY_data + d);
     Vec x_vec = Vec::loadu(X_data + d);
-    fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-    std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-    std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+    fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+    fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
     fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
     fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
     convert_from_float<T>(dx_vec0, dx_vec1).store(dX_data + d);
   }
   if (D - d > 0) {
-    fVec c1_0, c1_1;
-    std::tie(c1_0, c1_1) = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
+    fVec [c1_0, c1_1] = gamma_null ? std::tuple<fVec, fVec>(fVec(1), fVec(1))
                                       : load_util(gamma + d, D - d);
     c1_0 = c1_0 * fVec(opmath_t(*rstd));
     c1_1 = c1_1 * fVec(opmath_t(*rstd));
     Vec dy_vec = Vec::loadu(dY_data + d, D - d);
     Vec x_vec = Vec::loadu(X_data + d, D - d);
-    fVec dy_vec0, dy_vec1, x_vec0, x_vec1;
-    std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-    std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+    fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+    fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
     fVec dx_vec0 = c1_0 * dy_vec0 + fVec(c2) * x_vec0 + fVec(c3);
     fVec dx_vec1 = c1_1 * dy_vec1 + fVec(c2) * x_vec1 + fVec(c3);
     convert_from_float<T>(dx_vec0, dx_vec1).store(dX_data + d, D - d);
@@ -1367,9 +1346,8 @@ inline typename std::
       const T* dY_ptr = dY_data + m * C;
       Vec x_vec = Vec::loadu(X_ptr + d);
       Vec dy_vec = Vec::loadu(dY_ptr + d);
-      fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
-      std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-      std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+      fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+      fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
       acc0_vec0 += x_vec0 * dy_vec0;
       acc0_vec1 += x_vec1 * dy_vec1;
       acc1_vec0 += dy_vec0;
@@ -1380,7 +1358,7 @@ inline typename std::
     acc1_vec0.store(db_ptr + d);
     acc1_vec1.store(db_ptr + d + fVec::size());
     fVec gamma_vec0, gamma_vec1;
-    std::tie(gamma_vec0, gamma_vec1) = gamma_null ?
+    fVec [gamma_vec0, gamma_vec1] = gamma_null ?
       std::tuple<fVec, fVec>(fVec(1), fVec(1)) : load_util(gamma_ptr + d, K);
     ds_gamma += vec::vec_reduce_all(
         [](fVec& x, fVec& y) { return x + y; }, acc0_vec0 * gamma_vec0);
@@ -1398,9 +1376,8 @@ inline typename std::
       const T* dY_ptr = dY_data + m * C;
       Vec x_vec = Vec::loadu(X_ptr + d, D - d);
       Vec dy_vec = Vec::loadu(dY_ptr + d, D - d);
-      fVec x_vec0, x_vec1, dy_vec0, dy_vec1;
-      std::tie(x_vec0, x_vec1) = convert_to_float<T>(x_vec);
-      std::tie(dy_vec0, dy_vec1) = convert_to_float<T>(dy_vec);
+      fVec [x_vec0, x_vec1] = convert_to_float<T>(x_vec);
+      fVec [dy_vec0, dy_vec1] = convert_to_float<T>(dy_vec);
       if (D - d > fVec::size()) {
         x_vec1 = fVec::set(zero, x_vec1, D - d - fVec::size());
         dy_vec1 = fVec::set(zero, dy_vec1, D - d - fVec::size());
@@ -1421,8 +1398,7 @@ inline typename std::
     acc1_vec0.store(db_ptr + d, (D - d) > fVec::size() ? fVec::size() : (D - d));
     acc1_vec1.store(db_ptr + d + fVec::size(),
       (D - d) > fVec::size() ? (D - d - fVec::size()) : 0);
-    fVec gamma_vec0, gamma_vec1;
-    std::tie(gamma_vec0, gamma_vec1) = gamma_null ?
+    fVec [gamma_vec0, gamma_vec1] = gamma_null ?
       std::tuple<fVec, fVec>(fVec(1), fVec(1)) : load_util(gamma_ptr + d, D - d);
     if (D - d > fVec::size()) {
       gamma_vec1 = fVec::set(zero, gamma_vec1, D - d - fVec::size());
@@ -1501,12 +1477,10 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       for (const auto i : c10::irange(begin, end)) {
         // Step 1. Compute internal gradients.
         opmath_t* ds_ptr = ds_data + i * D;
-        opmath_t* db_ptr = db_data + i * D;
-        opmath_t ds_gamma, db_gamma;
         const T* X_ptr = X_data + n * HxW * C + g * D;
         const T* dY_ptr = dY_data + n * HxW * C + g * D;
         const PT* gamma_ptr = gamma_null ? gamma_data : (gamma_data + g * D);
-        std::tie(ds_gamma, db_gamma) = CalcInternalGradientsChannelsLast<T, PT, opmath_t>(
+        opmath_t [ds_gamma, db_gamma] = CalcInternalGradientsChannelsLast<T, PT, opmath_t>(
           X_ptr,
           dY_ptr,
           gamma_ptr,
