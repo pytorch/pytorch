@@ -1,4 +1,4 @@
-"""Adapted from https://github.com/arogozhnikov/einops/blob/master/einops/parsing.py."""
+"""Adapted from https://github.com/arogozhnikov/einops/blob/36c7bb16e57d6e57f8f3050f9e07abdf3f00469f/einops/parsing.py."""
 import keyword
 import warnings
 from typing import List, Optional, Set, Tuple, Union
