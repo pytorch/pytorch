@@ -397,6 +397,9 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` object
     """
+
+    torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
+
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
     # convert tensor to the corresponding device type if it's not in that device type
@@ -488,6 +491,8 @@ def distribute_module(
     Returns:
         A module that contains parameters/buffers that are all `DTensor`s.
     """
+
+    torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
