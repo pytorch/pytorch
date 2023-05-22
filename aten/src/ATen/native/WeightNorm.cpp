@@ -10,6 +10,8 @@
 #else
 #include <ATen/ops/_weight_norm_differentiable_backward_native.h>
 #include <ATen/ops/_weight_norm_interface.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
 #include <ATen/ops/_weight_norm_native.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/norm_except_dim.h>
