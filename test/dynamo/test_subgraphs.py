@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifdyn, ifunspec, ifdynstaticdefault
+from torch._dynamo.utils import disable_cache_limit, ifdyn, ifdynstaticdefault, ifunspec
 
 globalmod = torch.nn.ReLU()
 
