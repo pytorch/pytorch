@@ -32,6 +32,13 @@ test_classes = {}
 
 ALL_DYNAMIC_XFAILS = {
     "MiscTests": [],
+    "ReproTests": [
+        # Could not infer dtype of torch._C.SymIntNode
+        "test_convert_boxes_to_pooler_format",
+    ],
+    "SubGraphTests": [
+        "test_enumerate_not_break_graph",
+    ],
 }
 
 XFAIL_HITS = 0
@@ -86,6 +93,20 @@ for test in tests:
 assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
 
 # Single config failures
+
+unittest.expectedFailure(
+    DynamicShapesMiscTests.test_change_backends_dynamic_shapes
+    # '__torch__.torch.SymInt (of Python compilation unit at: 0x4c9c0e0)'
+    # object has no attribute or method '__ne__'
+    # NB: I don't think this ever can actually work, cuz TorchScript
+    # can't deal with SymInt inputs
+)
+
+
+unittest.expectedFailure(
+    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
+    # NotImplementedError: SymNodeVariable() is not a constant
+)
 
 unittest.expectedFailure(
     DynamicShapesNNModuleTests.test_lazy_module1_dynamic_shapes

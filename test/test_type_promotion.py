@@ -5,11 +5,10 @@ import itertools
 import unittest
 
 import torch
-import torch._dynamo
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests, make_tensor,
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
-                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO)
+                                                  numpy_to_torch_dtype_dict, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
                                                         dtypes, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
@@ -782,17 +781,17 @@ class TestTypePromotion(TestCase):
             t = t * mask
 
         if coalesced:
-            stens = t.to_sparse()
+            s = t.to_sparse()
         else:
-            stens = t.to_sparse()
-            indices = torch.cat((stens.indices(), stens.indices()), 1)
-            values = torch.cat((stens.values(), stens.values()), 0)
-            stens = torch.sparse_coo_tensor(indices=indices, values=values, size=stens.size(), dtype=dtype, device=device)
-            t = stens.to_dense()
-        self.assertEqual(coalesced, stens.is_coalesced())
-        self.assertEqual(stens.dtype, dtype)
-        self.assertEqual(t.dtype, stens.dtype)
-        return t, stens
+            s = t.to_sparse()
+            indices = torch.cat((s.indices(), s.indices()), 1)
+            values = torch.cat((s.values(), s.values()), 0)
+            s = torch.sparse_coo_tensor(indices=indices, values=values, size=s.size(), dtype=dtype, device=device)
+            t = s.to_dense()
+        self.assertEqual(s.is_coalesced(), coalesced)
+        self.assertEqual(s.dtype, dtype)
+        self.assertEqual(t.dtype, s.dtype)
+        return t, s
 
     def _get_precision(self, dtype, coalesced):
         if dtype == torch.half and not coalesced:
@@ -887,10 +886,6 @@ class TestTypePromotion(TestCase):
     def _run_all_tests_for_sparse_op(self, op_name, device, dtypes):
         for dtype1, dtype2 in itertools.product(dtypes, dtypes):
             for inplace, coalesced in itertools.product([True, False], [True, False]):
-                # print(op_name, inplace, dtype1, dtype2, device, coalesced)
-                if not coalesced and TEST_WITH_TORCHDYNAMO:
-                    # Known broken sparse add
-                    continue
                 self._test_sparse_op(op_name, inplace, dtype1, dtype2, device, coalesced)
 
     @onlyNativeDeviceTypes

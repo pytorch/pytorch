@@ -2469,6 +2469,18 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_avg_pool2d8(self):
+        # https://github.com/pytorch/pytorch/issues/100987
+        def fn(x):
+            return aten.avg_pool2d(
+                x, kernel_size=3, stride=2, padding=1, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn(1, 3, 6, 6),),
+        )
+
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -6280,18 +6292,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def interpret(*args, **kwargs):
                     return Interpreter(model_).run(*args[0:], **kwargs)
 
-                def convert(x):
-                    if isinstance(x, torch.Tensor):
-                        return fake_mode.from_tensor(x)
-                    return x
-
-                fake_flat_tensor_args = [convert(x) for x in example_inputs_]
+                fake_flat_tensor_args = [
+                    fake_mode.from_tensor(x) for x in example_inputs_
+                ]
                 fw_module = make_fx(interpret, select_decomp_table())(
                     *fake_flat_tensor_args
                 )
                 self.model = fw_module
                 self.example_args = fake_flat_tensor_args
-                return fw_module
+                return lambda x: example_inputs_
 
         def get_kernels(self, fn, args) -> typing.List[CachingAutotuner]:
             from torch._inductor.debug import DebugContext
@@ -6315,55 +6324,30 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             return kernels
 
-        @patch.object(torch._dynamo.config, "assume_static_by_default", False)
         def test_divisibile_by_16_covers_numel_args(self):
-            for dynamic_shapes in [True, False]:
-                with patch.object(
-                    torch._dynamo.config, "dynamic_shapes", dynamic_shapes
-                ):
-                    torch._dynamo.reset()
+            torch._dynamo.reset()
 
-                    def fn(a: torch.Tensor) -> torch.Tensor:
-                        return torch.sum(a)
+            def fn(a: torch.Tensor) -> torch.Tensor:
+                return torch.sum(a)
 
-                    kernels = self.get_kernels(
-                        fn, [torch.randn([256, 256], device="cuda")]
-                    )
-                    if dynamic_shapes:
-                        self.assertTrue(
-                            len(kernels) == 1, "SUM should result in one kernel"
-                        )
-                        # kernel0 reduces from 8 elements to a single scalar.
-                        arguments_that_are_divisible_by_16_in_kernel1 = (
-                            kernels[0].meta["configs"][0].divisible_by_16
-                        )
-                        self.assertEqual(
-                            arguments_that_are_divisible_by_16_in_kernel1, (0, 1)
-                        )
-                    else:
-                        self.assertTrue(
-                            len(kernels) == 2, "SUM should result in two kernels"
-                        )
-                        # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
-                        # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
-                        # at slot 3 should be in the divisible by 16 descriptor
-                        arguments_that_are_divisible_by_16_in_kernel0 = (
-                            kernels[0].meta["configs"][0].divisible_by_16
-                        )
-                        self.assertEqual(
-                            arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3)
-                        )
+            kernels = self.get_kernels(fn, [torch.randn([256, 256], device="cuda")])
+            self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
 
-                        # kernel1 reduces from 8 elements to a single scalar.
-                        arguments_that_are_divisible_by_16_in_kernel1 = (
-                            kernels[1].meta["configs"][0].divisible_by_16
-                        )
-                        self.assertEqual(
-                            arguments_that_are_divisible_by_16_in_kernel1, (0, 1)
-                        )
-                    torch._dynamo.reset()
+            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+            # at slot 3 should be in the divisible by 16 descriptor
+            arguments_that_are_divisible_by_16_in_kernel0 = (
+                kernels[0].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
-        @patch.object(torch._dynamo.config, "dynamic_shapes", False)
+            # kernel1 reduces from 8 elements to a single scalar.
+            arguments_that_are_divisible_by_16_in_kernel1 = (
+                kernels[1].meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
+            torch._dynamo.reset()
+
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
@@ -6438,7 +6422,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
-        @patch.object(torch._dynamo.config, "dynamic_shapes", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")

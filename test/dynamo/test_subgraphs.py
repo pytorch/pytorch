@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifdyn, ifdynstaticdefault, ifunspec
+from torch._dynamo.utils import disable_cache_limit, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -312,7 +312,10 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = torch.add(unsupported(x, x), 1)
             return a * x + len_(b)
 
-        self._common(fn, 2, 5)
+        if config.dynamic_shapes:
+            self._common(fn, 2, 5)
+        else:
+            self._common(fn, 2, 4)
 
     def test_restore_range(self):
         def fn(a, b):
@@ -389,7 +392,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # just one graph
         self.assertEqual(cnt.frame_count, 1)
 
-    @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_kwarg(self):
         def fn(a, b):
             return a - b * 10
@@ -410,7 +412,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             # just one graph
             self.assertEqual(cnt_dynamic.frame_count, 1)
 
-    @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_duck_size(self):
         def fn(a, b):
             if a.size(0) == b.size(0):
@@ -629,7 +630,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdyn(ifdynstaticdefault(4, 7), 4))
+        self._common(fn, 1, 2)
 
 
 if __name__ == "__main__":
