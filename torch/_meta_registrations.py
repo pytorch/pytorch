@@ -674,6 +674,7 @@ def linalg_lu_factor_ex_meta(
 
 
 @register_meta([aten.linalg_lu_solve.default, aten.linalg_lu_solve.out])
+@out_wrapper()
 def linalg_lu_solve_meta(
     LU: Tensor,
     pivots: Tensor,
@@ -681,7 +682,6 @@ def linalg_lu_solve_meta(
     *,
     left: bool = True,
     adjoint: bool = False,
-    out: Tensor = None,
 ) -> Tensor:
     # dtype
     checkFloatingOrComplex(LU, "torch.linalg.lu_solve")
@@ -727,13 +727,6 @@ def linalg_lu_solve_meta(
         if result.is_complex():
             result = result.conj()
 
-    if out is not None:
-        assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
-        out = _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-        # sets conj bit in out (not done by out_wrapper)
-        torch._C._set_conj(out, result.is_conj())  # type: ignore[arg-type]
-        return out
     return result
 
 
