@@ -45,7 +45,7 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .cuda_properties import get_device_properties
-from .dependencies import extract_read_writes, index_vars_no_squeeze, var_builder
+from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
     cache_on_self,
@@ -2697,8 +2697,11 @@ class ExternKernel(InputsKernel):
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
         x.unwrap_view().freeze_layout()
-        index_args, var_ranges = index_vars_no_squeeze(x.get_size(), prefix="r")
-        index = x.make_indexer()(*index_args)
+        index_args, var_ranges = dependencies.index_vars_squeeze(
+            x.get_size(), prefix="r"
+        )
+        range_vars = index_args[0]
+        index = x.make_indexer()(range_vars)
 
         index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)
         strides = V.graph.sizevars.stride_vars(index, range_vars)
