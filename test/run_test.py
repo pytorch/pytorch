@@ -15,6 +15,8 @@ from datetime import datetime
 from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, Optional
 
+import pkg_resources
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -1245,7 +1247,6 @@ def must_serial(file: str) -> bool:
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
         or "distributed" in os.getenv("TEST_CONFIG", "")
-        or "dynamo" in os.getenv("TEST_CONFIG", "")
         or "distributed" in file
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
@@ -1530,7 +1531,25 @@ def run_tests(
     return failure_messages
 
 
+def check_pip_packages() -> None:
+    packages = [
+        "pytest-rerunfailures",
+        "pytest-shard",
+        "pytest-flakefinder",
+        "pytest-xdist",
+    ]
+    installed_packages = [i.key for i in pkg_resources.working_set]
+    for package in packages:
+        if package not in installed_packages:
+            print(
+                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+            )
+            sys.exit(1)
+
+
 def main():
+    check_pip_packages()
+
     options = parse_args()
 
     test_directory = str(REPO_ROOT / "test")
