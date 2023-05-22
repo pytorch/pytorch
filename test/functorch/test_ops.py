@@ -253,7 +253,6 @@ def _get_vjpfull_variant(fn, primals):
     return wrapped, args
 
 
-
 def get_jvp_variant(f, sample):
     # We want this higher-order variant of jvp, so that it can
     # be used to wrap vmap
@@ -546,7 +545,6 @@ class TestOperators(TestCase):
                                      clone_inputs=True,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
 
-
     def jvp_opinfo_test(self, fn, sample, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
         # NB: we used requires_grad=True to determine where the primals are,
@@ -624,11 +622,11 @@ class TestOperators(TestCase):
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('linalg.multi_dot',
-            {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('svd_lowrank',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('pca_lowrank',
-            {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -825,7 +823,7 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
         tol1('matrix_exp',
-            {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
     ))
     @skipOps('TestOperators', 'test_vmapvjpvjp', {
         xfail('as_strided', 'partial_views'),
@@ -947,7 +945,7 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('matrix_exp',
-            {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
+             {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
         xfail('as_strided', 'partial_views'),
@@ -1567,7 +1565,7 @@ class TestOperators(TestCase):
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('matrix_exp',
-            {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapjvpvjp(self, device, dtype, op):
         # Since we test `jvpvjp` seperately,
@@ -1611,7 +1609,6 @@ class TestOperators(TestCase):
                 jvp_of_vjp, args, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
-
 
     def _make_extremal_inputs(self, shape, device):
         if shape is None:
@@ -1684,7 +1681,6 @@ class TestOperators(TestCase):
                 result = torch.nn.functional.softmax(input)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.softmax, (cotangents, input))
-
 
     def test_extremal_numerics_log_softmax(self, device):
         N, C, H, W = 3, 4, 5, 6
