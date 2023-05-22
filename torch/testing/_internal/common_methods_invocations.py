@@ -8346,6 +8346,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 yield SampleInput(input, *args, **kwargs)
 
 
+# TODO(crcrpar): Add forward mode AD support to out-place foreach functions
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         'exp',
