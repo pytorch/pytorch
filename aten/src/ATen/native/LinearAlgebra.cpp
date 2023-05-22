@@ -2570,8 +2570,6 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
       .view(a.sizes());
   }
   else { // if Double or ComplexDouble
-    TORCH_CHECK(a.scalar_type() == at::ScalarType::Double
-      || a.scalar_type() == at::ScalarType::ComplexDouble);
     constexpr std::array<double, total_n_degs> thetas_double = {
       2.220446049250313e-16, // deg 1
       2.580956802971767e-08, // deg 2
