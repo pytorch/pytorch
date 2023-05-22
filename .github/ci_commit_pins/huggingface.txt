@@ -1,1 +1,1 @@
-4.27.4
+../../.ci/docker/ci_commit_pins/huggingface.txt
