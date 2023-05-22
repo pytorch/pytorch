@@ -80,9 +80,7 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    # Triton does not distinguish between row- and col-majorness
-    # and will be fast as long as there is a contiguous dimension.
-    if not (t.is_contiguous() or t.transpose(-2, -1).is_contiguous()):
+    if t.stride(-2) > 1 and t.stride(-1) > 1:
         return t.contiguous()
     else:
         return t
@@ -620,6 +618,11 @@ if _has_triton():
             max_grid
         )
 
+        # If nnz x block strides are not the same in out_backup.values and values,
+        # it means that out_backup.values and values are not the views of each other,
+        # so we have to copy.
+        if out_backup.values().stride()[-3:] != values.stride()[-3:]:
+            out_backup.values().copy_(values.reshape(out_backup.values().shape))
         return out_backup
 
 

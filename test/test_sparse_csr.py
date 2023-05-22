@@ -3555,6 +3555,16 @@ class TestSparseCompressedTritonKernels(TestCase):
                 "test_triton_sampled_addmm",
                 bsr, mat1, mat2
             ).clone()
+            input_broadcasted_clone = torch.sparse_compressed_tensor(
+                input_broadcasted_clone.crow_indices(),
+                input_broadcasted_clone.col_indices(),
+                # For testing `out=` let's make values to have "weird" strides
+                # so that if the kernel modifies values to it's needs, the result
+                # is being compied into out.values.
+                input_broadcasted_clone.values().transpose(-3, -2).contiguous().transpose(-3, -2),
+                layout=input_broadcasted_clone.layout,
+                size=input_broadcasted_clone.shape
+            )
 
             scalars = (0.0, 2.0)
             for alpha, beta, out in itertools.product(scalars, scalars, (None, input_broadcasted_clone)):
@@ -3572,10 +3582,10 @@ class TestSparseCompressedTritonKernels(TestCase):
                     self.assertEqual(res_tri.to_dense(), res_csr.to_dense())
 
                 # Check grid consistency
-                grid_size = (3,)
+                grid_size = (3, None)
                 grid_gen = itertools.product(grid_size, repeat=2)
                 for grid in grid_gen:
-                    res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta)
+                    res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
 
 
