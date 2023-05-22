@@ -79,11 +79,63 @@ class PackedLinearWeightDynamicBackward
       // Per Channel quantizer does not support transpose.
       // Manual transpose is necessary
       original_weight = original_weight.dequantize();
+
+// kwanghoon(TODO): This is going to be a long term solution that is applicable
+// to every models One issue with quantizing a gradient, we can't get good
+// enough gradient to improve model accuracy when model become complicated As of
+// now, we can disable, and comeback when we figure it out better solution.
+#if 0
+      // Enable Kernel backend for quantized backpropagaiton matrix
+      // multiplication
+      original_weight = at::permute(original_weight, {1, 0});
+      // Take advantage of QNNPACK for matrix multiplication
+      // Per channel scales & zero point computation
+      // Sources :
+      // https://github.com/pytorch/pytorch/blob/master/torch/ao/quantization/observer.py#L350-L353
+      auto [amin, amax] = at::aminmax(original_weight, /*dim* = */ 1);
+      // QInt8 type signed quantization
+      auto qmax = 127;
+      auto qmin = -128;
+      // Clamp with some epsilon number, so that value does not go below zero
+      auto epsilon = 1e-9;
+      auto new_scales = (amax - amin) / float(qmax - qmin);
+      new_scales = at::clamp(new_scales, epsilon);
+      auto new_zero_point =
+          qmin - at::round(amin / new_scales).toType(c10::kInt);
+      new_zero_point = at::clamp(new_zero_point, qmin, qmax);
+      // TO-DO (BUGBUG)
+      // Backend kernel is designed for inference, tightly coded for output
+      // channel. For mathematical correctness, we should enable to run kernel
+      // with input channel axis after transpose. As workaround, we are simply
+      // either exploring per tensor quantization or per channel quantization
+      // with axis = 0
+      original_weight = at::quantize_per_channel(
+          original_weight,
+          new_scales,
+          new_zero_point,
+          /*axis = 1 for transpose, but we are forcing it to non-transposed case
+             due to above issue*/
+          0,
+          c10::kQInt8);
+#endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
     }
-    // Compute gradient in FP32
+#if 1
+    // Pure FP32 computation, useful for debugging purpose
     auto dLdX1 = torch::matmul(grad_output0, original_weight);
+#else
+    // Take advantage of QNNPACK for matrix multiplication
+    static auto op = at::Dispatcher::singleton()
+                         .findSchemaOrThrow("quantized::linear_prepack", "")
+                         .typed<c10::intrusive_ptr<LinearPackedParamsBase>(
+                             at::Tensor, c10::optional<at::Tensor>)>();
+    auto prepacked_weight = op.call(original_weight, nullopt);
+
+    auto dLdX1 =
+        prepacked_weight->apply_dynamic(grad_output0.toType(c10::kFloat));
+#endif
+
     auto input_grad0 = dLdX1 * input_scale;
     return {input_grad0, torch::Tensor(), torch::Tensor()};
   }
