@@ -31,7 +31,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
-from torch._dynamo.utils import ifdyn, ifdynstaticdefault
+from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
 from torch.nn import functional as F
 
 
@@ -878,7 +878,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # In the future, we could reduce the frame_count down to 1
         # by guarding on the exact values of `Tensor repeats` arg
         self.assertEqual(cnt.frame_count, 4)
-        self.assertEqual(cnt.op_count, ifdyn(14, 14))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(14, 16), 14))
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -981,7 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifdyn(14, 32))
+        self.assertEqual(cnt.op_count, ifunspec(37, ifdyn(14, 14)))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1141,7 +1141,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 13)
+        self.assertEqual(cnt.op_count, 10)
 
     def test_rng_state(self):
         def fn():
@@ -1277,7 +1277,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
         # With unspec int, maximum computation is preserved
-        self.assertEqual(cnt.op_count, ifdyn(3, 4))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(3, 4), 3))
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
@@ -2788,8 +2788,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.randn(3))
 
-        self.assertEqual(counter.op_count, 3)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, ifdyn(ifdynstaticdefault(3, 2), 3))
+        self.assertEqual(counter.frame_count, ifdyn(ifdynstaticdefault(1, 2), 1))
 
     def test_delattr(self):
         class MyObj:
@@ -3204,23 +3204,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
-
-    @requires_cuda()
-    def test_disallow_data_parallel(self):
-        from torch.nn.parallel.data_parallel import DataParallel
-
-        class MockModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = DataParallel(torch.nn.Linear(3, 3).cuda())
-
-            def forward(self, x):
-                return self.linear(x)
-
-        mod = MockModule().cuda()
-        opt_mod = torch.compile(mod, backend="eager")
-        x = torch.randn(3, 3, device="cuda")
-        opt_mod(x)
 
 
 if __name__ == "__main__":

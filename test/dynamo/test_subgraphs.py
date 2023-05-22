@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifdyn
+from torch._dynamo.utils import disable_cache_limit, ifdyn, ifdynstaticdefault, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -327,10 +327,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        if config.assume_static_by_default:
-            self._common(fn, 2, 4)
-        else:
-            self._common(fn, 2, ifdyn(4, 1))
+        self._common(fn, 2, ifunspec(1, 4))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -632,7 +629,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 4)
+        self._common(fn, 1, ifdyn(ifdynstaticdefault(4, 7), 4))
 
 
 if __name__ == "__main__":

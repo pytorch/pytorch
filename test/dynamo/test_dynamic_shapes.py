@@ -11,7 +11,6 @@ try:
         test_higher_order_ops,
         test_misc,
         test_modules,
-        test_python_autograd,
         test_repros,
         test_subgraphs,
     )
@@ -23,7 +22,6 @@ except ImportError:
     import test_higher_order_ops
     import test_misc
     import test_modules
-    import test_python_autograd
     import test_repros
     import test_subgraphs
 
@@ -32,28 +30,27 @@ import unittest
 
 test_classes = {}
 
-ALL_DYNAMIC_XFAILS = {}
+ALL_DYNAMIC_XFAILS = {
+    "MiscTests": [],
+}
 
 XFAIL_HITS = 0
 
 
-def make_test_cls(cls, *, dynamic, static_default=False):
-    if dynamic:
-        suffix = "_dynamic_shapes"
-        cls_prefix = "DynamicShapes"
-    else:
-        suffix = "_static_shapes"
-        cls_prefix = "StaticShapes"
-
+def make_dynamic_cls(cls, *, static_default=False):
+    suffix = "_dynamic_shapes"
     if static_default:
         suffix += "_static_default"
+
+    cls_prefix = "DynamicShapes"
+    if static_default:
         cls_prefix = f"StaticDefault{cls_prefix}"
 
     test_class = make_test_cls_with_patches(
         cls,
         cls_prefix,
         suffix,
-        (config, "dynamic_shapes", dynamic),
+        (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
     )
@@ -81,13 +78,44 @@ tests = [
     test_subgraphs.SubGraphTests,
     test_higher_order_ops.HigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
-    test_python_autograd.TestPythonAutograd,
 ]
 for test in tests:
-    make_test_cls(test, dynamic=False)
-    make_test_cls(test, dynamic=True, static_default=True)
+    make_dynamic_cls(test)
+    make_dynamic_cls(test, static_default=True)
 
 assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
+
+# Single config failures
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module1_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module2_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module3_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module4_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module5_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module6_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

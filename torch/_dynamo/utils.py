@@ -1406,7 +1406,7 @@ def ifdynstaticdefault(count1, count2):
 
 
 def ifunspec(count1, count2):
-    if not torch._dynamo.config.specialize_int:
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
