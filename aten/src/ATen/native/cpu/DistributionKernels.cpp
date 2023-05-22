@@ -149,13 +149,13 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (double *)(sample_ptr + begin), 0, 1./lambda);
+              (double *)(sample_ptr + begin), 1.4013e-45, 1./lambda);
             vslDeleteStream(&stream);
           } else {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (float *) (sample_ptr + begin), 0, 1./lambda);
+              (float *) (sample_ptr + begin), 1.4013e-45, 1./lambda);
             vslDeleteStream(&stream);
           }
           // vectorized copy if using buffer and contiguous
