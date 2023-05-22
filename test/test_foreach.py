@@ -912,13 +912,12 @@ class TestForeach(TestCase):
         self.assertIsNone(sample.input[1].grad)
 
     @ops(
-        filter(
-            lambda op: op.supports_forward_ad,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        ),
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
         dtypes=(torch.float,),
     )
     def test_forward_mode_AD(self, device, dtype, op):
+        if not op.supports_forward_ad:
+            self.skipTest("forward AD not supported")
 
         patterns_to_tolerate = "|".join([
             _BOOL_SUB_ERR_MSG,
