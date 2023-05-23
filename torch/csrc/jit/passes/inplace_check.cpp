@@ -3,7 +3,7 @@
 namespace torch {
 namespace jit {
 
-static void CheckInplace(Block* block) {
+void CheckInplace(Block* block) {
   for (auto node : block->nodes()) {
     if (node->kind() == prim::PythonOp && node->hasAttribute(attr::inplace)) {
       if (node->i(attr::inplace)) {
