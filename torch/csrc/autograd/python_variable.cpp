@@ -2036,7 +2036,13 @@ static int THPVariable_subclass_traverse(
         for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
           if (auto pyhook =
                   dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-            Py_VISIT(pyhook->dict);
+            if (pyhook->dict != var->backward_hooks) {
+              // We already visited var->backward_hooks above. Bad things can
+              // happen if we visited things twice.
+              // Normally this path would not be reached, but pyhook->dict can
+              // be different if we set backward_hooks to something new manually.
+              Py_VISIT(pyhook->dict);
+            }
           }
         }
       }
