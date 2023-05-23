@@ -26,8 +26,7 @@ struct RAIIContextManager {
   std::tuple<Args...> args_;
 };
 
-// Turns a C++ RAII guard into a struct that can be pybind'ed as a Python
-// context manager.
+// Turns a C++ RAII guard into a Python context manager.
 // See _ExcludeDispatchKeyGuard in python_dispatch.cpp for example.
 template <typename GuardT, typename... GuardArgs>
 void py_context_manager(const py::module& m, const char* name) {
