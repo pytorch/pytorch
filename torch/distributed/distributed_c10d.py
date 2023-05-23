@@ -1674,48 +1674,43 @@ def _coalescing_manager(
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
-    try:
-        yield cm
-    except Exception:
-        # Re-throw exception caught by code inside the context manager
-        raise
-    else:
-        op_list = _world.pg_coalesce_state.pop(group)
-        if op_list:
-            # Collectives supporting "Fast Path" coalescing are captured.
-            # See implementation in corresponding collective APIs.
-            # Currently supported:
-            # - coalesced `all_reduce`
-            # - coalesced `all_gather_into_tensor`
-            op0 = op_list[0].op
-            if op0 == all_reduce:
-                tensors = []
-                for op in op_list:
-                    tensors.append(op.tensor)
-                opts = AllreduceCoalescedOptions()
-                opts.reduceOp = op_list[0].redop
-                work = group.allreduce_coalesced(tensors, opts)
-            elif op0 == all_gather_into_tensor:
-                inputs = []
-                outputs = []
-                for op in op_list:
-                    inputs.append(op.tensor)
-                    outputs.append(op.dst_tensor)
-                work = group.allgather_into_tensor_coalesced(outputs, inputs)
-            else:
-                raise AssertionError(
-                    f"Coalescing manager does not support fast-path coalescing of {op0}, "
-                    f"yet {op0} is still recorded in op list. This is an internal error of c10d."
-                )
-
-        if device:
-            # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
-            work = group._end_coalescing(device)
-
-        if async_ops:
-            cm.append(work)
+    yield cm
+    op_list = _world.pg_coalesce_state.pop(group)
+    if op_list:
+        # Collectives supporting "Fast Path" coalescing are captured.
+        # See implementation in corresponding collective APIs.
+        # Currently supported:
+        # - coalesced `all_reduce`
+        # - coalesced `all_gather_into_tensor`
+        op0 = op_list[0].op
+        if op0 == all_reduce:
+            tensors = []
+            for op in op_list:
+                tensors.append(op.tensor)
+            opts = AllreduceCoalescedOptions()
+            opts.reduceOp = op_list[0].redop
+            work = group.allreduce_coalesced(tensors, opts)
+        elif op0 == all_gather_into_tensor:
+            inputs = []
+            outputs = []
+            for op in op_list:
+                inputs.append(op.tensor)
+                outputs.append(op.dst_tensor)
+            work = group.allgather_into_tensor_coalesced(outputs, inputs)
         else:
-            work.wait()
+            raise AssertionError(
+                f"Coalescing manager does not support fast-path coalescing of {op0}, "
+                f"yet {op0} is still recorded in op list. This is an internal error of c10d."
+            )
+
+    if device:
+        # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
+        work = group._end_coalescing(device)
+
+    if async_ops:
+        cm.append(work)
+    else:
+        work.wait()
 
 
 def batch_isend_irecv(p2p_op_list):
