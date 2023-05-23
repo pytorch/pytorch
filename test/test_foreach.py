@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import \
-    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize
+    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
@@ -913,7 +913,8 @@ class TestForeach(TestCase):
 
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        dtypes=(torch.float,),
+        # TODO(crcrpar): Add ComplexDouble
+        dtypes=(torch.float64,),
     )
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
@@ -928,44 +929,32 @@ class TestForeach(TestCase):
             # Some non-unary in-place ops with scalar/scalarlist would error out if there's non float ones.
             "can't be cast to the desired",
             "clamp is not supported for complex types",
-            "Found dtype Float but expected ComplexFloat",
+            "Found dtype Double but expected ComplexDouble",
         ])
 
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
         ):
 
-            def inplace_func(tensorlist):
+            # Call `clone` to avoid inplace modifications likewise
+            # `torch.testing._internal.common_utils.TestGradients._get_safe_inplace`
+            def inplace_func(*tensorlist):
                 kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
-                op.inplace_variant(tensorlist, *sample.args, **kwargs)
+                op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
                 return tensorlist
 
-            primal_tensors = [t.clone() for t in sample.input]
-            tangent_tensors = [torch.rand_like(t) for t in primal_tensors]
-
-            with torch.autograd.forward_ad.dual_level():
-                dual_inputs = [
-                    torch.autograd.forward_ad.make_dual(primal, tangent)
-                    for primal, tangent in zip(primal_tensors, tangent_tensors)
-                ]
-
-                try:
-                    dual_outputs = inplace_func(dual_inputs)
-                except Exception as e:
-                    if not re.findall(patterns_to_tolerate, str(e)):
-                        raise e
-                else:
-                    results, forward_mode_grads = [], []
-                    for dual in dual_outputs:
-                        unpacked_dual = torch.autograd.forward_ad.unpack_dual(dual)
-                        results.append(unpacked_dual.primal)
-                        forward_mode_grads.append(unpacked_dual.tangent)
-                    cloned_sample = sample.transform(clone)
-                    ref_inputs = [t.clone() for t in cloned_sample.input]
-                    outputs = inplace_func(ref_inputs)
-                    ref_grads = torch.autograd.grad(outputs, ref_inputs, tangent_tensors)
-                    self.assertEqual(results, outputs)
-                    self.assertEqual(forward_mode_grads, ref_grads)
+            try:
+                gradcheck(
+                    inplace_func,
+                    sample.input,
+                    raise_exception=True,
+                    check_forward_ad=True,
+                    check_backward_ad=False,
+                    check_batched_grad=False,
+                )
+            except Exception as e:
+                if not re.findall(patterns_to_tolerate, str(e)):
+                    raise e
 
 
 instantiate_device_type_tests(TestForeach, globals())
