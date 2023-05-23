@@ -647,6 +647,10 @@ void initDispatchBindings(PyObject* module) {
         return c10::isIncludedInAlias(a, b);
       });
 
+  // DEPRECATED, please don't use this. Instead use torch._C._ExcludeDispatchKeyGuard
+  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
+      .def(py::init<c10::DispatchKeySet>());
+
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
 
