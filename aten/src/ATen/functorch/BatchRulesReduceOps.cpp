@@ -405,6 +405,26 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+Tensor bucketize_decomp_Tensor(
+    const Tensor& self,
+    const Tensor& boundaries,
+    bool out_int32,
+    bool right) {
+  // checking logical rank
+  TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
+  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+}
+
+Tensor bucketize_decomp_Scalar(
+    const Scalar& self,
+    const Tensor& boundaries,
+    bool out_int32,
+    bool right) {
+  // checking logical rank
+  TORCH_CHECK(boundaries.dim() == 1, "bucketize: boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
+  return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
+}
+
 // Use when the other macros don't work out.
 // - dim_pos: index of the dim argument
 // - keepdim_case: either True, False, or Variable.
@@ -442,6 +462,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
+  m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
+  m.impl("bucketize.Scalar", bucketize_decomp_Scalar);
   REDUCTION_BOXED_ARGS(count_nonzero.dim_IntList, 1, KEEPDIM_CASE_FALSE, -1);
   REDUCTION_NO_KEEPDIM_ARG(cummax);
   REDUCTION_NO_KEEPDIM_ARG(cummin);

@@ -44,6 +44,20 @@ class TORCH_API PrefixStore : public Store {
 
   void watchKey(const std::string& key, WatchKeyCallback callback) override;
 
+  void append(
+      const std::string& key,
+      const std::vector<uint8_t>& value) override;
+
+  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+
+  void multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values) override;
+
+  // Returns true if this store support watchKey, append, multiGet and multiSet
+  bool hasExtendedApi() const override;
+
+
   c10::intrusive_ptr<Store> getUnderlyingStore();
 
  protected:

@@ -318,7 +318,7 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 else:
-                    fn = mod.__call__
+                    fn = mod._call_impl
                 fn_source = AttrSource(self.source, "__call__")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
@@ -326,7 +326,6 @@ class NNModuleVariable(VariableTracker):
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
-
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
@@ -374,7 +373,7 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
 
-        if name == "_call_impl":
+        if name in ["_call_impl", "_wrapped_call_impl"]:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
@@ -683,14 +682,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = self.value
-
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
             if mod.cls_to_become is not None:
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
-
-        name = "__call__"
+        name = "_call_impl"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
@@ -711,6 +708,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
+        if name in ["_call_impl", "_wrapped_call_impl"]:
+            fn = getattr(self.value_type, name)
+            if self.source:
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+            else:
+                source = None
+
+            return variables.UserFunctionVariable(
+                fn, source=source, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
