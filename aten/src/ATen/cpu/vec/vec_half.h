@@ -5,7 +5,7 @@ namespace vec {
 inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
-inline uint16_t float_to_half(float val) {
+inline uint16_t float2half_scalar(float val) {
 #if defined(CPU_CAPABILITY_AVX2)
   __m256 v = _mm256_set1_ps(val);
   __m128i o =
