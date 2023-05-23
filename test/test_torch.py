@@ -5722,7 +5722,6 @@ def disable_gc():
     else:
         yield
 
-@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTorch(TestCase):
     exact_dtype = True
 

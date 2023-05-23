@@ -3526,7 +3526,6 @@ def may_require_grad(dtype):
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
 
-@skipIfTorchDynamo("TorchDynamo fails with unknown reason")
 class TestBufferProtocol(TestCase):
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
