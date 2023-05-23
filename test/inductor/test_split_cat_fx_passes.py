@@ -546,6 +546,25 @@ class TestSplitCatFxPasses(TestCase):
         )
 
     @torch._inductor.config.patch(split_cat_fx_passes=True)
+    def test_split_cat_merge_mutation(self):
+        args = [
+            torch.randn(2, 32, 32, 16),
+        ]
+
+        def split_cat_mutation(x):
+            splits = torch.split(x, 4, dim=1)
+            splits[1].copy_(splits[0])
+            return torch.cat(splits, dim=1)
+
+        expected = split_cat_mutation(*args)
+        actual = torch.compile(split_cat_mutation, dynamic=True)(*args)
+
+        torch.testing.assert_close(actual, expected)
+
+        self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
+        self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
+
+    @torch._inductor.config.patch(split_cat_fx_passes=True)
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
             items = list(torch.split(x, 1, dim=1))
