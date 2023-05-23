@@ -26,10 +26,9 @@ from ..pattern_matcher import (
     RepeatedExpr,
 )
 from .pre_grad import (
-    merge_split_cat_pass,
     merge_splits_pass,
     normalize_split_pass,
-    split_squeeze_pass,
+    split_cat_pass,
     unbind_stack_pass,
 )
 
@@ -755,7 +754,7 @@ class GetItem(CallFunction):
             _users=MULTIPLE,
         ),
     ),
-    pass_dict=split_squeeze_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -773,7 +772,7 @@ class GetItem(CallFunction):
             _users=MULTIPLE,
         )
     ),
-    pass_dict=split_squeeze_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 def merge_split_squeeze(
@@ -868,7 +867,7 @@ getitem_split = ListOf(
         dim=Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -878,7 +877,7 @@ getitem_split = ListOf(
         dim=Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -888,7 +887,7 @@ getitem_split = ListOf(
         Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
