@@ -804,6 +804,7 @@ def _move_module_to_device(
 
     Precondition: ``_check_single_device_module()``.
     """
+    print("Move module to device")
     param = next(_get_orig_params(module, ignored_params), None)
     if param is None:
         return  # no original parameters to manage
@@ -811,6 +812,7 @@ def _move_module_to_device(
     # TODO: This only checks the parameter's device, not any buffers. Thus, a
     # buffer-only module will not get offloaded to CPU.
     if device_from_device_id is not None:
+        print("device id not None")
         if param.device == cpu_device:
             # BFS from `module` without traversing any nested FSDP instances to
             # collect the parameters/buffers that have not yet been managed
@@ -830,6 +832,7 @@ def _move_module_to_device(
             # on the ignored parameters (and buffers).
             _move_states_to_device(params, buffers, device_from_device_id)
     elif param.device == cpu_device:
+        print("warning CPU init")
         _warn_cpu_init()
 
 
@@ -872,6 +875,7 @@ def _warn_cpu_init():
         "be on GPU device to work with the `sync_module_states=True` flag "
         "since that requires GPU communication."
     )
+    print(" -- done warning CPU init --")
 
 
 def _get_compute_device(
@@ -907,6 +911,8 @@ def _get_compute_device(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
             f"{compute_device} vs {device_from_device_id}"
         )
+    else:
+        print("RV -- did NOT raise error")
     return compute_device
 
 

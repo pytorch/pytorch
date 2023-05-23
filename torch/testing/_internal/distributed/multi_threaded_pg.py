@@ -12,6 +12,7 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     AllToAllOptions,
+    BarrierOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -114,7 +115,7 @@ class AllGatherBase:
             assert isinstance(output_tensor, torch.Tensor)
             # get input_tensor from each rank and copy it into the right place
             # in output_tensor
-            cat_tensor = torch.cat([data[rank][1] for rank in range(len(data))])
+            cat_tensor = torch.cat([data[rank][1].to(output_tensor.device) for rank in range(len(data))])
             output_tensor.copy_(cat_tensor)
 
 class Scatter:
@@ -308,6 +309,9 @@ class ProcessLocalGroup(dist.ProcessGroup):
         res = coll.join(self._rank, tensor_list)
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def barrier(self, opts=BarrierOptions()):
+        return self.allreduce(tensor_list=[torch.ones(1)])
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
