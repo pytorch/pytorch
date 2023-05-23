@@ -161,10 +161,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "amax": {f16},
     "amin": {f16},
     "angle": {f64},
-    "argwhere": {i64},
-    "bernoulli": {f64},
     "bincount": {i32, i64},
-    "bucketize": {b8, f64, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -258,15 +255,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     # AssertionError: Scalars are not close!
     "empty_strided": {b8, i32, i64, f16, f32, f64},
     # These return complex tensors
-    "cdouble": {b8, i32, i64, f16, f32, f64},
-    "cfloat": {b8, i32, i64, f16, f32, f64},
     "chalf": {b8, i32, i64, f16, f32, f64},
     "complex": {f16, f32, f64},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__getitem__": {f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
