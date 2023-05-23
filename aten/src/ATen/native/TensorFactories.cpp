@@ -352,7 +352,10 @@ Tensor& empty_out(IntArrayRef size,
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND(Half, DEFINE_CAST_OP)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-prototypes"
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
+#pragma clang diagnostic pop
 
 #undef DEFINE_CAST_OP
 
