@@ -33,6 +33,10 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -146,6 +150,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         run: |
           set -x
 
@@ -202,6 +207,7 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
