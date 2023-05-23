@@ -800,6 +800,7 @@ class DistributionsTestCase(TestCase):
         super().setUp()
 
 
+@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributions(DistributionsTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -3475,7 +3476,6 @@ class TestRsample(DistributionsTestCase):
             ]))
 
 
-@skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionShapes(DistributionsTestCase):
     def setUp(self):
         super().setUp()
