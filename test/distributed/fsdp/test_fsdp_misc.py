@@ -62,9 +62,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
     @property
     def process_group(self):
-        pg = dist.distributed_c10d._get_default_group()
-        print(f"pg is {pg}")
-        return pg
+        return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
@@ -269,8 +267,6 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         """Tests that passing a CPU module to FSDP preserves that the wrapped
         module is on CPU after FSDP initialization, albeit after loging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
-        torch.set_num_threads(1)
-        # torch.set_num_interop_threads(1)
         torch.cuda.set_device(self.rank)
         regex = "passed-in `module` is on CPU"
         context = self.assertWarnsRegex(
@@ -302,9 +298,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     @property
     def process_group(self):
-        pg = dist.distributed_c10d._get_default_group()
-        print(f"pg is {pg}")
-        return pg
+        return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_namedtuple(self):
