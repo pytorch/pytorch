@@ -77,7 +77,7 @@ def single_record_test(**kwargs):
 
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(1, output_code=True)
+    test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
 
     @requires_cuda()
@@ -199,6 +199,20 @@ class LoggingTests(LoggingTestCase):
         logger = logging.getLogger("torch.utils")
         logger.info("hi")
         self.assertEqual(len(records), 1)
+
+    @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
+    def test_all(self, _):
+        registry = torch._logging._internal.log_registry
+        state = torch._logging._internal.log_state
+
+        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
+            logger = logging.getLogger(logger_qname)
+
+            if logger_qname == dynamo_qname:
+                self.assertEqual(logger.level, logging.INFO)
+            else:
+                self.assertEqual(logger.level, logging.DEBUG)
 
 
 # single record tests

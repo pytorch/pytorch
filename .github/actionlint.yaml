@@ -11,8 +11,9 @@ self-hosted-runner:
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
-    - windows.4xlarge
+    - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
+    - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
     - bm-runner
     - linux.rocm.gpu

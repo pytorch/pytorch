@@ -914,23 +914,41 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  bool gradIsSparse =
-      (var.dtype() == grad.dtype() &&
-       var.device().type() == grad.device().type() && grad.layout() == kSparse);
-  THPUtils_assertRet(
-      -1,
-      grad.options().type_equal(var.options()) || gradIsSparse,
-      "assigned grad has data of a different type");
-  if (var.is_cuda()) {
-    THPUtils_assertRet(
-        -1,
-        grad.get_device() == var.get_device(),
-        "assigned grad has data located on a different device");
+  TORCH_CHECK(
+      var.dtype() == grad.dtype(),
+      "attempting to assign a gradient with dtype '",
+      grad.dtype(),
+      "' to a tensor with dtype '",
+      var.dtype(),
+      "'. Please ensure that the gradient and the tensor have the same dtype");
+  TORCH_CHECK(
+      var.device().type() == grad.device().type(),
+      "attempting to assign a gradient with device type '",
+      grad.device().type(),
+      "' to a tensor with device type '",
+      var.device().type(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
+  if (grad.layout() != kSparse) {
+    TORCH_CHECK(
+        grad.options().type_equal(var.options()),
+        "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  THPUtils_assertRet(
-      -1,
+  if (var.is_cuda()) {
+    TORCH_CHECK(
+        grad.get_device() == var.get_device(),
+        "attempting to assign a gradient located on device with index '",
+        grad.get_device(),
+        "' to a tensor located on device with index '",
+        var.get_device(),
+        "'. Please ensure that the gradient and the tensor are on the same device");
+  }
+  TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
-      "assigned grad has data of a different size");
+      "attempting to assign a gradient of size '",
+      grad.sym_sizes(),
+      "' to a tensor of size '",
+      var.sym_sizes(),
+      "'. Please ensure that the gradient and the tensor are the same size");
 
   var.mutable_grad() = grad;
   return 0;
