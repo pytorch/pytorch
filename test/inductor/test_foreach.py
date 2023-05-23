@@ -51,7 +51,7 @@ class ForeachTests(TestCase):
         )
 
     # called in test_cpp_wrapper.py
-    test_cpp_wrapper = _test_single
+    test_cpp_wrapper = requires_cuda(_test_single)
 
     @requires_cuda()
     def test_single(self):
