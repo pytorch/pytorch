@@ -12,7 +12,6 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
-#include <torch/csrc/utils/byte_order.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
