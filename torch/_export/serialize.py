@@ -1,7 +1,8 @@
 import copy
 import io
+import logging
 import operator
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int
@@ -29,6 +30,9 @@ from .serde.schema import (   # type: ignore[attr-defined]
 
 
 __all__ = ["convert_fake_tensor_to_tensor_meta", "convert_tensor_meta_to_fake_tensor"]
+
+
+log = logging.getLogger(__name__)
 
 
 class SerializeError(RuntimeError):
@@ -91,6 +95,13 @@ _SYM_INT_OPS = {
     operator.mod,
 }
 
+
+def import_device(d: Device) -> torch.device:
+    if d.index is None:
+        return torch.device(type=d.type)  # type: ignore[call-overload]
+    return torch.device(type=d.type, index=d.index)
+
+
 def export_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
     if isinstance(s, int):
         return SymInt.create(as_int=s)
@@ -120,6 +131,19 @@ def export_tensor_meta(t: torch.Tensor) -> TensorMeta:
     )
 
 
+def import_tensor_meta(tensor_meta: TensorMeta, fake_tensor_mode: FakeTensorMode) -> FakeTensor:
+    with fake_tensor_mode:
+        return cast(
+            FakeTensor,
+            torch.empty_strided(
+                tuple([val.as_int for val in tensor_meta.sizes]),
+                tuple([val.as_int for val in tensor_meta.strides]),
+                device=import_device(tensor_meta.device),
+                dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
+            ),
+        )
+
+
 def export_metadata(node: torch.fx.Node) -> Dict[str, str]:
     ret = {}
     if stack_trace := node.meta.get("stack_trace"):
@@ -128,6 +152,20 @@ def export_metadata(node: torch.fx.Node) -> Dict[str, str]:
     # Need an explicit None check instead of walrus operator, because
     # module_fqn can be the empty string if the node belongs to the root.
     # The walrus operator returns False on an empty string :(
+    if module_fqn is not None:
+        ret["module_fqn"] = module_fqn
+    # TODO(angelayi) add nn_module_stack and source_fn
+    return ret
+
+
+def import_metadata(metadata) -> Dict[str, str]:
+    ret = {}
+    if stack_trace := metadata.get("stack_trace"):
+        ret["stack_trace"] = stack_trace
+    # Need an explicit None check instead of walrus operator, because
+    # module_fqn can be the empty string if the node belongs to the root.
+    # The walrus operator returns False on an empty string :(
+    module_fqn = metadata.get("module_fqn")
     if module_fqn is not None:
         ret["module_fqn"] = module_fqn
     # TODO(angelayi) add nn_module_stack and source_fn
@@ -145,6 +183,22 @@ def export_operator(target, version) -> Operator:
         return Operator(name=str(target), version=version)
 
 
+def import_operator(serialized_target, op_version):
+    if serialized_target.version != op_version:
+        raise SerializeError(
+            f"Target {serialized_target.name} had op version {serialized_target.version} "
+            f"but the existing op version is now {op_version}"
+        )
+    target = torch.ops
+    for name in serialized_target.name.split("."):
+        if not hasattr(target, name):
+            log.warning(f"Could not find operator {target.name}. Returning target as string.")  # noqa: G004
+            return target.name
+        else:
+            target = getattr(target, name)
+    return target
+
+
 def export_pytree(spec: pytree.TreeSpec) -> str:
     # TODO(angelayi): spec
     # assert isinstance(spec, pytree.TreeSpec), type(spec)
@@ -153,8 +207,16 @@ def export_pytree(spec: pytree.TreeSpec) -> str:
     # _, tree = ex_pytree.tree_flatten(tree)
     # return tree.to_str()
     return ""
+
+
+def import_pytree(spec: str) -> pytree.TreeSpec:
     # TODO(angelayi): spec
-    return ""
+    # tree_spec = ex_pytree.from_str(spec)
+    # dummy_leaves = [torch.tensor(0)] * tree_spec.num_leaves()
+    # tree = ex_pytree.tree_unflatten(dummy_leaves, tree_spec)
+    # _, py_spec = pytree.tree_flatten(tree)
+    # return py_spec
+    return pytree.LeafSpec()
 
 
 def export_signature(sig) -> GraphSignature:
@@ -192,6 +254,30 @@ def export_signature(sig) -> GraphSignature:
     return graph_signature
 
 
+def import_signature(sig: GraphSignature):
+    # TODO(angelayi): When we figure out graph signature
+    # backward_signature = None
+    # if bw_sig := sig.backwardSignature:
+    #     backward_signature = PyBackwardSignature(
+    #         gradients_to_parameters=dict(bw_sig.gradientsToParameters),
+    #         gradients_to_user_inputs=dict(bw_sig.gradientsToUserInputs),
+    #         loss_output=bw_sig.lossOutput,
+    #     )
+    # return PyGraphSignature(
+    #     parameters=list(sig.inputsToParameters.values()),
+    #     buffers=list(sig.inputsToBuffers.values()),
+    #     user_inputs=list(sig.userInputs),
+    #     user_outputs=list(sig.userOutputs),
+    #     inputs_to_buffers=dict(sig.inputsToBuffers),
+    #     inputs_to_parameters=dict(sig.inputsToParameters),
+    #     buffers_to_mutate=dict(sig.buffersToMutate),
+    #     in_spec=import_pytree(sig.inSpec),
+    #     out_spec=import_pytree(sig.outSpec),
+    #     backward_signature=backward_signature,
+    # )
+    pass
+
+
 def export_state_dict(state_dict) -> bytes:
     buffer = io.BytesIO()
     state_dict = dict(state_dict)
@@ -205,6 +291,12 @@ def export_state_dict(state_dict) -> bytes:
         state_dict[name] = state_dict[name].cpu()
     torch.save(state_dict, buffer)
     return buffer.getvalue()
+
+
+def import_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
+    buffer = io.BytesIO(serialized)
+    buffer.seek(0)
+    return torch.load(buffer)
 
 
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
@@ -497,9 +589,176 @@ class Serializer:
         )
 
 
+class Deserializer:
+    def __init__(self, op_version: int = 0):
+        self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
+        self.serialized_name_to_meta: Dict[str, FakeTensor] = {}
+        self.graph = torch.fx.Graph()
+        self.fake_tensor_mode = FakeTensorMode()
+        self.op_version = op_version
+
+    def deserialize(
+        self, serialized_graph_module: GraphModule, serialized_state_dict: bytes
+    ) -> torch.fx.GraphModule:
+        graph = self.graph
+        serialized_graph = serialized_graph_module.graph
+
+        # Handle the tensor metas.
+        for name, tensor_value in serialized_graph.tensor_values.items():
+            meta_val = import_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
+            self.serialized_name_to_meta[name] = meta_val
+
+        # Inputs: convert to placeholder nodes in FX.
+        for input in serialized_graph.inputs:
+            placeholder_node = graph.placeholder(input.as_tensor.name)
+            self.sync_serialized_node(input.as_tensor.name, placeholder_node)
+
+        # Nodes: convert to call_function nodes.
+        for serialized_node in serialized_graph.nodes:
+            if serialized_node.target.name == "torch.set_grad_enabled":
+                # Hack for torch.no_grad support. In the long run this should become
+                # a higher order op but this is fine for now. See [NOTE: nograd support]
+                fx_node = graph.call_function(
+                    torch.set_grad_enabled,
+                    (self.import_input(serialized_node.inputs[0].arg),),
+                )
+                fx_node.meta.update(import_metadata(serialized_node.metadata))
+                continue
+
+            target = import_operator(serialized_node.target, self.op_version)
+
+            # For convenience: if this node returns a single tensor, name the
+            # newly-created node after it. This ensures that these tensor values
+            # have names that are consistent with serialized.
+            name = (
+                serialized_node.outputs[0].value.name
+                if _is_single_tensor_return(target)
+                else None  # FX will generate a name for us.
+            )
+            args, kwargs = self.import_inputs(target, serialized_node)
+
+            fx_node = graph.create_node("call_function", target, args, kwargs, name)
+
+            self.import_outputs(serialized_node, fx_node)
+
+            fx_node.meta.update(import_metadata(serialized_node.metadata))
+
+        # Outputs: convert to a single `output` node.
+        outputs = []
+        for output in serialized_graph.outputs:
+            assert isinstance(output.value, TensorArgument)
+            outputs.append(self.serialized_name_to_node[output.value.name])
+
+        graph.output(tuple(outputs) if len(outputs) > 1 else outputs[0])
+
+        sig = import_signature(serialized_graph_module.signature)
+        state_dict = import_state_dict(serialized_state_dict)
+
+        return torch.fx.GraphModule(state_dict, graph)
+
+    def sync_serialized_node(self, name: str, fx_node: torch.fx.Node):
+        self.serialized_name_to_node[name] = fx_node
+        fx_node.meta["val"] = self.serialized_name_to_meta[name]
+
+    def import_inputs(self, target: torch._ops.OpOverload, serialized_node: Node):
+        schema_args = target._schema.arguments
+        actual_args = {
+            input.name: self.import_input(input.arg) for input in serialized_node.inputs
+        }
+        args = []
+        kwargs = {}
+        for schema_arg in schema_args:
+            is_positional = not schema_arg.has_default_value()
+            if is_positional:
+                args.append(actual_args[schema_arg.name])
+            else:
+                if schema_arg.name in actual_args:
+                    kwargs[schema_arg.name] = actual_args[schema_arg.name]
+        return tuple(args), kwargs
+
+    def import_input(self, value: Argument) -> Any:
+        type_ = value.type
+        if type_ == Argument.fields().as_none:
+            # None should converted as None, but is encoded as bool in serialized
+            # Convert serialized object to torch equivalent
+            return None
+        elif type_ == Argument.fields().as_tensor:
+            return self.serialized_name_to_node[value.as_tensor.name]
+        elif type_ == Argument.fields().as_tensors:
+            return [self.serialized_name_to_node[arg.name] for arg in value.as_tensors]
+        elif type_ == Argument.fields().as_int:
+            return value.as_int
+        elif type_ == Argument.fields().as_ints:
+            # convert from serialized.python.types.List to python list
+            return list(value.as_ints)
+        elif type_ == Argument.fields().as_float:
+            return value.as_float
+        elif type_ == Argument.fields().as_floats:
+            # convert from serialized.python.types.List to python list
+            return list(value.as_floats)
+        elif type_ == Argument.fields().as_string:
+            return str(value.as_string)
+        elif type_ == Argument.fields().as_sym_int or type_ == Argument.fields().as_sym_ints:
+            raise ValueError("Symints not yet supported")
+        elif type_ == Argument.fields().as_scalar_type:
+            return _SERIALIZE_TO_TORCH_DTYPE[value.as_scalar_type]
+        elif type_ == Argument.fields().as_memory_format:
+            return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[value.as_memory_format]
+        elif type_ == Argument.fields().as_layout:
+            return _SERIALIZE_TO_TORCH_LAYOUT[value.as_layout]
+        elif type_ == Argument.fields().as_device:
+            return import_device(value.as_device),
+        elif type_ == Argument.fields().as_bool:
+            return value.as_bool
+        elif type_ == Argument.fields().as_bools:
+            # convert from serialized.python.types.List to python list
+            return list(value.as_bools)
+        else:
+            raise SerializeError("Unhandled argument type:", type_)
+
+    def import_outputs(self, serialized_node: Node, fx_node: torch.fx.Node) -> None:
+        # Simple case for single tensor return.
+        assert isinstance(fx_node.target, torch._ops.OpOverload)
+        if _is_single_tensor_return(fx_node.target):
+            return self.sync_serialized_node(serialized_node.outputs[0].as_tensor.name, fx_node)
+
+        # Convert multiple return types to FX format.
+        # In FX, each node only returns one value. So in order to represent
+        # multiple return values, we have to emit a `getitem` node for each
+        # return value.
+        # This performs the inverse mapping of the `export_outputs` call in
+        # serialization, see [NOTE: Multiple outputs]
+        output_names = []
+        if len(serialized_node.outputs) == 1:
+            assert serialized_node.outputs[0].type == Argument.fields().as_tensors
+            output_names = [arg.name for arg in serialized_node.outputs[0].as_tensors]
+        else:
+            for output in serialized_node.outputs:
+                assert output.type == Argument.fields().as_tensor
+                output_names.append(output.as_tensor.name)
+
+        for idx, name in enumerate(output_names):
+            individual_output = self.graph.create_node(
+                "call_function",
+                operator.getitem,
+                (fx_node, idx),
+                name=name,
+            )
+            self.sync_serialized_node(name, individual_output)
+            # The derived `getitem` nodes should have the same stacktrace as the
+            # original `fx_node`
+            individual_output.meta.update(import_metadata(serialized_node.metadata))
+
+        # also update the metaval for `fx_node` to be a list(meta)
+        fx_node.meta["val"] = [self.serialized_name_to_meta[name] for name in output_names]
+
+
 def serialize(graph_module) -> Tuple[GraphModule, bytes]:
     return Serializer().serialize(graph_module)
 
+
+def deserialize(serialized_graph_module: GraphModule, state_dict: bytes) -> torch.fx.GraphModule:
+    return Deserializer().deserialize(serialized_graph_module, state_dict)
 
 ###################################################################################################################
 
@@ -551,21 +810,7 @@ def convert_tensor_meta_to_fake_tensor(gm: torch.fx.GraphModule, shape_env: Shap
     fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
     for node in gm.graph.nodes:
         if (val := node.meta.get("tensor_meta", None)) is not None:
-
-            def _extract_faketensor(tensor_meta: TensorMeta):
-                return FakeTensor(
-                    fake_tensor_mode,
-                    torch.empty(
-                        # TODO Support dynamic shape.
-                        tuple(s.as_int for s in tensor_meta.sizes),
-                        dtype=_DTYPES_MAPPING[tensor_meta.dtype],
-                        device="meta",
-                        requires_grad=tensor_meta.requires_grad,
-                    ),
-                    torch.device("cpu"),
-                )
-
             node.meta["val"] = pytree.tree_map_only(
-                TensorMeta, _extract_faketensor, val
+                TensorMeta, lambda v: import_tensor_meta(v, fake_tensor_mode), val
             )
     return gm

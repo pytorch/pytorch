@@ -9,8 +9,10 @@ from torch._export.graph_module import get_export_meta
 from torch._export.serialize import (
     convert_fake_tensor_to_tensor_meta,
     convert_tensor_meta_to_fake_tensor,
+    deserialize,
     serialize,
 )
+import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.testing._internal.common_utils import run_tests, TestCase
 from functorch.experimental import control_flow
@@ -195,7 +197,60 @@ class TestSerialize(TestCase):
         self.assertEqual(node.inputs[3].arg.as_bool, True)
         self.assertEqual(node.inputs[4].arg.as_string, "right")
         self.assertEqual(node.inputs[5].arg.as_none, ())
-    
+
+
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestDeserialize(TestCase):
+    def check_graph(self, fn, inputs) -> None:
+        """Export a graph, serialize it, deserialize it, and compare the results."""
+        exported_module = export(fn, inputs, {}).module
+        serialized_struct, state_dict = serialize(exported_module)
+        loaded_graph = deserialize(serialized_struct, state_dict)
+
+        orig_outputs = exported_module(*inputs)
+        loaded_outputs = loaded_graph(*inputs)
+
+        flat_orig_outputs, _ = pytree.tree_flatten(orig_outputs)
+        flat_loaded_outputs, _ = pytree.tree_flatten(loaded_outputs)
+
+        for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
+            self.assertTrue(torch.allclose(orig, loaded))
+
+    def test_multi_return(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, w, b):
+                return torch.nn.functional.layer_norm(
+                    x,
+                    x.size()[1:],
+                    weight=w,
+                    bias=b,
+                    eps=1e-5,
+                )
+
+        inputs = (
+            torch.ones([512, 512], requires_grad=True),
+            torch.ones([512]),
+            torch.ones([512]),
+        )
+        self.check_graph(MyModule(), inputs)
+
+    def test_basic(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = x + x
+                x = x * x
+                x = x / x
+                return x, x.clone()
+
+        inputs = (torch.ones([512], requires_grad=True),)
+        self.check_graph(MyModule(), inputs)
+
 
 if __name__ == '__main__':
     run_tests()
