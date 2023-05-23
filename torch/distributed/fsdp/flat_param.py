@@ -668,7 +668,7 @@ class FlatParamHandle:
         device: Optional[torch.device] = None
         # For `use_orig_params=True`, permit non-uniform `requires_grad`
         for tensor in tensors:
-            if type(tensor) is FlatParameter:
+            if isinstance(tensor, FlatParameter):
                 raise ValueError("Cannot flatten a `FlatParameter`")
             if dtype is None and not tensor.is_floating_point():
                 raise ValueError("Cannot flatten integer dtype tensors")

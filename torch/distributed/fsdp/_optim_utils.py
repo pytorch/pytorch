@@ -985,7 +985,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
         ):
-            if type(param) is not FlatParameter:
+            if not isinstance(param, FlatParameter):
                 continue
             fqn = clean_tensor_name(prefix + param_name)
             flat_param_to_fqn[param] = fqn
