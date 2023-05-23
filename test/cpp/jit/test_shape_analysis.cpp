@@ -482,7 +482,7 @@ TEST(ShapeAnalysisTest, TestShapeMultipleReturns) {
 
   auto res =
       calculateSymbolicShapesOnOp(max_dim_op, {ss1, const_int, false_ival});
-  c10::SymbolicShape expected_res = c10::SymbolicShape({sym_dim});
+  c10::SymbolicShape expected_res = c10::SymbolicShape(sym_dim);
   assertShapeEqual(res->at(0), expected_res);
   // res0 and res1 should share the same symbolic symbol
   EXPECT_EQ(res->at(0), res->at(1));
