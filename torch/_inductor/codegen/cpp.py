@@ -963,16 +963,16 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})({x} ^ {y})"
 
     @staticmethod
-    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+    def rand(seed: sympy.Expr, offset: sympy.Expr):
+        return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
-    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+    def randn(seed: sympy.Expr, offset: sympy.Expr):
+        return f"randn_cpu({seed}, {offset})"
 
     @staticmethod
-    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+    def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
+        return f"randint64_cpu({seed}, {offset}, {low}, {high})"
 
     @staticmethod
     def sigmoid(x):
@@ -1556,10 +1556,10 @@ class CppTile2DKernel(CppVecKernel):
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 if opt_ctx.is_store_fp32_as_bf16:
-                    line = f"store_float_as_bf16({storebuf}, {value})"
+                    line = f"store_float_as_bf16({storebuf}, {value});"
                 else:
                     assert opt_ctx.is_bf16_mem_copy
-                    line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                    line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))

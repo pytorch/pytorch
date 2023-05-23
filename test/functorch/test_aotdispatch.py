@@ -1821,17 +1821,6 @@ def forward(self, tangents_1):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
-    def test_inference_mode(self):
-        m = torch.nn.Linear(4, 4)
-        inp = torch.randn(4, 4)
-
-        aot_mod = aot_module(m, fw_compiler=nop)
-
-        with torch.inference_mode():
-            out_ref = m(inp)
-            out_test = aot_mod(inp)
-        self.assertEqual(out_ref, out_test)
-
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -2103,6 +2092,33 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x):
+                x.add_(4)
+                return (x.cos().sum() + self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
+
+    def test_aot_export_forward_mutation_multiple_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                y.add_(4)
+                self.buffer1.add_(5)
+                return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
+
     def test_aot_export_input_mutation_on_parameter_banned(self):
         def fn(p, x):
             p.mul_(2)
@@ -2160,7 +2176,7 @@ class <lambda>(torch.nn.Module):
             return (x + x,)
         inp = torch.randn(2)
         with self.assertRaisesRegex(
-            RuntimeError, "aot_export_joint_simple does not support input mutations"
+            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
         ):
             aot_export_joint_simple(fn, [inp], trace_joint=False)
             aot_export_joint_simple(fn, [inp], trace_joint=True)

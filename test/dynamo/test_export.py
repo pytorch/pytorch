@@ -2355,12 +2355,6 @@ def forward(self, x):
             gm.meta["input_shape_constraints"],
             [c.serializable_spec for c in constraints],
         )
-        preserved = False
-        for _, vr in gm.meta["inline_constraints"].items():
-            # Should have the constraint with min=2, max=5
-            if vr.lower == 2 and vr.upper == 5:
-                preserved = True
-        self.assertTrue(preserved)
 
     @torch._dynamo.config.patch(
         dynamic_shapes=True,

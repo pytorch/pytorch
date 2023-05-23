@@ -1,9 +1,10 @@
 import dataclasses
 import weakref
+import re
 from typing import Any, Callable, List, Tuple, Optional, Dict, Union
 
 import sympy
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 import torch
 import torch._dynamo
@@ -32,7 +33,6 @@ from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 Value = Any
 
 ExportGraphModule = torch.fx.GraphModule
-EXPORT_METADATA = "_export_metadata_key"
 
 
 # Note - [On Export Dynamic Dimension UX]
@@ -117,6 +117,15 @@ def _export(
                 assume_static_by_default=True,
             )
 
+            params = OrderedDict()
+            buffers = OrderedDict()
+
+            for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
+                params[name] = param
+
+            for name, param in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
+                buffers[name] = param
+
             fake_inps = []
             for node in gm_torch_level.graph.nodes:
                 if node.op == "placeholder" and "val" in node.meta:
@@ -128,9 +137,10 @@ def _export(
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
             # Fix the graph output signature to be tuple if scalar
+            # because aot_export expects a tuple as return type
             return_val = f(*args)
             out_spec = orig_out_spec = gm_torch_level._out_spec
-            # this means it is scalar return value
+            # this means it is scalar return value, so will make it tuple
             if not isinstance(return_val, (list, tuple, dict)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
@@ -145,22 +155,36 @@ def _export(
             )
 
             gm_torch_level.recompile()
-
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
             mutation_data = MutationData(
                 parameters=graph_signature.parameters,
                 buffers=graph_signature.buffers,
                 user_inputs=graph_signature.user_inputs,
                 user_outputs=graph_signature.user_outputs,
-                inputs_to_parameters = graph_signature.inputs_to_parameters,
+                inputs_to_parameters=graph_signature.inputs_to_parameters,
                 inputs_to_buffers=graph_signature.inputs_to_buffers,
                 buffers_to_mutate=graph_signature.buffers_to_mutate
             )
 
+            # TODO unfortunately preserving meta at graph level is not
+            # working well with aot_export. So we manually copy it.
+            # The node level meta is preserved.
+            for key, val in gm_torch_level.meta.items():
+                gm.meta[key] = val
+
+            # The unbacked symint symbols are updated in aot_export
+            # so we serialize them here instead of inside dynamo
+            gm.meta["inline_constraints"] = {
+                k: v
+                for k, v in fake_mode.shape_env.var_to_range.items()
+                if re.match(r"^[if]\d+$", str(k))
+            }
+
             flat_args, in_spec = pytree.tree_flatten(args)
             export_graph_module = graph_module.make_export_graph_module(
-                gm, gm.graph, in_spec, orig_out_spec, flat_args, mutation_data
+                gm, gm.graph, in_spec, orig_out_spec, flat_args, mutation_data, params, buffers
             )
+
             return export_graph_module
 
         except (ConstraintViolationError, ValueRangeError) as e:
@@ -228,7 +252,12 @@ class MultiMethodExportedProgram:
         def apply_passes(
             gm: graph_module.ExportGraphModule,
         ) -> graph_module.ExportGraphModule:
+            # TODO Move this under ExportedProgram when that is a thing.
+            buffers = getattr(gm, "buffers", OrderedDict())
+            parameters = getattr(gm, "parameters", OrderedDict())
             transformed = pm(gm).graph_module
+            transformed.buffers = buffers
+            transformed.parameters = parameters
             assert transformed is not None
             transformed.meta.update(gm.meta)
             return transformed

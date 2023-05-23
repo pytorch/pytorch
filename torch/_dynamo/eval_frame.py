@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -719,6 +718,61 @@ class Constraint(ConstraintTarget):
         )
 
 
+class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+    def __init__(
+        self,
+        m: torch.fx.GraphModule,
+        flat_args: Tuple[Any],
+        matched_input_elements_positions: List[int],
+        matched_output_elements_positions: List[int],
+        example_fake_inputs: List[torch.Tensor],
+    ):
+        super().__init__(m)
+
+        matched_input_elements_to_fake = {
+            val: example_fake_inputs[ix]
+            for ix, val in enumerate(matched_input_elements_positions)
+        }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
+
+        self.new_args = []
+        for i in range(0, len(flat_args)):
+            arg = super(FlattenInputOutputSignature, self).placeholder(
+                f"arg{i}", (), {}
+            )
+            if i in matched_input_elements_to_fake:
+                arg.node.meta["val"] = matched_input_elements_to_fake[i]
+            else:
+                # Fill node.mata["val"] with faketensor from the input,
+                # if it's not found in matched_input_elements_positions
+                if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+            self.new_args.append(arg)
+        self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
+        self.matched_output_elements_positions = matched_output_elements_positions
+
+    def placeholder(self, target, args, kwargs):
+        arg = next(self.old_args_gen)
+        if "val" in self.current_node.meta:
+            arg.node.meta["val"] = self.current_node.meta["val"]
+        if "tensor_dict" in self.current_node.meta:
+            arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        return arg
+
+    def output(self, target, args, kwargs):
+        dynamo_result_flat = args[0]
+        lookup = [*dynamo_result_flat, *self.new_args]
+        new_result_flat = [lookup[i] for i in self.matched_output_elements_positions]
+        return super().output(target, (new_result_flat,), {})
+
+    def run_node(self, n):
+        self.current_node = n
+        r = super().run_node(n)
+        if "val" in self.current_node.meta:
+            r.node.meta["val"] = self.current_node.meta["val"]
+        return r
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -897,6 +951,16 @@ def export(
                 "Summary of dimension constraints:%s",
                 msg,
             )
+
+        # Error if we have any constraints on static values
+        for k in shape_env.var_to_range.keys():
+            if isinstance(k, sympy.Integer):
+                constraint_violation_error = ConstraintViolationError(
+                    f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
+                    "It appears that you're trying to set a constraint on a "
+                    f"value which we evaluated to have a static value of {k}. "
+                    "Scroll up to see where this constraint was set."
+                )
     if constraint_violation_error:
         raise constraint_violation_error
 
@@ -910,60 +974,11 @@ def export(
 
     # NB: This is mostly hitting the cache; Dynamo already converted these
     example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
-
-    matched_input_elements_to_fake = {val: example_fake_inputs[ix] for ix, val in enumerate(matched_input_elements_positions)}
-
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
-
-    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
-        def __init__(
-            self,
-            m,
-        ):
-            super().__init__(m)
-            arg_len = len(flat_args)
-            self.new_args = []
-            for i in range(0, arg_len):
-                arg = super(ChangeInputOutputSignature, self).placeholder(
-                    f"arg{i}", (), {}
-                )
-                if i in matched_input_elements_to_fake:
-                    arg.node.meta["val"] = matched_input_elements_to_fake[i]
-                else:
-                    # Fill node.mata["val"] with faketensor from the input,
-                    # if it's not found in matched_input_elements_positions
-                    if (fake_mode is not None and isinstance(flat_args[i], torch.Tensor)):
-                        arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
-                self.new_args.append(arg)
-
-            self.old_args_gen = (
-                self.new_args[i] for i in matched_input_elements_positions
-            )
-
-        def placeholder(self, target, args, kwargs):
-            arg = next(self.old_args_gen)
-            if "val" in self.current_node.meta:
-                arg.node.meta["val"] = self.current_node.meta["val"]
-            if "tensor_dict" in self.current_node.meta:
-                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
-            return arg
-
-        def output(self, target, args, kwargs):
-            dynamo_result_flat = args[0]
-            lookup = [*dynamo_result_flat, *self.new_args]
-            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            return super().output(target, (new_result_flat,), {})
-
-        def run_node(self, n):
-            self.current_node = n
-            r = super().run_node(n)
-            if "val" in self.current_node.meta:
-                r.node.meta["val"] = self.current_node.meta["val"]
-            return r
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
@@ -1014,8 +1029,12 @@ def export(
                 # Wrap the internal error to the user-facing error
                 raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
-    new_graph = ChangeInputOutputSignature(
+    new_graph = FlattenInputOutputSignature(
         graph,
+        flat_args,
+        matched_input_elements_positions,
+        matched_output_elements_positions,
+        example_fake_inputs,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1024,14 +1043,6 @@ def export(
         if constraints
         else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object

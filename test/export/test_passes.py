@@ -2,12 +2,12 @@
 import unittest
 
 import torch
+import torch._dynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export, dynamic_dim, _export
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
-    ConstPropPass,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
@@ -34,42 +34,14 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        gm = export(f, (x,)).find_method("forward")
-
-        new_gm = ReplaceViewOpsWithViewCopyOpsPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
+        ep = export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
 
         count_after = 0
-        for node in new_gm.graph.nodes:
+        for node in ep.graph.nodes:
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(gm(x), f(x)))
-
-    def test_const_prop_pass(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.nn.Parameter(torch.ones(1, 2, 3))
-
-            def forward(self, x):
-                b = self.a + self.a
-                c = torch.cat([self.a, b])
-                return (c + c) + x
-
-        def count_additions(gm) -> int:
-            return sum(
-                (node.target == torch.ops.aten.add.Tensor) for node in gm.graph.nodes
-            )
-
-        gm = export(M(), (torch.zeros(2, 2, 3),)).find_method("forward")
-        self.assertEqual(count_additions(gm), 3)
-
-        new_gm = ConstPropPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
-        self.assertEqual(count_additions(new_gm), 1)
+        self.assertTrue(torch.allclose(ep(x), f(x)))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -89,7 +61,7 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 3)
         self.assertEqual(num_scalar_tensor, 3)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -120,10 +92,10 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             gm(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
             gm(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
@@ -152,11 +124,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1's dimension #0 size is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -190,11 +162,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 7)
         self.assertEqual(num_scalar_tensor, 7)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1's dimension #0 size is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -223,9 +195,10 @@ class TestPasses(TestCase):
 
     def test_functionalization_with_view_copy(self) -> None:
         def foo(x):
-            x.add_(4)
-            y = x.view(x.shape)
-            return x.cos() + y.cos()
+            y = x + 4
+            y.add_(4)
+            z = y.view(y.shape)
+            return x.cos() + z.cos()
 
         x = torch.zeros(4, 2, 3)
 

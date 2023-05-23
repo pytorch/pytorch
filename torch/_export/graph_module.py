@@ -5,7 +5,7 @@ import warnings
 import sympy
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 from sympy.logic.boolalg import Boolean as SympyBoolean
 
@@ -15,7 +15,7 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 
 from . import error
-from torch._functorch.aot_autograd import GraphSignature, FQN, GraphInputName, GraphOutputName
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 ExportGraphModule = fx.GraphModule
 
@@ -153,22 +153,24 @@ class ExportGraphModuleMixin:
             except Exception as e:
                 raise error.InternalError("The in_spec is not correctly maintained.") from e
 
-        params = {
-            **dict(self.named_parameters(remove_duplicate=False)),
-            **dict(self.named_buffers(remove_duplicate=False)),
+        parameters = getattr(self, "parameters", OrderedDict())
+        buffers = getattr(self, "buffers", OrderedDict())
+
+        params_buffer = {
+            **dict(parameters),
+            **dict(buffers),
         }
 
-        params_flat, params_spec = pytree.tree_flatten(params)
-        params_flat = tuple(params_flat)
+        param_buffer_flat, params_spec = pytree.tree_flatten(params_buffer)
 
         with torch.fx.traceback.preserve_node_meta(), torch.no_grad():
-            res = torch.fx.Interpreter(self).run(*params_flat, *args, enable_io_processing=False)
+            res = torch.fx.Interpreter(self).run(*param_buffer_flat, *args, enable_io_processing=False)
 
         mutation = meta.mutation_data
         num_mutated = len(mutation.buffers_to_mutate) if mutation is not None else 0
         user_flat_outputs = res[num_mutated:]
 
-        # TODO update the mutated buffers
+        # TODO update the mutated buffers in memory
 
         if getattr(meta, "out_spec", None) is not None:
             try:
@@ -255,6 +257,8 @@ def make_export_graph_module(
     out_spec: Optional[pytree.TreeSpec] = None,
     example_inputs: Any = None,
     mutation_data: MutationData = None,
+    params: OrderedDict[str, torch.nn.Parameter] = None,
+    buffers: OrderedDict[str, torch.Tensor] = None,
     class_name: str = "ExportGraphModule",
 ) -> fx.GraphModule:
 
@@ -297,6 +301,10 @@ def make_export_graph_module(
         mutation_data=mutation_data,
     )
     attach_export_graph_metadata(gm, meta)
+    # TODO figure out where to save them
+
+    gm.parameters = params if params is not None else OrderedDict()
+    gm.buffers = buffers if buffers is not None else OrderedDict()
     return gm
 
 
