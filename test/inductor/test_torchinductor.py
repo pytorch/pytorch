@@ -5154,7 +5154,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
         if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:

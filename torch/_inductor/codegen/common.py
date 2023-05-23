@@ -414,7 +414,16 @@ class KernelArgs:
 
     def seed_offset(self, name, value):
         if "load_seed_offset" in self.sizevars.values():
-            name = "%s%d" % (name, len([x for x in self.sizevars.values() if x.startswith("load_seed_offset")]))
+            name = "%s%d" % (
+                name,
+                len(
+                    [
+                        x
+                        for x in self.sizevars.values()
+                        if x.startswith("load_seed_offset")
+                    ]
+                ),
+            )
         self.sizevars[value] = name
         return name
 
