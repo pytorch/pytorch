@@ -1437,6 +1437,7 @@ aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
 
+
 # Followings are source code for xnnpack delegate
 
 xnnpack_delegate_serializer_header = [
