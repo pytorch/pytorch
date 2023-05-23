@@ -284,18 +284,9 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   StreamIdType id_type = static_cast<StreamIdType>(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 
-  // if (isHighPriority) {
-  //   const auto idx = get_idx(high_priority_counters[device_index]);
-  //   return CUDAStreamForId(device_index, makeStreamId(StreamIdType::HIGH,
-  //   idx));
-  // }
-
-  // const auto idx = get_idx(low_priority_counters[device_index]);
-  // return CUDAStreamForId(device_index, makeStreamId(StreamIdType::LOW, idx));
 }
 
-C10_API CUDAStream
-getStreamFromPool(const bool isHighPriority, DeviceIndex device){
+CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
 }
