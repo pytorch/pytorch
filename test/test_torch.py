@@ -84,7 +84,6 @@ def torch_vital_set(value):
 
 # Tests Vital Signs for Torch
 # FIXME: document or deprecate whatever this is
-@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestBasicVitalSigns(TestCase):
     def test_basic_vitals(self):
         with torch_vital_set(''):
@@ -109,7 +108,6 @@ class TestBasicVitalSigns(TestCase):
             self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
 
 # FIXME: document or deprecate whatever this is
-@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestVitalSignsCuda(TestCase):
     @onlyCUDA
     def test_cuda_vitals_gpu_only(self, device):
@@ -119,7 +117,6 @@ class TestVitalSignsCuda(TestCase):
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
 
-@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
@@ -1018,7 +1015,6 @@ class TestTorchDeviceType(TestCase):
         x = torch.rand([1, 64, 8, 128, 172]).to(device)
         y = conv(x)
 
-    @skipIfTorchDynamo("<resume in test_is_set_to> Meaning graph breaks in set_")
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)
@@ -2186,7 +2182,6 @@ else:
             x.cauchy_()
             self.assertFalse(x.isinf().sum())
 
-    @skipIfTorchDynamo("AssertionError: make_fallback(aten.cauchy.default): a decomposition exists")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy(self, device, dtype):
         a = torch.tensor([10], dtype=dtype, device=device).cauchy_(0.0, 0.5)
@@ -5491,7 +5486,6 @@ else:
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
-@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestDevicePrecision(TestCase):
     exact_dtype = True
 
@@ -7338,7 +7332,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         x = torch.tensor([])
         self.assertEqual(list(x), [])
 
-    @skipIfTorchDynamo("Fails on comparison")
     def test_new(self) -> None:
         x = torch.autograd.Variable(torch.tensor([]))
         y = torch.autograd.Variable(torch.randn(4, 4))
@@ -8666,6 +8659,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         T()
 
+    def test_storage_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(RuntimeError, lambda: torch._C.StorageBase())
+
+        # But construction of subclass is OK
+        class T(torch._C.StorageBase):
+            pass
+
+        T()
+
     def test_tensor_base_new(self):
 
         # OK to call super().__new__, see
@@ -8677,6 +8680,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         x = torch.ones(5)
         test_tensor = TestTensor(x)
+
+    def test_storage_base_new(self):
+
+        # OK to call super().__new__, see
+        # https://github.com/pytorch/pytorch/issues/57421
+        class TestStorage(torch._C.StorageBase):
+            @staticmethod
+            def __new__(cls, x, *args, **kwargs):
+                return super().__new__(cls, x, *args, **kwargs)
+
+        x = torch.UntypedStorage(5)
+        test_storage = TestStorage(x)
 
     def test_pyobj_preserved(self):
         x = torch.empty(2)
@@ -8702,6 +8717,160 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del z  # it's dead again
         self.assertEqual(type(y.grad), MyTensor)
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc(self):
+        m, t = Tracker.make()
+        s0 = torch.UntypedStorage(10)
+        s1 = s0
+        s0._tracker = t
+        del t
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        del a
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc_zombie(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertFalse(m[0])
+        del a
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc_resurrected(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertFalse(m[0])
+
+        s0 = a.untyped_storage()
+        self.assertTrue(isinstance(s0, torch.UntypedStorage))
+
+        del a
+        self.assertFalse(m[0])
+        del s0
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_resurrected(self):
+        m, t = Tracker.make()
+        s = torch.UntypedStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertFalse(m[0])
+
+        s = a.untyped_storage()
+        self.assertTrue(isinstance(s, torch.UntypedStorage))
+
+        del a
+        self.assertFalse(m[0])
+        del s
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_subclass_zombie(self):
+        class MyStorage(torch.UntypedStorage):
+            finalized_count = 0
+
+            def __del__(self):
+                MyStorage.finalized_count += 1
+
+        m, t = Tracker.make()
+        s = MyStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertFalse(m[0])
+
+        del a
+        self.assertEqual(MyStorage.finalized_count, 1)
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_subclass_resurrected(self):
+        class MyStorage(torch.UntypedStorage):
+            finalized_count = 0
+
+            def __del__(self):
+                MyStorage.finalized_count += 1
+
+        m, t = Tracker.make()
+        s = MyStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertFalse(m[0])
+
+        s = a.untyped_storage()
+        del a
+        self.assertFalse(m[0])
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertTrue(isinstance(s, MyStorage))
+        del s
+        self.assertEqual(MyStorage.finalized_count, 1)
+        self.assertTrue(m[0])
+
     def test_tensor_slot_dealloc(self):
 
         class SlotTensor1(torch._C._TensorBase):
@@ -8723,10 +8892,41 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    def test_storage_slot_dealloc(self):
+
+        class SlotStorage1(torch._C.StorageBase):
+            __slots__ = ['slot1']
+
+        class SlotStorage2(SlotStorage1):
+            __slots__ = ['slot2']
+
+        m1, t1 = Tracker.make()
+        m2, t2 = Tracker.make()
+        slot_storage = SlotStorage2(torch.UntypedStorage(2))
+        slot_storage.slot1 = t1
+        slot_storage.slot2 = t2
+        del t1
+        del t2
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+        del slot_storage
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_dict_dealloc(self):
         m, t = Tracker.make()
         x = torch.empty(2)
+        x.arf = t
+        del t
+        self.assertFalse(m[0])
+        del x
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_storage_dict_dealloc(self):
+        m, t = Tracker.make()
+        x = torch.UntypedStorage(2)
         x.arf = t
         del t
         self.assertFalse(m[0])
@@ -8745,10 +8945,35 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
+    def test_storage_finalizer_dealloc(self):
+        m = [False]
+
+        class FinalizerStorage(torch._C.StorageBase):
+            def __del__(self):
+                m[0] = True
+
+        fin_storage = FinalizerStorage(torch.UntypedStorage(2))
+        self.assertFalse(m[0])
+        del fin_storage
+        self.assertTrue(m[0])
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_weakref_dealloc(self):
-
         x = torch.empty(2)
+        m = [False]
+
+        def cb(r):
+            m[0] = True
+
+        wref = weakref.ref(x, cb)
+        del x
+        self.assertTrue(m[0])
+        self.assertEqual(wref(), None)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_weakref_dealloc(self):
+
+        x = torch.UntypedStorage(2)
         m = [False]
 
         def cb(r):
@@ -8802,6 +9027,49 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_storage_cycle_via_dict(self):
+        m1, t1 = Tracker.make()
+        x = torch.UntypedStorage(2)
+        x._tracker = t1
+        del t1
+
+        m2, t2 = Tracker.make()
+        y = torch.UntypedStorage(2)
+        y._tracker = t2
+        del t2
+
+        x._loop = y
+        y._loop = x
+
+        # C++ reference should keep the cycle live!
+        # This exercise THPVariable_subtype_traverse
+        # NB: Because z.grad is a reference done entirely in C++, cycles
+        # involving it directly are NOT broken by Python GC; you've
+        # set up a good old C++ reference cycle which we cannot safely
+        # break (because C++ references are allowed to be accessed
+        # multithreaded-ly) (TODO: except maybe if you can prove that
+        # only Python has access to the C++ object, in which case you can
+        # also prove that no multithreaded access occurs)
+        z = torch.UntypedStorage(2)
+        z.grad = x
+
+        del x
+        del y
+
+        gc.collect()
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+
+        with disable_gc():
+            del z
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
     def test_tensor_cycle_via_slots(self):
         m1 = [False]
         m2 = [False]
@@ -8820,6 +9088,38 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         x = SlotTensor1(torch.empty(2))
         y = SlotTensor2(torch.empty(2))
+
+        x.slot1 = y
+        y.slot2 = x
+
+        del x
+        with disable_gc():
+            del y
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    def test_storage_cycle_via_slots(self):
+        m1 = [False]
+        m2 = [False]
+
+        class SlotStorage1(torch._C.StorageBase):
+            __slots__ = ['slot1']
+
+            def __del__(self):
+                m1[0] = True
+
+        class SlotStorage2(SlotStorage1):
+            __slots__ = ['slot2']
+
+            def __del__(self):
+                m2[0] = True
+
+        x = SlotStorage1(torch.UntypedStorage(2))
+        y = SlotStorage2(torch.UntypedStorage(2))
 
         x.slot1 = y
         y.slot2 = x
@@ -8862,7 +9162,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m2[0])
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_dead_weak_ref(self):
+    def test_tensor_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -8878,7 +9178,24 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertRaises(RuntimeError, lambda: x.sigmoid())
 
-    def test_resurrected_weak_ref(self):
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_dead_weak_ref(self):
+        x = torch.UntypedStorage(2)
+        w_x = weakref.ref(x)
+        y = torch.tensor(x)
+        del x
+
+        x = w_x()
+        # Ideally, x would keep the storage live.  But CPython doesn't
+        # provide enough hooks to do this.  So it will go dead and x
+        # will transmute into storage with null StorageImpl. Not great, but the
+        # best we can do.
+        del y
+
+        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
+        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
+
+    def test_tensor_resurrected_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -8891,13 +9208,42 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del y
         x.sigmoid()
 
+    def test_storage_resurrected_weak_ref(self):
+        x = torch.UntypedStorage(2)
+        w_x = weakref.ref(x)
+        y = torch.tensor(x)
+        del x
+
+        x = w_x()
+        # Use this to manually fix weak reference after dereferencing them
+        x._fix_weakref()
+        del y
+        x.float()
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_fix_weakref_no_leak(self):
+    def test_tensor_fix_weakref_no_leak(self):
         import weakref
 
         called = False
 
         a = torch.randn(1)
+
+        def callback(w):
+            nonlocal called
+            called = True
+        wa = weakref.ref(a, callback)
+        a._fix_weakref()
+        del a
+
+        self.assertTrue(called)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_fix_weakref_no_leak(self):
+        import weakref
+
+        called = False
+
+        a = torch.UntypedStorage(1)
 
         def callback(w):
             nonlocal called

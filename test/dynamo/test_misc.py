@@ -1880,7 +1880,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

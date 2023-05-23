@@ -191,7 +191,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
             c = torch.matmul(a, b)
@@ -359,7 +358,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         assert same(out, correct)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
         def func(inp, *, tag, ranks, group_size):

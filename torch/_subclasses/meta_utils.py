@@ -5,7 +5,11 @@ from typing import ContextManager, List, Optional
 
 import torch
 from torch._guards import Source
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    free_symbols,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
 
@@ -239,9 +243,7 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    static = all(isinstance(s, int) for s in t.size()) and all(
-                        isinstance(s, int) for s in t.stride()
-                    )
+                    static = len(free_symbols(t) == 0)
                     assert static, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(

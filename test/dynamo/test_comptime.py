@@ -2,7 +2,6 @@
 import re
 import sys
 from io import StringIO
-from unittest.mock import patch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -165,7 +164,6 @@ y = TensorVariable()
         bt = FILE.getvalue()
         self.assertIn("y = g(y)", bt)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_print_guards(self):
         global FILE
         FILE = StringIO()

@@ -74,7 +74,6 @@ def _rand_shape(dim, min_size, max_size):
 #
 # See https://pytorch.org/docs/master/torch.html#creation-ops
 
-@skipIfTorchDynamo("TorchDynamo fails with unknown reason")
 class TestTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3066,7 +3065,6 @@ class TestTensorCreation(TestCase):
 
 
 # Class for testing random tensor creation ops, like torch.randint
-@skipIfTorchDynamo("TorchDynamo fails with unknown reason")
 class TestRandomTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3460,7 +3458,6 @@ class TestRandomTensorCreation(TestCase):
             self.assertRaisesRegex(RuntimeError, regex, lambda: torch.randperm(n, generator=cuda_gen))  # implicitly on CPU
 
 # Class for testing *like ops, like torch.ones_like
-@skipIfTorchDynamo("TorchDynamo fails with unknown reason")
 class TestLikeTensorCreation(TestCase):
     exact_dtype = True
 
@@ -3704,7 +3701,6 @@ def to_numpy(tensor):
 def to_memview(tensor):
     return memoryview(to_numpy(tensor))
 
-@skipIfTorchDynamo("TorchDynamo fails with unknown reason")
 class TestAsArray(TestCase):
     def _check(self, original, cvt=lambda t: t, is_alias=True, same_dtype=True, same_device=True, **kwargs):
         """Check the output of 'asarray', given its input and assertion informations.
