@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-import torch._dynamo
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export, dynamic_dim, _export
