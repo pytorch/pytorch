@@ -1303,7 +1303,7 @@ class CppVecKernel(CppKernel):
             if dtype in [torch.bfloat16]:
                 tmpbufsize += " * 2"
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1347,7 +1347,7 @@ class CppVecKernel(CppKernel):
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1484,7 +1484,7 @@ class CppTile2DKernel(CppVecKernel):
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
+        return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
         return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
@@ -2037,7 +2037,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
-                return sympy.Symbol(str(index_var))
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
