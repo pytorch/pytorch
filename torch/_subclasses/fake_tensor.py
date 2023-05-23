@@ -1124,16 +1124,33 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
+        self.enter_stack = []
+
         self.shape_env = shape_env
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        assert self not in _get_current_dispatch_mode_stack()
+        assert self not in _get_current_dispatch_mode_stack(), func
         try:
             return self.dispatch(func, types, args, kwargs)
         except TypeError:
             log.exception("fake tensor raised TypeError")
             raise
+
+    # No-op if FakeTensorMode is already on the stack
+    def __enter__(self):
+        if self not in _get_current_dispatch_mode_stack():
+            self.enter_stack.append(True)
+            return super().__enter__()
+        else:
+            # no-op
+            self.enter_stack.append(False)
+            return self
+
+    def __exit__(self, a, b, c):
+        live = self.enter_stack.pop()
+        if live:
+            return super().__exit__(a, b, c)
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

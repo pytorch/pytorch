@@ -749,7 +749,7 @@ class TestFakeProxyTensor(TestCase):
             pass
 
         x = A(torch.randn(3, 3))
-        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
 
     def test_use_fake_and_tensor(self):
         def f(x, y):
