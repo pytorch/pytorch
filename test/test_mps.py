@@ -10511,9 +10511,6 @@ class TestConsistency(TestCaseMPS):
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
-        print(key)
-        print(op.name)
-
         run_grad_test = True
 
         def get_samples():
