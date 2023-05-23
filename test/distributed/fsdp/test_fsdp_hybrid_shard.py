@@ -104,6 +104,50 @@ class TestFSDPHybridShard(FSDPTest):
         with err_ctx:
             model = FSDP(model, sharding_strategy=ShardingStrategy._HYBRID_SHARD_ZERO2)
 
+    def test_single_node_hsdp(self):
+        model = MyModel().cuda()
+        num_node_devices = torch.cuda.device_count() # 8
+        shard_rank_lists = [i for i in range(0, num_node_devices // 2)], [i for i in range(num_node_devices // 2, num_node_devices)]
+        shard_groups = (dist.new_group(shard_rank_lists[0]), dist.new_group(shard_rank_lists[1]))
+        my_shard_group = shard_groups[0] if self.rank in shard_rank_lists[0] else shard_groups[1]
+        print(f"Rank {self.rank}: shard group has ranks {shard_rank_lists[0] if my_shard_group == shard_groups[0] else shard_rank_lists[1]}")
+        my_replicate_group = None
+        my_replicate_group_ranks = None
+        my_rank = self.rank
+        # Create groups like (0, 4), (1, 5), (2, 6) etc and assign appropriately
+        shard_factor = len(shard_rank_lists[0]) # 4
+        for i in range(num_node_devices // 2):
+            replicate_group_ranks = [j for j in range(i, num_node_devices, shard_factor)]
+            replicate_group = dist.new_group(replicate_group_ranks)
+            if my_rank in replicate_group_ranks:
+                my_replicate_group = replicate_group
+                my_replicate_group_ranks = replicate_group_ranks
+
+        print(f'{my_rank}: replicate group has ranks {my_replicate_group_ranks}')
+        model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD, process_group=(my_shard_group, my_replicate_group))
+        shard_g = model.process_group
+        replicate_g = model._inter_node_state.process_group
+        assert shard_g == my_shard_group
+        assert replicate_g == my_replicate_group
+
+    def test_single_node_hsdp_device_mesh(self):
+        model = MyModel().cuda()
+        from torch.distributed._tensor import DeviceMesh
+        mesh = DeviceMesh(device_type="cuda",
+                          mesh=[
+                            [0, 1, 2, 3],
+                            [4, 5, 6, 7]
+                          ])
+        mesh_groups = mesh.get_dim_groups()
+        # dim 0 is like (0, 4), (1, 5) groups, dim 1 is like (0, 1, 2, 3)
+        replicate_group, shard_group = mesh_groups[0], mesh_groups[1]
+        print(dist.get_world_size(replicate_group), dist.get_world_size(shard_group))
+        model = FSDP(model, sharding_strategy=ShardingStrategy.HYBRID_SHARD, process_group=(shard_group, replicate_group))
+        shard_g = model.process_group
+        replicate_g = model._inter_node_state.process_group
+        assert shard_g == shard_group
+        assert replicate_g == replicate_group
+
     @skip_if_lt_x_gpu(2)
     def test_hybrid_shard_pg_mismatch_raises(self):
         model = MyModel().cuda()
