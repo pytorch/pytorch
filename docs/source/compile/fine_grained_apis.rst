@@ -1,4 +1,5 @@
-# TorchDynamo APIs to control fine-grained tracing
+TorchDynamo APIs to control fine-grained tracing
+================================================
 
 `torch.compile` performs TorchDynamo tracing on all the user model. However, it is possible that a small part of the model code is not amenable to PT2 compilation stack. And you want to just disable PT2 on that particular portion, while running compilation on the rest of the model. This doc shares the existing APIs that give you such control and the relevant usecases.
 
@@ -10,7 +11,10 @@ Existing APIs
 * torch._dynamo.allow_in_graph
 
 
-# Section 1 - Summary Table {#section-1-summary-table}
+Section 1 - Summary Table
+=========================
+
+.. _section-1-summary-table:
 
 .. csv-table:: TorchDynamo APIs to control fine-grained tracing
    :header: "API", "Description", "When to use?"
@@ -23,13 +27,16 @@ Existing APIs
 
 
 
-# Section 2 - torch._dynamo.disable {#section-2-torch-_dynamo-disable}
+Section 2 - torch._dynamo.disable
+=================================
+
+.. _section-2-torch-_dynamo-disable:
 
 **tl;dr** - Disables PT2 stack on the decorated function frame and all the function frames recursively invoked from the decorated function frame.
 
 **Explanation** - TorchDynamo intercepts the execution of each Python function frame. So, suppose you have a code structure (image below) where the function `fn` calls functions `a_fn` and `b_fn`. And `a_fn` calls `aa_fn` and `ab_fn`. In the eager world (no torch.compile), these function frames run as-is. With torch.compile, TorchDynamo intercepts each of these function frames (indicated by the green color).
 
-.. figure:: _../_static/img/fine_grained_apis/api_diagram.png
+.. figure:: ../_static/img/fine_grained_apis/api_diagram.png
    :alt: Callstack diagram of differnet apis.
 
 **Usecase** - Now suppose function `a_fn` is causing troubles with `torch.compile`. And this is a non-critical portion of the model. You can use `_dynamo.disable` on function `a_fn`. As shown above, TorchDynamo will stop looking at frames originating from `a_fn` call (white color indicates original Python behavior).
@@ -40,8 +47,10 @@ You can decorate the offending function with `@torch._dynamo.disable`
 
 You can also use the non-decorator syntax if you don’t want to change the source code (however avoid this style if possible. Here, you have to take care that all users of the original function are now using the patched version).
 
+Section 3 - torch._dynamo.disallow_in_graph
+===========================================
 
-# Section 3 - torch._dynamo.disallow_in_graph {#section-3-torch-_dynamo-disallow_in_graph}
+.. _section-3-torch-_dynamo-disallow_in_graph:
 
 **tl;dr** - Disallows an operator (not the function) to be present in the TorchDynamo extracted graph. Note that this is suitable for operators (and not general functions as in the case of `_dynamo.disable`).
 
@@ -52,24 +61,31 @@ The catch is that you will have to find the corresponding Dynamo level operator 
 **Warning** - This is a global flag. So be cautious, if you are comparing different backend compilers. You might have to call `allow_in_graph` for the disallowed op when switching to the other compiler.
 
 
-# Section 4 - torch._dynamo.allow_in_graph {#section-4-torch-_dynamo-allow_in_graph}
+Section 4 - torch._dynamo.disallow_in_graph
+===========================================
+
+.. _section-4-torch-_dynamo-disallow_in_graph:
 
 **Usecase** - This is useful when the relevant function frame has some known hard-to-support TorchDynamo feature (like hooks and autograd.Function) and you are confident that downstream PT2 components like AOTAutograd can safely trace through the decorated function. When a function is decorated with `allow_in_graph`, TorchDynamo treats it as a black-box and puts it as-is in the generated graph.
 
 
 **Warning - `allow_in_graph`** skips TorchDynamo completely on the decorated function, skipping all TorchDynamo safety checks (graph breaks, handling closures etc). Therefore, one has to be very careful with `allow_in_graph`. Today downstream components like AOT Autograd rely on TorchDynamo to take care of complex Python features, but `allow_in_graph` bypasses TorchDynamo. If not careful, this could lead to soundness and really hard-to-debug issues.
 
-**Relevant post** - [https://fb.workplace.com/groups/257735836456307/permalink/446153667614522/](https://fb.workplace.com/groups/257735836456307/permalink/446153667614522/)
 
+Section 5 - Limitations
+=======================
 
-# Section 5 - Limitations {#section-5-limitations}
+.. _section-5-limitations:
 
 All the existing APIs are applied at the TorchDynamo level. Therefore, these APIs have visibility to only what TorchDynamo sees. This can lead to confusing scenarios.
 
 For example, `_dynamo.disallow_in_graph` will not work for aten operators because they are visible to AOT Autograd (example - `torch._dynamo.disallow_in_graph(torch.ops.aten.add)` will not work in the above example).
 
 
-# Section 6 - FAQ {#section-6-faq}
+Section 6 - FAQ
+===============
+
+.. _section-6-faq:
 
 **FAQ - How do I graph break on a function?**
 
@@ -96,7 +112,7 @@ Disable works at the function frame level and decides if TorchDynamo should look
 **FAQ - Difference between disable and now-deprecated skip -** You most likely need `_dynamo.disable`. But in an unlikely scenario, you might need even finer control. Suppose you want to disable the tracing on just the function `a_fn`, but want to continue the tracing back in `aa_fn` and `ab_fn`. This is shown below
 
 
-.. figure:: _../_static/img/fine_grained_apis/call_stack_diagram.png
+.. figure:: ../_static/img/fine_grained_apis/call_stack_diagram.png
    :alt: diagram of torch.compile + disable(a_fn, recursive=False)
 
 
