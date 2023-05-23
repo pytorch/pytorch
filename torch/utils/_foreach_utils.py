@@ -5,7 +5,34 @@ import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
+__all__ = ["SupportForeachDeviceType"]
 
+class SupportForeachDeviceType(object):
+    r"""
+    A class that manages the default device type for foreach support,
+    default is 'cuda'.
+    """
+    _default_device_type = "cuda"
+
+    @staticmethod
+    def add_device_type(device: str = "cuda"):
+        """
+        Add the default device type for foreach support.
+
+        Args:
+            device (str): The device type to be set as default. Default is 'cuda'.
+        """
+        SupportForeachDeviceType._default_device_type = device
+
+    @staticmethod
+    def get_device_type() -> str:
+        """
+        Get the current default device type for foreach support.
+
+        Returns:
+            str: The current default device type.
+        """
+        return SupportForeachDeviceType._default_device_type
 # This util function splits tensors into groups by device and dtype, which is useful before sending
 # tensors off to a foreach implementation, which requires tensors to be on one device and dtype.
 # If tensorlistlist contains more than one tensorlist, the following assumptions are made BUT NOT verified:
@@ -37,6 +64,6 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
     return per_device_and_dtype_tensors
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
-    if device.type not in ['cpu', 'cuda'] or torch.jit.is_scripting():
+    if (device.type != "cpu" and device.type != SupportForeachDeviceType._default_device_type) or torch.jit.is_scripting():
         return False
     return all(t is None or type(t) == torch.Tensor for t in tensors)
