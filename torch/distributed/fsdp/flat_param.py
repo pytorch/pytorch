@@ -26,7 +26,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.parameter import  _ParameterMeta  # type: ignore[attr-defined]
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
@@ -36,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     HandleTrainingState,
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
+from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import _no_dispatch_record_stream, _same_storage_as_data_ptr
@@ -179,9 +179,8 @@ class _FlatParameterMeta(_ParameterMeta):
     # instances that have the _is_flat_param flag for BC
     def __instancecheck__(self, instance):
         # NB: do NOT test the super implementation
-        return (
-            isinstance(instance, torch.Tensor)
-            and getattr(instance, "_is_flat_param", False)
+        return isinstance(instance, torch.Tensor) and getattr(
+            instance, "_is_flat_param", False
         )
 
 
@@ -408,12 +407,8 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
-            self._is_grad_none_mask = [
-                False for _ in range(self._num_params)
-            ]
-            self._tensors = [
-                None for _ in range(self._num_params)
-            ]
+            self._is_grad_none_mask = [False for _ in range(self._num_params)]
+            self._tensors = [None for _ in range(self._num_params)]
         else:
             self._params = None
             self._shared_params = None
@@ -1395,7 +1390,7 @@ class FlatParamHandle:
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
                     "approximate those ranks' sharded gradients being `None`"
                 )
-            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            flat_param._saved_grad_shard = None  # type: ignore[assignment]
             sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
         else:
             self._check_sharded(flat_param.grad)
