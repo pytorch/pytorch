@@ -14,7 +14,7 @@ from typing import List, Tuple
 from torch.distributed.logging_handlers import _log_handlers
 import torch.distributed as dist
 
-__all__: List[str] = ["exception_logger", "time_logger"]
+__all__: List[str] = []
 
 
 def _get_or_create_logger() -> logging.Logger:
@@ -40,7 +40,7 @@ global _c10d_logger
 _c10d_logger = _get_or_create_logger()
 
 
-def exception_logger(func):
+def _exception_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
@@ -67,7 +67,7 @@ def exception_logger(func):
     return wrapper
 
 
-def time_logger(func):
+def _time_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         t1 = time.time_ns()

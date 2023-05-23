@@ -11,7 +11,7 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 
-from torch.distributed.c10d_logger import _c10d_logger, exception_logger, time_logger
+from torch.distributed.c10d_logger import _c10d_logger, _exception_logger, _time_logger
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -93,12 +93,12 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
         self.assertEqual(1, len(_c10d_logger.handlers))
         self.assertIsInstance(_c10d_logger.handlers[0], logging.NullHandler)
 
-    @exception_logger
+    @_exception_logger
     def _failed_broadcast_raise_exception(self):
         tensor = torch.arange(2, dtype=torch.int64)
         dist.broadcast(tensor, self.world_size + 1)
 
-    @exception_logger
+    @_exception_logger
     def _failed_broadcast_not_raise_exception(self):
         try:
             tensor = torch.arange(2, dtype=torch.int64)
@@ -136,7 +136,7 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
 
-    @time_logger
+    @_time_logger
     def _dummy_sleep(self):
         time.sleep(5)
 
