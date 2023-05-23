@@ -67,7 +67,7 @@ def rearrange(
     try:
         left_str, right_str = pattern.split("->")
     except ValueError:
-        raise ValueError("Pattern must contain a single '->' separator")
+        raise ValueError("Pattern must contain a single '->' separator") from None
 
     if _ellipsis in axes_lengths:
         raise ValueError(f"'{_ellipsis}' is not an allowed axis identifier")
