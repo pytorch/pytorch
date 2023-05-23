@@ -93,7 +93,7 @@ class MultivariateNormal(Distribution):
     Example:
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
-        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = MultivariateNormal(torch.zeros(2), torch.eye(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
         tensor([-0.2102, -0.5429])
