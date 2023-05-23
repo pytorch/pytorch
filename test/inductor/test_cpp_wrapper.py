@@ -8,6 +8,7 @@ from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -27,7 +28,7 @@ except unittest.SkipTest:
 
 
 RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM
 
 
 class CppWrapperTemplate:
@@ -85,6 +86,7 @@ if RUN_CPU:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
+        BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
@@ -97,11 +99,11 @@ if RUN_CPU:
             torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
-        # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
+        BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_scalar_input"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sort"),
@@ -133,7 +135,6 @@ if RUN_CUDA:
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
-        # BaseTest("test_lowmem_dropout1"),  # None as output
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
