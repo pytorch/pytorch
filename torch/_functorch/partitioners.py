@@ -448,7 +448,7 @@ def min_cut_rematerialization_partition(
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
-    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
+    random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like, torch.ops.rngprims.philox_rand]
     compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit]  # noqa: E501,B950
 
     unrecomputable_ops = random_ops + compute_intensive_ops
@@ -542,7 +542,7 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
             continue
 
-        if node.op == 'placeholder' and "primals" in node.target:
+        if _is_primal(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
         # If a node can't be recomputed (too expensive or involves randomness),
