@@ -383,6 +383,10 @@ def main() -> None:
             args.workflow, args.job_name, filtered_test_matrix
         )
 
+        filtered_test_matrix = mark_unstable_jobs(
+            args.workflow, args.job_name, filtered_test_matrix
+        )
+
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
 
