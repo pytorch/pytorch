@@ -398,6 +398,8 @@ class _TargetExprVarArgs(_TargetExpr):
         m = Match(self)
         m.nodes.append(node)
         m.targets[self] = node.target
+        m.args.extend(node.args)
+        m.kwargs.update(node.kwargs)
         return m
 
 
