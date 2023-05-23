@@ -14,7 +14,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 
-
 def create_observer(observer_type, quantization_spec: QuantizationSpec, **extra_kwargs):
     if quantization_spec is None:
         return None
