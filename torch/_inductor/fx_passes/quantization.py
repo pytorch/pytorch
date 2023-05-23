@@ -1,7 +1,7 @@
 import torch
-from .post_grad import register_lowering_pattern
 from ..ir import QConv
 from ..pattern_matcher import Arg, CallFunction, KeywordArg, Match
+from .post_grad import register_lowering_pattern
 
 aten = torch.ops.aten
 prims = torch.ops.prims
