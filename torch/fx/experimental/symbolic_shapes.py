@@ -169,18 +169,21 @@ def is_concrete_int(a: Union[int, SymInt]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
-def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+def free_symbols(val: Union[SymInt, torch.Tensor, torch.Size]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
-        r = set()
-        for s in val.size():
-            r |= free_symbols(s)
+        r = free_symbols(val.size())
         for s in val.stride():
             r |= free_symbols(s)
         r |= free_symbols(val.storage_offset())
+        return r
+    elif isinstance(val, torch.Size):
+        r = set()
+        for s in val:
+            r |= free_symbols(s)
         return r
     else:
         raise AssertionError(f"cannot compute free_symbols of {val}")
