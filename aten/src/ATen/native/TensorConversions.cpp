@@ -1009,7 +1009,7 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optio
   return dense_to_sparse_compressed<Layout::SparseBsc>(self, blocksize, dense_dim_opt);
 }
 
-static void _check_blocksize_matches(
+void _check_blocksize_matches(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize_opt,
     const std::string& name) {
@@ -1023,7 +1023,7 @@ static void _check_blocksize_matches(
   }
 }
 
-static Tensor sparse_compressed_clone(
+Tensor sparse_compressed_clone(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
@@ -1046,7 +1046,7 @@ static Tensor sparse_compressed_clone(
       values.device());
 }
 
-static Tensor sparse_compressed_to_flipped(
+Tensor sparse_compressed_to_flipped(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
