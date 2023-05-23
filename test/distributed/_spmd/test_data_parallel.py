@@ -63,7 +63,7 @@ class TestDataParallel(DTensorTestBase):
         inp,
         train_step,
         data_parallel_mode,
-        data_parallel_options,
+        data_parallel_options=None,
     ):
         ddp_inp = deepcopy(inp)
 
@@ -79,6 +79,7 @@ class TestDataParallel(DTensorTestBase):
         ddp_opt.step()
 
         # compile it with replicate and run step once
+        data_parallel_options = data_parallel_options or {}
         compiled_fn = compile(
             parallel_mode=DataParallel(data_parallel_mode, **data_parallel_options)
         )(train_step)

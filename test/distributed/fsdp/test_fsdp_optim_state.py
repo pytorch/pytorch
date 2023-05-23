@@ -383,7 +383,7 @@ class TestFSDPOptimState(FSDPTest):
         ``num_iters``-many times, and returns the per-iteration losses."""
         torch.manual_seed(0)  # set seed for determinism
         losses = []
-        module = model.module if hasattr(model, "module") else model
+        module = getattr(model, "module", model)
         for _ in range(num_iters):
             optim.zero_grad()
             inp = module.get_input(device)

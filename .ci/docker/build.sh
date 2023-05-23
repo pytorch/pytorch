@@ -206,6 +206,7 @@ case "$image" in
     KATEX=yes
     CONDA_CMAKE=yes
     TRITON=yes
+    DOCS=yes
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -321,6 +322,7 @@ docker build \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "DOCS=${DOCS}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

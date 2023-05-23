@@ -396,6 +396,12 @@ class GradScaler:
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
             been invoked for all optimizers used this iteration.
+
+        .. warning::
+            For performance reasons, we do not check the scale factor value to avoid synchronizations,
+            so the scale factor is not guaranteed to be above 1. If the scale falls below 1 and/or
+            you are seeing NaNs in your gradients or loss, something is likely wrong. For example,
+            bf16-pretrained models are often incompatible with AMP/fp16 due to differing dynamic ranges.
         """
         if not self._enabled:
             return
