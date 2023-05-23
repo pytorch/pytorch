@@ -96,6 +96,7 @@ def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
 
+
 def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
@@ -103,6 +104,7 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
+
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -167,6 +169,7 @@ class GraphLowering(torch.fx.Interpreter):
             #   phlippe_resnet and functorch_maml_omniglot
             log.debug("add back the constraint for convolution")
             from .lowering import add_layout_constraint, constrain_to_fx_strides
+
             add_layout_constraint(torch.ops.aten.convolution, constrain_to_fx_strides)
 
         # Convert view to reshape if we are doing layout optimization.

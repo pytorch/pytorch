@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Union, Tuple
+from typing import Callable, Dict, List, Tuple, Union
 
 import sympy
 from sympy import Expr
