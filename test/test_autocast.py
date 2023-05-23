@@ -4,7 +4,7 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -124,6 +124,23 @@ class TestAutocastCPU(TestCase):
     def test_autocast_torch_need_autocast_promote(self):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_autocast_rnn(self):
+        if torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            x = torch.randn(1, 2, 1)
+            hx = torch.randn(2, 2, 1)
+            cx = torch.randn(2, 2, 1)
+
+            m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
+
+            # Raise ValueError when autocast is not enabled
+            with self.assertRaisesRegex(ValueError, "input must have the type"):
+                m(x, (hx, cx))
+
+            # Should be able to run the below case with autocast
+            with torch.cpu.amp.autocast():
+                m(x, (hx, cx))
 
 
 class CustomLinear(torch.autograd.Function):

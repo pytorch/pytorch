@@ -63,7 +63,6 @@ class DataParallel(ParallelMode):
         *,
         input_batch_dim: int = 0,
         custom_passes: Optional[Callable[[GraphModule], GraphModule]] = None,
-        _preserve_node_type: bool = False,
     ):
         """
         DataParallel Mode that partition the model and graph to data parallel style
@@ -81,9 +80,6 @@ class DataParallel(ParallelMode):
             custom_passes (Callable[[GraphModule], GraphModule], optional):
                 A custom callable that overrides the default graph transformation
                 and optimization passes.
-            _preserve_node_type (bool): whether to preserve the node type in the
-                compiled graph (i.e. param/grad/activation, etc.)
-
         """
         if parallel_style == "replicate":
             self.parallel_style = DataParallelStyle.REPLICATE
@@ -97,7 +93,6 @@ class DataParallel(ParallelMode):
         # TODO: what if user passes in a incorrect `input_batch_dim`, how should we
         # detect that and do proper error handling?
         self.input_batch_dim = input_batch_dim
-        self._preserve_node_type = _preserve_node_type
 
         if custom_passes is not None:
             self._gm_passes: Callable[[GraphModule], GraphModule] = custom_passes
@@ -129,7 +124,6 @@ class DataParallel(ParallelMode):
             mesh,
             self.parallel_style,
             self.input_batch_dim,
-            self._preserve_node_type,
         )
         return gm
 
