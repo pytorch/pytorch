@@ -771,20 +771,21 @@ class Scheduler:
 
     def create_foreach_nodes(self):
         removed_node_names = set()
+        fe_nodes = []
         for names in V.graph.lists.values():
             removed_node_names.update(names)
             fe_node = ForeachKernelSchedulerNode(
                 self, [self.name_to_node[name] for name in names]
             )
 
-            self.nodes.append(fe_node)
+            fe_nodes.append(fe_node)
 
             for name in names:
                 self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
-        ]
+        ] + fe_nodes
 
     def compute_dependencies(self):
         """

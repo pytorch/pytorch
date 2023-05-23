@@ -95,6 +95,21 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
+    def test_singleton_lists(self):
+        def fn(a0, b0):
+            return torch._foreach_add([a0], [b0])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
     def test_type_promotion(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
@@ -112,7 +127,7 @@ class ForeachTests(TestCase):
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
     def test_kernel_split_arg_limit(self):
@@ -227,7 +242,7 @@ class ForeachTests(TestCase):
 
         self.check_model_cuda(fn, inputs)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     def test_cpu_cpp_fallback(self):
         def fn(a0, a1, b0, b1):
@@ -242,7 +257,7 @@ class ForeachTests(TestCase):
 
         self.check_model_cpu(fn, inputs)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 if __name__ == "__main__":

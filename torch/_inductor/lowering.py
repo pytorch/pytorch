@@ -414,40 +414,43 @@ def make_pointwise(
 
 
 def make_foreach_pointwise(aten_fn, pw_fn):
-    def inner(*inputs: List[List[TensorBox]], alpha=1.0):
+    def inner(*inputs: List[List[TensorBox]], alpha=1):
         def is_dynamic(t):
             return any(x.free_symbols for x in t.data.get_size())
 
-        # group by device, and whether any of the inputs are dynamic
+        # group by device, whether any of the inputs are dynamic, and whether their types match
+        # (proxy for type promotion)
+        # Note: we'll fallback on type promotion until
+        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
+        # is in the pytorch triton version
         def group_args(tensor_pairs):
             out = defaultdict(list)
             for i, (l, r) in enumerate(tensor_pairs):
                 assert l.get_device() == r.get_device()
-                out[(l.get_device(), is_dynamic(l) or is_dynamic(r))].append((i, l, r))
+                use_foreach = not (
+                    is_dynamic(l)
+                    or is_dynamic(r)
+                    or l.data.get_dtype() != r.data.get_dtype()
+                )
+                out[(l.get_device(), use_foreach)].append((i, l, r))
             return out
 
         groups = group_args(zip(*inputs))
         outputs = [None] * len(inputs[0])
-        for (device, dyn_shapes), group in groups.items():
-            if device.type == "cpu" or dyn_shapes:
-                ls = []
-                rs = []
-                for output_ind, left, right in group:
-                    ls.append(left)
-                    rs.append(right)
-                output = fallback_handler(aten_fn, False)(ls, rs, alpha=alpha)
-                for ind, (output_ind, _, _) in enumerate(group):
-                    outputs[output_ind] = output[ind]
-            else:
-                assert device.type == "cuda"
-                buffer_list = []
-                for output_ind, left, right in group:
+        for (device, use_foreach), group in groups.items():
+            buffer_list = []
+            for output_ind, left, right in group:
+                if device.type == "cuda" and use_foreach:
                     left.realize()
                     right.realize()
-                    output = pw_fn(left, right, alpha=alpha)
-                    buffer_list.append(output.realize())
-                    outputs[output_ind] = output
 
+                output = pw_fn(left, right, alpha=alpha)
+                outputs[output_ind] = output
+
+                if device.type == "cuda" and use_foreach:
+                    buffer_list.append(output.realize())
+
+            if buffer_list:
                 V.graph.register_list(buffer_list)
 
         assert all(x is not None for x in outputs)
