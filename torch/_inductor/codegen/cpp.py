@@ -223,7 +223,7 @@ class CppPrinter(ExprPrinter):
                 x = f"div_floor_internal({x}, {div})"
             else:
                 x = f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
-        return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
+        return f"static_cast<long>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
@@ -238,7 +238,7 @@ class CppPrinter(ExprPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<long>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -246,8 +246,8 @@ class CppPrinter(ExprPrinter):
         base = self._print(base)
         if exp == 0.5:
             r = f"std::sqrt({base})"
-        else:
-            assert exp.is_integer
+            return f"static_cast<long>({r})" if expr.is_integer else r
+        assert exp.is_integer
         exp = int(exp)
         if exp > 0:
             r = "*".join([self.paren(base)] * exp)
@@ -256,7 +256,7 @@ class CppPrinter(ExprPrinter):
         else:  # exp == 0
             r = "1.0"
 
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<long>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
@@ -264,19 +264,19 @@ class CppPrinter(ExprPrinter):
             r = f"{expr.p}"
         else:
             r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<long>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<long>({r})" if expr.is_integer else r
 
 
 cexpr = CppPrinter().doprint
 
 
 def cexpr_index(index):
-    return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
+    return f"static_cast<long>({cexpr(index)})"
 
 
 class RecordOptimizationContext:
