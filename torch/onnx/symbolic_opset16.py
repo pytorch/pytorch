@@ -118,7 +118,7 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
 
 
 @_onnx_symbolic("aten::scatter_reduce")
-@symbolic_helper.parse_args("v", "i", "v", "v", "s", "none")
+@symbolic_helper.parse_args("v", "i", "v", "v", "s", "b")
 @_beartype.beartype
 def scatter_reduce(
     g: jit_utils.GraphContext,
@@ -164,19 +164,14 @@ def scatter_reduce(
     src_reshape = if_context.op("Reshape", src, neg_1)
     utils._add_output_to_block(if_context.block, src_reshape)
 
-    self_identity = if_context.op("Identity", self)
-    utils._add_output_to_block(if_context.block, self_identity)
-    index_identitye = if_context.op("Identity", index)
-    utils._add_output_to_block(if_context.block, index_identitye)
-    src_identity = if_context.op("Identity", src)
-    utils._add_output_to_block(if_context.block, src_identity)
+    self_identity = else_context.op("Identity", self)
+    utils._add_output_to_block(else_context.block, self_identity)
+    index_identitye = else_context.op("Identity", index)
+    utils._add_output_to_block(else_context.block, index_identitye)
+    src_identity = else_context.op("Identity", src)
+    utils._add_output_to_block(else_context.block, src_identity)
 
-    self, index, src = if_op.node().output()
-
-    dim = symbolic_helper._maybe_get_scalar(dim)
-    result = g.op(
-        "ScatterElements", self, index, src, axis_i=dim, reduction_s=onnx_reduce
-    )
+    result = g.op("ScatterElements", *if_op, axis_i=dim, reduction_s=onnx_reduce)
 
     # if self_rank == 0:
     if_op, (if_context, else_context), _ = jit_utils.add_op_with_blocks(
