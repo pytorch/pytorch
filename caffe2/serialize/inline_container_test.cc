@@ -6,6 +6,7 @@
 
 #include "caffe2/serialize/inline_container.h"
 #include "c10/util/irange.h"
+#include <c10/util/uuid.h>
 
 namespace caffe2 {
 namespace serialize {
@@ -42,6 +43,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
   std::string the_file = oss.str();
   std::ofstream foo("output.zip");
@@ -127,6 +129,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   ASSERT_EQ(written_records.count("key2"), 1);
 
   writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
   std::string the_file = oss.str();
   std::ofstream foo("output2.zip");
@@ -181,6 +184,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   ASSERT_EQ(written_records.count("key1.debug_pkl"), 1);
   ASSERT_EQ(written_records.count("key2.debug_pkl"), 1);
   writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
   std::string the_file = oss.str();
   std::ofstream foo("output2.zip");
@@ -209,6 +213,37 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
       3,
       [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   EXPECT_EQ(ret, 0);
+}
+
+TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
+  std::ostringstream oss;
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  auto writer_serialization_id = writer.serializationId();
+  auto dup_serialization_id = uuid::generate_uuid_v4();
+  writer.writeRecord(kSerializationIdRecordName, dup_serialization_id.c_str(), dup_serialization_id.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 0);
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  std::ofstream foo("output3.zip");
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  std::istringstream iss(the_file);
+
+  // read records through readers
+  PyTorchStreamReader reader(&iss);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+
+  EXPECT_EQ(reader.serializationId(), writer_serialization_id);
 }
 
 } // namespace
