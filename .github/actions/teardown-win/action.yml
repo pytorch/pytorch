@@ -43,5 +43,10 @@ runs:
           set +e
           set -x
 
-          [ ! -z "${EXTRA_DELETE_DIR}" ]  || rm -rf "${EXTRA_DELETE_DIR}"
+          if [ -n "${EXTRA_DELETE_DIR}" ]; then
+            # It's ok to fail to clean up the extra directory on Windows as it only contains
+            # the build artifacts and doesn't take up much space, i.e. /c/5053411580/build-results
+            rm -rf "${EXTRA_DELETE_DIR}" || true
+          fi
+
           rm -rf ./*
