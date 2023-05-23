@@ -253,7 +253,6 @@ def _get_vjpfull_variant(fn, primals):
     return wrapped, args
 
 
-
 def get_jvp_variant(f, sample):
     # We want this higher-order variant of jvp, so that it can
     # be used to wrap vmap
@@ -541,7 +540,6 @@ class TestOperators(TestCase):
                                      clone_inputs=True,
                                      fixme_ref_jvp_local=fixme_ref_jvp_local)
 
-
     def jvp_opinfo_test(self, fn, sample, output_process_fn,
                         clone_inputs, fixme_ref_jvp_local):
         # NB: we used requires_grad=True to determine where the primals are,
@@ -597,7 +595,8 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
-        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
+        decorate('nn.functional.scaled_dot_product_attention', device_type="cuda",
+                 decorator=expectedFailureIf(not (torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)))),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -1597,7 +1596,6 @@ class TestOperators(TestCase):
             for loop_out, batched_out in generator:
                 self.assertEqual(loop_out, batched_out)
 
-
     def _make_extremal_inputs(self, shape, device):
         if shape is None:
             return (None,)
@@ -1669,7 +1667,6 @@ class TestOperators(TestCase):
                 result = torch.nn.functional.softmax(input)
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(torch.nn.functional.softmax, (cotangents, input))
-
 
     def test_extremal_numerics_log_softmax(self, device):
         N, C, H, W = 3, 4, 5, 6
