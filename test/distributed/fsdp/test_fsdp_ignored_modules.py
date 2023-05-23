@@ -106,7 +106,20 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
-                "composable": [True, False],
+                "composable": [False],
+            },
+            self._test_ignored_modules_transformer,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_modules_transformer_composable(self):
+        """Tests that ignored modules' parameters are not flattened for a
+        transformer model with shared parameters."""
+        self.run_subtests(
+            {
+                "use_orig_params": [True],
+                "ignore_modules": [True, False],
+                "composable": [True],
             },
             self._test_ignored_modules_transformer,
         )
@@ -195,7 +208,20 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
-                "composable": [True, False],
+                "composable": [False],
+            },
+            self._test_ignored_modules_nested,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_modules_nested_composable(self):
+        """Tests that passing a module with nested FSDP modules does not
+        error and still ignores non-FSDP modules' parameters."""
+        self.run_subtests(
+            {
+                "use_orig_params": [True],
+                "ignore_modules": [True, False],
+                "composable": [True],
             },
             self._test_ignored_modules_nested,
         )
@@ -270,9 +296,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
         model = Model().cuda()
-        wrap_cls = FSDP
-        if composable:
-            wrap_cls = fully_shard
+        wrap_cls = FSDP if composable else fully_shard
         model.layer1 = wrap_cls(model.layer1)
         # Passing an FSDP module as an ignored module should error
         with self.assertRaises(
@@ -321,9 +345,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
-        wrap_cls = FSDP
-        if composable:
-            wrap_cls = fully_shard
+        wrap_cls = FSDP if composable else fully_shard
         model = ModelWithIgnoredModules(num_ignored=self.rank + 1).cuda()
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
@@ -374,9 +396,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             }
         )
 
-        wrap_cls = FSDP
-        if composable:
-            wrap_cls = fully_shard
+        wrap_cls = FSDP if composable else fully_shard
 
         model.layer1 = wrap_cls(
             model.layer1,

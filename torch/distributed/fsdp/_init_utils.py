@@ -668,9 +668,7 @@ def _get_ignored_modules(
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
-        if isinstance(
-            module, fsdp_file.FullyShardedDataParallel
-        ) or _get_module_fsdp_state(module):
+        if _get_module_fsdp_state(module):
             # TODO: We may relax this by taking the FSDP instance's wrapped
             # module to provide more flexibility to the user.
             raise ValueError("`ignored_modules` should not include FSDP modules")
