@@ -198,7 +198,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     assert len(args) == 8
                     training = args[5]
-                    args6_end = tuple(map(_to_nvfuser_constant, args[6:]))
+                    args6_end = [_to_nvfuser_constant(arg) for arg in args[6:]]
                     args = args[:5] + [training] + args6_end
                     return node.target.impl_nvfuser(fd, *args, **kwargs)
 
