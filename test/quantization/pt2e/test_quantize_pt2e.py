@@ -193,6 +193,13 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        for node in m.graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.aten.convolution.default
+            ):
+                # Add a check to ensure the output_qspec is not annotated of conv node
+                self.assertTrue(node.meta["quantization_annotation"].output_qspec is None)
         m(*example_inputs)
         m = convert_pt2e(m)
         node_occurrence = {
