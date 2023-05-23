@@ -1753,12 +1753,11 @@ class TritonKernel(Kernel):
                 if uniform_stride_order is None:
                     uniform_stride_order = stride_order
                 elif uniform_stride_order != stride_order:
-                    print(
-                        yellow_text(
-                            f"Expected stride order {uniform_stride_order}, but found stride order"
-                            + f" {stride_order} for kernel {kernel_name}"
-                        )
+                    msg = yellow_text(
+                        f"Expected stride order {uniform_stride_order}, but found stride order"
+                        + f" {stride_order} for kernel {kernel_name}"
                     )
+                    log.warning(msg)
 
                     stride_order_list = [
                         ir.get_stride_order(V.graph.get_buffer(name).layout.stride)
@@ -1781,18 +1780,16 @@ class TritonKernel(Kernel):
                         for name in call_args
                     ]
 
-                    print(
-                        yellow_text(
-                            f"  param names {argdefs}\n  buf names {call_args}\n  strides {stride_order_list}"
-                            + f"\n  sizes {size_list}\n  sources {source_list}\n"
-                        )
+                    msg = yellow_text(
+                        f"  param names {argdefs}\n  buf names {call_args}\n  strides {stride_order_list}"
+                        + f"\n  sizes {size_list}\n  sources {source_list}\n"
                     )
+                    log.warning(msg)
                     return
-        print(
-            green_text(
-                f"All the inputs for the triton kernel {kernel_name} have uniform layout"
-            )
+        msg = green_text(
+            f"All the inputs for the triton kernel {kernel_name} have uniform layout"
         )
+        log.warning(msg)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)

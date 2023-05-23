@@ -171,23 +171,11 @@ def get_stride_order(seq: Sequence[int]):
     return out
 
 
-def _in_faketensormode():
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
-
-    for m in _get_current_dispatch_mode_stack():
-        if isinstance(m, FakeTensorMode):
-            return True
-    return False
-
-
 def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
 
-    # for some operators we can not run them in FakeTensorMode (check FallbackKernel.create).
-    # Without FakeTensorMode size/stride have to be int. So we need call size_hint.
-    if not guard_shape or not _in_faketensormode():
+    if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
         shape_fn = identity
@@ -3260,13 +3248,6 @@ class FallbackKernel(ExternKernelAlloc):
             aten._linalg_svd.default,
             aten._linalg_svd.U,
             aten._fused_moving_avg_obs_fq_helper_functional,
-            # Here is the schema for this op:
-            #   _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
-            # if grad_out is contiguous while self is channels last,
-            # eager returns a channels last tensor while in FakeTensorMode we returns
-            # a contiguous tensor.
-            # This causes vgg16 training to fail when enabling layout optimization.
-            aten._adaptive_avg_pool2d_backward,
         )
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
