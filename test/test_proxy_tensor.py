@@ -8,8 +8,7 @@ import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed, skip, xfail, skipOps
-from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException
-
+from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
@@ -750,7 +749,7 @@ class TestFakeProxyTensor(TestCase):
             pass
 
         x = A(torch.randn(3, 3))
-        self.assertRaisesRegex(TypeError, "no implementation found", lambda: make_fx(f, tracing_mode="fake")())
+        self.assertRaisesRegex(TypeError, "Multiple dispatch failed", lambda: make_fx(f, tracing_mode="fake")())
 
     def test_use_fake_and_tensor(self):
         def f(x, y):
@@ -760,6 +759,15 @@ class TestFakeProxyTensor(TestCase):
         g = make_fx(f, tracing_mode="fake")(torch.randn(2), torch.randn(2))
         x, y = torch.randn(2), torch.randn(2)
         self.assertEqual(g(x, y), f(x, y))
+
+    def test_free_fake(self):
+        def f(x):
+            return torch.add(x, y)
+
+        with FakeTensorMode() as fake_mode:
+            y = torch.randn(2)
+            with self.assertRaisesRegex(TypeError, "Multiple dispatch failed"):
+                make_fx(f, tracing_mode="real")(torch.randn(2))
 
     def test_fused_adam(self):
         # See https://github.com/pytorch/pytorch/issues/99356
