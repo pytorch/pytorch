@@ -111,6 +111,7 @@ class _FSDPState(_State):
         self._fully_sharded_module_to_handles: Dict[
             nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
+        self._fully_sharded_module_names: List[str] = []
         self.compute_device: Optional[torch.device] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
