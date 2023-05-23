@@ -1,12 +1,15 @@
 import copy
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
-from typing import Callable, List, NamedTuple, Optional
+from dataclasses import asdict, dataclass, field
+from torch.fx import Node
+from typing import Callable, List, NamedTuple, Optional, Dict, Any
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 import torch
 
 __all__ = [
     "Quantizer",
+    "QuantizationAnnotation",
 ]
 
 # TODO: maybe remove torch.float32
@@ -26,17 +29,23 @@ _TORCH_DTYPE_TO_QDTYPE = {
     torch.uint8: torch.quint8,
     torch.int32: torch.qint32,
     torch.float16: torch.float16,
+    torch.float32: torch.float32,
 }
 
 
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec:
     dtype: torch.dtype
-    is_dynamic: bool = False
+    # observer or fake_quantize constructor such as
+    # MinMaxObserver, PerChannelHistogramObserver etc.
+    # or we can attach some custom args to them
+    # e.g. MinMaxObserver.with_args(eps=eps)
+    observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
     ch_axis: Optional[int] = None
+    is_dynamic: bool = False
 
     def __post_init__(self):
         # check dtype is one of the supported types
@@ -75,6 +84,7 @@ class QuantizationConfig:
     activation: Optional[QuantizationSpec]
     weight: Optional[QuantizationSpec]
     bias: Optional[QuantizationSpec]
+    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
     is_qat: bool = False
 
 OperatorPatternType = List[Callable]
@@ -98,6 +108,29 @@ OperatorConfig = NamedTuple(
     ],
 )
 
+@dataclass
+class QuantizationAnnotation:
+    """ How are input arguemnt or output should be quantized,
+    expressed as QuantizationSpec, this corresponds to how a Tensor in the
+    operator Graph is observed (PTQ) or fake quantized (QAT)
+    """
+
+    # a map from torch.fx.Node to QuantizationSpec
+    # TODO: change the value to QuantizationSpec in a separate PR
+    input_qspec_map: Dict[Node, Any] = field(default_factory=dict)
+
+    # How the output of this node is quantized, expressed as QuantizationSPec
+    # TODO: change the value to QuantizationSpec in a separate PR
+    output_qspec: Optional[Any] = None
+
+    # whether the node is annotated or not
+    _annotated: bool = False
+
+    # TODO: will be updated soon to use sharing group and be more general
+    _input_output_share_observers: bool = False
+
+    # TODO: remove after sharing API refactor
+    _reuse_input_obs_or_fq: bool = False
 
 class Quantizer(ABC):
 
@@ -118,3 +151,16 @@ class Quantizer(ABC):
     @abstractmethod
     def get_supported_operators(cls) -> List[OperatorConfig]:
         pass
+
+def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
+    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    if quantization_annotation.input_qspec_map is None:
+        quantization_annotation.input_qspec_map = {}
+    quantization_annotation.input_qspec_map[input_node] = qspec
+    node.meta["quantization_annotation"] = quantization_annotation
+
+
+def _annotate_output_qspec(node: Node, qspec):
+    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    quantization_annotation.output_qspec = qspec
+    node.meta["quantization_annotation"] = quantization_annotation
