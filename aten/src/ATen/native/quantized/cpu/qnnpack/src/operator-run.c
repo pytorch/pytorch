@@ -241,6 +241,10 @@ static void compute_q8gemm_prepacked_sparse_dq(
           &context->quantization_params);
       break;
     case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
+      // This function can not return an error code without substantially
+      // changing the internal API. A check for invalid index type should
+      // already exist in the calling function. If the code reaches here, then
+      // please add / restore the index check in the calling function.
       pytorch_qnnp_log_error(
           "Invalid indices dtype specified for "
           "operator-run compute_q8gemm_prepacked_sparse_dq");
@@ -1230,6 +1234,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
               pytorch_q8gemm_sparse_params->packedA_w8_gemm_dq;
           break;
         case pytorch_qnnp_sparse_matrix_indices_dtype_invalid:
+          // Catch invalid index type and return early.
+          // This ensures all subsequent calls will have a valid index type.
           pytorch_qnnp_log_error(
               "Invalid indices dtype specified for "
               "operator-run pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq");
