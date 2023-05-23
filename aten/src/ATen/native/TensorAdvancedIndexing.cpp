@@ -86,7 +86,6 @@
 #include <ATen/ops/_index_put_impl_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_unsafe_index_native.h>
-#include <ATen/ops/_unsafe_index_put_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argwhere_native.h>
 #include <ATen/ops/as_strided.h>
@@ -683,10 +682,6 @@ Tensor put(const Tensor & self, const Tensor& index, const Tensor & source, cons
 
 Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
-}
-
-Tensor _unsafe_index_put(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
-  return at::index_put(self, indices, value, accumulate);
 }
 
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
