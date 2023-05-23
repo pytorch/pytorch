@@ -326,7 +326,7 @@ DEFINE_DISPATCH(addr_stub);
 
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-static Tensor lu_det_P(const Tensor& pivots) {
+Tensor lu_det_P(const Tensor& pivots) {
   return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
@@ -1594,7 +1594,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
     });
 }
 
-static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
+void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const Tensor &mat2, const Scalar &beta_, const Scalar &alpha_) {
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   const auto result_sizes = result.sizes();
@@ -1766,7 +1766,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   return;
 }
 
-static void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
+void conjugate_mutable_input_if_needed(const Tensor& self, bool conjugate) {
   if (conjugate) {
     self.conj_physical_();
   }
@@ -1823,7 +1823,7 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
-static bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
+bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -2678,7 +2678,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
+void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
   // A
   at::native::checkIsMatrix(A, "linalg.matrix_norm");
   at::native::checkFloatingOrComplex(A, "linalg.matrix_norm", /*low_precision*/low_precision);
@@ -2950,7 +2950,7 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
+Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
@@ -2967,13 +2967,13 @@ static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::
 }
 
 // Return zero for each matrix in the batch
-static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
+Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtype) {
   auto result_shape = IntArrayRef(self.sizes().cbegin(), self.sizes().cend()-2);
   TensorOptions options = self.options().dtype(toRealValueType(self.scalar_type()));
   return at::zeros(result_shape, options);
 }
 
-static void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
+void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
     Scalar* ord = c10::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());

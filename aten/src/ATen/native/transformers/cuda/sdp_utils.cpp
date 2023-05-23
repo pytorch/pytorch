@@ -3,6 +3,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
