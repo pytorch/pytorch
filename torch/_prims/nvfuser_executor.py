@@ -240,7 +240,9 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return arg
 
         # Transforms graph to call nvfuser lowerings
-        nv_args = tuple(templates_to_nvfuser_inputs(nv_arg) for nv_arg in nv_args_templates)
+        nv_args = tuple(
+            templates_to_nvfuser_inputs(nv_arg) for nv_arg in nv_args_templates
+        )
         out = FusionInterpreter(gm).run(*nv_args)
         flat_out, unflatten_spec = tree_flatten(out)
 
