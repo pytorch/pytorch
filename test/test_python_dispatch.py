@@ -992,6 +992,21 @@ class TestCustomOp(TestCase):
         with self.assertRaises(torch._subclasses.fake_tensor.DynamicOutputShapeException):
             make_fx(f, tracing_mode='fake')(x)
 
+    def test_symints(self):
+        def f(x):
+            return torch.testing._internal.custom_op_db.numpy_view_copy(x, x.shape)
+        x = torch.randn(2, 3, 4)
+        gm = make_fx(f, tracing_mode='symbolic')(x)
+        result = gm(x)
+        self.assertEqual(result, f(x))
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
+    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    return numpy_view_copy""")  # noqa: B950
+
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
