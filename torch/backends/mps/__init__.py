@@ -25,11 +25,12 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
 
 
 # Register prims as implementation of var_mean and group_norm
-if is_built():
-    from ...library import Library as _Library
-    from ..._refs import var_mean as _var_mean, native_group_norm as _native_group_norm
-    from ..._decomp.decompositions import native_group_norm_backward as _native_group_norm_backward
-    _lib = _Library("aten", "IMPL")
-    _lib.impl("var_mean.correction", _var_mean, "MPS")
-    _lib.impl("native_group_norm", _native_group_norm, "MPS")
-    _lib.impl("native_group_norm_backward", _native_group_norm_backward, "MPS")
+def _init():
+    if is_built():
+        from ...library import Library as _Library
+        from ..._refs import var_mean as _var_mean, native_group_norm as _native_group_norm
+        from ..._decomp.decompositions import native_group_norm_backward as _native_group_norm_backward
+        _lib = _Library("aten", "IMPL")
+        _lib.impl("var_mean.correction", _var_mean, "MPS")
+        _lib.impl("native_group_norm", _native_group_norm, "MPS")
+        _lib.impl("native_group_norm_backward", _native_group_norm_backward, "MPS")
