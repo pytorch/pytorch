@@ -8,10 +8,6 @@ import torch
 import torch._ops
 import torch.fx
 
-# NOTE: If we only import torch._decomp, we will get RuntimeError: Only a single
-# TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
-# definitions in a single TORCH_LIBRARY block.
-from torch._decomp import decomposition_table as torch_decomposition_table
 from torch.onnx._internal import _beartype
 
 from torch.onnx._internal.fx import registration
@@ -90,7 +86,10 @@ def create_onnx_friendly_decomposition_table(
     # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
     _ONNX_SUPPORT_OP_OVERLOADS = _create_onnx_supports_op_overload_table(registry)
 
-    for op_overload, decomp_fn in torch_decomposition_table.items():
+    # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
+    # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
+    # definitions in a single TORCH_LIBRARY block.
+    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():  # type: ignore[attr-defined]
         # Skip decomposition into "prim::*" ops (defined in 'torch._refs'), because they
         # are not generally supported by ONNX.
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX
