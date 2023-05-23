@@ -2894,7 +2894,6 @@ def fn():
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(raise_on_backend_change=True)
-    @torch._dynamo.config.patch(dynamic_shapes=False)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def fn1():
