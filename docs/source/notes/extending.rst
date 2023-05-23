@@ -2,8 +2,7 @@ Extending PyTorch
 =================
 
 In this note we'll cover ways of extending :mod:`torch.nn`,
-:mod:`torch.autograd`, :mod:`torch`, and writing custom C extensions utilizing our C
-libraries.
+:mod:`torch.autograd`, :mod:`torch`, and writing custom C++ extensions.
 
 .. _extending-autograd:
 
@@ -859,19 +858,47 @@ by ``get_overridable_functions`` cannot be overriden.
 Extending :mod:`torch` native API
 ---------------------------------
 
-While ``__torch_function__`` allows to effectively extend PyTorch's behavior
-for it's pure python components, it does not allow to extend the parts of
+While ``__torch_function__`` allows to effectively extend PyTorch's pure python
+components' behavior, it does not allow to extend the parts of
 PyTorch implemented in C++. To that end, a :class:`Tensor` subclass can also
 define ``__torch_dispatch__`` which will be able to override the behavior at the
 c++ level.
 
-TODO Intro to the dispatcher and basic key ordering.
+To effectively use this feature, it is important to know how the native part of
+PyTorch is implemented. The most important component there is what we call the
+"dispatcher" (the best description can be found in this [blog post](http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) even though it is slightly outdated).As
+hinted by its name, it is responsible to call the right backend
+function for a specific call of a function. For example, when calling
+``torch.add(a, b)``, the dispatcher will inspect both argument, figure out which
+"feature" (autograd, autocast, functionalization, etc) and which "backend" (CPU,
+CUDA, MPS, etc) should be used for this specific call and finally call all the
+right kernels.
+A very common thing done by a kernel is "redispatch". For example when running your
+neural network on GPU with autocast, the call will be first the autocast kernel that
+will handle any potential autocast logic and redispatch down. The next feature in line
+will be autograd that will properly create the autograd graph and redispatch down.
+Finally, we reach the backend kernel for CUDA which will launch the right CUDA kernel
+and return the final result. On the way out, autograd will attach the graph to the
+output and then autocast will have a chance to do any update it needs on exit.
 
-TODO Intro to the aten API.
+One of the configuration of the dispatcher is the order in which all these feature and backend keys are called. The latest list can be found in ``DispatchKey.h`` inside the ``DispatchKey`` enum. For the purpose of extending torch, the important piece of ordering is: vmap -> Autocast -> Autograd -> ZeroTensor -> Neg/Conj -> Functionalize -> Python -> Backends. The most important key for the purpose of this discussion is the ``Python`` one as every Tensor subclass with the ``__torch_dispatch__`` method defined will have the flag to call into this feature. It is from there that the user-defined method is called and where the behavior can be overwritten arbitrarily. From there, calling the provided ``func`` again will perform a "redispatch".
 
-TODO link back to subclass zoo
+Some important implication of this implementation are:
+- This code runs "below all features" it is thus only responsible, like a regular backend, to generate the output value of each Tensor (and can, and should, ignore all advanced features like autograd, autocast, etc).
+- If any high level feature implement a give function without redispatching, it will never reach the Python key and so the ``__torch_dispatch__`` callback will never be triggered. This happens in particular for CompositeImplicitAutograd function (composite functions whose autograd formula is specified implicitly by the other native ops it calls) which are evaluated at the Autograd level without redispatching.
+- When calling back to python and when wrapping the results, the usual conversions are used as some objects cannot be represented in python (undefined Tensors for example become None).
+- To have an easy to use python object representing a given native function, they are lazily populated at ``torch.ops.{namespace}.{func_name}.{overload_name}``. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual python API and binding code.
 
-TODO Intro + link to torch.library code (unify it with the "native" framing)
+
+In a similar way where ``__torch_function__`` is able to interpose on all of torch's python API and Tensor methods, ``__torch_dispatch__`` is able to intercept all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
+Most of these function are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their registration is then generated via codegen alongside some of the feature registrations.
+Some more exotic functions or features are also registered in other places in the c++ codebase or in user-defined c++ extensions.
+
+It is also possible to add new native functions using :mod:`torch.library`. This python feature allows to define and/or add new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
+
+
+You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
+
 
 Extending all :mod:`torch` API with Modes
 -----------------------------------------
@@ -890,10 +917,3 @@ See this
 for a detailed explanation and examples.
 
 Documentations are available at :doc:`../cpp_extension`.
-
-
-Writing custom C extensions
----------------------------
-
-Example available at
-`this GitHub repository <https://github.com/pytorch/extension-ffi>`_.
