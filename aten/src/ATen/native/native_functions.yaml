@@ -2989,6 +2989,12 @@
   dispatch:
     CompositeExplicitAutograd: index_put
 
+- func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_index_put
+
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
@@ -3189,6 +3195,10 @@
   dispatch:
     CompositeExplicitAutograd: linear_out
 
+- func: _structured_sparse_linear(Tensor a, Tensor b, Tensor mask_or_meta) -> (Tensor, Tensor)
+  dispatch:
+    CUDA: _structured_sparse_linear
+
 - func: mkldnn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
@@ -3209,10 +3219,6 @@
   dispatch:
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
-
-- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None, str? activation=None) -> (Tensor, Tensor)
-  dispatch:
-    CUDA: _structured_sparse_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
 
@@ -3661,6 +3667,11 @@
     QuantizedCPU: quantized_max_pool2d
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
+
+- func: quantized_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_max_pool3d
+  autogen: quantized_max_pool3d.out
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
