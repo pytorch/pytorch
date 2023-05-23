@@ -19,6 +19,8 @@ namespace {
     template <typename T>
     class SignManipulation : public ::testing::Test {};
     template <typename T>
+    class SignManipulationHalfPrecision : public ::testing::Test {};
+    template <typename T>
     class Rounding : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocal : public ::testing::Test {};
@@ -78,6 +80,7 @@ namespace {
     TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Interleave, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(SignManipulation, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulationHalfPrecision, ReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
@@ -164,6 +167,60 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+    }
+    TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
+      typedef enum  {
+        ABS,
+        NEGATE
+      } SignOpType;
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      using RT = float; // reference
+      float atol = 0.01f;
+      float rtol = 0.01f;
+
+      auto cmp = [&](RT ref, VT val) {
+        return std::abs(ref - RT(val)) <= atol + rtol * std::abs(val);
+      };
+
+#define APPLY_FN_AND_STORE(VEC_TYPE)                            \
+      [&](SignOpType op_type, VEC_TYPE& x_fp_vec, void *x_fp) { \
+        if (op_type == SignOpType::NEGATE) {                    \
+          x_fp_vec.neg().store(x_fp);                           \
+        } else {                                                \
+          x_fp_vec.abs().store(x_fp);                           \
+        }                                                       \
+      }
+
+      auto apply_fn_and_store_ref = APPLY_FN_AND_STORE(vfloat);
+      auto apply_fn_and_store_half = APPLY_FN_AND_STORE(vec);
+
+      auto half_precision_ut = [&](SignOpType op_type) {
+        constexpr auto N = vec::size();
+        CACHE_ALIGN RT x_fp[N];
+        CACHE_ALIGN VT x_hp[N];
+        auto seed = TestSeed();
+        ValueGen<RT> generator(RT(-1), RT(1), seed);
+        for (const auto i : c10::irange(N)) {
+            x_fp[i] = generator.get();
+            x_hp[i] = VT(x_fp[i]);
+        }
+        auto x_fp_vec = vfloat::loadu(x_fp);
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp);
+        x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp + vfloat::size());
+
+        auto x_hp_vec = vec::loadu(x_hp);
+        apply_fn_and_store_half(op_type, x_hp_vec, x_hp);
+
+        for (int64_t len = 0; len < N; len++) {
+            ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nabs/negate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+        }
+      };
+
+      half_precision_ut(SignOpType::ABS);
+      half_precision_ut(SignOpType::NEGATE);
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
