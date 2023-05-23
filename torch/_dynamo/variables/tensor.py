@@ -8,7 +8,7 @@ import sympy
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, utils, variables
 from ..bytecode_transformation import create_call_function, Instruction
@@ -133,7 +133,8 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not config.dynamic_shapes:
+        if not free_symbols(value):
+            # this is a fully static shape, and the keys on props here inform specialization.
             props["size"] = tuple(value.size())
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
