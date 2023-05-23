@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set
 
 import torch
 
@@ -8,13 +8,13 @@ import torch.utils._pytree as pytree
 
 from torch import Tensor
 
-from torch.distributed._tensor import DeviceMesh, Shard
+from torch.distributed._tensor import DeviceMesh, Replicate, Shard
 from torch.distributed._tensor.ops.view_ops import (
     DimSpec,
     InputDim,
     ops as view_op_rules,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
+from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 aten = torch.ops.aten
 
@@ -57,19 +57,6 @@ class BatchDimAnalyzer:
             aten.transpose.int: torch.transpose,
         }
 
-        # reduction ops that is used to detect whether there's a reduction over batch
-        # dimension operation, if there is, we mark the output as sharded instead of
-        # partial placement
-        self.reduction_ops = [
-            aten.binary_cross_entropy.default,
-            aten.binary_cross_entropy_with_logits.default,
-            aten.mean.default,
-            aten.mse_loss.default,
-            aten.nll_loss_forward.default,
-            aten.soft_margin_loss.default,
-            aten.sum.default,
-        ]
-
     def init_batch_dim_size(self, batch_dim_size: int) -> None:
         """
         initialize batch dim size base on the first input batch size
@@ -100,19 +87,7 @@ class BatchDimAnalyzer:
             # if batch dim already computed, simply return it
             return self.batch_dim_map[node]
 
-        shape = node.meta["val"].shape
-
-        if full_reduction:
-            # if it's a full reduction then we use operand batch dim as
-            # the node's batch dim
-            operand = node.all_input_nodes[0]
-            assert (
-                operand in self.batch_dim_map
-            ), "input have full reduction but not in dim map!"
-            operand_batch_dim = self.get_batch_dim(operand)
-            self.set_batch_dim(node, operand_batch_dim)
-            return operand_batch_dim
-        elif node.target in self.dim_rule_map:
+        if node.target in self.dim_rule_map:
             view_op_rule = view_op_rules[self.dim_rule_map[node.target]]  # type: ignore[index]
             args_val = pytree.tree_map_only(fx.Node, lambda n: n.meta["val"], node.args)
             kwargs_val = pytree.tree_map_only(
@@ -142,50 +117,74 @@ class BatchDimAnalyzer:
                     self.batch_dim_size = node.meta["val"].shape[output_dim]
                     return output_dim
 
-            # if there's no hints from the output_dim_rules, we just follow the
-            # operand batch dim
-            self.set_batch_dim(node, operand_batch_dim)
-            return operand_batch_dim
+        # if there's no hints from the output_dim_rules, we infer from output
+        # shape to see if there's batch dim, and shard correspondingly
+        node_val = node.meta["val"]
+        if isinstance(node_val, (list, tuple)):
+            shapes = [val.shape for val in node_val]
         else:
-            # loop through the dim size to find the batch dim
-            for i, dim_size in enumerate(shape):
-                if dim_size == self.batch_dim_size:
-                    self.set_batch_dim(node, i)
-                    return i
+            shapes = [node_val.shape]
 
-        # if we reach here, it means we failed to find the batch dim
-        raise RuntimeError(f"batch dim analysis failed on node: {node}!")
-
-    def compute_batch_dim_shard_spec(
-        self, node: fx.Node, mesh: DeviceMesh, input_full_reduction: bool = False
-    ) -> Tuple[DTensorSpec, bool]:
-        """
-        This function first compute the batch dimension for the current node,
-        then generate the sharding spec that shards on the batch dimension.
-        """
         # for reduction op that reduces over the sharded batch dim
         # we don't generate partial, but rather, we generate shard
         # This is because the intention of data parallel is to never
         # do full reduction across batch dimension, it would still
         # keep the reduction activation as sharded.
-        reduction_over_batch = False
-        shape = node.meta["val"].shape
-        if node.target in self.reduction_ops and len(shape) == 0:
-            operand = node.all_input_nodes[0]
-            if operand in self.batch_dim_map:
-                operand_batch_dim = self.get_batch_dim(operand)
-                if operand_batch_dim == self.batch_dim:
-                    reduction_over_batch = True
+        full_reduction = False
+        # loop through the dim size to find the output batch dim
+        for shape in shapes:
+            if len(shape) == 0:
+                full_reduction = True
+
+            for i, dim_size in enumerate(shape):
+                if dim_size == self.batch_dim_size:
+                    self.set_batch_dim(node, i)
+                    return i
+
+        operands = node.all_input_nodes
+        if not operands:
+            # if there's no operands, it must be factory ops and it's a tensor
+            # generated for computation and should be marked as replicated
+            self.set_batch_dim(node, -1)
+            # -1 means replicated
+            return -1
+        else:
+            # if there's operand we see the operand have batch dim, if operand
+            # have batch dim but output does not, it's either a full reduction,
+            # where we should stay sharded, or it's a reduction on batch dim only
+            # where we should produce partial
+            operand_batch_dim = -1
+            for operand in operands:
+                if operand in self.batch_dim_map:
+                    operand_batch_dim = self.get_batch_dim(operand)
+            # self.get_batch_dim(operands[0])
+            if operand_batch_dim < 0:
+                # if operand does not have batch dim, we also don't have batch dim
+                self.set_batch_dim(node, operand_batch_dim)
+                return operand_batch_dim
+            elif full_reduction:
+                self.set_batch_dim(node, operand_batch_dim)
+                return operand_batch_dim
             else:
-                raise RuntimeError(f"batch dim analysis failed on node: {node}!")
+                # if operand have batch dim but output does not, it should
+                # produce partial, we use -2 to indicate partial
+                self.set_batch_dim(node, -2)
+                return -2
 
-        full_reduction = reduction_over_batch or input_full_reduction
-        node_batch_dim = self.compute_batch_dim(node, full_reduction)
-        batch_dim_shard_spec = DTensorSpec(
-            mesh=mesh, placements=[Shard(node_batch_dim)]
-        )
+    def compute_act_spec(self, node: fx.Node, mesh: DeviceMesh) -> DTensorSpec:
+        """
+        This function first compute the batch dimension for the current node,
+        then generate the sharding spec that shards on the batch dimension.
+        """
+        node_batch_dim = self.compute_batch_dim(node)
+        if node_batch_dim == -1:
+            # indicate this activation is replicated
+            act_spec = DTensorSpec(mesh=mesh, placements=[Replicate()])
+        elif node_batch_dim == -2:
+            # indicate this activation is partial
+            act_spec = DTensorSpec(mesh=mesh, placements=[_Partial()])
+        else:
+            # indicate this activation is Shard
+            act_spec = DTensorSpec(mesh=mesh, placements=[Shard(node_batch_dim)])
 
-        if full_reduction:
-            batch_dim_shard_spec.from_local = True  # type: ignore[attr-defined]
-
-        return batch_dim_shard_spec, reduction_over_batch
+        return act_spec
