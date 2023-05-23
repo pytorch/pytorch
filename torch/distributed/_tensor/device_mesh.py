@@ -157,6 +157,11 @@ class DeviceMesh(object):
                         f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
                     )
                 torch.cuda.set_device(get_rank() % num_gpus_per_host)
+            # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
+            # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
+            # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
+            # this attribute, so we will implement this logic once we figure out the answer.
+            self._seed = torch.cuda.initial_seed()
         else:
             raise RuntimeError(
                 f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
@@ -192,11 +197,6 @@ class DeviceMesh(object):
                     f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
                     f"has mesh {other_mesh}!"
                 )
-        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-        # this attribute, so we will implement this logic once we figure out the answer.
-        self._seed = torch.cuda.initial_seed()
 
         # groups created by dimension, each dimension should have exact
         # one valid process group per rank
