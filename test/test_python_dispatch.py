@@ -15,7 +15,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
-from torch._custom_op import custom_op, CustomOp
+from torch._custom_op.impl import custom_op, CustomOp
 from torch.fx.experimental.proxy_tensor import make_fx
 import typing
 import collections
@@ -416,11 +416,11 @@ class TestCustomOp(TestCase):
 
     def tearDown(self):
         import torch._custom_op
-        keys = list(torch._custom_op.global_registry.keys())
+        keys = list(torch._custom_op.impl.global_registry.keys())
         for key in keys:
             if not key.startswith(f'{TestCustomOp.test_ns}::'):
                 continue
-            torch._custom_op.global_registry[key]._destroy()
+            torch._custom_op.impl.global_registry[key]._destroy()
 
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
@@ -582,7 +582,7 @@ class TestCustomOp(TestCase):
                 return list(itertools.product(examples, examples)) + []
             raise AssertionError(f"unsupported param type {typ}")
 
-        for typ in torch._custom_op.SUPPORTED_PARAM_TYPES:
+        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
             @custom_op(f'{TestCustomOp.test_ns}::foo')
             def foo(x: Tensor, y: typ) -> Tensor:
                 ...
@@ -716,7 +716,7 @@ class TestCustomOp(TestCase):
             op._destroy()
 
     def test_reserved_ns(self):
-        from torch._custom_op import RESERVED_NS
+        from torch._custom_op.impl import RESERVED_NS
 
         for ns in RESERVED_NS:
             with self.assertRaisesRegex(ValueError, 'is a reserved namespace'):
@@ -810,7 +810,7 @@ class TestCustomOp(TestCase):
         def foo_impl(x):
             return x.sin()
 
-        from torch._custom_op import SUPPORTED_DEVICE_TYPE_TO_KEY
+        from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
         for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
             # Smoke test: should not raise error
@@ -911,7 +911,7 @@ class TestCustomOp(TestCase):
 
         @foo.impl_abstract()
         def foo_meta(x):
-            ctx = torch._custom_op.get_ctx()
+            ctx = torch._custom_op.impl.get_ctx()
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
                 ctx.create_unbacked_symint(min=1)
             with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
