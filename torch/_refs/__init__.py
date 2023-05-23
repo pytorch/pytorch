@@ -186,7 +186,7 @@ __all__ = [
     #
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
-    "item",  # TODO: add OpInfo
+    "item",
     "to",
     #
     # Reduction ops
@@ -295,7 +295,7 @@ __all__ = [
     # Test-related functions
     #
     "allclose",
-    "equal",  # TODO: add OpInfo
+    "equal",
     #
     # Statistical operations
     #
@@ -5021,7 +5021,6 @@ def allclose(
     )
 
 
-# TODO: add OpInfo for torch.equal and refs.equal
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
     utils.check_same_dtype(a, b)

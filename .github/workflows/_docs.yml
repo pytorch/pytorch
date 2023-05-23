@@ -157,7 +157,7 @@ jobs:
           s3-bucket: doc-previews
           if-no-files-found: error
           path: pytorch.github.io/docs/main/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
@@ -167,7 +167,7 @@ jobs:
           if-no-files-found: error
           s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
 
       - name: Upload functorch Docs Preview
         uses: seemethere/upload-artifact-s3@v5
@@ -177,42 +177,4 @@ jobs:
           s3-bucket: doc-previews
           if-no-files-found: error
           path: functorch_ghpages/nightly/
-          s3-prefix: pytorch/${{ github.event.pull_request.number }}/functorchdocs
-
-      # The three upload steps below duplicate the upload from above, but to a different path. This is needed since we
-      # are in the process of changing the path, but want to keep the disruption to a minimum.
-      # See https://github.com/pytorch/test-infra/issues/3894
-      # After a grace period the s3-prefix should start with pytorch/pytorch/
-      - name: Upload Python Docs Preview (forward compatibility)
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: pytorch.github.io/docs/main/
-          s3-prefix: pytorch/pytorch/pytorch/${{ github.event.pull_request.number }}
-
-      - name: Upload C++ Docs Preview (forward compatibility)
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          s3-bucket: doc-previews
-          path: cppdocs/
-          s3-prefix: pytorch/pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
-
-      - name: Upload functorch Docs Preview (forward compatibility)
-        uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'functorch' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: functorch_ghpages/nightly/
-          s3-prefix: pytorch/pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
-
-      - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always()
+          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
