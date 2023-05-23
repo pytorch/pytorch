@@ -104,6 +104,7 @@ def rearrange(
 
     first_class_dims: Tuple[Dim, ...] = (dims(total_n_dims),) if total_n_dims == 1 else dims(total_n_dims)
     identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
+    anon_axes: List[AnonymousAxis] = []
 
     # map the left-hand side identifiers to first class dims
     dims_i = 0
@@ -118,6 +119,7 @@ def rearrange(
                 # unitary anonymous axis
                 anon_axis = AnonymousAxis("1")
                 identifier_dim_map[anon_axis] = (first_class_dims[dims_i],)
+                anon_axes.append(anon_axis)
                 dimension.append(anon_axis)
                 dims_i += 1
         elif dimension == _ellipsis:
@@ -146,5 +148,13 @@ def rearrange(
 
     left_dims = composition_to_dims(left.composition)
     right_dims = composition_to_dims(right.composition)
+
     # TODO: add type stubs for Tensor.order
-    return tensor[left_dims].order(*right_dims)  # type: ignore[attr-defined]
+    tensor = tensor[left_dims].order(*right_dims)  # type: ignore[attr-defined]
+    if anon_axes:
+        # sum over all unitary anonymous axes to convert the functorch.dim.Tensor to its corresponding torch.Tensor
+        return tensor.sum(  # type: ignore[union-attr]
+            tuple(identifier_dim_map[axis][0] for axis in anon_axes), keepdim=False  # type: ignore[misc]
+        )
+    else:
+        return tensor  # type: ignore[return-value]
