@@ -290,6 +290,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_out_multi_device(self):
+        with FakeTensorMode():
+            x = torch.rand([4])
+            y = torch.rand([4], device="cuda")
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                torch.sin(x, out=y)
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                x.add_(y)
+
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):
         with FakeTensorMode():
             x = torch.empty(1, device="cuda")

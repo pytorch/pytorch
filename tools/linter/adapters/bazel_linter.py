@@ -60,14 +60,11 @@ def get_disallowed_checksums(
     """
     Return the set of disallowed checksums from all http_archive rules
     """
-    try:
-        # Use bazel to get the list of external dependencies in XML format
-        proc = subprocess.run(
-            [binary, "query", "kind(http_archive, //external:*)", "--output=xml"],
-            capture_output=True,
-        )
-    except OSError:
-        raise
+    # Use bazel to get the list of external dependencies in XML format
+    proc = subprocess.run(
+        [binary, "query", "kind(http_archive, //external:*)", "--output=xml"],
+        capture_output=True,
+    )
 
     stdout = str(proc.stdout, "utf-8").strip()
     root = ET.fromstring(stdout)
