@@ -29,7 +29,6 @@ from ..virtualized import V
 from .mm_common import filtered_configs
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)  # TODO
 
 
 aten = torch.ops.aten
@@ -225,10 +224,10 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),
             dilation,
             transposed,
-            output_padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())

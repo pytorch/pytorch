@@ -23,7 +23,7 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -46,12 +46,12 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_dtype_size,
+    get_sympy_Expr_dtype,
     sympy_product,
 )
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG) # TODO
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
@@ -76,10 +76,14 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+        constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
     if isinstance(constant_buffer, sympy.core.numbers.Integer):
         return torch.int64
+
+    if isinstance(constant_buffer, sympy.Expr):
+        return get_sympy_Expr_dtype(constant_buffer)
+
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -99,7 +103,6 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
-            print("View To reshape") # TODO
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -157,7 +160,12 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
 
         if self.decide_layout_opt():
-            print("add back the constraint for convolution") # TODO
+            # If we disabled the layout optimization here, we should add back
+            # the eager layout constaint for convolution to maintain the behavior
+            # as disabling layout optimization.
+            # This is important to pass the accuracy check for
+            #   phlippe_resnet and functorch_maml_omniglot
+            log.debug("add back the constraint for convolution")
             from .lowering import add_layout_constraint, constrain_to_fx_strides
             add_layout_constraint(torch.ops.aten.convolution, constrain_to_fx_strides)
 
@@ -198,8 +206,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
-        self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
@@ -406,43 +412,12 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    def random_seed_buffer(self, device: torch.device):
-        """
-        Return a device-unique 1-element tensor storing our RNG seed.
-        This will get initialized at the start of each graph in
-        `wrapper.py`.
-
-        Note this is only used by cuda backends.  The CPU backend handles
-        RNG seeds as a sizevar.
-        """
-        name = f"seed_{device.type}_{device.index}"
-        if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
-            self.randomness_seeds.append(name)
-
-        return ir.RandSeedBuffer(
-            name=name,
-            layout=ir.FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[],
-                stride=[],
-            ),
-        )
-
-    def increment_randomness_offset(self, numel):
-        """
-        A global counter of how many random numbers we have handed out so far.
-        """
-        offset = self.randomness_offset
-        self.randomness_offset = offset + numel
-        return offset
-
     @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
+        metrics.disable_cpp_wrapper += 1
         self.cpp_wrapper = False
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
@@ -674,13 +649,6 @@ class GraphLowering(torch.fx.Interpreter):
             elif n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride:
-                # inductor graphs can occasionally return sizes/strides,
-                # e.g. if we need to save symints for the backward graph.
-                if isinstance(n.meta["val"], torch.SymInt):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             elif is_magic_method(n.target):
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
@@ -812,7 +780,9 @@ class GraphLowering(torch.fx.Interpreter):
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
+            elif isinstance(
+                value, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+            ):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
@@ -911,8 +881,7 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        # TODO: will revert this line before merge
-        if config.benchmark_kernel or True:
+        if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")

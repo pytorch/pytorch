@@ -107,10 +107,13 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
+# Enable constant and index_expr folding
+constant_and_index_propagation = True
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 
 def is_fbcode():
@@ -225,6 +228,9 @@ class cpp:
     # force usage as specified, without testing.
     vec_isa_ok = None
 
+    # similar to config.triton.descriptive_names
+    descriptive_names = "original_aten"
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -232,9 +238,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    # cudagraph_trees = not is_fbcode()
-    # TODO: I'll revert the change here
-    cudagraph_trees = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_TREES", "1") == "1"
+    cudagraph_trees = not is_fbcode()
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
