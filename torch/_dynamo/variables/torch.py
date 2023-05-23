@@ -207,8 +207,11 @@ class TorchVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.func.vmap:
-            self.value._vmap_info = {'args': args, 'kwargs': kwargs}
-            return TorchHigherOrderOperator(self.value)
+            return TorchHigherOrderOperatorVariable(
+                self.value,
+                source=self.source,
+                value_metadata={"args": args, "kwargs": kwargs},
+            )
         elif self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
@@ -811,10 +814,18 @@ def speculate_subgraph(
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(self, value, source: Optional[Source] = None, **kwargs):
+    def __init__(
+        self,
+        value,
+        source: Optional[Source] = None,
+        *,
+        value_metadata: Optional[Dict] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
+        self.value_metadata = value_metadata
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1213,12 +1224,13 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         elif self.value is torch.func.vmap:
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
-            vmap_args = self.value._vmap_info['args']
-            vmap_kwargs = self.value._vmap_info['kwargs']
+            vmap_args = self.value_metadata["args"]
+            vmap_kwargs = self.value_metadata["kwargs"]
+            # first vmap arg is function
             fn = vmap_args[0]
-            # Hack!
-            self.source = fn.source
+
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+                tx,
                 fn,
                 args,
                 graph_checkpoint,
@@ -1239,12 +1251,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = r
             # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
             vmap_proxy = tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    args=tuple(vmap_proxy_args),
-                    kwargs=vmap_proxy_kwargs,
-                    name="vmap_proxy",
-                )
+                "call_function",
+                self.value,
+                args=tuple(vmap_proxy_args),
+                kwargs=vmap_proxy_kwargs,
+                name="vmap_proxy",
+            )
 
             batched_fn_args = tuple(arg.as_proxy() for arg in args)
             batched_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}

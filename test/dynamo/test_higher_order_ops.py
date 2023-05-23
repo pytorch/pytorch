@@ -501,6 +501,16 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3, expected_opcount=2)
 
+    def test_vmap(self):
+        def f(x):
+            return torch.func.vmap(torch.func.vmap(torch.sin, 0), 1)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
