@@ -140,16 +140,6 @@ namespace {
     }
   }
 
-  Tensor& adaptive_avg_pool2d_backward_out_cpu(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input)
-  {
-    adaptive_avg_pool2d_backward_out_cpu_template(
-      grad_input, grad_output, input);
-    return grad_input;
-  }
-
   Tensor adaptive_avg_pool2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input)

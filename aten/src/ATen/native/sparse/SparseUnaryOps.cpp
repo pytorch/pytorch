@@ -7,6 +7,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/ops/asin.h>
