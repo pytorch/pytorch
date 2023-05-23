@@ -168,7 +168,8 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             self.assertIn(str(dist.get_rank()), msg_dict["local_rank"])
 
             self.assertIn("time_spent", msg_dict.keys())
-            self.assertLess(5, float(msg_dict["time_spent"]))
+            time_ns = re.findall(r'\d+', msg_dict["time_spent"])[0]
+            self.assertLess(5, float(time_ns))
 
 
 if __name__ == "__main__":
