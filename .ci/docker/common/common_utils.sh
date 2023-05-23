@@ -34,3 +34,11 @@ pip_install() {
 get_pinned_commit() {
   cat "${1}".txt
 }
+
+get_conda_version() {
+  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
+}
+
+conda_reinstall() {
+  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
+}

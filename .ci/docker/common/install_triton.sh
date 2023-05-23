@@ -4,14 +4,6 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-get_conda_version() {
-  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
-}
-
-conda_reinstall() {
-  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
-}
-
 if [ -n "${ROCM_VERSION}" ]; then
   TRITON_REPO="https://github.com/ROCmSoftwarePlatform/triton"
   TRITON_TEXT_FILE="triton-rocm"
