@@ -1471,7 +1471,7 @@ static void nnc_prepacked_conv2d_clamp_run(
 
 #endif // USE_XNNPACK
 
-static void nnc_aten_embedding(
+void nnc_aten_embedding(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,

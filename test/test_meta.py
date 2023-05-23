@@ -613,7 +613,6 @@ meta_function_expected_failures = {
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
-    torch.multinomial : {f64, bf16, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
@@ -716,7 +715,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
-    torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
@@ -856,8 +854,6 @@ meta_dispatch_expected_failures = {
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.multi_margin_loss.default : {f32, f64},
     aten.multilabel_margin_loss_forward.default : {f32, f64},
-    aten.multinomial.default : {bf16, f32, f64},
-    aten.multinomial.out : {bf16, f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.segment_reduce.default : {bf16, f32, f16, f64},
@@ -924,8 +920,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.median.dim: {f16},  # aten::median.dim_values
     aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
-    aten.multinomial.default: {f16},  # aten::multinomial
-    aten.multinomial.out: {f16},  # aten::multinomial.out
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out

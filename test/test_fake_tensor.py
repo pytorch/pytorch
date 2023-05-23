@@ -39,6 +39,16 @@ class FakeTensorTest(TestCase):
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
 
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_initialized(self):
+        # doesnt error
+        with FakeTensorMode():
+            p = torch.randn(4, 2, requires_grad=True, device='cuda')
+            x = torch.randn(8, 4, device='cuda')
+            y = torch.mm(x, p).square().sum()
+            y.backward()
+
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
         y = torch.empty(4, 2, 2, device="cpu")
@@ -288,6 +298,19 @@ class FakeTensorTest(TestCase):
             out = torch.nn.functional.conv2d(inputs, filters, padding=1)
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_out_multi_device(self):
+        with FakeTensorMode():
+            x = torch.rand([4])
+            y = torch.rand([4], device="cuda")
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                torch.sin(x, out=y)
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                x.add_(y)
+
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):

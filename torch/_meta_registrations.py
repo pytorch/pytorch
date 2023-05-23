@@ -2175,7 +2175,7 @@ def meta_relu_(self):
     return self
 
 
-@register_meta(aten.index_put.default)
+@register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
 
@@ -3013,6 +3013,20 @@ def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
 def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
+
+
+@register_meta([aten.multinomial.default, aten.multinomial.out])
+@out_wrapper()
+def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
+    check(
+        0 < input.dim() <= 2,
+        lambda: f"The probabilty distributions dimensions must be 1 or 2, but got {input.dim()}",
+    )
+    if input.dim() == 1:
+        return torch.empty(num_samples, dtype=torch.long, device=input.device)
+    return torch.empty(
+        input.size(0), num_samples, dtype=torch.long, device=input.device
+    )
 
 
 def multiply_integers(vs):
