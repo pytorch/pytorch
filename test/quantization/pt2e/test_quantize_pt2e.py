@@ -25,6 +25,7 @@ from torch.ao.quantization._quantize_pt2e import (
     prepare_pt2e_quantizer,
     prepare_qat_pt2e_quantizer,
 )
+from torch.ao.quantization._pt2e.quantizer import QuantizationAnnotation
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
 
 from torch.ao.quantization.qconfig import (
@@ -43,6 +44,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
 )
+from torch.fx import Node
 from torch.testing._internal.common_quantized import override_quantized_engine
 
 @skipIfNoQNNPACK
@@ -58,33 +60,26 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                _DEFAULT_TARGET_DTYPE_INFO = {
-                    "input_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                    "output_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                }
-                for node in model.graph.nodes:
-                    node.meta["target_dtype_info"] = copy.deepcopy(
-                        _DEFAULT_TARGET_DTYPE_INFO
-                    )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
                         and node.target == torch.ops.aten.convolution.default
                     ):
-                        node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_obs_or_fq_ctr": observer.default_weight_observer,
-                            "bias_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                                dtype=torch.float
-                            ),
-                            "output_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_index": 1,
-                            "bias_index": 2,
-                        }
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                                weight: observer.default_weight_observer,
+                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                            },
+                            output_qspec=observer.default_observer,
+                            _annotated=True,
+                        )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -134,32 +129,26 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                _DEFAULT_TARGET_DTYPE_INFO = {
-                    "input_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                    "output_act_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                        dtype=torch.float
-                    ),
-                }
-                for node in model.graph.nodes:
-                    node.meta["target_dtype_info"] = copy.deepcopy(
-                        _DEFAULT_TARGET_DTYPE_INFO
-                    )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
                         and node.target == torch.ops.aten.convolution.default
                     ):
-                        node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "weight_obs_or_fq_ctr": observer.default_weight_observer,
-                            "bias_obs_or_fq_ctr": observer.PlaceholderObserver.with_args(
-                                dtype=torch.float
-                            ),
-                            "weight_index": 1,
-                            "bias_index": 2,
-                        }
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                                weight: observer.default_weight_observer,
+                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                            },
+                            output_qspec=observer.default_observer,
+                            _annotated=True,
+                        )
                     if (
                         node.op == "call_function"
                         and node.target == operator.getitem
@@ -167,15 +156,19 @@ class TestQuantizePT2E(QuantizationTestCase):
                     ):
                         getitem_node = node
                         maxpool_node = getitem_node.args[0]
-                        maxpool_node.meta["target_dtype_info"] = {
-                            "input_act_obs_or_fq_ctr": observer.default_observer,
-                            "_annotated": True,
-                        }
-                        getitem_node.meta["target_dtype_info"] = {
-                            "output_act_obs_or_fq_ctr": observer.default_observer,
-                            "input_output_share_observers": True,
-                            "_annotated": True,
-                        }
+                        input_act = maxpool_node.args[0]
+                        assert isinstance(input_act, Node)
+                        maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: observer.default_observer,
+                            },
+                            _annotated=True,
+                        )
+                        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            output_qspec=observer.default_observer,
+                            _input_output_share_observers=True,
+                            _annotated=True,
+                        )
 
             def validate(self, model: torch.fx.GraphModule) -> None:
                 pass
@@ -396,11 +389,11 @@ class TestQuantizePT2E(QuantizationTestCase):
         """
         This test fails because linear decompositon changes due to the presence of
         permute node. In the below linear 1 is decomposed as
-        %t_default : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%_param_constant2,), kwargs = {})
-        %clone_default : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%permute_default,), kwargs = {memory_format: torch.contiguous_format})  # noqa: B950
-        %_unsafe_view_default : [num_users=1] = call_function[target=torch.ops.aten._unsafe_view.default](args = (%clone_default, [8, 16]), kwargs = {})  # noqa: B950
-        %mm_default : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%_unsafe_view_default, %t_default), kwargs = {})  # noqa: B950
-        %view_default : [num_users=1] = call_function[target=torch.ops.aten.view.default](args = (%mm_default, [2, 2, 2, 8]), kwargs = {})  # noqa: B950
+        %t_default : [#users=1] = call_function[target=torch.ops.aten.t.default](args = (%_param_constant2,), kwargs = {})
+        %clone_default : [#users=1] = call_function[target=torch.ops.aten.clone.default](args = (%permute_default,), kwargs = {memory_format: torch.contiguous_format})  # noqa: B950
+        %_unsafe_view_default : [#users=1] = call_function[target=torch.ops.aten._unsafe_view.default](args = (%clone_default, [8, 16]), kwargs = {})  # noqa: B950
+        %mm_default : [#users=1] = call_function[target=torch.ops.aten.mm.default](args = (%_unsafe_view_default, %t_default), kwargs = {})  # noqa: B950
+        %view_default : [#users=1] = call_function[target=torch.ops.aten.view.default](args = (%mm_default, [2, 2, 2, 8]), kwargs = {})  # noqa: B950
 
         Note the presence of cline and unsafe_view. This is due to permute
         """
@@ -559,6 +552,51 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=False)
         self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
 
+    def test_prepare_qat_conv_bn_fusion_no_conv_bias(self):
+        class M1(torch.nn.Module):
+            """
+            Single conv + BN with no conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                return x
+
+        class M2(torch.nn.Module):
+            """
+            Mixed conv + BN with and without conv bias.
+            """
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
+                self.bn1 = torch.nn.BatchNorm2d(3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3, bias=True)
+                self.bn2 = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                return x
+
+        example_inputs = (torch.randn(3, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=False, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_graph(
+            M1(), example_inputs, is_per_channel=True, has_relu=False, has_bias=False
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M1(), example_inputs, is_per_channel=True)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=False)
+        self._verify_symmetric_qnnpack_qat_numerics(M2(), example_inputs, is_per_channel=True)
+
     def test_prepare_qat_conv_bn_relu_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -577,12 +615,77 @@ class TestQuantizePT2E(QuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=False, has_relu=True)
         self._verify_symmetric_qnnpack_qat_graph(M(), example_inputs, is_per_channel=True, has_relu=True)
 
+    def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
+        """
+        Test this special case seen in resnet18:
+
+          maxpool -> maxpool_getitem -> conv -> bn -> conv_bn_getitem
+
+        We want the metadata to be copied from the `conv_bn_getitem` node, not `maxpool_getitem`.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=1)
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                x = self.maxpool(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        def _get_getitem_nodes(m: torch.fx.GraphModule):
+            """
+            Return a 2-tuple of (maxpool_getitem_node, conv_bn_getitem_node) from the graph.
+            """
+            maxpool_getitem_node, conv_bn_getitem_node = None, None
+            for node in m.graph.nodes:
+                if node.target != operator.getitem:
+                    continue
+                if node.args[0].target == torch.ops.aten.max_pool2d_with_indices.default:
+                    maxpool_getitem_node = node
+                elif node.args[0].target == torch.ops.aten._native_batch_norm_legit.default:
+                    conv_bn_getitem_node = node
+                else:
+                    raise ValueError("Unexpected getitem node ", node, node.args)
+            assert maxpool_getitem_node is not None, "did not find maxpool getitem node, bad test setup"
+            assert conv_bn_getitem_node is not None, "did not find conv bn getitem node, bad test setup"
+            return (maxpool_getitem_node, conv_bn_getitem_node)
+
+        # Program capture
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m, guards = torchdynamo.export(
+            M(),
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m.graph.eliminate_dead_code()
+        m.recompile()
+        (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Prepare QAT
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        quantizer.set_global(qq.get_symmetric_quantization_config(is_per_channel=False, is_qat=True))
+        m = prepare_qat_pt2e_quantizer(m, quantizer)
+        (maxpool_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
+
+        # Verify that the metadata was copied from `conv_bn_getitem`, not `maxpool_getitem`
+        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta["quantization_annotation"]
+        maxpool_getitem_meta = maxpool_getitem_node.meta["quantization_annotation"]
+        conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
+        self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
+        self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
+
     def _verify_symmetric_qnnpack_qat_graph(
         self,
         m: torch.fx.GraphModule,
         example_inputs: Tuple[Any, ...],
         is_per_channel: bool,
         has_relu: bool,
+        has_bias: bool = True,
         expected_conv_constant_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
@@ -625,13 +728,16 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, torch.ops.aten._native_batch_norm_legit.default)
 
-        # Verify: conv / scale_factor.reshape + bias.reshape
-        add_bias_node = bn_node.args[0]
-        (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+        # Verify: conv / scale_factor.reshape [+ bias.reshape]
+        if has_bias:
+            add_bias_node = bn_node.args[0]
+            (div_scale_factor_node, bias_reshape_node) = add_bias_node.args
+            self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
+            self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
+        else:
+            div_scale_factor_node = bn_node.args[0]
         (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
-        self.assertEqual(add_bias_node.target, torch.ops.aten.add.Tensor)
         self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
-        self.assertEqual(bias_reshape_node.target, torch.ops.aten.view.default)
         self.assertEqual(conv_node.target, torch.ops.aten.convolution.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
@@ -671,9 +777,11 @@ class TestQuantizePT2E(QuantizationTestCase):
         zero_bias_node = conv_node.args[2]
         mul_weight_scale_factor_node = conv_weight_fq_node.args[0]
         (conv_weight_fq_node, scale_factor_reshape_node) = mul_weight_scale_factor_node.args
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        if has_bias:
+            self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
+        else:
+            self.assertTrue(zero_bias_node is None)
         self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
-        self.assertEqual(zero_bias_node.target, torch.ops.aten.zeros_like.default)
         self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.view.default)
 
         # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)

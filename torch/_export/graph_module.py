@@ -1,13 +1,19 @@
 import copy
 import dataclasses
 import pickle
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import warnings
+import sympy
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections import defaultdict
+
+from sympy.logic.boolalg import Boolean as SympyBoolean
 
 import torch
 import torch.fx as fx
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+
 from . import error
 
 ExportGraphModule = fx.GraphModule
@@ -28,6 +34,9 @@ LeafValue = Union[
 ]
 
 
+ConstraintExpr = Union[sympy.Expr, SympyBoolean]
+
+
 @dataclasses.dataclass
 class ExportMetadata:
     """The fields in this class are what used to be extra data from ExportGraphModule."""
@@ -38,9 +47,9 @@ class ExportMetadata:
     # TODO(gmagogsfm): Expose constraints in Metadata
     # Mapping from output name to mutated buffer names.
     mutation: List[Tuple[str, List[str]]] = dataclasses.field(default_factory=list)
-    input_shape_constraints: List[Any] = dataclasses.field(default_factory=list)
+    input_shape_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
     inline_constraints: Dict[str, Any] = dataclasses.field(default_factory=dict)
-    example_inputs: Any = None
+    input_name_to_example_inputs: Dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 EXPORT_METADATA = "_export_metadata_key"
@@ -226,20 +235,45 @@ def make_export_graph_module(
     in_spec: Optional[pytree.TreeSpec] = None,
     out_spec: Optional[pytree.TreeSpec] = None,
     mutation: Optional[List[Tuple[str, List[str]]]] = None,
-    input_shape_constraints: Optional[List] = None,
-    inline_constraints: Optional[Dict] = None,
     example_inputs: Any = None,
     class_name: str = "ExportGraphModule",
 ) -> fx.GraphModule:
+
+    input_shape_constraints = []
+    inline_constraints = {}
+    if isinstance(root, torch.fx.GraphModule):
+        input_shape_constraints = root.meta.get("input_shape_constraints", [])
+        inline_constraints = root.meta.get("inline_constraints", {})
+
     gm = fx.GraphModule(root, graph, class_name)
+
+    input_tracker = 0
+
+    # group by input id
+    input_shape_constraints_by_tensor_id = defaultdict(list)
+    for constraint in input_shape_constraints:
+        input_shape_constraints_by_tensor_id[constraint["t_id"]].append((constraint["dim"], constraint["min"], constraint["max"]))
+
+    input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
+    input_name_to_example_inputs: Dict[str, Any] = {}
+    if example_inputs is not None:
+        input_tracker = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                example_input = example_inputs[input_tracker]
+                if id(example_input) in input_shape_constraints_by_tensor_id:
+                    input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
+                input_name_to_example_inputs[node.name] = example_input
+                input_tracker += 1
+
     meta = ExportMetadata(
         in_spec=in_spec,
         out_spec=out_spec,
         update_spec=0,
         mutation=mutation if mutation else [],
-        input_shape_constraints=input_shape_constraints if input_shape_constraints is not None else [],
-        inline_constraints=inline_constraints if inline_constraints is not None else {},
-        example_inputs=example_inputs,
+        input_shape_constraints=input_shape_constraints_by_src_name,
+        inline_constraints=inline_constraints,
+        input_name_to_example_inputs=input_name_to_example_inputs,
     )
     attach_export_graph_metadata(gm, meta)
     return gm
