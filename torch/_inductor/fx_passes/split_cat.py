@@ -85,7 +85,7 @@ def normalize_split_base(match: Match, _get_split_args: Callable):
     pass_dict=normalize_split_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
-def normalize_split_default(match: Match):
+def normalize_split_default(match: Match, *args, **kwargs):
     return normalize_split_base(match, _get_split_args_default)
 
 
