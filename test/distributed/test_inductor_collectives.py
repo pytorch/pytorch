@@ -17,6 +17,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
 
@@ -406,4 +407,5 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

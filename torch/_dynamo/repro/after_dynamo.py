@@ -1,10 +1,13 @@
+import argparse
 import copy
 import functools
 import logging
 import os
 import shutil
+import sys
 import textwrap
 from importlib import import_module
+from typing import Union
 
 import torch
 import torch.fx as fx
@@ -17,10 +20,16 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
+    InputReader,
+    InputWriter,
     minifier_dir,
     NNModuleToString,
+    NopInputReader,
     run_fwd_maybe_bwd,
+    same_two_models,
 )
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
+from torch.hub import tqdm
 
 from .. import config
 from ..backends.registry import lookup_backend, register_debug_backend
@@ -121,35 +130,32 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
 
 
 def generate_dynamo_fx_repro_string(
-    model_str, args, compiler_name, check_accuracy=False
+    gm,
+    args,
+    compiler_name,
+    check_accuracy=False,
+    *,
+    stable_output=False,
+    save_dir=None,
+    command="run",
 ):
     """
     Generate a repro string for backend-agnostic minified version.
     """
 
-    run_code = textwrap.dedent(
-        f"""
-with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
-    ref = run_fwd_maybe_bwd(mod, args)
-    res = run_fwd_maybe_bwd(opt_mod, args)
-    """
-    )
+    model_str = NNModuleToString.convert(gm)
 
-    if config.repro_level == 4 or check_accuracy:
-        run_code = textwrap.dedent(
-            f"""
-mod.eval()
-opt_mod.eval()
-
-class AccuracyError(Exception):
-    pass
-
-with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
-    assert same_two_models(mod, mod, args), "Eager itself failed"
-    if not same_two_models(mod, opt_mod, args):
-        raise AccuracyError("Dynamo failed")
-    """
-        )
+    # TODO: Figure out why torch.compile'd hash isn't work on this codepath
+    writer = InputWriter(save_dir, stable_hash=True)
+    for placeholder, arg in zip(fx_placeholder_targets(gm), args):
+        if isinstance(arg, (int, torch.SymInt)):
+            writer.symint(placeholder, arg)
+        elif isinstance(arg, torch.Tensor):
+            # TODO: improve these names with FQN
+            writer.tensor(placeholder, arg)
+        else:
+            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+    load_args = "\n".join(writer.lines())
 
     return textwrap.dedent(
         f"""
@@ -160,22 +166,21 @@ import torch.fx as fx
 import torch._dynamo
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.debug_utils import run_fwd_maybe_bwd
-from torch._dynamo.debug_utils import same_two_models
 
-{generate_config_string()}
+{generate_config_string(stable_output=stable_output)}
 
 {extra_imports}
 
-args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
-args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
-
 {model_str}
-
 mod = Repro()
-opt_mod = torch._dynamo.optimize("{compiler_name}")(mod)
 
-{run_code}
-        """
+{load_args}
+
+if __name__ == '__main__':
+    from torch._dynamo.repro.after_dynamo import run_repro
+    run_repro(mod, load_args, accuracy={check_accuracy!r}, command={command!r},
+        save_dir={save_dir!r}, autocast={torch.is_autocast_enabled()!r}, backend={compiler_name!r})
+"""
     )
 
 
@@ -192,11 +197,10 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
 
-    model_str = NNModuleToString.convert(gm)
     with open(file_name, "w") as fd:
         fd.write(
             generate_dynamo_fx_repro_string(
-                model_str, args, compiler_name, check_accuracy
+                gm, args, compiler_name, check_accuracy, save_dir=subdir
             )
         )
     latest_repro = os.path.join(curdir, "repro.py")
@@ -227,64 +231,20 @@ def dump_backend_state(gm, args, compiler_name, check_accuracy=False):
 
 
 def dump_to_minify_after_dynamo(gm, args, compiler_name):
-    model_str = NNModuleToString.convert(gm)
-
-    minifier_backend = "dynamo_minifier_backend"
-    if config.repro_level == 4:
-        minifier_backend = "dynamo_accuracy_minifier_backend"
-
-    custom_compiler_error = (
-        textwrap.dedent(
-            """\
-        raise RuntimeError(
-            'Compiler name is None - this likely means that a custom compiler '
-            'was called by torchdynamo. Please remove this error, import your '
-            'custom compiler function, and replace the compiler_name="None" '
-            'line below to compiler_name=<my_imported_custom_function>'
+    # TODO: factor this out
+    subdir = os.path.join(minifier_dir(), "checkpoints")
+    if not os.path.exists(subdir):
+        os.makedirs(subdir, exist_ok=True)
+    helper_for_dump_minify(
+        generate_dynamo_fx_repro_string(
+            gm,
+            args,
+            compiler_name,
+            check_accuracy=config.repro_level == 4,
+            save_dir=subdir,
+            command="minify",
         )
-        """
-        )
-        if compiler_name is None
-        else ""
     )
-
-    contents = textwrap.dedent(
-        f"""
-import os
-from math import inf
-import torch
-from torch import tensor, device
-import torch.fx as fx
-import functools
-import torch._dynamo
-from torch._dynamo.debug_utils import run_fwd_maybe_bwd
-from torch._dynamo.backends.registry import lookup_backend
-from torch._dynamo.testing import rand_strided
-
-{generate_config_string()}
-
-{extra_imports}
-
-args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
-args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
-
-{model_str}
-mod = Repro()
-
-# Setup debug minifier compiler
-compiler_fn = lookup_backend("{minifier_backend}")
-{custom_compiler_error}
-dynamo_minifier_backend = functools.partial(
-    compiler_fn,
-    compiler_name="{compiler_name}",
-)
-opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
-
-with torch.cuda.amp.autocast(enabled={torch.is_autocast_enabled()}):
-    opt_mod(*args)
-        """
-    )
-    helper_for_dump_minify(contents)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -297,6 +257,13 @@ def dynamo_minifier_backend(gm, example_inputs, compiler_name):
     from functorch.compile import minifier
 
     compiler_fn = lookup_backend(compiler_name)
+
+    # TODO: It's inconsistent to pass SymInt inputs but REAL tensors.
+    # We should pass ints and look at the GraphModule placeholders
+    # to resolve them to SymInt (if necessary)
+    example_inputs = [
+        i.node.hint if isinstance(i, torch.SymInt) else i for i in example_inputs
+    ]
 
     try:
         compiled_gm = compiler_fn(gm, example_inputs)
@@ -384,3 +351,201 @@ def backend_fails(gm, example_inputs, compiler_fn, orig_failure):
         if SequenceMatcher(None, orig_failure, new_failure).ratio() > 0.5:
             return True
         return False
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                           REPRO MAIN
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+def repro_common(options, mod, load_args):
+    if not hasattr(load_args, "_version"):
+        log.warning(
+            "load_args does not have a _version attribute, please file a bug to PyTorch "
+            "and describe how you generate this repro script"
+        )
+    else:
+        if load_args._version > 0:
+            log.warning(
+                "load_args is version %s, but this version of PyTorch only supports "
+                "version 0.  We will try to run it anyway but there may be an incompatibility; "
+                "if so, try upgrading your version of PyTorch.",
+                load_args._version,
+            )
+
+    nop_reader = NopInputReader()
+    load_args(nop_reader)
+
+    with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
+        input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
+        load_args(input_reader)
+        args = input_reader.args
+
+    return args
+
+
+def repro_minify(options, mod, load_args):
+    args = repro_common(options, mod, load_args)
+
+    # Setup debug minifier compiler
+    if not options.accuracy:
+        compiler_fn = lookup_backend("dynamo_minifier_backend")
+    else:
+        compiler_fn = lookup_backend("dynamo_accuracy_minifier_backend")
+
+    if options.backend is None:
+        raise RuntimeError(
+            "Compiler name is None - this likely means that a custom compiler "
+            "was called by torchdynamo. Please remove this error, import your "
+            "custom compiler function, and replace the backend=None "
+            "line in run_repro to backend=<my_imported_custom_function>"
+        )
+
+    dynamo_minifier_backend = functools.partial(
+        compiler_fn,
+        compiler_name=options.backend,
+    )
+    opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
+
+    with torch.cuda.amp.autocast(enabled=options.autocast):
+        opt_mod(*args)
+
+
+def repro_run(options, mod, load_args):
+    args = repro_common(options, mod, load_args)
+
+    opt_mod = torch._dynamo.optimize(options.backend)(mod)
+
+    if options.accuracy != "":
+        mod.eval()
+        opt_mod.eval()
+
+        with torch.cuda.amp.autocast(enabled=options.autocast):
+            assert same_two_models(mod, mod, args), "Eager itself failed"
+            if not same_two_models(mod, opt_mod, args):
+                raise AccuracyError("Dynamo failed")
+    else:
+        with torch.cuda.amp.autocast(enabled=options.autocast):
+            ref = run_fwd_maybe_bwd(mod, args)
+            res = run_fwd_maybe_bwd(opt_mod, args)
+
+
+def run_repro(
+    mod,
+    load_args,
+    *,
+    command="run",
+    accuracy: Union[bool, str] = "",
+    save_dir=None,
+    autocast=False,
+    backend="inductor",
+    **kwargs,
+):
+    for k in kwargs:
+        log.warning(
+            "Unrecognized kwarg %s; perhaps this repro was made on a newer version of PyTorch",
+            k,
+        )
+
+    if accuracy is True:
+        accuracy = "accuracy"
+    elif accuracy is False:
+        accuracy = ""
+
+    parser = argparse.ArgumentParser(
+        description=f"""\
+An after_dynamo repro script, typically triggering a bug in Dynamo or
+AOTAutograd.  When run with no arguments, this script defaults to running
+'{command}'.  Extra flags may be available; to find out more, try '{command}
+--help'.  There are also alternate subcommands available, see below.
+
+default settings on this script:
+  {accuracy=}
+  {save_dir=}
+""",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+
+    def common_flags(parser):
+        accuracy_group = parser.add_mutually_exclusive_group()
+        accuracy_group.add_argument(
+            "--no-accuracy",
+            dest="accuracy",
+            action="store_const",
+            const="",
+            default=accuracy,
+            help="do not test accuracy, just run the module and see if it errors",
+        )
+        accuracy_group.add_argument(
+            "--accuracy",
+            action="store_const",
+            const="accuracy",
+            default=accuracy,
+            help="test accuracy",
+        )
+        parser.add_argument(
+            "--save-dir",
+            type=str,
+            default=save_dir,
+            metavar="DIR",
+            help="directory where saved inputs live",
+        )
+        parser.add_argument(
+            "--no-save-dir",
+            dest="save_dir",
+            action="store_const",
+            const=None,
+            help="don't use any directory for saved inputs",
+        )
+        parser.add_argument(
+            "--no-isolate",
+            dest="isolate",
+            action="store_false",
+            default=False,
+            help="no isolate (doesn't do anything for after_dynamo)",
+        )
+        parser.add_argument(
+            "--autocast",
+            default=autocast,
+            action="store_true",
+            help="use torch.cuda.amp.autocast",
+        )
+        parser.add_argument(
+            "--no-autocast",
+            dest="autocast",
+            action="store_false",
+            help="don't use torch.cuda.amp.autocast",
+        )
+        parser.add_argument(
+            "--backend",
+            type=str,
+            default=backend,
+            metavar="BACKEND",
+            help="torch.compile backend to use",
+        )
+
+    subparsers = parser.add_subparsers(
+        dest="command", metavar="{run,minify}", required=True
+    )
+
+    parser_run = subparsers.add_parser(
+        "run",
+        help="just run the repro",
+    )
+    common_flags(parser_run)
+
+    parser_minify = subparsers.add_parser(
+        "minify", help="run the minifier on the repro"
+    )
+    common_flags(parser_minify)
+
+    args = None
+    if len(sys.argv) <= 1:
+        args = [command, *sys.argv[1:]]
+
+    options = parser.parse_args(args)
+    COMMAND_FNS = {
+        "minify": repro_minify,
+        "run": repro_run,
+    }
+    COMMAND_FNS[options.command](options, mod, load_args)

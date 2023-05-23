@@ -20,6 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StrictMinMaxConstraint,
 )
 from torch._dynamo.exc import UserError, UserErrorType
+from torch._export.passes import AddRuntimeAssertionsForConstraintsPass
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.pass_manager import PassManager
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
@@ -113,6 +114,7 @@ def _export(
                 decomposition_table=DECOMP_TABLE,
                 constraints=constraints,
                 assume_static_by_default=True,
+                functionalize=True,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
@@ -125,13 +127,10 @@ def _export(
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
     )
-
-    input_shape_constraints = gm.meta.get("input_shape_constraints", None)
-    inline_constraints = gm.meta.get("inline_constraints", None)
     # TODO: Track mutation
     mutation = None
     export_graph_module = graph_module.make_export_graph_module(
-        gm, gm.graph, in_spec, out_spec, mutation, input_shape_constraints, inline_constraints, flat_args
+        gm, gm.graph, in_spec, out_spec, mutation, flat_args
     )
     return export_graph_module
 
@@ -236,6 +235,9 @@ class MultiMethodExportedProgram:
         "please look up one of its methods first via `find_method(method_name)` "
         "to access property: {property_name}."""
         return getattr(default_module, property_name)
+
+    def add_runtime_assertions(self) -> "MultiMethodExportedProgram":
+        return self.transform(AddRuntimeAssertionsForConstraintsPass())
 
     @property
     def meta(self):

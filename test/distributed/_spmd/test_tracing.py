@@ -399,7 +399,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={nn.Linear: AssertOverride(self)})
+        @compile(module_override=[AssertOverride(self)])
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -434,14 +434,18 @@ class TraceTrainStepTest(DTensorTestBase):
     def test_adam_fused(self):
         self._test_adam(foreach=False, fused=True)
 
-    def _test_train_step_override(self, module_override_key):
+    def _test_train_step_override(self):
         transform_targets = []
 
         class DDMOverride(Override):
             def replacement(
                 self, fqn: str, orig_submodule: torch.nn.Module
             ) -> torch.nn.Module:
-                return DummyDDM()
+                return (
+                    DummyDDM()
+                    if isinstance(orig_submodule, DataDependentModule)
+                    else orig_submodule
+                )
 
             def transform(
                 self,
@@ -467,7 +471,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(module_override={module_override_key: DDMOverride()})
+        @compile(module_override=[DDMOverride()])
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()
@@ -486,13 +490,8 @@ class TraceTrainStepTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_module_type_override(self):
-        self._test_train_step_override(module_override_key=DataDependentModule)
-
-    @skip_if_lt_x_gpu(2)
-    @with_comms
-    def test_module_fqn_override(self):
-        self._test_train_step_override(module_override_key="ddm")
+    def test_module_override(self):
+        self._test_train_step_override()
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -503,8 +502,11 @@ class TraceTrainStepTest(DTensorTestBase):
             def replacement(
                 self, fqn: str, orig_submodule: torch.nn.Module
             ) -> torch.nn.Module:
-                if fqn in ["ddm1", "ddm2"]:
-                    return DummyDDM()
+                return (
+                    DummyDDM()
+                    if isinstance(orig_submodule, DataDependentModule)
+                    else orig_submodule
+                )
 
             def transform(
                 self,
@@ -543,7 +545,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return self.relu(self.ddm2(self.l2(self.ddm1(self.l1(x)))))
 
-        @compile(module_override={DataDependentModule: DDMOverride()})
+        @compile(module_override=[DDMOverride()])
         def train_step(mod, opt, inp):
             mod(inp).sum().backward()
             opt.step()

@@ -977,8 +977,6 @@ _foreach_ops_without_differentiability_info = {
     # No reference backward available as addcdiv/addcmul don't support Tensor as scaling factor.
     ("_foreach_addcdiv", "Tensor"),
     ("_foreach_addcmul", "Tensor"),
-    # FIXME(crcrpar): Let `_foreach_zero_` have backward.
-    ("_foreach_zero", ""),
 }
 
 _foreach_ops_with_different_arity = {
