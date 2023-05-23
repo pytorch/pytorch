@@ -2,6 +2,10 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+conda_reinstall() {
+  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
+}
+
 function install_huggingface() {
   local version
   version=$(get_pinned_commit huggingface)
