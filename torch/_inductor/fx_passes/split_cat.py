@@ -97,6 +97,15 @@ def normalize_split_default(match: Match):
     return normalize_split_base(match, _get_split_args_default)
 
 
+def find_next_users(split_node):
+    next_users = []
+    for getitem_node in split_node.users.keys():
+        for getitem_user in getitem_node.users.keys():
+            if getitem_user not in next_users:
+                next_users.append(getitem_user)
+    return next_users
+
+
 class TorchSplit(CallFunction):
     """
     Matches a call to torch.split if it is in a normalized form. Ensures that all users of
@@ -241,7 +250,7 @@ class SplitCatSimplifier:
         split_sections: List[int],
     ):
         # Find the next users (i.e. users after the getitem)
-        next_users = self.find_next_users(split_node)
+        next_users = find_next_users(split_node)
         # Gather inputs of the next users. When inputs come from `split_node`, they are instead represented by
         # a tuple indicating the split ranges. See `get_user_input_list` for more details
         user_inputs_list = self.get_user_input_list(split_node, next_users)
@@ -266,14 +275,6 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list
         )
         self.erase_old_nodes(graph, split_node, next_users)
-
-    def find_next_users(self, split_node):
-        next_users = []
-        for getitem_node in split_node.users.keys():
-            for getitem_user in getitem_node.users.keys():
-                if getitem_user not in next_users:
-                    next_users.append(getitem_user)
-        return next_users
 
     def get_user_input_list(
         self, split_node, next_users
@@ -723,7 +724,7 @@ class GetItem(CallFunction):
     def __init__(self, arg, index, _users=1):
         super().__init__(operator.getitem, arg, index, _users=_users)
 
-    def find_anchor_nodes(self, ctx: MatchContext, searched, matching_nodes=True):
+    def find_anchor_nodes(self, ctx: MatchContext, searched):
         # We generally match GetItem with arg being an Arg(). So, we never return the anchor
         # nodes as the stored node in ctx.pattern_to_node is returned. Here we override find_anchor_nodes
         # to not use ctx.pattern_to_node
@@ -734,7 +735,7 @@ class GetItem(CallFunction):
                         continue
                     for node in other_node.users:
                         if node not in searched:
-                            if not matching_nodes or self._match_fns(node):
+                            if self._match_fns(node):
                                 yield node
                                 searched.add(node)
 
@@ -781,6 +782,9 @@ def merge_split_squeeze(
     graph = match.graph
     split = next(node for node in match.nodes if node.target == torch.split)
     if not all(s == 1 for s in split_sizes):
+        return
+    next_users = find_next_users(split)
+    if not all(node.target == torch.squeeze for node in next_users):
         return
     with graph.inserting_before(match.output_node()):
         unbind = graph.call_function(

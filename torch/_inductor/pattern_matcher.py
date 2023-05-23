@@ -340,14 +340,13 @@ class _TargetArgsExpr(_TargetExpr):
         m.targets[self] = node.target
         return m
 
-    def find_anchor_nodes(self, ctx: MatchContext, searched, matching_nodes=True):
+    def find_anchor_nodes(self, ctx: MatchContext, searched):
         """
         This is used when we are matching a pattern with multiple outputs.
         There is a partial match (stored in ctx) and we want to walk
         this pattern to find a connection to an already-matched node.
 
-        If `matching_nodes` is True, will yield candidate nodes that `self._match` might
-        like.
+        Yields candidate nodes that `self._match` might like.
         """
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
@@ -360,7 +359,7 @@ class _TargetArgsExpr(_TargetExpr):
                         continue
                     for node in other_node.users:
                         if node not in searched:
-                            if not matching_nodes or self._match_fns(node):
+                            if self._match_fns(node):
                                 yield node
                                 searched.add(node)
 
@@ -514,9 +513,7 @@ class RepeatedExpr(PatternExpr):
             self.inner_pattern,
         )
         # Check all anchor nodes match the pattern
-        for anchor_node in self.inner_pattern.find_anchor_nodes(
-            ctx, set(), matching_nodes=False
-        ):
+        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, set()):
             anchor_m = MatchContext([self], graph=node.graph).match(
                 self.inner_pattern, anchor_node
             )
