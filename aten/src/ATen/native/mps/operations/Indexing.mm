@@ -82,7 +82,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets =
           (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
       TORCH_CHECK(
@@ -109,7 +109,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
       if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS)) {
-        indexSelectPSO = MPSDevice::getInstance()->metalIndexingFunction(indexFunction);
+        indexSelectPSO = MPSDevice::getInstance()->metalIndexingPSO(indexFunction);
         size_t argumentBufferLength = sizeof(uint64_t) * num_indices;
         indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
         uint64_t* indexABContents = (uint64_t*)(indexAB.contents);
@@ -819,9 +819,8 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "edb_mps:" + getMPSTypeString(grad_) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" +
-        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
-        std::to_string(scale_grad_by_freq);
+    string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" + std::to_string(num_weights) +
+        ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
 
