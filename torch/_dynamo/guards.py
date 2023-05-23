@@ -38,6 +38,7 @@ from torch.utils.weak import WeakIdRef
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
+from .exc import unimplemented
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -373,6 +374,8 @@ class GuardBuilder(GuardBuilderBase):
         # The module guard checks for modifications to the Module's type, __dict__,
         # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
         # This subsumes the check for Module.training.
+        if not hasattr(val, "training"):
+            unimplemented(f"Guard setup for uninitialized class {type(val)}")
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)
         except AttributeError:
