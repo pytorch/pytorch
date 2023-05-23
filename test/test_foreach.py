@@ -913,8 +913,8 @@ class TestForeach(TestCase):
 
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
-        # TODO(crcrpar): Add ComplexDouble
-        dtypes=(torch.float64,),
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=(torch.float64, torch.complex128),
     )
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
@@ -931,6 +931,10 @@ class TestForeach(TestCase):
             "clamp is not supported for complex types",
             "Found dtype Double but expected ComplexDouble",
         ])
+
+        # this pattern goes to the slow path implementation, needs to update the op db?
+        if dtype == torch.complex128 and op.inplace_variant == torch._foreach_abs_:
+            self.skipTest("In-place abs is not supported for complex tensors.")
 
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
