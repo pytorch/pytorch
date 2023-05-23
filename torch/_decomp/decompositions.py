@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int):
+def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
@@ -1226,9 +1226,9 @@ def native_group_norm_backward(
     ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
     db = grad_output.view(N, C, HxW).sum(dim=[2])
 
-    d_input = None
-    d_gamma = None
-    d_bias = None
+    d_input: Optional[Tensor] = None
+    d_gamma: Optional[Tensor] = None
+    d_bias: Optional[Tensor] = None
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if gamma is not None:
