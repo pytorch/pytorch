@@ -500,11 +500,12 @@ static PyObject* NNModuleGuard_call(
   NNModuleGuard* guard = (NNModuleGuard*)callable;
 
   if (PyTuple_GET_SIZE(args) != 1) {
-    PyErr_SetString(PyExc_TypeError, "NNModuleGuardType: expected one argument");
+    PyErr_SetString(
+        PyExc_TypeError, "NNModuleGuardType: expected one argument");
     return NULL;
   }
 
-  PyObject *mod = PyTuple_GET_ITEM(args, 0);
+  PyObject* mod = PyTuple_GET_ITEM(args, 0);
   if (guard->mod != mod) {
     Py_RETURN_FALSE;
   }
