@@ -55,7 +55,15 @@ class TestDataParallel(DTensorTestBase):
         return 2
 
     def _test_data_parallel(
-        self, mod, ddp_mod, opt, ddp_opt, inp, train_step, data_parallel_mode
+        self,
+        mod,
+        ddp_mod,
+        opt,
+        ddp_opt,
+        inp,
+        train_step,
+        data_parallel_mode,
+        data_parallel_options=None,
     ):
         ddp_inp = deepcopy(inp)
 
@@ -71,9 +79,10 @@ class TestDataParallel(DTensorTestBase):
         ddp_opt.step()
 
         # compile it with replicate and run step once
-        compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(
-            train_step
-        )
+        data_parallel_options = data_parallel_options or {}
+        compiled_fn = compile(
+            parallel_mode=DataParallel(data_parallel_mode, **data_parallel_options)
+        )(train_step)
         compiled_fn(mod, opt, inp)
 
         for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
@@ -216,6 +225,40 @@ class TestDataParallel(DTensorTestBase):
             self._test_data_parallel(
                 mod, ddp_mod, opt, ddp_opt, train_batch, train_step, parallel_mode
             )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_fully_shard_non_0_batch_dim(self):
+        class WrapperModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = SimpleMLP()
+
+            def forward(self, x):
+                reshaped_x = x.t().contiguous()
+                return self.mlp(reshaped_x).t()
+
+        mod = WrapperModule().cuda(self.rank)
+        opt = torch.optim.Adam(mod.parameters(), lr=0.1, fused=True)
+
+        train_batch = (
+            torch.randn((50, 128), device=torch.device(self.rank)),
+            torch.randn((8, 128), device=torch.device(self.rank)),
+        )
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.1, fused=True)
+
+        self._test_data_parallel(
+            mod,
+            ddp_mod,
+            opt,
+            ddp_opt,
+            train_batch,
+            train_step,
+            "fully_shard",
+            {"input_batch_dim": 1},
+        )
 
 
 if __name__ == "__main__":
