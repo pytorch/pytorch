@@ -1,0 +1,48 @@
+name: inductor-periodic
+
+on:
+  push:
+    tags:
+      - ciflow/inductor/*
+  workflow_dispatch:
+  schedule:
+    # Run every 4 hours during the week and every 12 hours on the weekend
+    - cron: 45 0,4,8,12,16,20 * * 1-5
+    - cron: 45 4,12 * * 0,6
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build:
+    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-test:
+    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build
+    with:
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}

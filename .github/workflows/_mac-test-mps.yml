@@ -83,26 +83,6 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Disable XProtect and MDS
-        continue-on-error: true
-        run: |
-          # Like Windows Defender, XProtect could interfere with the test
-          set +e
-          set -x
-
-          SERVICES=(
-            "com.apple.XProtect.daemon.scan"
-            "com.apple.XprotectFramework.PluginService"
-            "com.apple.XprotectFramework.scan"
-            "com.apple.metadata.mds"
-            "com.apple.metadata.mds.index"
-          )
-          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
-          for SERVICE in "${SERVICES[@]}"; do
-            sudo launchctl stop "${SERVICE}"
-            sudo launchctl disable "system/${SERVICE}"
-          done
-
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:

@@ -206,12 +206,7 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
-# This future is needed to print Python2 EOL message
-from __future__ import print_function
 import sys
-if sys.version_info < (3,):
-    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
     sys.exit(-1)
@@ -1114,6 +1109,7 @@ def main():
         'include/ATen/core/dispatch/*.h',
         'include/ATen/core/op_registration/*.h',
         'include/c10/core/impl/*.h',
+        'include/c10/core/impl/cow/*.h',
         'include/c10/util/*.h',
         'include/c10/cuda/*.h',
         'include/c10/cuda/impl/*.h',

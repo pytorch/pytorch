@@ -2659,8 +2659,25 @@ class ForeachFuncInfo(OpInfo):
         supports_scalar_self_arg=False,
         **kwargs,
     ):
+        (
+            foreach_method,
+            foreach_method_inplace,
+            torch_ref_method,
+            torch_ref_inplace,
+        ) = get_foreach_method_names(name)
+        if name == "zero":
+            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
+            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
+            # is not defined at the moment. Thus to skip the qualification, set a similar torch
+            # function.
+            assert foreach_method is None
+            foreach_method = torch.zero_
         super().__init__(
-            "_foreach_" + name,
+            name="_foreach_" + name,
+            op=foreach_method,
+            ref=torch_ref_method,
+            method_variant=foreach_method,
+            inplace_variant=foreach_method_inplace,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
@@ -2670,15 +2687,6 @@ class ForeachFuncInfo(OpInfo):
         )
         self.supports_scalar_self_arg = supports_scalar_self_arg
 
-        (
-            foreach_method,
-            foreach_method_inplace,
-            torch_ref_method,
-            torch_ref_inplace,
-        ) = get_foreach_method_names(name)
-        self.method_variant = foreach_method
-        self.inplace_variant = foreach_method_inplace
-        self.ref = torch_ref_method
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
 

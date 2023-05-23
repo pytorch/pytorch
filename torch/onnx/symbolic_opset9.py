@@ -52,6 +52,7 @@ __all__ = [
     "bitwise_or",
     "bmm",
     "broadcast_tensors",
+    "broadcast_to",
     "bucketize",
     "cat",
     "cdist",
@@ -843,28 +844,42 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         return reduce_nodim, reduce_dim
 
@@ -934,6 +949,27 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def expand(g: jit_utils.GraphContext, self, size, implicit):
+    size = symbolic_helper._maybe_get_const(size, "is")
+    if not symbolic_helper._is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    elif symbolic_helper._is_packed_list(size):
+        # Expand with -1 dim value means dim is unchanged.
+        # Since onnx::expand supports two-way broadcasting,
+        # -1 dim value can be exported to onnx as 1
+        size = symbolic_helper._reshape_helper(
+            g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
+        )
+    dtype = _type_utils.JitScalarType.INT64
+    ones = ones_like(g, size, dtype)
+    neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
+    size = where(g, g.op("Equal", size, neg_ones), ones, size)
+    return g.op("Expand", self, size)
+
+
+@_onnx_symbolic("aten::broadcast_to")
+@symbolic_helper.quantized_args(True)
+@_beartype.beartype
+def broadcast_to(g: jit_utils.GraphContext, self, size):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -4360,7 +4396,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -4383,6 +4419,10 @@ def repeat_interleave(
             input,
         )
 
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)
+
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
@@ -4390,8 +4430,6 @@ def repeat_interleave(
 
     # Cases where repeats is an int or single value tensor
     if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-        if not symbolic_helper._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "repeat_interleave",
@@ -4400,11 +4438,9 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        else:
-            reps = input_sizes[dim]
-            repeats = expand(
-                g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None
-            )
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:

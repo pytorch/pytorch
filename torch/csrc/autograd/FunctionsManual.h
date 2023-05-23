@@ -1031,6 +1031,32 @@ Tensor to_sparse_backward(
     const c10::Layout self_layout,
     const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+mkldnn_rnn_layer_differentiable_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
