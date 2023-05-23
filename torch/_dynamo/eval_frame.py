@@ -820,8 +820,8 @@ def export(
     if pre_autograd:
         assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
-    call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
-    original_signature = inspect.signature(call_to_inspect)
+    f = f.forward if isinstance(f, torch.nn.Module) else f
+    original_signature = inspect.signature(f)
 
     if functionalize and not aten_graph:
         raise UserError(
@@ -921,7 +921,9 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (
+        shape_env := getattr(fake_mode, "shape_env", None)
+    ) is not None and not skipfiles.check(inspect.getsourcefile(f)):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
