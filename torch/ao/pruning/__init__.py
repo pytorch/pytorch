@@ -17,3 +17,7 @@ from .sparsifier.utils import FakeSparsity
 from .sparsifier.utils import module_to_fqn
 from .sparsifier.utils import fqn_to_module
 from .sparsifier.utils import get_arg_info_from_tensor_fqn
+
+# Structured Sparse Subclass
+from .semi_structured_sparse_tensor import SemiStructuredSparseTensor
+from .semi_structured_sparse_tensor import SemiStructuredSparseTensorCUTLASS
