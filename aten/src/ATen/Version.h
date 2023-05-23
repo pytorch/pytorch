@@ -13,4 +13,6 @@ TORCH_API std::string get_openmp_version();
 
 TORCH_API std::string get_cxx_flags();
 
+TORCH_API std::string get_cpu_capability();
+
 } // namespace at

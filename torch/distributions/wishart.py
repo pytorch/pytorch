@@ -34,15 +34,15 @@ class Wishart(ExponentialFamily):
 
     Example:
         >>> # xdoctest: +SKIP("FIXME: scale_tril must be at least two-dimensional")
-        >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
+        >>> m = Wishart(torch.Tensor([2]), covariance_matrix=torch.eye(2))
         >>> m.sample()  # Wishart distributed with mean=`df * I` and
         >>>             # variance(x_ij)=`df` for i != j and variance(x_ij)=`2 * df` for i == j
 
     Args:
+        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
         scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
-        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
     Note:
         Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or
         :attr:`scale_tril` can be specified.

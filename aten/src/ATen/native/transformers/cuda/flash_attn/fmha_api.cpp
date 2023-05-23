@@ -34,7 +34,12 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha.h>
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -336,8 +341,13 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
         }
         launch_params.params.philox_args = philox_state;
     } else {
-        seed_t = at::empty({}, at::dtype(at::kLong));
-        offset_t = at::empty({}, at::dtype(at::kLong));
+        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        } else {
+            seed_t = at::empty({}, at::dtype(at::kLong));
+            offset_t = at::empty({}, at::dtype(at::kLong));
+        }
     }
 
     run_fmha_fwd(launch_params);

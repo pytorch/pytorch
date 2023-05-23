@@ -129,6 +129,7 @@ FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 # `torch.ao.quantization._pt2e`, which interferes with memory profiling
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
 }
 
 
