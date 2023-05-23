@@ -28,7 +28,7 @@ void setDynamicLayerFrontBackKeysIncluded(bool included) {
 DynamicLayer::DynamicLayer(
     TransformType transform_type,
     int64_t layerId,
-    optional<int64_t> batchSize,
+    optional<c10::SymInt> batchSize,
     optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
@@ -42,7 +42,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
-      interpreter_ = Interpreter::Vmap(layerId, batchSize.value(), randomness.value());
+      interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
       interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value());
@@ -66,7 +66,7 @@ int64_t DynamicLayer::layerId() const {
   return interpreter_.level();
 }
 
-int64_t DynamicLayer::batchSize() const {
+c10::SymInt DynamicLayer::batchSize() const {
   return VmapInterpreterPtr(&interpreter_).batchSize();
 }
 
@@ -245,7 +245,7 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 
 int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<int64_t> batch_size,
+    optional<c10::SymInt> batch_size,
     optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
