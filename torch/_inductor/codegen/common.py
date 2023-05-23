@@ -412,6 +412,12 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
+    def seed_offset(self, name, value):
+        if "load_seed_offset" in self.sizevars.values():
+            name = "%s%d" % (name, len([x for x in self.sizevars.values() if x.startswith("load_seed_offset")]))
+        self.sizevars[value] = name
+        return name
+
     def size(self, name):
         if str(name) == "seed":
             self.sizevars["seed"] = "seed"
