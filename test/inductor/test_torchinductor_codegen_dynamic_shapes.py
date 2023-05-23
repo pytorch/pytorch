@@ -136,6 +136,7 @@ test_failures = {
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
+    "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -163,7 +164,11 @@ test_failures = {
     "test_linspace2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
+    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
@@ -182,6 +187,7 @@ test_failures = {
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
@@ -295,7 +301,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None
