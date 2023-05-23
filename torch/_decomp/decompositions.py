@@ -1226,9 +1226,9 @@ def native_group_norm_backward(
     ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
     db = grad_output.view(N, C, HxW).sum(dim=[2])
 
-    d_input: Optional[Tensor] = None
-    d_gamma: Optional[Tensor] = None
-    d_bias: Optional[Tensor] = None
+    d_input = None
+    d_gamma = None
+    d_bias = None
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if gamma is not None:
