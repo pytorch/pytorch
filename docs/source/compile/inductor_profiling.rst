@@ -72,9 +72,7 @@ https://gist.github.com/shunting314/8243734a38b5733ea78479209c0ae893
 
 There are quite a lot of interesting things to note in the output
 
-a. We write a chrome trace file for the profile so we can load the trace
-   and interact with it. In the log, look for lines as follows to find
-   the path of the trace file.
+(a) We write a chrome trace file for the profile so we can load the trace and interact with it. In the log, look for lines as follows to find the path of the trace file.
 
 **Chrome trace for the profile is written to
 /tmp/compiled_module_profile.json**
@@ -86,8 +84,7 @@ browser and load the file as the UI suggested ) will show UI as follows:
 
 One can zoom in and out to check the profile.
 
-b. We report the percent of GPU time regarding to the wall time by log
-   line like:
+(b) We report the percent of GPU time regarding to the wall time by log line like:
 
 **Percent of time when GPU is busy: 102.88%**
 
@@ -106,8 +103,7 @@ low percent of time when GPU is busy:
 This means the model has a lot of CPU overhead. This is consistent with
 the fact that enabling cudagraphs improve densenet121’s perf a lot.
 
-c. We can break down the GPU time to different categories of kernels. In
-   the mixnet_l example, we see
+(c) We can break down the GPU time to different categories of kernels. In the mixnet_l example, we see
 
 -  pointwise kernel takes 28.58%
 -  reduction kernel takes 13.85%
@@ -117,8 +113,7 @@ c. We can break down the GPU time to different categories of kernels. In
 This information can be found in the summary line (i.e. the last line)
 of the report for each kernel category.
 
-d. We call also zoom into a certain category of kernels, e.g. let’s
-   check reduction kernels:
+(d) We call also zoom into a certain category of kernels, e.g. let’s check reduction kernels:
 
 .. image:: ../_static/img/inductor_profiling/kernel_breakdown.png
 
