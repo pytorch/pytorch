@@ -267,6 +267,7 @@ struct UnwindCache {
 static UnwindCache unwind_cache;
 static std::shared_timed_mutex cache_mutex_;
 
+extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
   UnwindState state;
