@@ -16,9 +16,15 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
-        from . import test_cpu_repro, test_mkldnn_pattern_matcher, test_torchinductor
+        from . import (
+            test_cpu_repro,
+            test_foreach,
+            test_mkldnn_pattern_matcher,
+            test_torchinductor,
+        )
     except ImportError:
         import test_cpu_repro
+        import test_foreach
         import test_mkldnn_pattern_matcher
         import test_torchinductor
 except unittest.SkipTest:
@@ -66,7 +72,7 @@ def make_test_case(name, device, tests, condition=True):
     fn.__name__ = test_name
     if condition:
         setattr(
-            CppWrapperTemplate if device != "cuda" else CudaWrapperTemplate,
+            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
             test_name,
             fn,
         )
@@ -148,6 +154,11 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest(
+            "test_cpp_wrapper",
+            device=None,
+            tests=test_foreach.ForeachTests(),
+        ),  # test foreach
     ]:
         make_test_case(item.name, item.device, item.tests)
 

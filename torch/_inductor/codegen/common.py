@@ -661,6 +661,7 @@ class Kernel(CodeGen):
         super().__init__()
         metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
+
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()

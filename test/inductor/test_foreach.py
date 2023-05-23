@@ -26,6 +26,7 @@ except (unittest.SkipTest, ImportError) as e:
 class ForeachTests(TestCase):
     check_model_cuda = check_model_cuda
     check_model_cpu = check_model
+    check_kernel_count = True
 
     def setUp(self):
         super().setUp()
@@ -35,8 +36,7 @@ class ForeachTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
-    @requires_cuda()
-    def test_single(self):
+    def _test_single(self):
         def fn(a0, a1, b0, b1):
             return torch._foreach_add([a0, a1], [b0, b1])
 
@@ -50,6 +50,12 @@ class ForeachTests(TestCase):
             ),
         )
 
+    # called in test_cpp_wrapper.py
+    test_cpp_wrapper = _test_single
+
+    @requires_cuda()
+    def test_single(self):
+        self._test_single()
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()

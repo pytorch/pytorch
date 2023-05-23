@@ -416,20 +416,19 @@ def make_pointwise(
 def make_foreach_pointwise(aten_fn, pw_fn):
     def inner(*inputs: List[List[TensorBox]], alpha=1.0):
         def is_dynamic(t):
-            return any(
-                x.free_symbols for x in itertools.chain(t.layout.size, t.layout.stride)
-            )
+            return any(x.free_symbols for x in t.data.get_size())
 
-        def group_by_device(tensor_pairs):
+        # group by device, and whether any of the inputs are dynamic
+        def group_args(tensor_pairs):
             out = defaultdict(list)
             for i, (l, r) in enumerate(tensor_pairs):
                 assert l.get_device() == r.get_device()
                 out[(l.get_device(), is_dynamic(l) or is_dynamic(r))].append((i, l, r))
             return out
 
-        device_groups = group_by_device(zip(*inputs))
+        groups = group_args(zip(*inputs))
         outputs = [None] * len(inputs[0])
-        for (device, dyn_shapes), group in device_groups.items():
+        for (device, dyn_shapes), group in groups.items():
             if device.type == "cpu" or dyn_shapes:
                 ls = []
                 rs = []
@@ -452,10 +451,6 @@ def make_foreach_pointwise(aten_fn, pw_fn):
                 V.graph.register_list(buffer_list)
 
         assert all(x is not None for x in outputs)
-        return outputs
-
-        outputs = [fn(*x, alpha=alpha) for x in zip(*inputs)]
-        V.graph.register_list([output.realize() for output in outputs])
         return outputs
 
     return inner
