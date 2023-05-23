@@ -156,7 +156,7 @@ def _rematerialize_optimizer(
         yield
     finally:
         param_group["params"] = orig_params
-        opt.state.update(orig_states)
+        opt.state = orig_states
 
 
 aten = torch.ops.aten  # pyre-ignore

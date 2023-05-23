@@ -306,7 +306,6 @@ def build_data_parallel_strategies(
                 else:
                     assert isinstance(arg_strategy, DataParallelStrategy)
                     arg_node_type = arg_strategy.node_type
-                    input_full_reduction = arg_strategy.reduction_over_batch
                     if arg_node_type == NodeType.PARAM:
                         replica_strategy = _gen_replicate_strategy(mesh)
                         dp_strategy_map[node] = DataParallelStrategy(
@@ -318,19 +317,11 @@ def build_data_parallel_strategies(
                             NodeType.GRAD, [partial_sig]
                         )
                     elif arg_node_type == NodeType.ACT:
-                        (
-                            arg_node_spec,
-                            _,
-                        ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
+                        arg_node_spec = batch_dim_analyzer.compute_act_spec(
                             input_nodes[0], mesh
                         )
 
-                        (
-                            output_spec,
-                            _,
-                        ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                            node, mesh, input_full_reduction
-                        )
+                        output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
 
                         shard_strategy = PlacementStrategy(
                             output_spec=output_spec, input_specs=[arg_node_spec]
@@ -365,9 +356,7 @@ def build_data_parallel_strategies(
                     if arg_node_type == NodeType.ACT:
                         # activation sharded
                         has_activation = True
-                        act_spec, _ = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                            arg, mesh
-                        )
+                        act_spec = batch_dim_analyzer.compute_act_spec(arg, mesh)
 
                         input_specs.append(act_spec)
 
@@ -414,46 +403,7 @@ def build_data_parallel_strategies(
                     for arg in input_args
                     if isinstance(dp_strategy_map[arg], DataParallelStrategy)
                 ]
-                if NodeType.ACT in input_node_types:
-                    # param + activation, build up acceptable strategy
-                    # param must be replicated, activation must be sharded
-                    for arg in input_args:
-                        arg_strategy = dp_strategy_map[arg]
-                        assert isinstance(arg_strategy, DataParallelStrategy)
-                        node_type = arg_strategy.node_type
-                        if node_type == NodeType.ACT:
-                            # activation must stay sharded
-                            (
-                                act_spec,
-                                _,
-                            ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                                arg, mesh
-                            )
-
-                            input_specs.append(act_spec)
-                        elif node_type == NodeType.PARAM:
-                            # param must be replicated
-                            input_specs.append(
-                                DTensorSpec(mesh=mesh, placements=[Replicate()])
-                            )
-                        else:
-                            raise RuntimeError(
-                                f"Expecting node with parameter and activation, but found {input_node_types}! "
-                            )
-                    # produce activation type sharding for output
-                    (
-                        output_spec,
-                        reduction_over_batch,
-                    ) = batch_dim_analyzer.compute_batch_dim_shard_spec(node, mesh)
-
-                    shard_strategy = PlacementStrategy(
-                        output_spec=output_spec, input_specs=input_specs
-                    )
-
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_strategy], reduction_over_batch
-                    )
-                elif NodeType.GRAD in input_node_types:
+                if NodeType.GRAD in input_node_types:
                     # param/state + grad, build up acceptable strategy
                     # the strategy should be the same for all the inputs/outputs
                     # TODO: optimizer parts should follow the dtensor prop logic
@@ -492,13 +442,67 @@ def build_data_parallel_strategies(
                         output_node_type, [replica_strategy, shard_strategy]
                     )
                 elif NodeType.PARAM in input_node_types:
-                    # at this point, inputs should only have parameters, the
-                    # strategy of this node would be the same as the input
-                    dp_strategy_map[node] = dp_strategy_map[input_args[0]]
+                    if NodeType.ACT in input_node_types:
+                        # param + activation, build up acceptable strategy
+                        # param must be replicated, activation must be sharded
+                        for arg in input_args:
+                            arg_strategy = dp_strategy_map[arg]
+                            assert isinstance(arg_strategy, DataParallelStrategy)
+                            node_type = arg_strategy.node_type
+                            if node_type == NodeType.ACT:
+                                # compute activation spec
+                                act_spec = batch_dim_analyzer.compute_act_spec(
+                                    arg, mesh
+                                )
+
+                                input_specs.append(act_spec)
+                            elif node_type == NodeType.PARAM:
+                                # param must be replicated
+                                input_specs.append(
+                                    DTensorSpec(mesh=mesh, placements=[Replicate()])
+                                )
+                            else:
+                                raise RuntimeError(
+                                    f"Expecting node with parameter and activation, but found {input_node_types}! "
+                                )
+                        # produce activation type sharding for output
+                        output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
+
+                        act_strategy = PlacementStrategy(
+                            output_spec=output_spec, input_specs=input_specs
+                        )
+
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.ACT, [act_strategy]
+                        )
+                    else:
+                        # If inputs only have parameters, the
+                        # strategy of this node should follow input
+                        dp_strategy_map[node] = dp_strategy_map[input_args[0]]
                 else:
-                    raise RuntimeError(
-                        f"Unrecognized node: {node} with input node types: {input_node_types}."
+                    # If input nodes does not have PARAM/GRAD/STATE, then
+                    # it should be a pure activation computation, it should
+                    # produce activation output.
+                    # Activations are usually sharded unless model creates
+                    # new tensors during computation, which depend on whether
+                    # the new tensor associate with a batch dim or not, it could
+                    # be shard/replicate/partial, batch dim analyzer should tell
+                    # us the correct sharding.
+                    for arg in input_args:
+                        arg_strategy = dp_strategy_map[arg]
+                        assert isinstance(arg_strategy, DataParallelStrategy)
+                        input_spec = batch_dim_analyzer.compute_act_spec(arg, mesh)
+
+                        input_specs.append(input_spec)
+
+                    act_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
+                    op_strategy = PlacementStrategy(
+                        output_spec=act_spec, input_specs=input_specs
                     )
+                    dp_strategy_map[node] = DataParallelStrategy(
+                        NodeType.ACT, [op_strategy]
+                    )
+
         elif node.op == "output":
             dp_strategy_map[node] = DataParallelStrategy(NodeType.NON_TENSOR, [])
         else:
@@ -629,11 +633,15 @@ def partitioner(graph: GraphModule) -> GraphModule:
     Graph partitioner that partitions the single device graph
     to distributed graph
     """
-    shape_adjustment_ops = [
-        aten.view.default,
-        aten.reshape.default,
-        aten.expand.default,
-    ]
+    shape_adjustment_ops = {
+        aten._unsafe_view.default: 1,
+        aten.expand.default: 1,
+        aten.new_zeros.default: 1,
+        aten.ones.default: 0,
+        aten.reshape.default: 1,
+        aten.view.default: 1,
+        aten.zeros.default: 0,
+    }
     # partition the graph to distributed
     for node in graph.graph.nodes:
         node_sharding = node.meta["sharding"]
@@ -689,13 +697,37 @@ def partitioner(graph: GraphModule) -> GraphModule:
 
             output_val = node.meta["val"]
 
-            if node.target in shape_adjustment_ops:
+            if node.target == torch.ops.aten.repeat.default:
+                # for repeat op, we need to infer the repeat sizes
+                assert isinstance(output_val, torch.Tensor)
+                local_shape = compute_local_shape(
+                    output_val.shape, out_spec.mesh, out_spec.placements
+                )
+                input_shape = node.args[0].meta["val"].shape
+
+                def infer_repeat_sizes(repeated_shape, input_shape):
+                    repeated_size = [1] * len(repeated_shape)
+                    padded_length = len(repeated_shape) - len(input_shape)
+                    for i in range(len(repeated_shape)):
+                        if i < padded_length:
+                            repeated_size[i] = repeated_shape[i]
+                        else:
+                            repeated_size[i] = (
+                                repeated_shape[i] // input_shape[i - padded_length]
+                            )
+
+                    return repeated_size
+
+                node.update_arg(1, infer_repeat_sizes(local_shape, input_shape))
+
+            elif node.target in shape_adjustment_ops:
                 # for view related op that needs shape, adjust shape to local shape if needed
                 assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
                     output_val.shape, out_spec.mesh, out_spec.placements
                 )
-                node.update_arg(1, local_shape)
+                shape_arg_num = shape_adjustment_ops[node.target]
+                node.update_arg(shape_arg_num, local_shape)
 
             # convert output val to its local component
             node.meta["val"] = _partition_val(output_val, out_spec)
@@ -794,11 +826,7 @@ def partition_data_parallel(
         accessor.set_tensor(param_key, dtensor_param)
 
         # update the optimizer state key and values to DTensor
-        if param_key in named_states:
-            assert optimizer is not None, "Can't find optimizer!"
-            assert (
-                param in optimizer.state
-            ), f"param {param_key} not in optimizer state!"
+        if optimizer is not None and param in optimizer.state:
             param_states = named_states[param_key]
             param_dtensor_states = {}
             for state_key, state_val in param_states.items():
