@@ -8501,7 +8501,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
             self.assertEqual(out, ref_out)
-            # parameters in bfloat16 is not recommended
+            # parameters in bfloat16/Half is not recommended
             atol = 5e-4
             rtol = 8e-3
 
@@ -8509,7 +8509,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=atol, rtol=rtol)
             self.assertEqual(input.grad, ref_input.grad, atol=atol, rtol=rtol)
 
-        for is_mixed in [True]:
+        for is_mixed in [True, False]:
             helper(self, (4, 8, 10, 10), 4, torch.channels_last, is_mixed)
             helper(self, (2, 30, 9, 9), 3, torch.channels_last, is_mixed)
             helper(self, (4, 8, 40, 40), 4, torch.channels_last, is_mixed)
