@@ -157,12 +157,12 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
-    "allclose": {f16, f32, f64},
+    "__getitem__": {i32, i64},
+    "allclose": {f64},
     "amax": {f16},
     "amin": {f16},
-    "angle": {f16, f32, f64},
-    "argwhere": {b8, f16, f32, f64, i32, i64},
+    "angle": {f32, f64},
+    "argwhere": {f16, f32, f64, i32, i64},
     "bernoulli": {f32, f64},
     "bincount": {i32, i64},
     "bucketize": {b8, f16, f32, f64, i32, i64},
@@ -267,7 +267,7 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__getitem__": {b8, f16, f32, f64, i32, i64},
+    "__getitem__": {f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
