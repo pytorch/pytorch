@@ -821,7 +821,8 @@ def get_fast_op_impls():
 @functools.lru_cache(None)
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    torch.empty(1, device="cuda")
+    if torch.cuda.is_available():
+        torch.empty(1, device="cuda")
 
 
 @contextlib.contextmanager
