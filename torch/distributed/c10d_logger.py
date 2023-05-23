@@ -70,9 +70,9 @@ def exception_logger(func):
 def time_logger(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        t1 = time.time()
+        t1 = time.time_ns()
         func_return = func(*args, **kwargs)
-        t2 = time.time()
+        t2 = time.time_ns()
 
         if dist.is_initialized():
             msg_dict = {
@@ -82,7 +82,7 @@ def time_logger(func):
                 "world_size": f"{dist.get_world_size(kwargs.get('group'))}",
                 "global_rank": f"{dist.get_rank()}",
                 "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
-                "time_spent": f"{t2-t1}",
+                "time_spent": f"{t2-t1}ns",
             }
         else:
             msg_dict = {
