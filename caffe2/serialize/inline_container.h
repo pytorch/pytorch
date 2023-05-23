@@ -93,6 +93,8 @@ typedef struct mz_zip_archive mz_zip_archive;
 namespace caffe2 {
 namespace serialize {
 
+static constexpr const char* kSerializationIdRecordName = ".data/serialization_id";
+
 class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
@@ -117,6 +119,9 @@ class TORCH_API PyTorchStreamReader final {
   uint64_t version() const {
     return version_;
   }
+  const std::string& serializationId() {
+    return serialization_id_;
+  }
 
   void setShouldLoadDebugSymbol(bool should_load_debug_symbol) {
     load_debug_symbol_ = should_load_debug_symbol;
@@ -137,6 +142,7 @@ class TORCH_API PyTorchStreamReader final {
   int64_t version_;
   std::mutex reader_lock_;
   bool load_debug_symbol_ = true;
+  std::string serialization_id_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
@@ -164,6 +170,10 @@ class TORCH_API PyTorchStreamWriter final {
     return archive_name_;
   }
 
+  const std::string& serializationId() {
+    return serialization_id_;
+  }
+
   ~PyTorchStreamWriter();
 
  private:
@@ -177,6 +187,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  std::string serialization_id_;
   // This number will be updated when the model has operators
   // that have valid upgraders.
   uint64_t version_ = kMinProducedFileFormatVersion;
