@@ -1,8 +1,10 @@
+"""Module for handling op-level validation during exporting."""
+
 from __future__ import annotations
 
 import warnings
 
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -20,7 +22,7 @@ from torch.utils import _pytree
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
+    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
     torch_args: tuple,
     torch_kwargs: dict,
 ):
@@ -37,18 +39,13 @@ def validate_op_between_ort_torch(
 
     Args:
         node (torch.fx.Node): The validated fx.node
-        symbolic_fn (Union[onnxscript.OnnxFunction, Callable]): The corresponded ONNX node
+        symbolic_fn (Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]): The corresponded ONNX node
         torch_args (tuple): torch argument inputs
         torch_kwargs (dict): torch keyword argument inputs
     """
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
-    # trace_only function is regular python function
-    function_name = (
-        symbolic_fn.name
-        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
-        else symbolic_fn.__name__
-    )
+    function_name = symbolic_fn.name
 
     # TODO(bowbao, titaiwang): Diagnostics.
     # - Add dedicated diagnostic for op-level validation.
