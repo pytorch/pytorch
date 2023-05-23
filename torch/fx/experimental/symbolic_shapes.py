@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import os
 import re
 import sys
 import textwrap
@@ -17,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 
@@ -31,9 +30,10 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext
+from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._traceback import format_frame
 
 InputList = List
 DimList = List
@@ -68,10 +68,6 @@ def uninteresting_files():
         torch._inductor.sizevars,
     ]
     return {inspect.getfile(m) for m in mods}
-
-def shorten_filename(fn):
-    prefix = os.path.commonprefix([fn, __file__])
-    return fn[len(prefix):]
 
 SYM_FUNCTION_MODE = None
 
@@ -323,13 +319,26 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if not isinstance(a, SymInt):
         if not (min <= a <= max):
             raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
+
+        if (
+            (fake_mode := detect_fake_mode()) is not None and
+            getattr(fake_mode, "shape_env", None) is not None
+        ):
+            # If we are tracing with a fake mode then add this integer to the
+            # shape_env's var_to_range
+            sym_integer = sympy.Integer(a)
+            shape_env = fake_mode.shape_env
+            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
+
         return
+
     if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
-    # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
@@ -523,6 +532,41 @@ class RelaxedUnspecConstraint(Constraint):
 # inferred by guards from tracing, and that a backend can add whatever guards
 # it wants (including fully specializing the value).
 DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
+
+@dataclass(frozen=True)
+class EqualityConstraint(Constraint):
+    """
+    Given pairs of sources corresponding to pairs of dynamic dimensions that
+    are specified equal, represent them in a union-find data structure so that
+    we can efficiently check whether two such sources are transitively equal.
+    """
+    source_pairs: List[Tuple[Source, Source]]
+
+    def __post_init__(self):
+        object.__setattr__(self, "_parents", {})
+        for source1, source2 in self.source_pairs:
+            self._union(self._find(source1), self._find(source2))
+
+    def _find(self, source):
+        if source in self._parents:
+            return self._find(self._parents[source])
+        else:
+            return source
+
+    def _union(self, root1, root2):
+        if root1 != root2:
+            self._parents[root1] = root2
+
+    def render(self):
+        buf = ", ".join(
+            f"{source1.name()} == {source2.name()}"
+            for (source1, source2) in self.source_pairs
+        )
+        return "{" + buf + "}"
+
+    def is_equal(self, source1, source2):
+        return self._find(source1) == self._find(source2)
+
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -1491,6 +1535,9 @@ class DimConstraints:
         # printer for solutions
         self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
 
+        # inconsistencies found on substituting with concrete values / static solutions
+        self._inconsistencies: List[str] = []
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1555,7 +1602,13 @@ class DimConstraints:
             return
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
-        assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
+        # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
+        # It is possible that `expr` will fail the consistency check because of
+        # precision errors. Specifically, on substituting its free symbols with
+        # their concrete values, we might end up comparing floats. Until we have
+        # a fix for this issue, we delay raising such failures. See solve().
+        if orig_reduced == sympy.false:
+            self._inconsistencies.append(f"{orig_expr} is inconsistent!")
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1568,7 +1621,11 @@ class DimConstraints:
             expr = self.rewrite_with_congruences(s, expr)
             if expr != sympy.true:
                 reduced = expr.subs(self._var_to_val)
-                assert reduced != sympy.false, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
+                if reduced == sympy.false:
+                    self._inconsistencies.append(
+                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                        "is inconsistent!"
+                    )
                 if isinstance(expr, sympy.Eq):
                     # special status for symbols that have equalities (see `solve` below)
                     self._symbols_with_equalities.add(s)
@@ -1623,7 +1680,14 @@ class DimConstraints:
 
         return reduced_congruences
 
+    def raise_inconsistencies(self):
+        if self._inconsistencies:
+            msg = "\n".join(self._inconsistencies)
+            self._inconsistencies.clear()
+            raise ValueError(f"The following inconsistencies were found:\n{msg}")
+
     def solve(self):
+        self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
         while(self._symbols_with_equalities):
@@ -1645,6 +1709,7 @@ class DimConstraints:
             self._multivariate_inequalities = set()
             for expr in multivariate_inequalities:
                 self.add(expr.subs(s, self._substitutions[s]))
+            self.raise_inconsistencies()
 
             # simplify symbolic equivalences: some of them will now become specializations!
             symbolic_equivalences = self._symbolic_equivalences
@@ -1657,7 +1722,11 @@ class DimConstraints:
             try:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
-                self._dynamic_results.add(self._dcp.doprint(solution))
+                if isinstance(solution, sympy.And):
+                    for arg in solution.args:
+                        self._dynamic_results.add(self._dcp.doprint(arg))
+                else:
+                    self._dynamic_results.add(self._dcp.doprint(solution))
             except NotImplementedError as e:
                 log.warning("Failed to reduce inequalities: %s", e)
                 for expr in exprs:
@@ -1684,23 +1753,30 @@ class DimConstraints:
         def unwrap_local_source(source_name):
             return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
 
+        # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
+        # There is no change in behavior since 2 is the default lower bound.
+        def remove_default_lower_bound(dc):
+            return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
+
+        signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+
         buf = ""
         indent = 4 * " "
         if self._static_results:
             sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
-            buf += "\nNOTE: Specializations will happen by default with `assume_static_by_default=True`."
-            buf += f"\n```\ndef specializations{str(original_signature)}:"
-            buf += f"\n{indent}return (" + f" and\n{indent}".join(sorted_static_results) + ")"
+            buf += f"\n```\ndef specializations{str(signature)}:"
+            for result in sorted_static_results:
+                buf += f"\n{indent}assert {result}"
             buf += "\n```\n"
         if self._dynamic_results:
             sorted_dynamic_results = sorted(self._dynamic_results)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
-            buf += f"\n```\ndef specify_constraints{str(original_signature)}:"
+            buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
             for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{unwrap_local_source(result)},"
+                buf += f"\n{indent*2}{remove_default_lower_bound(unwrap_local_source(result))},"
             buf += f"\n{indent}]\n```\n"
         return buf
 
@@ -1758,7 +1834,7 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
-        self.var_to_stack: Dict["sympy.Symbol", str] = {}
+        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1921,19 +1997,19 @@ class ShapeEnv:
 
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
@@ -1995,7 +2071,7 @@ class ShapeEnv:
 
             vr = self.var_to_range[sympy_expr]
             if val not in vr:
-                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+                raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
             r = sympy_expr
         else:
@@ -2034,6 +2110,7 @@ class ShapeEnv:
         # DimList[DimConstraint]).  Whenever Optional is accepted, that
         # just means there are no constraints
         constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
+        equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
@@ -2126,12 +2203,12 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(list)
-        dynamic_sources = []
-        constraint_violations : List[Tuple[Constraint, Callable[[], str]]] = []
+        constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
 
-        def record_constraint_violation(constraint, msg_fn):
-            assert callable(msg_fn)
-            constraint_violations.append((constraint, msg_fn))
+        def record_constraint_violation(warn_only, msg, hint=None):
+            constraint_violations.append(
+                (warn_only, lambda: f"{msg} {hint()}" if hint else msg)
+            )
 
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
@@ -2161,10 +2238,10 @@ class ShapeEnv:
                     if constraint is not None:
                         # TODO: Maybe non-strict constraint shouldn't error
                         # here?  Check what happens in practice
-                        def hint():
+                        def hint(s):
                             if s.free_symbols:
                                 return (
-                                    "Perhaps you meant to specify a constraint on {s.free_symbols}?" +
+                                    f"Perhaps you meant to specify a constraint on {s.free_symbols}?" +
                                     "; ".join(
                                         f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
                                         for s0 in s.free_symbols
@@ -2173,23 +2250,29 @@ class ShapeEnv:
                             else:
                                 return "Did you really mean to mark this dimension as dynamic?"
 
-                        record_constraint_violation(constraint, lambda: (
+                        msg = (
                             f"Could not validate constraint {constraint.render(source)} as "
                             f"{source.name()} is actually a non-atomic symbolic expression "
-                            f"{s}.  {hint()}"
-                        ))
+                            f"{s}."
+                        )
+                        record_constraint_violation(
+                            constraint.warn_only,
+                            msg,
+                            hint=functools.partial(hint, s),
+                        )
 
                 input_guards.append((source, s))
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 if constraint is not None:
-                    record_constraint_violation(constraint, lambda: (
+                    msg = (
                         f"Could not validate constraint {constraint.render(source)} as "
                         f"{source.name()} was inferred to be constant.  For more information "
                         # TODO: fold this into TORCH_LOGS
                         "about why it is constant, set torch._dynamo.config.print_specializations = True"
-                    ))
+                    )
+                    record_constraint_violation(constraint.warn_only, msg)
 
         for t, source, constraint in zip(placeholders, sources, constraint_inputs):
             if isinstance(source, str):
@@ -2239,6 +2322,19 @@ class ShapeEnv:
 
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
+                if (
+                    isinstance(expr, sympy.Symbol) and
+                    expr in symbol_to_constraints and
+                    isinstance(source, TensorPropertySource)
+                    and source.prop is TensorProperty.SIZE
+                    and equalities_inputs and
+                    not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
+                ):
+                    msg = (
+                        f"The specified set of equalities {equalities_inputs.render()} "
+                        f"is not sufficient; please also specify {source_ref(source)} == {sexpr}."
+                    )
+                    record_constraint_violation(equalities_inputs.warn_only, msg)
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -2264,11 +2360,11 @@ class ShapeEnv:
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):
-                            record_constraint_violation(c, lambda: (
+                            msg = (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
-                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
-                                f"was allocated at:\n{tb}"
-                            ))
+                                f"we generated a guard on this size variable: {guard_expr}."
+                            )
+                            record_constraint_violation(c.warn_only, msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -2300,15 +2396,12 @@ class ShapeEnv:
                         # applied the constraint when we allocated the symbol
                         # originally.  Otherwise, should only assert that
                         # vr is superset of c_vr
-                        if not (c_vr.lower == r.lower and c_vr.upper == r.upper):
-                            record_constraint_violation(c_vr, lambda: (
+                        if not (c_vr.lower <= r.lower and c_vr.upper >= r.upper):
+                            msg = (
                                 f"Could not validate constraint {c.render(sources[0])} as "
                                 f"we actually inferred the valid range to be [{r.lower}, {r.upper}]."
-                                "This is actually supposed to be impossible to "
-                                "trigger right now as we do not refine ranges; maybe you called "
-                                "constrain_range manually, or we forgot to update this error message? "
-                                "In any case, please file a bug report."
-                            ))
+                            )
+                            record_constraint_violation(c.warn_only, msg)
 
                 assert sources
                 assert symbol.is_integer
@@ -2335,8 +2428,8 @@ class ShapeEnv:
         if constraint_violations:
             warn_msgs = []
             error_msgs = []
-            for constraint, msg in constraint_violations:
-                if constraint.warn_only:
+            for warn_only, msg in constraint_violations:
+                if warn_only:
                     msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
@@ -2551,7 +2644,8 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, self.var_to_stack[s])
+            stacktrace = ''.join(traceback.format_list(self.var_to_stack[s]))
+            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
@@ -2732,9 +2826,6 @@ class ShapeEnv:
                 for frame in reversed(tb):
                     if frame.filename not in uninteresting_files():
                         break
-
-                def format_frame(frame):
-                    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
 
                 # NB: this stack is truncated, but it's fine because the main
                 # stack_info will give you the rest of the info you need
