@@ -24,7 +24,7 @@ from ..utils import (
     sympy_product,
 )
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 
 
 pexpr = PythonPrinter().doprint
@@ -663,14 +663,6 @@ class WrapperCodeGen(CodeGen):
             )
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
-
-    def call_kernel(self, name: str, kernel: Kernel):
-        tmp = IndentedBuffer()
-        kernel.call_kernel(self, tmp, name)
-        for line in tmp.getvalue().split("\n"):
-            line = line.strip()
-            if line:
-                self.writeline(line)
 
     def writeline(self, line):
         self.lines.append(line)
