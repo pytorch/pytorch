@@ -799,5 +799,6 @@ if _has_triton():
             layout=input.layout
         )
 else:
+    bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
     sampled_addmm = None  # type: ignore[assignment]
