@@ -634,7 +634,7 @@ class WrapperCodeGen(CodeGen):
             )
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=None
+        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
     ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
@@ -650,7 +650,7 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=None
+        self, name, call_args, grid=None, device_index=None, cuda=True
     ):
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
@@ -903,7 +903,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return super().generate()
 
     def define_kernel(
-        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=None
+        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
     ):
         self.header.splice(f"\n{kernel}\n")
 
@@ -1139,7 +1139,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
     ):
         if not cuda:
-            return super().define_kernel(name, kernel, metadata)
+            return super().define_kernel(name, kernel, metadata, cuda)
 
     def generate(self):
         self.prefix.writeline("\n")
@@ -1192,7 +1192,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self, name, call_args, grid=None, device_index=None, cuda=True
     ):
         if not cuda:
-            return super().generate_kernel_call(name, call_args, device_index)
+            return super().generate_kernel_call(
+                name, call_args, grid, device_index, cuda
+            )
 
         params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
         assert (

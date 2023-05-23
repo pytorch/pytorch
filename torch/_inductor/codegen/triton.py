@@ -1708,7 +1708,6 @@ class TritonKernel(Kernel):
             call_args,
             grid,
             V.graph.scheduler.current_device.index,
-            cuda=True,
         )
 
     def create_cse_var(self, *args, **kwargs):
