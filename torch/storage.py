@@ -29,6 +29,7 @@ class _StorageBase:
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
+    def __setitem__(self, *args, **kwargs): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
     def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
