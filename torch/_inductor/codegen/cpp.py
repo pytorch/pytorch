@@ -215,12 +215,11 @@ class CppPrinter(ExprPrinter):
 
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
-        is_integer = x.is_integer and div.is_integer
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         mod = self.paren(self.doprint(mod))
         if div != "1" and div != "1L" and div != "1.0":
-            if is_integer:
+            if expr.is_integer:
                 x = f"div_floor_internal({x}, {div})"
             else:
                 x = f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
@@ -228,10 +227,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
-        is_integer = x.is_integer and div.is_integer
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        if is_integer:
+        if expr.is_integer:
             return f"div_floor_internal({x}, {div})"
         return (
             f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
