@@ -256,9 +256,9 @@ def make_export_graph_module(
     in_spec: Optional[pytree.TreeSpec] = None,
     out_spec: Optional[pytree.TreeSpec] = None,
     example_inputs: Any = None,
-    mutation_data: MutationData = None,
-    params: OrderedDict[str, torch.nn.Parameter] = None,
-    buffers: OrderedDict[str, torch.Tensor] = None,
+    mutation_data: Optional["MutationData"] = None,
+    params: Optional["OrderedDict[str, torch.nn.Parameter]"] = None,
+    buffers: Optional["OrderedDict[str, torch.Tensor]"] = None,
     class_name: str = "ExportGraphModule",
 ) -> fx.GraphModule:
 

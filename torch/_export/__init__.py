@@ -117,14 +117,13 @@ def _export(
                 assume_static_by_default=True,
             )
 
-            params = OrderedDict()
-            buffers = OrderedDict()
+            params: "OrderedDict[str, torch.nn.Parameter]" = OrderedDict(
+                dict(gm_torch_level.named_parameters(recurse=True, remove_duplicate=False))
+            )
 
-            for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
-                params[name] = param
-
-            for name, param in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
-                buffers[name] = param
+            buffers: "OrderedDict[str, torch.Tensor]" = OrderedDict(
+                dict(gm_torch_level.named_buffers(recurse=True, remove_duplicate=False))
+            )
 
             fake_inps = []
             for node in gm_torch_level.graph.nodes:
@@ -144,7 +143,7 @@ def _export(
             if not isinstance(return_val, (list, tuple, dict)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
-            orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args
+            orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
             gm_torch_level.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(

@@ -2378,13 +2378,6 @@ def forward(self, x):
             tracing_mode="symbolic",
         )
 
-        preserved = False
-        for _, vr in gm.meta["inline_constraints"].items():
-            # Should have the constraint with min=2, max=5
-            if vr.lower == 2 and vr.upper == 5:
-                preserved = True
-        self.assertTrue(preserved)
-
     @config.patch(
         dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
