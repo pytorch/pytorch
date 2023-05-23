@@ -14,6 +14,15 @@ enum class SDPBackend {
   efficient_attention = 2
 };
 
+// Note that if this changed make sure to update
+// the templated enum in mem_eff/kernel_forward.h and mem_eff/kernel_backward.h
+enum class CustomMaskType {
+  NoCustomMask = 0,
+  CausalFromTopLeft = 1,
+  CausalFromBottomRight = 2,
+  NumCustomMaskTypes,
+};
+
 inline c10::SymFloat calculate_scale(
     const at::Tensor& query,
     c10::optional<double> scale) {
