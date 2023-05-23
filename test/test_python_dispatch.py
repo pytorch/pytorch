@@ -93,6 +93,45 @@ class TestPythonRegistration(TestCase):
             my_lib = Library("aten", "IMPL")
             my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
+    def test_finalizer(self):
+        impls_refcnt = sys.getrefcount(torch.library._impls)
+        lib = Library("_torch_testing", "FRAGMENT")
+        lib.define("foo123(Tensor x) -> Tensor")
+
+        # 1 for `lib`, 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib), 2)
+        # We gained an additional reference that gets cleared when the finalizer runs
+        self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
+        # 1 for `lib`
+        # 1 for the finalizer
+        # 1 for sys.getrefcount
+        self.assertEqual(sys.getrefcount(lib._op_impls), 3)
+
+        def foo123(x):
+            pass
+
+        lib.impl("_torch_testing::foo123", foo123, "CPU")
+        key = '_torch_testing/foo123/CPU'
+        self.assertTrue(key in torch.library._impls)
+
+        saved_op_impls = lib._op_impls
+
+        # del will definitely work if the following passes
+        self.assertEqual(sys.getrefcount(lib), 2)
+        del lib
+
+        # 1 for saved_op_impls
+        # 1 for sys.getrefcount
+        # This function should be the last user of lib._op_impls:
+        # - lib should not have a reference anymore (it was del'ed)
+        # - lib's finalizer should not have a reference anymore
+        self.assertEqual(sys.getrefcount(saved_op_impls), 2)
+
+        self.assertTrue(key not in torch.library._impls)
+
+        # lib's finalizer should not have a reference anymore
+        self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt)
+
     def test_override_cpu_sum(self) -> None:
         # Example 1
         run = [False]
