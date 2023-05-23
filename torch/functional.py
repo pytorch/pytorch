@@ -139,7 +139,7 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -1726,7 +1726,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
-        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU

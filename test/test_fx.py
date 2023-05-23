@@ -1273,7 +1273,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint()
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', 'num_users']:
+        for s in ['args', 'kwargs', '#users']:
             assert s in stringed
 
     def test_custom_proxy_type(self):

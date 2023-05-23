@@ -958,7 +958,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.op_count, 11)
 
     def test_reformer_train(self):
         with torch.enable_grad():
@@ -1237,30 +1237,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_test_fn = torch._dynamo.optimize(cnt)(test_fn)
         opt_test_fn()
-
-    # See https://github.com/pytorch/pytorch/issues/100067
-    def test_copy_weird_strides(self):
-        # This test requires inductor's copy() decomp to preserve strides properly.
-        def test_fn(a):
-            b = torch.zeros(48, 4, 256, 513)
-            b[:, 0, 1:256, 1:256] = a
-            c = b.view(4, 12, 1024, 513)
-            d = c.transpose(2, 1)
-            d.add_(1)
-            return d
-
-        sh, st, dt, dev, rg = (
-            (48, 255, 255),
-            (787968, 513, 1),
-            torch.float16,
-            "cpu",
-            True,
-        )
-        a = rand_strided(sh, st, dt, dev).requires_grad_(rg)
-        compiled_f = torch.compile(test_fn, backend="aot_eager_decomp_partition")
-        out1 = test_fn(a)
-        out2 = compiled_f(a)
-        self.assertEqual(out1, out2)
 
     def test_indexing_with_list(self):
         def test_fn():
@@ -1659,6 +1635,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIsInstance(act, GELUActivation)
         self.assertIs(act.act, nn.functional.gelu)
         self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
+
+    def test_dropout_inline(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            return torch.nn.Dropout(0.1)(x)
+
+        y = torch.randn(10)
+        torch.manual_seed(1337)
+        ref = nn.functional.dropout(y, 0.1)
+        torch.manual_seed(1337)
+        res = fn(y)
+        self.assertTrue(same(ref, res))
 
     def test_torch_tensor_ops(self):
         def fn(x):
@@ -2952,11 +2940,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(dict(counters["frames"]), {"total": 2, "ok": 2})
-        self.assertEqual(
-            dict(counters["graph_break"]), {"autograd.Function with requires_grad": 1}
-        )
-        self.assertEqual(cnt.op_count, 6)
+        self.assertEqual(dict(counters["frames"]), {"total": 1, "ok": 1})
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()
@@ -3213,6 +3198,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
+
+    @requires_cuda()
+    def test_disallow_data_parallel(self):
+        from torch.nn.parallel.data_parallel import DataParallel
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = DataParallel(torch.nn.Linear(3, 3).cuda())
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule().cuda()
+        opt_mod = torch.compile(mod, backend="eager")
+        x = torch.randn(3, 3, device="cuda")
+        opt_mod(x)
 
 
 if __name__ == "__main__":

@@ -73,7 +73,9 @@ static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* MPSModule_synchronize(PyObject* _unused, PyObject* noargs) {
+static PyObject* MPSModule_deviceSynchronize(
+    PyObject* _unused,
+    PyObject* noargs) {
   HANDLE_TH_ERRORS
   at::detail::getMPSHooks().deviceSynchronize();
   Py_RETURN_NONE;
@@ -148,7 +150,10 @@ static PyObject* MPSModule_profilerStopTrace(
 // cppcoreguidelines-avoid-non-const-global-variables,
 // cppcoreguidelines-avoid-c-arrays)
 static struct PyMethodDef _MPSModule_methods[] = {
-    {"_mps_synchronize", MPSModule_synchronize, METH_NOARGS, nullptr},
+    {"_mps_deviceSynchronize",
+     MPSModule_deviceSynchronize,
+     METH_NOARGS,
+     nullptr},
     {"_mps_is_in_bad_fork", MPSModule_isInBadFork, METH_NOARGS, nullptr},
     {"_mps_is_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
     {"_mps_is_on_macos_13_or_newer",
