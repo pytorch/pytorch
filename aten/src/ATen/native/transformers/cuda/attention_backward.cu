@@ -115,8 +115,8 @@ _efficient_attention_backward(
     const at::Tensor& rng_seed_tensor, // seed using for generating random numbers for dropout
     const at::Tensor& rng_offset_tensor, // offset into random number sequence
     int64_t custom_mask_type,
-    int64_t num_splits_key,
-    const c10::optional<double> scale) {
+    const c10::optional<double> scale,
+    c10::optional <int64_t> num_splits_key) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -366,9 +366,8 @@ _efficient_attention_backward(
     auto parallelism_without_split_key =
         p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
-    p.num_splits_key = std::max<int64_t>(p.num_splits_key, num_splits_key);
-    if (num_splits_key <
-        1) { // Skip heuristic, if user provided an explicit value
+    if (num_splits_key.has_value()) { // Skip heuristic, if user provided an explicit value
+      p.num_splits_key = std::max<int64_t>(p.num_splits_key, num_splits_key.value());
       // If we already have enough parallelism, split-keys can help
       // better use L2 cache.
       // This is negligible when the seqlen is too small tho
@@ -577,8 +576,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
           seed_t,
           offset_t,
           static_cast<int64_t>(custom_mask_type),
-          -1, // num_split_keys
-          scale);
+          scale,
+          c10::nullopt);  // num_split_keys
   return std::make_tuple(
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
