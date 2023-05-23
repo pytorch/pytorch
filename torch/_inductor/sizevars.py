@@ -361,7 +361,7 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> Tuple[int]:
+    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
         return tuple(self.size_hint(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):

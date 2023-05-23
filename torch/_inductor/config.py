@@ -70,7 +70,9 @@ coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
 
-layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
+# prepend an underscore on purpose since most of the code should
+# use V.graph.layout_opt
+_layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
 warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 
 # control store vs recompute heuristic

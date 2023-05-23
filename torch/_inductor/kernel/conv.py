@@ -340,7 +340,7 @@ def convolution(
     weight.realize()
 
     # ndim can be 1 for convolution in models such as demucs
-    if config.layout_opt and ndim == 2:
+    if V.graph.layout_opt and ndim == 2:
         log.debug("FORCE CHANNELS LAST INPUTS FOR CONV")
         x = ir.ExternKernel.require_channels_last(x)
         # TODO maybe we can convert weights to channels last just once before
@@ -432,5 +432,12 @@ def _convolution(
     )
 
 
-if not config.layout_opt:
-    add_layout_constraint(aten.convolution, constrain_to_fx_strides)
+def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
+    assert fx_node.target == torch.ops.aten.convolution.default
+    if V.graph.layout_opt:
+        return args, kwargs
+    else:
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
+add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)

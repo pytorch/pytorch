@@ -161,16 +161,7 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
-        if self.decide_layout_opt():
-            # If we disabled the layout optimization here, we should add back
-            # the eager layout constaint for convolution to maintain the behavior
-            # as disabling layout optimization.
-            # This is important to pass the accuracy check for
-            #   phlippe_resnet and functorch_maml_omniglot
-            log.debug("add back the constraint for convolution")
-            from .lowering import add_layout_constraint, constrain_to_fx_strides
-
-            add_layout_constraint(torch.ops.aten.convolution, constrain_to_fx_strides)
+        self.layout_opt = self.decide_layout_opt()
 
         # Convert view to reshape if we are doing layout optimization.
         # It's needed because when we do layout optimization, an contiguous tensor
@@ -183,7 +174,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # Replace view op to reshape op in this case.
         # As an example, timm_resnest will fail if we don't do this.
-        if config.layout_opt:
+        if self.layout_opt:
             view_to_reshape(gm)
 
         self.extra_traceback = False  # we do our own error wrapping
@@ -217,15 +208,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler = None
         self.nodes_prefer_channels_last = (
-            self.find_nodes_prefer_channels_last() if config.layout_opt else set()
+            self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
         self._warned_fallback = {"aten.convolution_backward"}
 
-    def decide_layout_opt(self):
+    def decide_layout_opt(self) -> bool:
         """
-        Return true if layout_opt is disabled by this method.
+        Decide if we should enable layout optimization for this graph based on
+        heuristics.
         """
-        if not config.layout_opt:
+        if not config._layout_opt:
             return False
 
         gm = self.module
@@ -242,8 +234,7 @@ class GraphLowering(torch.fx.Interpreter):
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("ONLY A FEW CONV, SKIP LAYOUT OPT")
-            config.layout_opt = False
-            return True
+            return False
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
@@ -266,8 +257,7 @@ class GraphLowering(torch.fx.Interpreter):
             n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
         ):
             log.debug("FOUND GROUPED CONVOLUTION with >1 in_channels!")
-            config.layout_opt = False
-            return True
+            return False
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
         # channels last hurts performance.
@@ -284,8 +274,7 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug(
                 "SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL"
             )
-            config.layout_opt = False
-            return True
+            return False
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
@@ -294,8 +283,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
-            config.layout_opt = False
-            return True
+            return False
 
         # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
         # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
@@ -313,10 +301,9 @@ class GraphLowering(torch.fx.Interpreter):
                 log.debug(
                     "SKIP LAYOUT OPT BECAUSE _scaled_dot_product_flash_attention found"
                 )
-                config.layout_opt = False
-                return True
+                return False
 
-        return False
+        return True
 
     def find_nodes_prefer_channels_last(self):
         """
@@ -712,7 +699,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
                         ]
-                        if not config.layout_opt:
+                        if not self.layout_opt:
                             need_fixed_layout.append(torch.ops.aten.convolution.default)
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
