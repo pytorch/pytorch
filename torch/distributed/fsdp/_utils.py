@@ -1,28 +1,23 @@
-from typing import cast
+from functools import partial
+from typing import Any, cast, Type, Dict
 
 import torch
+
+from torch.distributed.utils import _apply_to_tensors
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.nn.modules.normalization import LayerNorm
 from torch.utils._mode_utils import no_dispatch
 
-from torch.distributed.utils import _apply_to_tensors
-from functools import partial
 
-
-def _contains_batchnorm(module):
-    return any(isinstance(mod, _BatchNorm) for mod in module.modules())
-
-
-def _contains_module(root, module_to_check):
-    return any(isinstance(mod, module_to_check) for mod in root.modules())
-
-def _override_module_mixed_precision(root, module_to_override, wrap_override_dict={"mixed_precision": None}):
+def _override_module_mixed_precision(
+    root: torch.nn.Module,
+    module_cls_to_override: Type[torch.nn.Module],
+    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},
+):
     for mod in root.modules():
-        if isinstance(mod, module_to_override):
+        if isinstance(mod, module_cls_to_override):
             mod._wrap_overrides = wrap_override_dict  # type: ignore[assignment]
-
-        if isinstance(mod, LayerNorm): # TODO: generalize this logic if additional types need to be supported
-
+            # if isinstance(mod, LayerNorm): # TODO: generalize this logic if additional types need to be supported
             old_dtype = None
 
             def cast_fn(dtype, x: torch.Tensor) -> torch.Tensor:
@@ -32,21 +27,18 @@ def _override_module_mixed_precision(root, module_to_override, wrap_override_dic
                 old_dtype = x.dtype
                 return x.to(dtype)
 
-            def ln_forward_pre_hook(module, args):
+            def forward_pre_hook(module, args):
                 return _apply_to_tensors(partial(cast_fn, torch.float32), args)
 
-            def ln_forward_post_hook(module, args, output):
+            def forward_post_hook(module, args, output):
                 nonlocal old_dtype
                 if old_dtype is not None:
                     return _apply_to_tensors(partial(cast_fn, old_dtype), output)
 
-            mod.register_forward_pre_hook(ln_forward_pre_hook)
-            mod.register_forward_hook(ln_forward_post_hook)
-
-def _override_batchnorm_mixed_precision(module):
-    for mod in module.modules():
-        if isinstance(mod, _BatchNorm):
-            mod._wrap_overrides = {"mixed_precision": None}  # type: ignore[assignment]
+            # We intentionally append both of these hooks so that they run after
+            # all other hooks.
+            mod.register_forward_pre_hook(forward_pre_hook, prepend=False)
+            mod.register_forward_hook(forward_post_hook, prepend=False)
 
 
 def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:

@@ -727,7 +727,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
             buffer_dtype=torch.float16,
-            _mixed_precision_module_classes_to_ignore=[_BatchNorm, nn.LayerNorm],
+            _module_classes_to_ignore=[_BatchNorm, nn.LayerNorm],
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,

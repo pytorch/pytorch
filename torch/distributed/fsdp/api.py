@@ -134,9 +134,10 @@ class MixedPrecision:
             arguments and keyword arguments to ``param_dtype`` for the root FSDP instance.
             It takes precedence over ``cast_forward_inputs`` for the root FSDP instance.
             (Default: ``True``)
-        _mixed_precision_module_classes_to_ignore: (Sequence[type]): Module classes to ignore
-            for mixed precision. This will make the specified nn.Module types ignore mixed precision,
-            by wrapping them in their own FSDP unit and setting mixed_precision=None. Note that this
+        _module_classes_to_ignore: (Sequence[type]): Module classes to ignore
+            for mixed precision. This will make the specified ``nn.Module`` types ignore mixed precision,
+            by wrapping them in their own FSDP unit and setting mixed_precision=None. Note that
+            this setting is only relevant for auto wrapping with ``auto_wrap_policy``, and that this
             implies the ultimate wrapping of your FSDP module will be different than what the policy
             specifies. Note that this API is experimental and subject to change.
 
@@ -213,7 +214,7 @@ class MixedPrecision:
     keep_low_precision_grads: bool = False
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
-    _mixed_precision_module_classes_to_ignore: Optional[Sequence[type]] = (_BatchNorm,)
+    _module_classes_to_ignore: Optional[Sequence[type]] = (_BatchNorm,)
 
 
 

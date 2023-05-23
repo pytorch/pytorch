@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
 from torch.distributed.fsdp._utils import (
-    _contains_module,
     _override_module_mixed_precision,
 )
 
@@ -18,9 +17,6 @@ from torch.distributed.fsdp.wrap import (
     _recursive_wrap,
     _wrap_module_cls_individually,
 )
-
-from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.modules.normalization import LayerNorm
 
 
 class FullyShardedModuleState(NamedTuple):
@@ -62,11 +58,10 @@ def _auto_wrap(
                 "if using an `auto_wrap_policy`"
             )
     mixed_precision = fsdp_kwargs["mixed_precision"]
-    if mixed_precision is not None and any(
-        _contains_module(root_module, module_to_override)
-        for module_to_override in mixed_precision._mixed_precision_module_classes_to_ignore
-    ):
-        for mp_module_to_override in mixed_precision._mixed_precision_module_classes_to_ignore:
+    if mixed_precision is not None:
+        for mp_module_to_override in mixed_precision._module_classes_to_ignore:
+            # Make modules of this particular type run in fp32 by wrapping them in their own
+            # FSDP unit.
             _override_module_mixed_precision(root_module, mp_module_to_override)
 
         auto_wrap_policy = functools.partial(
@@ -74,7 +69,7 @@ def _auto_wrap(
             policies=[
                 auto_wrap_policy,
                 partial(
-                    _wrap_module_cls_individually, module_classes=mixed_precision._mixed_precision_module_classes_to_ignore
+                    _wrap_module_cls_individually, module_classes=mixed_precision._module_classes_to_ignore
                 ),
             ],
         )
