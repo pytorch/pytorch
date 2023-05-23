@@ -21,6 +21,7 @@ void SchemaInfo::addArgumentValues(
 
   for (size_t i = 0; i < value_list.size(); i++) {
     if (value_list[i].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       value_map_[schema_.arguments()[i].name()] = *value_list[i];
       alias_maps_current_ = false;
     }

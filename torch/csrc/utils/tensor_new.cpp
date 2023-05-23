@@ -189,6 +189,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
         return *scalarType;
       }
     }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *scalarType;
   }
   AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);

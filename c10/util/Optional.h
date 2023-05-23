@@ -4,6 +4,10 @@
 #include <optional>
 #include <type_traits>
 
+// Macros.h is not needed, but it does namespace shenanigans that lots
+// of downstream code seems to rely on. Feel free to remove it and fix
+// up builds.
+#include <c10/macros/Macros.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
