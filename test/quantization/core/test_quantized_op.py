@@ -1459,6 +1459,52 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool2d results are off")
 
+    """Tests 3D max pool operation on quantized tensors."""
+    def test_max_pool3d(self):
+        torch_types = [torch.qint8, torch.quint8]
+        kernels = [1, 3]
+        strides = [1, 3]
+        dilations = [1, 3]
+        paddings = [1, 3]
+        ceil_modes = [True, False]
+        options = itertools.product(torch_types, kernels, strides, dilations, paddings, ceil_modes)
+        for torch_type, kernel, stride, dilation, padding, ceil_mode in options:
+            X = torch.randint(20, 40, (2, 3, 16, 10, 10)).to(torch.float)
+            scale = 15
+            zero_point = 20
+            # Check constraints for invalid input
+            if not (kernel // 2 >= padding):
+                continue
+            iT, iH, iW = X.shape[-3:]
+            oT = pool_output_shape(iT, kernel, padding, stride, dilation, ceil_mode)
+            if not (oT > 0):
+                continue
+            oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
+            if not (oH > 0):
+                continue
+            oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
+            if not (oW > 0):
+                continue
+
+            a_pool = torch.nn.functional.max_pool3d(X, kernel_size=kernel,
+                                                    stride=stride,
+                                                    padding=padding, dilation=dilation,
+                                                    ceil_mode=ceil_mode)
+            a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
+                                              zero_point=zero_point, dtype=torch_type)
+            a_ref = a_ref.dequantize()
+            qa = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            ops_under_test = {
+                "torch": torch.max_pool3d,
+                "nn.functional": torch.nn.functional.max_pool3d,
+            }
+            for name, op in ops_under_test.items():
+                a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                           dilation=dilation, ceil_mode=ceil_mode)
+                self.assertEqual(a_ref, a_hat.dequantize(),
+                                 msg="{} results are off".format(name))
+
     """Tests max pool operation on NHWC quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=10),
@@ -1518,6 +1564,55 @@ class TestQuantizedOps(TestCase):
             padding=_pair(padding), dilation=_pair(dilation), ceil_mode=ceil_mode)
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool2d results are off")
+
+    """Tests 3D max pool operation on quantized channel_last tensors."""
+    def test_max_pool3d_nhwc(self):
+        torch_types = [torch.qint8, torch.quint8]
+        kernels = [1, 3]
+        strides = [1, 3]
+        dilations = [1, 3]
+        paddings = [1, 3]
+        ceil_modes = [True, False]
+        options = itertools.product(torch_types, kernels, strides, dilations, paddings, ceil_modes)
+        for torch_type, kernel, stride, dilation, padding, ceil_mode in options:
+            X = torch.randint(20, 40, (2, 67, 16, 10, 10)).to(torch.float)
+            X_copy = copy.deepcopy(X)
+            X = X.contiguous(memory_format=torch.channels_last_3d)
+            scale = 15
+            zero_point = 20
+            # Check constraints for invalid input
+            if not (kernel // 2 >= padding):
+                continue
+            iT, iH, iW = X.shape[-3:]
+            oT = pool_output_shape(iT, kernel, padding, stride, dilation, ceil_mode)
+            if not (oT > 0):
+                continue
+            oH = pool_output_shape(iH, kernel, padding, stride, dilation, ceil_mode)
+            if not (oH > 0):
+                continue
+            oW = pool_output_shape(iW, kernel, padding, stride, dilation, ceil_mode)
+            if not (oW > 0):
+                continue
+
+            a_pool = torch.nn.functional.max_pool3d(X, kernel_size=kernel,
+                                                    stride=stride,
+                                                    padding=padding, dilation=dilation,
+                                                    ceil_mode=ceil_mode)
+            a_ref = torch.quantize_per_tensor(a_pool, scale=scale,
+                                              zero_point=zero_point, dtype=torch_type)
+            a_ref = a_ref.dequantize()
+            qa = torch.quantize_per_tensor(X_copy, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qa = qa.contiguous(memory_format=torch.channels_last_3d)
+            ops_under_test = {
+                "torch": torch.max_pool3d,
+                "nn.functional": torch.nn.functional.max_pool3d,
+            }
+            for name, op in ops_under_test.items():
+                a_hat = op(qa, kernel_size=kernel, stride=stride, padding=padding,
+                           dilation=dilation, ceil_mode=ceil_mode)
+                self.assertEqual(a_ref, a_hat.dequantize(),
+                                 msg="{} results are off".format(name))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
