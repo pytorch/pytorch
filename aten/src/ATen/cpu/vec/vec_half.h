@@ -1,23 +1,4 @@
 #include <ATen/cpu/vec/intrinsics.h>
-
-#ifdef CPU_CAPABILITY_AVX512
-#if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(64)))
-#elif defined(_WIN32)
-#define __at_align__ __declspec(align(64))
-#else
-#define __at_align__
-#endif
-#else // CPU_CAPABILITY_AVX512
-#if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(32)))
-#elif defined(_WIN32)
-#define __at_align__ __declspec(align(32))
-#else
-#define __at_align__
-#endif
-#endif // CPU_CAPABILITY_AVX512
-
 namespace at {
 namespace vec {
 // See Note [CPU_CAPABILITY namespace]
