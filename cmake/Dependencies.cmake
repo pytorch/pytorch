@@ -54,7 +54,6 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -1241,6 +1240,7 @@ endif()
 # ---[ cuSPARSELt
 if(USE_CUSPARSELT)
   target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_DIR})
+endif()
 
 # ---[ HIP
 if(USE_ROCM)
