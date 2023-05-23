@@ -533,6 +533,38 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
                         + m1[scale] * FloorDiv(m1[base], m1[divisor])
                     )
                     return expr
+    for term1 in expr.args:
+        m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
+        if m1 and m1[divisor] == 1:
+            for term2 in expr.args:
+                m2 = term2.match(scale * ModularIndexing(base, divisor, mod1))
+                if (
+                    m2
+                    and term1 != term2
+                    and m1[base] != m2[base]
+                    and m1[divisor] == m2[divisor]
+                    and m1[mod1] == m2[mod1]
+                ):
+                    if m1[base] % m2[base] == 0:
+                        factor = m1[base] // m2[base]
+                        expr = join_dimensions(
+                            expr
+                            - term1
+                            + factor
+                            * m1[scale]
+                            * ModularIndexing(m2[base], m1[divisor], m1[mod1])
+                        )
+                        return expr
+                    if m2[base] % m1[base] == 0:
+                        factor = m2[base] // m1[base]
+                        expr = join_dimensions(
+                            expr
+                            - term2
+                            + factor
+                            * m2[scale]
+                            * ModularIndexing(m1[base], m2[divisor], m2[mod1])
+                        )
+                        return expr
     return expr
 
 

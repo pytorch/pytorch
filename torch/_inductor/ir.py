@@ -2688,7 +2688,9 @@ class ExternKernel(InputsKernel):
         offset = V.graph.sizevars.offset_var(index, rw.range_vars)
         expected = sympy_dot(rw.range_vars, strides) + offset
 
-        if index != expected:
+        from .sizevars import join_dimensions
+
+        if join_dimensions(index - expected) != 0:
             log.debug(
                 "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
@@ -2779,6 +2781,18 @@ class ExternKernel(InputsKernel):
         # TODO - Storage to InputBuffer
         if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
             return x
+        if (
+            isinstance(x, TensorBox)
+            and isinstance(x.data, BaseView)
+            and not isinstance(x.data, ReinterpretView)
+            and is_storage_and_layout(x.unwrap_view())
+            and not isinstance(x.unwrap_view().data, ExternKernelAlloc)
+        ):
+            try:
+                x.data = cls.convert_to_reinterpret_view(x.data)
+                return cls.require_stride_order(x, order)
+            except NotImplementedError:
+                pass
         x = cls.copy_input(x)
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
