@@ -454,7 +454,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2, 3)
         result = f(x)
 
-        self.assertEqual(result, ((x.sin(), x.cos()), ))
+        self.assertEqual(result, ((x.sin(), x.cos()),))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),

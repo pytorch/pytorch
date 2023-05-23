@@ -783,12 +783,17 @@ def speculate_subgraph(
                 unimplemented("HigherOrderOperator with body with pytree output")
 
             if isinstance(output, (ListVariable, TupleVariable)):
+
+                def _is_supported(var):
+                    return isinstance(var, TensorVariable) or (
+                        isinstance(var, ConstantVariable) and var.value is None
+                    )
+
                 if any(
-                    not isinstance(var, TensorVariable)
-                    for var in output.unpack_var_sequence(tx)
+                    not _is_supported(var) for var in output.unpack_var_sequence(tx)
                 ):
                     unimplemented(
-                        "HigherOrderOperator body's output must consist of tensors only"
+                        "HigherOrderOperator body's output must consist of tensors or None only"
                     )
 
             if always_restore:
