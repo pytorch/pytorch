@@ -154,8 +154,8 @@ if RUN_CUDA:
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
-        # BaseTest("test_cat"),  # alias
-        # BaseTest("test_convolution1"),
+        BaseTest("test_cat"),  # alias
+        BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
