@@ -136,15 +136,6 @@ ENV OPENSSL_ROOT_DIR /opt/openssl
 ENV OPENSSL_DIR /opt/openssl
 RUN rm install_openssl.sh
 
-ARG TRITON
-# Install triton, this needs to be done before sccache because the latter will
-# try to reach out to S3, which docker build runners don't have access
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/triton.txt triton.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt
-
 # [Optional] Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
@@ -158,6 +149,15 @@ COPY ci_commit_pins/text.txt text.txt
 
 RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
+
+ARG TRITON
+# Install triton, this needs to be done before sccache because the latter will
+# try to reach out to S3, which docker build runners don't have access
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton.txt triton.txt
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton.txt
 
 ARG ONNX
 # Install ONNX dependencies

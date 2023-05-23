@@ -85,16 +85,6 @@ COPY ./common/install_cmake.sh install_cmake.sh
 RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
-ARG TRITON
-# Install triton, this needs to be done before sccache because the latter will
-# try to reach out to S3, which docker build runners don't have access
-COPY ./common/install_triton.sh install_triton.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/triton.txt triton.txt
-COPY triton_version.txt triton_version.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
-
 # [Optional] Install torch inductor benchmark deps
 ARG INDUCTOR_BENCHMARK
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
@@ -108,6 +98,16 @@ COPY ci_commit_pins/text.txt text.txt
 
 RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
+
+ARG TRITON
+# Install triton, this needs to be done before sccache because the latter will
+# try to reach out to S3, which docker build runners don't have access
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton.txt triton.txt
+COPY triton_version.txt triton_version.txt
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
