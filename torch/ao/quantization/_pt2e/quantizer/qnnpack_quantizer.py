@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import functools
 import operator
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Any
 
 import torch
 import torch._dynamo as torchdynamo
@@ -15,7 +15,6 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
     get_weight_obs_or_fq_ctr,
 )
 
-from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
@@ -30,6 +29,17 @@ from .quantizer import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
 )
+from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.observer import (
+    HistogramObserver,
+    MinMaxObserver,
+    PerChannelMinMaxObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
+    PlaceholderObserver,
+)
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+
 
 __all__ = [
     "QNNPackQuantizer",
@@ -125,16 +135,32 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
 ):
+    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = \
+        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
+
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
         qscheme=torch.per_tensor_affine,
         is_dynamic=False,
+        observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(eps=2**-12),
     )
     qscheme = (
         torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
+    weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = MinMaxObserver
+    if is_qat:
+        weight_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
+    elif is_per_channel:
+        weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver
+
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    if is_qat:
+        if qscheme == torch.per_tensor_symmetric:
+            extra_args["observer"] = MovingAverageMinMaxObserver
+        else:
+            extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-127,
@@ -142,8 +168,14 @@ def get_symmetric_quantization_config(
         qscheme=qscheme,
         ch_axis=0,
         is_dynamic=False,
+        observer_or_fake_quant_ctr=weight_observer_or_fake_quant_ctr.with_args(**extra_args),
     )
-    bias_quantization_spec = QuantizationSpec(dtype=torch.float)
+
+    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = PlaceholderObserver
+    bias_quantization_spec = QuantizationSpec(
+        dtype=torch.float,
+        observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
+    )
     quantization_config = QuantizationConfig(
         act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
     )
@@ -152,11 +184,6 @@ def get_symmetric_quantization_config(
 
 def get_supported_config_and_operators() -> List[OperatorConfig]:
     return get_supported_symmetric_config_and_operators()
-
-
-def _get_default_obs_or_fq_ctr():
-    return PlaceholderObserver.with_args(dtype=torch.float)
-
 
 def _is_annotated(nodes: List[Node]):
     """
@@ -221,18 +248,20 @@ class QNNPackQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         global_config = self.global_config
-        _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
+        # _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
+        # TODO: validate that global_config is supported
+        self.annotate_symmetric_config(model, global_config)
 
         return model
 
-    @register_annotator(
-        [
-            get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
-            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
-            get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
-            get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
-        ]
-    )
+    # @register_annotator(
+    #     [
+    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
+    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
+    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
+    #     ]
+    # )
     def annotate_symmetric_config(
         self, model: torch.fx.GraphModule, config: QuantizationConfig
     ) -> torch.fx.GraphModule:
