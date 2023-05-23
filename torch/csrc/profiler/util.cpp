@@ -310,7 +310,7 @@ std::string inputOpIdsToStr(
   return str;
 }
 
-std::string dtypesToStr(const std::vector<std::string>& types) {
+std::string strListToStr(const std::vector<std::string>& types) {
   if (types.empty()) {
     return "[]";
   } else {
@@ -324,6 +324,21 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
   }
+}
+
+std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
+  std::vector<std::string> concrete_str_inputs;
+  std::stringstream ss;
+  for (const auto& val : list) {
+    if (val.isNone()) {
+      concrete_str_inputs.emplace_back("");
+    } else {
+      ss.str("");
+      ss << val;
+      concrete_str_inputs.emplace_back(ss.str());
+    }
+  }
+  return strListToStr(concrete_str_inputs);
 }
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {

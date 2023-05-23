@@ -23,7 +23,7 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -46,6 +46,7 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_dtype_size,
+    get_sympy_Expr_dtype,
     sympy_product,
 )
 from .virtualized import V
@@ -75,10 +76,14 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+        constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
     if isinstance(constant_buffer, sympy.core.numbers.Integer):
         return torch.int64
+
+    if isinstance(constant_buffer, sympy.Expr):
+        return get_sympy_Expr_dtype(constant_buffer)
+
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -165,7 +170,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
-        self.wrapper_code = None
+        self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
@@ -212,6 +217,20 @@ class GraphLowering(torch.fx.Interpreter):
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
 
+    def get_numel(self, buffer_name: str):
+        from .ir import MultiOutputLayout
+
+        if buffer_name in self.constants:
+            return self.constants[buffer_name].numel()
+        if buffer_name in self.name_to_buffer:
+            buf = self.name_to_buffer[buffer_name]
+            if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
+                return 1
+            return buf.get_numel()
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name].get_numel()
+        raise KeyError(f"could not find {buffer_name}")
+
     def random_seed_buffer(self, device: torch.device):
         """
         Return a device-unique 1-element tensor storing our RNG seed.
@@ -249,6 +268,7 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
+        metrics.disable_cpp_wrapper += 1
         self.cpp_wrapper = False
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
@@ -436,6 +456,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+        value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(value, (TensorBox, sympy.Expr))
             if not isinstance(value, TensorBox):
@@ -603,7 +624,9 @@ class GraphLowering(torch.fx.Interpreter):
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
+            elif isinstance(
+                value, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+            ):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
@@ -697,6 +720,9 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
+        # TODO. Revisit this once the logging API is more mature
+        output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:

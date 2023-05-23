@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -151,8 +152,11 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
+      uint64_t profile_id =
+          getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
 
-      stream->copy_and_sync(tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking);
+      stream->copy_and_sync(
+          tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking, profile_id);
       [destBuffer release];
     }
   }
@@ -187,7 +191,11 @@ static void copy_to_mps_stride_contig(at::Tensor& dst, const at::Tensor& src, bo
                                                           options:options
                                                       deallocator:nil];
 
-    stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
+    uint64_t profile_id =
+        getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst, size_to_copy, non_blocking);
+
+    stream->copy_and_sync(
+        sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking, profile_id);
     [sourceBuffer release];
   }
 }
@@ -218,8 +226,12 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
+  // we don't have tensors info for profiling here
+  uint64_t profile_id =
+      getMPSProfiler().beginProfileCopy(src, dst, at::OptionalTensorRef(), at::OptionalTensorRef(), size, false);
+
   MPSStream* stream = getCurrentMPSStream();
-  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true);
+  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true, profile_id);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking) {
@@ -267,14 +279,17 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
 
   MPSStream* stream = getCurrentMPSStream();
   if (sameDataType) {
+    uint64_t profile_id = getMPSProfiler().beginProfileCopy(sourceBuffer, destBuffer, src, dst_, src.nbytes(), true);
     // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
-    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset);
+    stream->copy(sourceBuffer, destBuffer, src.nbytes(), src_byte_offset, dst_byte_offset, profile_id);
   } else {
     if (dst_byte_offset) {
       auto tmp = at::empty(dst_.sizes(), dst_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
       auto tmpBuffer = getMTLBufferStorage(tmp);
       copy_cast_mps(tmp, src, tmpBuffer, sourceBuffer);
-      stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset);
+
+      uint64_t profile_id = getMPSProfiler().beginProfileCopy(tmpBuffer, destBuffer, tmp, dst_, dst_.nbytes(), true);
+      stream->copy(tmpBuffer, destBuffer, dst_.nbytes(), 0, dst_byte_offset, profile_id);
     } else {
       copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
     }
