@@ -1301,11 +1301,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.global_registry:
-            custom_op = torch._custom_op.global_registry[func.name()]
+        if func.name() in torch._custom_op.impl.global_registry:
+            custom_op = torch._custom_op.impl.global_registry[func.name()]
             if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
                     result = custom_op._get_impl("abstract").func(*args, **kwargs)
                     return result
 
