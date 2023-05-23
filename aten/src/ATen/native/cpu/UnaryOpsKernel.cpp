@@ -139,7 +139,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -243,7 +243,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void frac_kernel(TensorIteratorBase& iter) {
+static void frac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -252,7 +252,7 @@ void frac_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void logical_not_kernel(TensorIteratorBase& iter) {
+static void logical_not_kernel(TensorIteratorBase& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
@@ -283,7 +283,7 @@ void neg_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void sign_kernel(TensorIteratorBase& iter){
+static void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
@@ -337,7 +337,7 @@ static void sgn_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinc_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "sinc_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t {
@@ -370,7 +370,7 @@ static void cosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void acosh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -378,7 +378,7 @@ static void acosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void asinh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -386,7 +386,7 @@ static void asinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void atanh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "atanh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "atanh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::atanh(a); });
@@ -394,7 +394,7 @@ static void atanh_kernel(TensorIteratorBase& iter) {
 }
 
 static void digamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "digamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "digamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
@@ -402,7 +402,7 @@ static void digamma_kernel(TensorIteratorBase& iter) {
 }
 
 static void trigamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "trigamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "trigamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return trigamma(a); });
@@ -469,7 +469,7 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -559,7 +559,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
-void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
         bool neg_flag = false;
@@ -690,7 +690,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
       constexpr int64_t grain_size = 2048;                                          \
       iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                     \
     });                                                                             \
@@ -703,7 +703,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
         constexpr int64_t grain_size = 2048;                                                     \
         iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
     });                                                                                          \
