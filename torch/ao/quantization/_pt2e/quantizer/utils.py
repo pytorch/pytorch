@@ -4,27 +4,28 @@ from torch.ao.quantization._pt2e.quantizer.quantizer import (
     QuantizationConfig,
     QuantizationSpec,
 )
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
 from torch.ao.quantization.observer import (
-    HistogramObserver,
-    MinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    PerChannelMinMaxObserver,
+    _PartialWrapper,
     PlaceholderObserver,
 )
+from torch.ao.quantization.qconfig import _obs_or_fq_ctr_equals
 
-def create_observer(observer_type, quantization_spec: QuantizationSpec, **extra_kwargs):
+def create_observer(quantization_spec: QuantizationSpec, **extra_kwargs):
     if quantization_spec is None:
         return None
+    observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
     kwargs = get_observer_kwargs(quantization_spec)
+    kwargs.pop("observer_or_fake_quant_ctr")
     # we will remove is_dynamic from QuantizationSpec because
     # it seems that dynamic range quantization
-    if observer_type != PlaceholderObserver:
+    if not _obs_or_fq_ctr_equals(observer_or_fake_quant_ctr, PlaceholderObserver):
         kwargs.pop("is_dynamic")
-    if "PerChannel" not in observer_type.__name__:
+    obs_or_fq_class = observer_or_fake_quant_ctr
+    if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
+        obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
+    if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
         kwargs.pop("ch_axis")
-    return observer_type.with_args(**kwargs, **extra_kwargs)
+    return observer_or_fake_quant_ctr.with_args(**kwargs, **extra_kwargs)
 
 
 def get_act_obs_or_fq_ctr(quantization_config: QuantizationConfig):
@@ -42,18 +43,7 @@ def get_act_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         raise Exception(
             "Unsupported quantization_spec for activation: {}".format(quantization_spec)
         )
-    if quantization_config.is_qat:
-        return create_observer(
-            FusedMovingAvgObsFakeQuantize,
-            quantization_spec,
-            reduce_range=False,
-            eps=2**-12,
-        )
-    else:  # ptq
-        return create_observer(
-            HistogramObserver, quantization_spec, reduce_range=False, eps=2**-12
-        )
-
+    return create_observer(quantization_spec)
 
 def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -69,18 +59,7 @@ def get_weight_obs_or_fq_ctr(quantization_config: QuantizationConfig):
         raise ValueError(
             f"Unsupported quantization_spec {quantization_spec} for weight"
         )
-    observer_type = MinMaxObserver
-    extra_args = {}
-    if quantization_config.is_qat:
-        observer_type = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
-        if quantization_spec.qscheme == torch.per_tensor_symmetric:
-            extra_args = {"observer": MovingAverageMinMaxObserver}
-        else:
-            extra_args = {"observer": MovingAveragePerChannelMinMaxObserver}  # type: ignore[dict-item]
-    elif quantization_spec.qscheme == torch.per_channel_symmetric:
-        observer_type = PerChannelMinMaxObserver  # type: ignore[assignment]
-    return create_observer(observer_type, quantization_spec, eps=2**-12, **extra_args)
-
+    return create_observer(quantization_spec)
 
 def get_bias_obs_or_fq_ctr(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -92,4 +71,4 @@ def get_bias_obs_or_fq_ctr(quantization_config: QuantizationConfig):
     assert (
         quantization_spec.dtype == torch.float
     ), "Only float dtype for bias is supported for bias right now"
-    return PlaceholderObserver.with_args(dtype=quantization_spec.dtype)
+    return create_observer(quantization_spec)

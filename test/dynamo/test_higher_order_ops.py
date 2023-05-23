@@ -417,7 +417,31 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             {"Invoking an nn.Module inside HigherOrderOperator": 1},
         )
 
-    def test_fallback_on_non_single_tensor_output(self):
+    def test_flat_list_output(self):
+        def f(x):
+            return wrap(lambda x: [torch.sin(x), torch.cos(x)], x)
+
+        x = torch.randn(3)
+        self._test_wrap_simple(f, (x,), 2, expected_opcount=3)
+
+    def test_fallback_on_python_primitives_output(self):
+        counters.clear()
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return wrap(lambda x: [1, torch.sin(x), 2.0], x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, [1, torch.sin(x), 2.0])
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
+        )
+
+    def test_fallback_on_nested_tuple_output(self):
         # We can likely support this in the future, I just don't want to deal
         # with it right now
         counters.clear()
@@ -425,16 +449,35 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnt)
         def f(x):
-            return wrap(lambda x: (x.sin(), x.cos()), x)
+            return wrap(lambda x: ((x.sin(), x.cos()),), x)
 
         x = torch.randn(2, 3)
         result = f(x)
 
-        self.assertEqual(result, (x.sin(), x.cos()))
+        self.assertEqual(result, ((x.sin(), x.cos()),))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator with body with non single Tensor output": 1},
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
+        )
+
+    def test_fallback_on_output_with_dict(self):
+        # We can likely support this in the future, I just don't want to deal
+        # with it right now
+        counters.clear()
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return wrap(lambda x: [{"a": -x}], x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, [{"a": -x}])
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_access_module_attr(self):
