@@ -1769,7 +1769,7 @@ class TestSDPA(NNTestCase):
             if warn_only
             else contextlib.nullcontext()
         )
-        with use_deterministic_algorithims(True, warn_only=True):
+        with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
                 with warning_context:
                     torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()

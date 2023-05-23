@@ -394,7 +394,7 @@ _efficient_attention_backward(
             "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
       } else {
         TORCH_CHECK(
-            num_splits_key <= 1,
+            num_splits_key.value_or(1) <= 1,
             "Using `num_splits_key > 1` makes the algorithm non-deterministic, and pytorch's deterministic mode is enabled");
         p.num_splits_key = 1;
       }
