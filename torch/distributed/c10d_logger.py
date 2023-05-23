@@ -14,7 +14,7 @@ from typing import List, Tuple
 from torch.distributed.logging_handlers import _log_handlers
 import torch.distributed as dist
 
-__all__: List[str] = []
+__all__: List[str] = ["exception_logger", "time_logger"]
 
 
 def _get_or_create_logger() -> logging.Logger:
