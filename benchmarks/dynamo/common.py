@@ -86,7 +86,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
-    "nanogpt_generate",  # invalid multinomial distribution (sum of probabilities <= 0)
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
 ]
@@ -262,6 +261,7 @@ CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
+    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [

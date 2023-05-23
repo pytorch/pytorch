@@ -48,6 +48,7 @@ using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticIn
 // dimensions to get 8. Adjust this number as necessary
 constexpr int64_t kVmapStaticDimVecSize = 8;
 using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
+using VmapSymDimVector = SmallVector<c10::SymInt, kVmapStaticDimVecSize>;
 
 // NOTE: [What is an VmapTransform?]
 // An *VmapTransform* converts logical views of tensors to physical views.
