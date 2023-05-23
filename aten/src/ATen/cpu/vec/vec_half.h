@@ -20,7 +20,7 @@ inline uint16_t float_to_half(float val) {
 #endif
 }
 
-inline float half_to_float(uint16_t val) {
+inline float half2float_scalar(uint16_t val) {
 #if defined(CPU_CAPABILITY_AVX2)
   __m128i v = _mm_cvtsi32_si128(val);
   __m256 o = _mm256_cvtph_ps(v);
