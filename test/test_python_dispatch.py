@@ -2151,7 +2151,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.is_contiguous()
@@ -2162,7 +2162,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             self.assertEqual(e.is_contiguous(), True)
             e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
-            err_msg = "no implementation found for"
+            err_msg = "Multiple dispatch failed for"
             e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
             self.assertEqual(e.is_contiguous(), False)
             with self.assertRaisesRegex(TypeError, err_msg):
@@ -2233,7 +2233,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return torch.device('meta')
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.prim.device'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.prim.device'"
             with self.assertRaisesRegex(TypeError, err_msg):
                 e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
                 e.device()
@@ -2271,7 +2271,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return data.dim()
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.dim'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.dim'"
             e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.dim()
@@ -2325,7 +2325,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.sym_stride'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.sym_stride'"
             e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.stride()
@@ -2377,7 +2377,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return None
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.aten.sym_size'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.aten.sym_size'"
             e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.size()
@@ -2446,7 +2446,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                         return data.layout
                     return NotImplemented
 
-            err_msg = "no implementation found for 'torch.ops.prim.layout'"
+            err_msg = "Multiple dispatch failed for 'torch.ops.prim.layout'"
             e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.layout
