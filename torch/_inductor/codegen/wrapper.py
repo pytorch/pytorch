@@ -251,6 +251,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
+        self.kenel_numel_expr = set()
         self.lines = []
         self.declare = ""
         self.ending = ""
