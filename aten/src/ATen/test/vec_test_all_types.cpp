@@ -168,69 +168,59 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
     }
-    TYPED_TEST(SignManipulationHalfPrecision, Absolute) {
+    TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
+      typedef enum  {
+        ABS,
+        NEGATE
+      } SignOpType;
       using vec = TypeParam;
       using VT = UholdType<TypeParam>;
       using RT = float; // reference
-      constexpr auto N = vec::size();
-      CACHE_ALIGN RT x_fp[N];
-      CACHE_ALIGN VT x_hp[N];
-      auto seed = TestSeed();
-      ValueGen<RT> generator(RT(-1), RT(1), seed);
-      for (const auto i : c10::irange(N)) {
-        x_fp[i] = generator.get();
-        x_hp[i] = VT(x_fp[i]);
-      }
       float atol = 0.01f;
       float rtol = 0.01f;
-      auto cmp = [=](RT ref, VT val) {
-        return std::abs(ref - val) <= atol + rtol * std::abs(val);
-      };
 
-      auto x_fp_vec = vfloat::loadu(x_fp);
-      x_fp_vec.abs().store(x_fp);
-      x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
-      x_fp_vec.abs().store(x_fp + vfloat::size());
-
-      auto x_hp_vec = vec::loadu(x_hp);
-      x_hp_vec.abs().store(x_hp);
-
-      for (int64_t len = 1; len <= N; len++) {
-        ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
-            << "\nabsolute, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
-      }
-    }
-    TYPED_TEST(SignManipulationHalfPrecision, Negate) {
-      using vec = TypeParam;
-      using VT = UholdType<TypeParam>;
-      using RT = float; // reference
-      constexpr auto N = vec::size();
-      CACHE_ALIGN RT x_fp[N];
-      CACHE_ALIGN VT x_hp[N];
-      auto seed = TestSeed();
-      ValueGen<RT> generator(RT(-1), RT(1), seed);
-      for (const auto i : c10::irange(N)) {
-        x_fp[i] = generator.get();
-        x_hp[i] = VT(x_fp[i]);
-      }
-      float atol = 0.01f;
-      float rtol = 0.01f;
-      auto cmp = [=](RT ref, VT val) {
+      auto cmp = [&](RT ref, VT val) {
         return std::abs(ref - RT(val)) <= atol + rtol * std::abs(val);
       };
 
-      auto x_fp_vec = vfloat::loadu(x_fp);
-      x_fp_vec.neg().store(x_fp);
-      x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
-      x_fp_vec.neg().store(x_fp + vfloat::size());
-
-      auto x_hp_vec = vec::loadu(x_hp);
-      x_hp_vec.neg().store(x_hp);
-
-      for (int64_t len = 1; len <= N; len++) {
-        ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
-            << "\nnegate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+#define APPLY_FN_AND_STORE(VEC_TYPE)                            \
+      [&](SignOpType op_type, VEC_TYPE& x_fp_vec, void *x_fp) { \
+        if (op_type == SignOpType::NEGATE) {                    \
+          x_fp_vec.neg().store(x_fp);                           \
+        } else {                                                \
+          x_fp_vec.abs().store(x_fp);                           \
+        }                                                       \
       }
+
+      auto apply_fn_and_store_ref = APPLY_FN_AND_STORE(vfloat);
+      auto apply_fn_and_store_half = APPLY_FN_AND_STORE(vec);
+
+      auto half_precision_ut = [&](SignOpType op_type) {
+        constexpr auto N = vec::size();
+        CACHE_ALIGN RT x_fp[N];
+        CACHE_ALIGN VT x_hp[N];
+        auto seed = TestSeed();
+        ValueGen<RT> generator(RT(-1), RT(1), seed);
+        for (const auto i : c10::irange(N)) {
+            x_fp[i] = generator.get();
+            x_hp[i] = VT(x_fp[i]);
+        }
+        auto x_fp_vec = vfloat::loadu(x_fp);
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp);
+        x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp + vfloat::size());
+
+        auto x_hp_vec = vec::loadu(x_hp);
+        apply_fn_and_store_half(op_type, x_hp_vec, x_hp);
+
+        for (int64_t len = 0; len < N; len++) {
+            ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nabs/negate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+        }
+      };
+
+      half_precision_ut(SignOpType::ABS);
+      half_precision_ut(SignOpType::NEGATE);
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;

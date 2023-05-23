@@ -3,7 +3,7 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 from functorch import make_fx
 
@@ -322,7 +322,7 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Union[Type[Any], str], Override]],
+    module_override: Optional[List[Override]],
     parallel_mode: ParallelMode,
     *args: Any,
     **kwargs: Any,
@@ -346,16 +346,19 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        # FIXME(@mrshenli): type might overlap with fqns
-        for typ_or_fqn, override in module_override.items():
-            for fqn, submodule in mod.named_modules():
-                if (
-                    isinstance(typ_or_fqn, str)
-                    and typ_or_fqn == fqn
-                    or isinstance(typ_or_fqn, type)
-                    and isinstance(submodule, typ_or_fqn)
-                ):
-                    accessor.swap_submodule(fqn, override.replacement(fqn, submodule))
+        def swap(fqn_prefix: str, module: torch.nn.Module) -> None:
+            for override in module_override:  # type: ignore[union-attr]
+                for name, child in module.named_children():
+                    if len(name) == 0:
+                        continue
+                    fqn = fqn_prefix + "." + name if fqn_prefix != "" else name
+                    new_child = override.replacement(fqn, child)
+                    if id(new_child) == id(child):
+                        swap(fqn, new_child)
+                    else:
+                        accessor.swap_submodule(fqn, new_child)
+
+        swap("", mod)
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))
@@ -467,7 +470,7 @@ def _compile(
 
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
-        for _, override in module_override.items():
+        for override in module_override:
             gm = override.transform(gm, flat_state)
 
     return _CompiledResult(gm, mod, opt, flat_state)
@@ -479,7 +482,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Union[Type[Any], str], Override]] = None,
+    module_override: Optional[List[Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
     parallel_mode: Optional[ParallelMode] = None,
 ):
@@ -490,12 +493,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
-            dictionary maps from target :class:`nn.Module` types or
-            fully-qualified names to :class:`Override` objects. The
-            :class:`Override` objects provide :class:`nn.Module` replacements
-            during tracing and a graph transformation function after tracing.
-            (Default: ``None``)
+        module_override (Optional[List[Override]]): a list of Override instances
+            that will be applied to the module in order. The :class:`Override`
+            objects provide :class:`nn.Module` replacements during tracing and a
+            graph transformation function after tracing. (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
             a callback that will be called after the original callable is
             compiled and distributed (usually after the first iteration) to
