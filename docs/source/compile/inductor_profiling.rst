@@ -1,3 +1,6 @@
+TorchInductor GPU Profiling
+===========================
+
 This document lists some useful commands and workflows that can help
 people dive into a model’s perf in TorchInductor. When a model is not
 running as fast as expected, we may want to dive into the model and
@@ -69,7 +72,7 @@ https://gist.github.com/shunting314/8243734a38b5733ea78479209c0ae893
 
 There are quite a lot of interesting things to note in the output
 
-1. We write a chrome trace file for the profile so we can load the trace
+a. We write a chrome trace file for the profile so we can load the trace
    and interact with it. In the log, look for lines as follows to find
    the path of the trace file.
 
@@ -83,7 +86,7 @@ browser and load the file as the UI suggested ) will show UI as follows:
 
 One can zoom in and out to check the profile.
 
-2. We report the percent of GPU time regarding to the wall time by log
+b. We report the percent of GPU time regarding to the wall time by log
    line like:
 
 **Percent of time when GPU is busy: 102.88%**
@@ -103,7 +106,7 @@ low percent of time when GPU is busy:
 This means the model has a lot of CPU overhead. This is consistent with
 the fact that enabling cudagraphs improve densenet121’s perf a lot.
 
-3. We can break down the GPU time to different categories of kernels. In
+c. We can break down the GPU time to different categories of kernels. In
    the mixnet_l example, we see
 
 -  pointwise kernel takes 28.58%
@@ -114,7 +117,7 @@ the fact that enabling cudagraphs improve densenet121’s perf a lot.
 This information can be found in the summary line (i.e. the last line)
 of the report for each kernel category.
 
-4. We call also zoom into a certain category of kernels, e.g. let’s
+d. We call also zoom into a certain category of kernels, e.g. let’s
    check reduction kernels:
 
 .. image:: ../_static/img/inductor_profiling/kernel_breakdown.png
