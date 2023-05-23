@@ -159,11 +159,6 @@ COPY ci_commit_pins/triton.txt triton.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt
 
-# Reinstall the correct cmake
-ENV CMAKE_VERSION $(get_conda_version cmake)
-ENV NUMPY_VERSION $(get_conda_version numpy)
-RUN if [ -n "${CONDA_CMAKE}" ]; then ./conda_reinstall cmake="${CMAKE_VERSION}" && ./conda_reinstall numpy="${NUMPY_VERSION}"; fi
-
 ARG ONNX
 # Install ONNX dependencies
 COPY ./common/install_onnx.sh ./common/common_utils.sh ./
