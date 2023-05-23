@@ -684,7 +684,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
-    "torch/csrc/sparse/CusparseLtKernels.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
@@ -706,6 +705,7 @@ libtorch_cuda_distributed_extra_sources = [
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
+    "torch/csrc/sparse/CusparseLtKernels.cpp",
     "torch/csrc/cuda/nccl.cpp",
 ]
 
@@ -1436,7 +1436,6 @@ aten_cuda_with_sort_by_key_source_list = [
 aten_cuda_cu_with_sort_by_key_source_list = [
     "aten/src/ATen/native/cuda/Unique.cu",
 ]
-
 
 # Followings are source code for xnnpack delegate
 
