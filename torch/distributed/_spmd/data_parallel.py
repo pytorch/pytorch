@@ -5,12 +5,13 @@ from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 import torch
+
+import torch.distributed.distributed_c10d as c10d
 import torch.fx as fx
 import torch.library
 import torch.nn as nn
 
 import torch.utils._pytree as pytree
-
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
@@ -283,8 +284,16 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     """
     util function to generate a partial strategy
     """
+    # NOTE: we use AVG by default, avg reduction is needed depending on
+    # the loss function, for most loss function it should do
+    # gradient averaging. There might be certain cases it should
+    # not do gradient averaging (i.e. sum) but it's pretty rare.
+    # TODO: Only NCCL supports AVG so using backend like Gloo would
+    # crash, we should figure out a way to support avg reduction
+    # for non-NCCL backend
+    reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
     )
 
 

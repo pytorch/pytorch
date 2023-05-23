@@ -68,9 +68,6 @@ class TestDataParallel(DTensorTestBase):
 
         # train a DDP model once manually as DDP grads are different
         torch.sum(ddp_mod(ddp_inp[0]) - ddp_inp[1]).backward()
-        with torch.no_grad():
-            for p in ddp_mod.parameters():
-                p.grad *= self.world_size
         ddp_opt.step()
 
         # compile it with replicate and run step once
