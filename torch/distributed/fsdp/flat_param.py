@@ -26,6 +26,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.parameter import  _ParameterMeta  # type: ignore[attr-defined]
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
@@ -173,17 +174,18 @@ class FlatParamShardMetadata(NamedTuple):
     param_offsets: Tuple[Tuple[int, int], ...]
 
 
-class _FlatParameterMeta(torch._C._TensorMeta):
+class _FlatParameterMeta(_ParameterMeta):
     # Make `isinstance(t, FlatParameter)` return True for custom tensor
     # instances that have the _is_flat_param flag for BC
     def __instancecheck__(self, instance):
-        return super().__instancecheck__(instance) or (
+        # NB: do NOT test the super implementation
+        return (
             isinstance(instance, torch.Tensor)
             and getattr(instance, "_is_flat_param", False)
         )
 
 
-class FlatParameter(metaclass=_FlatParameterMeta):
+class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     """
     This is the flat parameter used by :class:`FullyShardedDataParallel`. It is
     comprised of one or more original parameters, which are flattened and
@@ -304,10 +306,38 @@ class FlatParameter(metaclass=_FlatParameterMeta):
             of zeros) as needed.
     """
 
+    _unpadded_unsharded_size: torch.Size
+    _padded_unsharded_size: torch.Size
+    _sharded_size: torch.Size
+    _num_params: int
+    _param_infos: Tuple[ParamInfo, ...]
+    _shapes: Tuple[torch.Size, ...]
+    _fqns: Tuple[str, ...]
+    _param_extensions: Tuple[Optional[Any], ...]
+    _numels_with_padding: Tuple[int, ...]
+    _numels: Tuple[int, ...]
+    _shard_param_infos: Tuple[_ShardParamInfo, ...]
+    _shared_param_infos: Tuple[SharedParamInfo, ...]
+    _modules: Set[nn.Module]
+    _shard_numel_padded: int
+    _local_shard: Tensor
+    _full_param_padded: Tensor
+    _full_prec_full_param_padded: Tensor
+    _post_backward_hook_state: Tuple[Any, Any]
+    _mp_shard: Tensor
+    _cpu_grad: Tensor
+    _saved_grad_shard: Tensor
+    _params: Optional[List[nn.Parameter]]
+    _shared_params: Optional[List[nn.Parameter]]
+    _tensors: Optional[List[Optional[Tensor]]]
+    _is_grad_none_mask: Optional[List[bool]]
+
+    _is_padding_mask: List[bool]
+
     def __new__(cls, data=None, requires_grad=True):
         assert cls is FlatParameter, "subclasses FlatParameter not supported"
-        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)
-        r._is_flat_param = True
+        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)  # type: ignore[call-arg]
+        r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
     # NB: This is not a regular method, because FlatParameter are not actually
@@ -369,19 +399,19 @@ class FlatParameter(metaclass=_FlatParameterMeta):
             assert shared_params is not None and len(shared_params) == len(
                 shared_param_infos
             )
-            self._params: Optional[List[nn.Parameter]] = []
+            self._params = []
             for param, is_padding in zip(params, is_padding_mask):
                 if not is_padding:
                     self._params.append(param)
-            self._shared_params: Optional[List[nn.Parameter]] = shared_params
+            self._shared_params = shared_params
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
-            self._is_grad_none_mask: Optional[List[bool]] = [
+            self._is_grad_none_mask = [
                 False for _ in range(self._num_params)
             ]
-            self._tensors: Optional[List[Optional[Tensor]]] = [
+            self._tensors = [
                 None for _ in range(self._num_params)
             ]
         else:
@@ -1348,7 +1378,7 @@ class FlatParamHandle:
         num_grad_none[0] = flat_param.grad is None
         dist.all_reduce(num_grad_none, group=self.process_group)
         if num_grad_none[0] == self.world_size:
-            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            flat_param._saved_grad_shard = None  # type: ignore[assignment]
             self._use_unsharded_grad_views()
             return
 
@@ -2286,6 +2316,7 @@ class FlatParamHandle:
         # - CPU offloading: `_cpu_grad`
         # - No CPU offloading + sharded strategies: `_saved_grad_shard`
         # - No CPU offloading + `NO_SHARD`: `grad`
+        grad: Optional[Tensor]
         if hasattr(flat_param, "_cpu_grad"):
             grad = flat_param._cpu_grad  # type: ignore[attr-defined]
         elif hasattr(flat_param, "_saved_grad_shard"):
