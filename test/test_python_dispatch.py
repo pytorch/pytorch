@@ -730,7 +730,7 @@ class TestCustomOp(TestCase):
 
     def test_private_ctor(self):
         with self.assertRaisesRegex(RuntimeError, 'CustomOp constructor is private'):
-            CustomOp(None, None, None, None)
+            CustomOp(None, None, None, None, None)
 
     def test_lifetime(self):
         @custom_op(f'{TestCustomOp.test_ns}::foo')
@@ -789,6 +789,21 @@ class TestCustomOp(TestCase):
             foo(y, x)
         foo._destroy()
 
+    def test_autograd_notimplemented_gradmode(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu'])
+        def foo_impl(x, y):
+            return x * y
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3)
+        with torch.no_grad():
+            # Shouldn't raise, because we are in no_grad
+            foo(y, x)
+
     def test_impl_cpu(self):
         @custom_op(f'{TestCustomOp.test_ns}::foo')
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -823,6 +838,271 @@ class TestCustomOp(TestCase):
             with self.assertRaisesRegex(ValueError, "we only support device_type"):
                 foo.impl(invalid_type)(foo_impl)
         foo._destroy()
+
+    def test_backward_partially_registered(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return grad * saved.cos()
+
+        x = torch.randn([], requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, "unable to find a 'save_for_backward'"):
+            y = foo(x)
+            y.backward()
+
+    def test_save_for_backward_inputs_are_namedtuple(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        hit = 0
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            nonlocal hit
+            hit += 1
+            self.assertTrue(isinstance(inputs, tuple))
+            self.assertEqual(list(inputs._asdict().keys()), ['x'])
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        self.assertEqual(hit, 1)
+        y.backward()
+        self.assertEqual(hit, 1)
+
+    def test_backward_returns_dict(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return grad * saved.cos()
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, 'to be a dict'):
+            y.backward()
+
+    def test_backward_dict_invalid_keys(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos(), 'y': None}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, "to have keys {'x'}"):
+            y.backward()
+
+    def test_backward_dict_grad_for_nontensor(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, dim):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos(), 'dim': None}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, 32)
+        with self.assertRaisesRegex(RuntimeError, "non-Tensor-like types"):
+            y.backward()
+
+    def test_backward_dict_requires_keys_for_input_tensors(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, y):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, x)
+        with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
+            y.backward()
+
+    def test_backward_dict_requires_keys_for_input_optional_tensors(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor, y: Optional[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x, y):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': grad * saved.cos()}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x, None)
+        with self.assertRaisesRegex(RuntimeError, r"to have keys {.*'y'.*}"):
+            y.backward()
+
+    def test_backward_grads_are_tensor_or_none(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.x
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'x': (grad * saved.cos(),)}
+
+        x = torch.randn([], requires_grad=True)
+        y = foo(x)
+        with self.assertRaisesRegex(RuntimeError, 'either None or a Tensor'):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads_with_same_numel(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': [grad * saved.cos(), None]}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "3 gradients but got 2"):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads_none_or_Tensor(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': [grad * saved.cos(), None, (None,)]}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "None or Tensor"):
+            y.backward()
+
+    def test_backward_tensorlist_input_requires_list_grads(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(xs):
+            return xs[0].sin()
+
+        @foo.impl_save_for_backward()
+        def foo_save_for_backward(inputs, output):
+            return inputs.xs[0]
+
+        @foo.impl_backward()
+        def foo_backward(ctx, saved, grad):
+            return {'xs': None}
+
+        xs = [torch.randn([], requires_grad=True) for _ in range(3)]
+        y = foo(xs)
+        with self.assertRaisesRegex(RuntimeError, "list of gradients"):
+            y.backward()
+
+    def test_backward_output_differentiability_type(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
+            ...
+
+        with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
+            @foo.impl_backward(output_differentiability=True)
+            def foo_backward(ctx, saved, grad):
+                return {'xs': None}
+
+    def test_backward_output_differentiability_numel(self):
+        @custom_op(f'{TestCustomOp.test_ns}::foo')
+        def foo(xs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+            ...
+
+        with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
+            @foo.impl_backward(output_differentiability=[True])
+            def foo_backward(ctx, saved, grad):
+                return {'xs': None}
 
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_impl_separate(self):
