@@ -669,7 +669,6 @@ meta_function_skips = {
     torch.functional.tensordot : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.linalg.matrix_norm : {c128, f32, c64, f64},
-    torch.linalg.matrix_power : {c128, c64},
     torch.linalg.matrix_rank : {c128, c64},
     torch.linalg.svd : {c128, c64},
     torch.matmul : {bf16, c128, f64, f32, f16, c64},
@@ -743,7 +742,6 @@ meta_function_device_skips['cpu'] = {
 meta_function_device_skips['cuda'] = {
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
-    torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
     torch.nn.functional.cross_entropy: {f16},
