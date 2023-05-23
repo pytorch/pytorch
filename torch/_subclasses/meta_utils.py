@@ -243,7 +243,7 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    static = len(free_symbols(t) == 0)
+                    static = len(free_symbols(t)) == 0
                     assert static, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
