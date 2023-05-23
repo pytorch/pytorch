@@ -1,4 +1,7 @@
-"""Adapted from https://github.com/arogozhnikov/einops/blob/master/tests/test_parsing.py."""
+# Owner(s): ["module: functorch"]
+
+"""Adapted from https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/tests/test_parsing.py."""
+
 from functorch.dim.einops._parsing import AnonymousAxis, ParsedExpression, _ellipsis
 from torch.testing._internal.common_utils import TestCase, run_tests
 from typing import Callable

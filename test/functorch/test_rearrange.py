@@ -1,4 +1,7 @@
-"""Adapted from https://github.com/arogozhnikov/einops/blob/master/tests/test_ops.py."""
+# Owner(s): ["module: functorch"]
+
+"""Adapted from https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/tests/test_ops.py."""
+
 from typing import List, Tuple
 
 import numpy as np
