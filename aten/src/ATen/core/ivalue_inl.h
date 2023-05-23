@@ -22,6 +22,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/FunctionRef.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -1627,7 +1628,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
   TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
-      const EnumHolder& v);
+      const ivalue::EnumHolder& v);
 
   TORCH_API const std::string qualifiedClassName() const;
 

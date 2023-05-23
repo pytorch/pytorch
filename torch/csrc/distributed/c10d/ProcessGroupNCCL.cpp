@@ -2209,6 +2209,29 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
   TORCH_CHECK(false, "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
+c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      OpType::COALESCED,
+      "nccl:all_gather_into_tensor_coalesced");
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
