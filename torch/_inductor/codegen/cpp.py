@@ -215,47 +215,63 @@ class CppPrinter(ExprPrinter):
 
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
+        is_integer = x.is_integer and div.is_integer
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} / {div})"
+        if div != "1" and div != "1L" and div != "1.0":
+            if is_integer:
+                x = f"div_floor_internal({x}, {div})"
+            else:
+                x = f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
+        is_integer = x.is_integer and div.is_integer
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"std::floor({x} / {div})"
+        if is_integer:
+            return f"div_floor_internal({x}, {div})"
+        return (
+            f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
+        )
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"std::floor({self._print(expr.args[0])})"
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
         if exp == 0.5:
-            return f"std::sqrt({base})"
-        assert exp.is_integer
+            r = f"std::sqrt({base})"
+        else:
+            assert exp.is_integer
         exp = int(exp)
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            r = "*".join([self.paren(base)] * exp)
         elif exp < 0:
-            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
-            return "1"
+            r = "1.0"
+
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
         if expr.q == 1:
-            return f"{expr.p}"
-        return f"{expr.p}.0/{expr.q}.0"
+            r = f"{expr.p}"
+        else:
+            r = f"{expr.p}.0/{expr.q}.0"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"std::ceil({self._print(expr.args[0])})"
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
 
 cexpr = CppPrinter().doprint

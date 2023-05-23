@@ -15,6 +15,7 @@
 #endif
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/copysign.h>
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
@@ -104,6 +105,46 @@ inline float flag_to_float_scalar(T src) {
   float ret;
   *(uint32_t*)(&ret) = src ? 0xFFFFFFFF : 0;
   return ret;
+}
+
+
+// Copy from aten/src/ATen/native/cpu/BinaryOpsKernel.cpp.
+template <typename scalar_t>
+inline scalar_t div_floor_internal(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
+  if (C10_UNLIKELY(b == 0)) {
+    // Divide by zero: return standard IEEE result
+    return a / b;
+  }
+
+  auto mod = std::fmod(a, b);
+  auto div = (a - mod) / b;
+  if ((mod != 0) && (b < 0) != (mod < 0)) {
+    div -= scalar_t(1);
+  }
+
+  scalar_t floordiv;
+  if (div != 0) {
+    floordiv = std::floor(div);
+    if (div - floordiv > scalar_t(0.5)) {
+      floordiv += scalar_t(1.0);
+    }
+  } else {
+    floordiv = c10::copysign(scalar_t(0), a / b);
+  }
+  return floordiv;
+}
+
+template <>
+inline long div_floor_internal(long a, long b) {
+  if (c10::is_negative(a) != c10::is_negative(b)) {
+    // Subtracts one from the results of truncation division if the
+    // divisor and dividend have different sign(bit)s and the remainder of
+    // the division is nonzero
+    const auto quot = a / b;
+    const auto rem = a % b;
+    return rem ? quot - 1 : quot;
+  }
+  return a / b;
 }
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
