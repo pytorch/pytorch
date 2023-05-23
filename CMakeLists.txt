@@ -1118,6 +1118,10 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
 
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
