@@ -107,7 +107,9 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
 
     def test_all_gather_into_tensor(self):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
-        output_tensor = torch.cat([torch.empty_like(input_tensor) for _ in range(self.world_size)])
+        output_tensor = torch.cat(
+            [torch.empty_like(input_tensor) for _ in range(self.world_size)]
+        )
         dist.all_gather_into_tensor(output_tensor, input_tensor)
         expected = torch.cat([torch.ones(3, 3) * rank for rank in range(self.world_size)])
         self.assertEqual(output_tensor, expected)
