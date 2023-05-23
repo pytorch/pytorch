@@ -93,6 +93,20 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
+# [Optional] Install torch inductor benchmark deps
+ARG INDUCTOR_BENCHMARK
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/vision.txt vision.txt
+COPY ci_commit_pins/audio.txt audio.txt
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
+COPY ci_commit_pins/text.txt text.txt
+
+RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
+
 # (optional) Install Android NDK
 ARG ANDROID
 ARG ANDROID_NDK
@@ -135,20 +149,6 @@ RUN bash ./install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 ENV OPENSSL_DIR /opt/openssl
 RUN rm install_openssl.sh
-
-# [Optional] Install torch inductor benchmark deps
-ARG INDUCTOR_BENCHMARK
-COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/vision.txt vision.txt
-COPY ci_commit_pins/audio.txt audio.txt
-COPY ci_commit_pins/huggingface.txt huggingface.txt
-COPY ci_commit_pins/timm.txt timm.txt
-COPY ci_commit_pins/torchbench.txt torchbench.txt
-COPY ci_commit_pins/text.txt text.txt
-
-RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
 
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will

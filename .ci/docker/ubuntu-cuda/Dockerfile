@@ -32,6 +32,20 @@ COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
+# [Optional] Install torch inductor benchmark deps
+ARG INDUCTOR_BENCHMARK
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/vision.txt vision.txt
+COPY ci_commit_pins/audio.txt audio.txt
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+COPY ci_commit_pins/torchbench.txt torchbench.txt
+COPY ci_commit_pins/text.txt text.txt
+
+RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
+
 # Install gcc
 ARG GCC_VERSION
 COPY ./common/install_gcc.sh install_gcc.sh
@@ -84,20 +98,6 @@ ARG CMAKE_VERSION
 COPY ./common/install_cmake.sh install_cmake.sh
 RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
-
-# [Optional] Install torch inductor benchmark deps
-ARG INDUCTOR_BENCHMARK
-COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/vision.txt vision.txt
-COPY ci_commit_pins/audio.txt audio.txt
-COPY ci_commit_pins/huggingface.txt huggingface.txt
-COPY ci_commit_pins/timm.txt timm.txt
-COPY ci_commit_pins/torchbench.txt torchbench.txt
-COPY ci_commit_pins/text.txt text.txt
-
-RUN if [ -n "${INDUCTOR_BENCHMARK}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh vision.txt audio.txt huggingface.txt timm.txt torchbench.txt text.txt
 
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
