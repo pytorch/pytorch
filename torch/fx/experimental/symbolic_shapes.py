@@ -6,7 +6,6 @@ import itertools
 import logging
 import math
 import operator
-import os
 import re
 import sys
 import textwrap
@@ -31,9 +30,10 @@ from torch import (  # noqa: F401
     SymFloat,
     SymInt,
 )
-from torch._guards import ShapeGuard, Source, TracingContext
+from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
+from torch.utils._traceback import format_frame
 
 InputList = List
 DimList = List
@@ -68,10 +68,6 @@ def uninteresting_files():
         torch._inductor.sizevars,
     ]
     return {inspect.getfile(m) for m in mods}
-
-def shorten_filename(fn):
-    prefix = os.path.commonprefix([fn, __file__])
-    return fn[len(prefix):]
 
 SYM_FUNCTION_MODE = None
 
@@ -323,12 +319,26 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if not isinstance(a, SymInt):
         if not (min <= a <= max):
             raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
+
+        if (
+            (fake_mode := detect_fake_mode()) is not None and
+            getattr(fake_mode, "shape_env", None) is not None
+        ):
+            # If we are tracing with a fake mode then add this integer to the
+            # shape_env's var_to_range
+            sym_integer = sympy.Integer(a)
+            shape_env = fake_mode.shape_env
+            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
+
         return
+
     if isinstance(a.node.expr, sympy.Integer):
         if not (min <= int(a.node.expr) <= max):
             raise ValueRangeError(f"Invalid value {int(a.node.expr)} for range [{min}:{max}]")
         return
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+
     # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
@@ -1525,6 +1535,9 @@ class DimConstraints:
         # printer for solutions
         self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
 
+        # inconsistencies found on substituting with concrete values / static solutions
+        self._inconsistencies: List[str] = []
+
     def rewrite_with_congruences(self, s, expr):
         """
         Eliminate expressions of the form b // d and b % d while adding congruences of the form b % d == k.
@@ -1589,7 +1602,13 @@ class DimConstraints:
             return
         orig_expr = expr
         orig_reduced = orig_expr.subs(self._var_to_val)
-        assert orig_reduced != sympy.false, f"{orig_expr} is inconsistent!"
+        # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
+        # It is possible that `expr` will fail the consistency check because of
+        # precision errors. Specifically, on substituting its free symbols with
+        # their concrete values, we might end up comparing floats. Until we have
+        # a fix for this issue, we delay raising such failures. See solve().
+        if orig_reduced == sympy.false:
+            self._inconsistencies.append(f"{orig_expr} is inconsistent!")
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1602,7 +1621,11 @@ class DimConstraints:
             expr = self.rewrite_with_congruences(s, expr)
             if expr != sympy.true:
                 reduced = expr.subs(self._var_to_val)
-                assert reduced != sympy.false, f"{expr}, obtained by rewriting {orig_expr} with congruences, is inconsistent!"
+                if reduced == sympy.false:
+                    self._inconsistencies.append(
+                        f"{expr}, obtained by rewriting {orig_expr} with congruences, "
+                        "is inconsistent!"
+                    )
                 if isinstance(expr, sympy.Eq):
                     # special status for symbols that have equalities (see `solve` below)
                     self._symbols_with_equalities.add(s)
@@ -1657,7 +1680,14 @@ class DimConstraints:
 
         return reduced_congruences
 
+    def raise_inconsistencies(self):
+        if self._inconsistencies:
+            msg = "\n".join(self._inconsistencies)
+            self._inconsistencies.clear()
+            raise ValueError(f"The following inconsistencies were found:\n{msg}")
+
     def solve(self):
+        self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
         while(self._symbols_with_equalities):
@@ -1679,6 +1709,7 @@ class DimConstraints:
             self._multivariate_inequalities = set()
             for expr in multivariate_inequalities:
                 self.add(expr.subs(s, self._substitutions[s]))
+            self.raise_inconsistencies()
 
             # simplify symbolic equivalences: some of them will now become specializations!
             symbolic_equivalences = self._symbolic_equivalences
@@ -1719,28 +1750,80 @@ class DimConstraints:
         # LocalSource.name() wraps the name with L[""]. We use regular
         # expression to do the replacement to avoid traversing up
         # the source hierarchy manually.
-        def unwrap_local_source(source_name):
-            return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
+        def extract_and_rewrite_local(dc):
+            match = re.search(r"L\['(.+?)'\]", dc)
+            if match is None:
+                return
+            arg = match.expand(r'\1')
+            dc = re.sub(r"L\['(.+?)'\]", r'\1', dc)
+            return arg, dc
+
+        def group(results, args_index):
+            groups = defaultdict(list)
+            for dc in results:
+                local = extract_and_rewrite_local(dc)
+                if local is None:
+                    # This can happen, e.g., with `assume_constant_result`.
+                    # In that case, we drop the constraint.
+                    # TODO(avik) Maybe we should generate an assertion here?
+                    continue
+                arg, dc = local
+                if arg in args_index:
+                    groups[args_index[arg]].append(dc)
+                else:
+                    raise ValueError(f"Cannot find param `{arg}` in {signature}")
+            sorted_groups = []
+            for idx, dcs in sorted(groups.items()):
+                _, arg = idx
+                sorted_groups.append((arg, sorted(dcs)))
+            return sorted_groups
+
+        # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
+        # There is no change in behavior since 2 is the default lower bound.
+        def remove_default_lower_bound(dc):
+            return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
 
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+        args_index = {}
+        for i, arg in enumerate(signature.parameters.keys()):
+            args_index[arg] = (i, arg)
+
+        def print_results(grouped, indent, result_fn):
+            nonlocal buf
+
+            space = False
+            for arg, results in grouped:
+                if space:
+                    buf += "\n"
+                else:
+                    space = True
+                buf += f"\n{indent}# {arg}:"
+                for result in results:
+                    buf += f"\n{indent}{result_fn(result)}"
 
         buf = ""
         indent = 4 * " "
         if self._static_results:
-            sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
+            grouped_static_results = group(self._static_results, args_index)
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
             buf += f"\n```\ndef specializations{str(signature)}:"
-            for result in sorted_static_results:
-                buf += f"\n{indent}assert {result}"
+            print_results(
+                grouped_static_results,
+                indent,
+                lambda result: f"assert {result}",
+            )
             buf += "\n```\n"
         if self._dynamic_results:
-            sorted_dynamic_results = sorted(self._dynamic_results)
+            grouped_dynamic_results = group(self._dynamic_results, args_index)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
-            for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{unwrap_local_source(result)},"
+            print_results(
+                grouped_dynamic_results,
+                indent * 2,
+                lambda result: f"{remove_default_lower_bound(result)},",
+            )
             buf += f"\n{indent}]\n```\n"
         return buf
 
@@ -1798,7 +1881,7 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
-        self.var_to_stack: Dict["sympy.Symbol", str] = {}
+        self.var_to_stack: Dict["sympy.Symbol", traceback.StackSummary] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1961,19 +2044,19 @@ class ShapeEnv:
 
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
@@ -2608,7 +2691,8 @@ class ShapeEnv:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         for s in expr.free_symbols:
-            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, self.var_to_stack[s])
+            stacktrace = ''.join(traceback.format_list(self.var_to_stack[s]))
+            self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
         return GuardOnDataDependentSymNode(
             "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
@@ -2789,9 +2873,6 @@ class ShapeEnv:
                 for frame in reversed(tb):
                     if frame.filename not in uninteresting_files():
                         break
-
-                def format_frame(frame):
-                    return f"{shorten_filename(frame.filename)}:{frame.lineno} in {frame.name}"
 
                 # NB: this stack is truncated, but it's fine because the main
                 # stack_info will give you the rest of the info you need
