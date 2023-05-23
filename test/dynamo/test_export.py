@@ -2249,6 +2249,23 @@ def forward(self, x):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
+    def test_export_module_specify_constraints_signature(self):
+        y = torch.randn([3, 3, 3])
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 3:
+                    return x.sin()
+                return x.cos()
+
+        mod = Mod()
+        torch._dynamo.export(mod, y)
+
+        with self.assertRaisesRegex(
+            ConstraintViolationError, "def specify_constraints\\(x\\):"
+        ):
+            torch._dynamo.export(mod, y, constraints=[dynamic_dim(y, 0)])
+
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
 

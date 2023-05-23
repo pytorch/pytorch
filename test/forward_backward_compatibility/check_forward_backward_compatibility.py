@@ -147,7 +147,6 @@ ALLOW_LIST = [
     # nested tensor temporary auxiliary ops
     ("aten::_reshape_nested", datetime.date(9999, 1, 1)),
     ("aten::_reshape_nested_backward", datetime.date(9999, 1, 1)),
-    ("aten::_structured_sparse_linear", datetime.date(2023, 6, 1)),
     ("aten::sum.SymInt", datetime.date(2022, 11, 30)),
     ("aten::mps_linear", datetime.date(9999, 1, 1)),
     ("aten::_mps_linear", datetime.date(9999, 1, 1)),

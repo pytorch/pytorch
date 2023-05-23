@@ -22,6 +22,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/FunctionRef.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
@@ -1053,18 +1054,18 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
 #endif
-    auto childFut = createInstance(std::move(type));
+    auto childFut = createInstance(::std::move(type));
     addCallback([childFut,
-                 cb = ::std::move(callback)](Future& parentFut) mutable {
+                 cb = std::move(callback)](Future& parentFut) mutable {
       try {
         if constexpr (::std::is_convertible_v<typename c10::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
           auto [ivalue, storages] = cb(parentFut);
-          childFut->markCompleted(::std::move(ivalue), std::move(storages));
+          childFut->markCompleted(::std::move(ivalue), ::std::move(storages));
         } else {
           childFut->markCompleted(cb(parentFut));
         }
-      } catch (::std::exception&) {
-        childFut->setError(::std::current_exception());
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
       }
     });
     return childFut;
@@ -1621,7 +1622,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
   TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
-      const ivalue::EnumHolder& v);
+      const EnumHolder& v);
 
   TORCH_API const std::string qualifiedClassName() const;
 
