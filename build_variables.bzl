@@ -120,7 +120,6 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
-    "torch/csrc/sparse/CusparseLtKernels.cpp",
 ]
 
 torch_unpickler_common = [
@@ -685,6 +684,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+    "torch/csrc/sparse/CusparseLtKernels.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
@@ -889,6 +889,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/python_dispatch.cpp",
     "torch/csrc/utils/python_symnode.cpp",
     "torch/csrc/utils/pybind.cpp",
+    "torch/csrc/utils/pyobject_preservation.cpp",
     "torch/csrc/utils/structseq.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",

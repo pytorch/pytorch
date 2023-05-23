@@ -32,7 +32,7 @@ namespace torch {
 namespace ao {
 namespace pruning {
 // create a container that holds relevant data for cusparselt linear
-struct CusparseLt : torch::CustomClassHolder {
+struct CusparseLt : public torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
   // this tensor is magic, will segfault when removed?
   at::Tensor sparse_compressed;
@@ -189,16 +189,15 @@ at::Tensor CusparseLt::cusparselt_helper(
 
   cusparseOrder_t result_order =
       (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-  cusparseOrder_t dense_input_order =
-      (input.is_contiguous()) ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
-  cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+// cusparseOrder_t dense_input_order = CUSPARSE_ORDER_ROW;
+  cusparseOperation_t opB = (input.is_contiguous())? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
 
-  int64_t num_B_rows = (input.is_contiguous()) ? k : n;
-  int64_t num_B_cols = (input.is_contiguous()) ? n : k;
+  int64_t num_B_rows = (input.is_contiguous())? k : n;
+  int64_t num_B_cols = (input.is_contiguous())? n : k;
   int64_t num_C_rows = num_A_rows;
   int64_t num_C_cols = n;
 
-  int64_t ldb = (input.is_contiguous()) ? num_B_cols : num_B_rows;
+  int64_t ldb = num_B_cols;
   int64_t ldc = (transposeResult) ? num_C_rows : num_C_cols;
 
   // initalize dense input descriptor
@@ -210,7 +209,7 @@ at::Tensor CusparseLt::cusparselt_helper(
       ldb,
       alignment,
       type,
-      dense_input_order))
+      order))
 
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
       &handle,

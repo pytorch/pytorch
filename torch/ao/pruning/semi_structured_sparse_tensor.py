@@ -1,6 +1,121 @@
 import torch
 
 
+class SemiStructuredSparseTensorCUTLASS(torch.Tensor):
+
+    @staticmethod
+    def __new__(
+        cls,
+        original_tensor,
+        original_shape=None,
+        compressed_tensor=None,
+        mask_or_meta=None,
+        transposed=False,
+    ):
+        kwargs = {}
+        kwargs["device"] = (
+            original_tensor.device
+            if original_tensor is not None
+            else compressed_tensor.device
+        )
+        kwargs["dtype"] = (
+            original_tensor.dtype
+            if original_tensor is not None
+            else compressed_tensor.dtype
+        )
+        kwargs["layout"] = (
+            original_tensor.layout
+            if original_tensor is not None
+            else compressed_tensor.layout
+        )
+        kwargs["requires_grad"] = (
+            original_tensor.requires_grad if original_tensor is not None else False
+        )
+
+        shape = original_shape if original_shape is not None else original_tensor.shape
+
+        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+    def __init__(
+        self,
+        original_tensor,
+        original_shape=None,
+        compressed_tensor=None,
+        mask_or_meta=None,
+        transposed=False,
+    ):
+        self.original_tensor = original_tensor
+        self.original_shape = (
+            original_tensor.shape if original_shape is None else original_shape
+        )
+        self.compressed_tensor = compressed_tensor
+        self.mask_or_meta=mask_or_meta 
+        self.transposed = transposed
+
+        #split apart now
+        if original_tensor is not None:
+            m, k = original_tensor.shape
+            self.compressed_tensor = original_tensor.masked_select(self.mask_or_meta).view(m, k//2)
+            self.original_tensor = None
+
+    def __repr__(self):
+        return f"CUTLASSTensor(shape={self.shape})"
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if func is torch.ops.aten.detach.default:
+            # since we create a new compressed tensor, the tensor will already be detached.
+            return SemiStructuredSparseTensorCUTLASS(
+                args[0].original_tensor,
+                original_shape=args[0].original_shape,
+                compressed_tensor=args[0].compressed_tensor,
+                mask_or_meta=args[0].mask_or_meta,
+                transposed=args[0].transposed,
+            )
+
+        if func is torch.ops.aten.t.default:
+            # Because we cannot go from the compressed representation back to the dense representation currently, we just keep track of how many times we have been transposed. If it's an odd number of times, we'll throw an error since we can't handle this situation
+            return SemiStructuredSparseTensorCUTLASS(
+                args[0].original_tensor,
+                original_shape=args[0].original_shape,
+                compressed_tensor=args[0].compressed_tensor,
+                mask_or_meta=args[0].mask_or_meta,
+                transposed=not args[0].transposed,
+            )
+
+        if (
+            func is torch.ops.aten.addmm.default
+            and args[0].is_floating_point()
+            and args[0].is_cuda
+        ):
+            bias, a, b = args
+            if isinstance(a, SemiStructuredSparseTensorCUTLASS) and not a.transposed:
+                # currently BIAS is broadcasted the wrong way in cuSPARSELT, so we need to call mm and then add at the end
+                return bias + a.cslt.mm(b, False)
+            # b must be transposed so we can undo it
+            elif isinstance(b, SemiStructuredSparseTensorCUTLASS) and b.transposed:
+                result, meta = torch._structured_sparse_linear(a, b.compressed_tensor, b.mask_or_meta, bias=bias)
+                b.mask_or_meta = meta
+                return result
+
+        # if func is torch.ops.aten.mm.default:
+            # a, b = args
+            # if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
+                # result, meta = torch._structured_sparse_linear(b, a.compressed_tensor, a.mask_or_meta, bias=None)
+                # a.mask_or_meta = a
+
+                # return a.cslt.mm(b, False)
+            # elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
+                # result, meta = torch._structured_sparse_linear(a, b.compressed_tensor, b.mask_or_meta, bias=None)
+                # b.mask_or_meta = meta
+                # return res.T 
+
+        raise NotImplementedError("Not implemented")
+
+
+
 class SemiStructuredSparseTensor(torch.Tensor):
     """
     This class implementes 2x4 sparsity

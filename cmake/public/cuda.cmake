@@ -267,6 +267,13 @@ else()
   message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
 endif()
 
+find_package(CUSPARSELT)
+add_library(torch::cusparselt INTERFACE IMPORTED)
+target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_PATH})
+target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH}/libcusparseLt.so)
+message(STATUS "cusparselt include: ${CUSPARSELT_INCLUDE_PATH}")
+message(STATUS "cusparselt lib: ${CUSPARSELT_LIBRARY_PATH}")
+
 # curand
 add_library(caffe2::curand INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)

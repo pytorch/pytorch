@@ -7,7 +7,7 @@ from tqdm import tqdm
 import pandas as pd
 import argparse
 import random
-from torch.ao.pruning import SemiStructuredSparseTensor
+from torch.ao.pruning import SemiStructuredSparseTensor, SemiStructuredSparseTensorCUTLASS
 
 
 torch.set_printoptions(
@@ -49,13 +49,13 @@ def gen_two_four_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
     )
 
 
-def test_linear(m, k, n, dtype, contiguous):
-    sparse_weight = torch.rand(m, k).to(dtype).cuda() * gen_two_four_sparse_mask(
+def test_linear(m, k, n, dtype, contiguous, backend):
+    mask = gen_two_four_sparse_mask(
         m, k, dtype=dtype
     )
+    sparse_weight = torch.rand(m, k).to(dtype).cuda()  * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
     model = Model(m, k).to(dtype).cuda().eval()
-    model.weight = sparse_weight
 
     dense_measurement = benchmark.Timer(
         stmt="model(input_tensor)",
@@ -65,9 +65,12 @@ def test_linear(m, k, n, dtype, contiguous):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(
-        SemiStructuredSparseTensor(model.linear.weight, contiguous_output=contiguous)
-    )
+    if backend == "cutlass":
+        model.linear.weight = nn.Parameter(
+            SemiStructuredSparseTensorCUTLASS(sparse_weight, mask_or_meta=mask.bool())
+        )
+    else:
+        model.linear.weight = nn.Parameter(SemiStructuredSparseTensor(sparse_weight, contiguous_output=contiguous))
 
     sparse_output = model(input_tensor)
 
@@ -79,10 +82,12 @@ def test_linear(m, k, n, dtype, contiguous):
     correct = torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3)
 
     return {
+        "test_function": "linear",
         "m": m,
         "k": k,
         "n": n,
         "dtype": str(dtype),
+        "backend": backend,
         "sparse_latency (ms)": sparse_measurement.median * 1000,
         "dense_latency (ms)": dense_measurement.median * 1000,
         "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
@@ -91,12 +96,15 @@ def test_linear(m, k, n, dtype, contiguous):
     }
 
 
-def test_tensor(m, k, n, dtype, contiguous):
+def test_tensor(m, k, n, dtype, contiguous, backend):
     A = gen_two_four_sparse_mask(m, k, dtype=dtype)
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    sA = SemiStructuredSparseTensor(A, contiguous_output=contiguous)
+    if backend == "cutlass":
+        sA = SemiStructuredSparseTensor(A, mask_or_meta=A)
+    else:
+        sA = SemiStructuredSparseTensor(A, contiguous_output=contiguous)
 
     # torch.mm calculation
     if dtype is not torch.int8:
@@ -122,15 +130,19 @@ def test_tensor(m, k, n, dtype, contiguous):
         globals=locals(),
     ).blocked_autorange()
 
+    correct = torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3)
+
     return {
+        "test_function": "tensor",
         "m": m,
         "k": k,
         "n": n,
         "dtype": str(dtype),
-        "sparse_latency (ms)": sparse_measurement.median * 1001,
+        "backend": backend,
+        "sparse_latency (ms)": sparse_measurement.median * 1000,
         "dense_latency (ms)": dense_measurement.median * 1000,
         "speedup (d/s)": dense_measurement.median / sparse_measurement.median,
-        "correct": torch.allclose(dense_output, sparse_output, rtol=1e-3, atol=1e-3),
+        "correct": correct,
         "contiguous": sparse_output.is_contiguous(),
     }
 
@@ -143,7 +155,7 @@ if __name__ == "__main__":
         "fp32": torch.float32,
     }
 
-    parser = argparse.ArgumentParser(description="cuSPARSELt Benchmarks")
+    parser = argparse.ArgumentParser(description="Semi-Structured Sparsity Benchmarks")
     parser.add_argument(
         "--mode",
         type=str,
@@ -159,6 +171,11 @@ if __name__ == "__main__":
         choices=dtype_lookup.keys(),
         default="fp16",
     )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["cutlass", "cusparselt"],
+        default="cusparselt")
     parser.add_argument("-contiguous", action="store_true")
     parser.add_argument("-e2e", action="store_true")
     parser.add_argument("-save", action="store_true")
@@ -178,7 +195,7 @@ if __name__ == "__main__":
             (1024, 4096, 16384),
         ]
         results = (
-            test_tensor(m, k, n, dtype, args.contiguous)
+            test_tensor(m, k, n, dtype, args.contiguous, args.backend)
             for (m, k, n) in tqdm(bert_shapes)
         )
 
@@ -204,7 +221,7 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            test_tensor(mn, 10240, mn, dtype, args.contiguous) for mn in tqdm(mn_vals)
+            test_tensor(mn, 10240, mn, dtype, args.contiguous, args.backend) for mn in tqdm(mn_vals)
         )
 
     elif args.mode == "nvidia-fixed-mn":
@@ -226,12 +243,12 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            test_tensor(10240, k, 10240, dtype, args.contiguous()) for k in tqdm(k_vals)
+            test_tensor(10240, k, 10240, dtype, args.contiguous, args.backend) for k in tqdm(k_vals)
         )
 
     df = pd.DataFrame.from_records(results)
     if args.save:
-        save_file = f"{args.mode}_{args.dtype}_{args.contiguous}_{'linear' if args.e2e else 'tensor'}.csv"
+        save_file = f"{args.mode}_{args.dtype}_{args.backend}.csv"
         df.to_csv(save_file)
         print(f"Finished benchmark: {args.mode} saved results to {save_file}")
     print(df)

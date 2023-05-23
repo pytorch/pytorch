@@ -54,6 +54,7 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cusparselt)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -1230,6 +1231,7 @@ endif(USE_LLVM)
 if(USE_CUDNN)
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
+  target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_DIR})
 endif()
 
 # ---[ HIP
@@ -1364,6 +1366,17 @@ if(USE_UCC)
     include(${CMAKE_CURRENT_LIST_DIR}/External/ucc.cmake)
   endif()
 endif()
+
+ #---[ CUSPARSELT
+#if(USE_CUDA)
+  #find_package(CUSPARSELT)
+  #if(CUSPARSELT_FOUND)
+    #include_directories(SYSTEM ${CUSPARSELT_INCLUDE_DIRS})
+    #list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUSPASRELT_LIBRARIES})
+  #else()
+    #message(WARNING "CUSAPARSE not found!!")
+  #endif()
+#endif()
 
 # ---[ CUB
 if(USE_CUDA)
