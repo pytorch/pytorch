@@ -583,10 +583,16 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                         # The current most relaxed values are for aten::stft
                         rtol = 1e-5
                         atol = 2e-5
+                    elif dtype == torch.float16:
+                        # Relax atol and rtol for float16 based on empirical results
+                        # The current most relaxed values are for dot
+                        rtol = 2e-3
+                        atol = 1e-5
                     else:
                         rtol = None
                         atol = None
                     # Run the test
+                    print(rtol, atol)
                     self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
                         model, inputs, rtol=rtol, atol=atol
                     )

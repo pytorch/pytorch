@@ -9522,11 +9522,6 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_dot_vdot,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=[
-               DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=1e-05, rtol=2e-03)}),
-                   'TestOnnxModelOutputConsistency', 'test_output_match', device_type='cpu')
-           ],
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(

@@ -158,10 +158,8 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "allclose": {f64},
-    "amax": {f16},
     "amin": {f16},
     "angle": {f64},
-    "bincount": {i32, i64},
     "cholesky": {f32, f64},
     "combinations": {b8, f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
@@ -169,7 +167,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     # Unsupported: data dependent operator: aten.equal.default
-    "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
     "item": {b8, f16, f32, f64, i32, i64},
@@ -209,7 +206,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "scatter_add": {f16},
     ("scatter_reduce", "sum"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
-    ("_segment_reduce", "lengths"): {f64},
     "sparse.sampled_addmm": {f32, f64},
     ("sparse.mm", "reduce"): {bf16, f32, f64},
     "stft": {f32, f64},
@@ -223,7 +219,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "tensor_split": {b8, f16, f32, f64, i32, i64},
     "to_sparse": {f32, f64},
     # AssertionError: Tensor-likes are not close!
-    "cauchy": {f16},
     "exponential": {f16},
     "geometric": {f16},
     "log_normal": {f16},
@@ -255,7 +250,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     # AssertionError: Scalars are not close!
     "empty_strided": {b8, i32, i64, f16, f32, f64},
     # These return complex tensors
-    "chalf": {b8, i32, i64, f16, f32, f64},
     "complex": {f16, f32, f64},
 }
 
