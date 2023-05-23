@@ -761,7 +761,6 @@ def partition_data_parallel(
     mesh: DeviceMesh,
     parallel_style: DataParallelStyle,
     input_batch_dim: int,
-    _preserve_node_type: bool = False,
 ) -> GraphModule:
     """
     The entry point function to partition the graph to data parallel
@@ -794,21 +793,21 @@ def partition_data_parallel(
     # 3. Partition the single machine graph to the distribute graph
     partitioned_graph = partitioner(graph)
 
-    if _preserve_node_type:
-        for node in partitioned_graph.graph.nodes:
-            if node in strategy_map:
-                node_strategy = strategy_map[node]
-                if isinstance(node_strategy, DataParallelStrategy):
-                    node.meta["node_type"] = node_strategy.node_type
-                elif isinstance(node_strategy, TupleStrategy):
-                    node.meta["node_type"] = NodeType.NON_TENSOR
-                else:
-                    raise RuntimeError(f"Unknown node strategy {node_strategy}")
+    # preserve node types for the expanded graph
+    for node in partitioned_graph.graph.nodes:
+        if node in strategy_map:
+            node_strategy = strategy_map[node]
+            if isinstance(node_strategy, DataParallelStrategy):
+                node.meta["node_type"] = node_strategy.node_type
+            elif isinstance(node_strategy, TupleStrategy):
+                node.meta["node_type"] = NodeType.NON_TENSOR
             else:
-                # if the nodes are expanded nodes (collectives), we mark them
-                # the same type as the input node.
-                input_node = node.all_input_nodes[0]
-                node.meta["node_type"] = input_node.meta["node_type"]
+                raise RuntimeError(f"Unknown node strategy {node_strategy}")
+        else:
+            # if the nodes are expanded nodes (collectives), we mark them
+            # the same type as the input node.
+            input_node = node.all_input_nodes[0]
+            node.meta["node_type"] = input_node.meta["node_type"]
 
     # 4. Last, inplace partition the weights and optim states to
     #    DTensors base on the parallel style

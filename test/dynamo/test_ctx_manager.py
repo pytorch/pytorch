@@ -556,6 +556,28 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.torch.float16)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_arguments_binding(self):
+        def f1(x):
+            with torch.cuda.amp.autocast(False):
+                x = torch.sin(x + 1)
+            return x
+
+        def f2(x):
+            with torch.cpu.amp.autocast(False):
+                x = torch.cos(x + 1)
+            return x
+
+        x = torch.rand([2, 3])
+        ref1 = f1(x)
+        ref2 = f2(x)
+        opt_f1 = torch.compile(backend="eager")(f1)
+        opt_f2 = torch.compile(backend="eager")(f2)
+        res1 = opt_f1(x)
+        res2 = opt_f2(x)
+        self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref2, res2))
+
     def test_generic_context_manager(self):
         def fn(x):
             with CutomizedCtxManager(True):
@@ -653,3 +675,30 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
             self.assertEqual(cnts.frame_count, 3)
             self.assertEqual(cnts.op_count, 3)
+
+    def test_graph_break_inlining(self):
+        def gn(z):
+            with torch.no_grad():
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y, z):
+            a = torch.mm(x, y)
+            z = gn(z)
+            return a
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4)
+        opt_fn(x, y, z).sum().backward()
+
+        self.assertEqual(cnts.frame_count, 2)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

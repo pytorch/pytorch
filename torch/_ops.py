@@ -776,7 +776,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)
@@ -786,18 +786,6 @@ class _Ops(types.ModuleType):
             # operators with the JIT.
             ctypes.CDLL(path)
         self.loaded_libraries.add(path)
-
-
-class Wrap(HigherOrderOperator):
-    def __init__(self):
-        super().__init__("wrap")
-
-    def __call__(self, func, *args):
-        result = func(*args)
-        return result
-
-
-wrap = Wrap()
 
 
 # The ops "namespace"

@@ -27,17 +27,16 @@ constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
   return {{std::forward<T>(t)...}};
 }
 
-bool check_requires_grad(sdp_params params, bool debug) {
+bool input_requires_grad(sdp_params params) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled)) {
-    if (debug) {
-      TORCH_WARN("Flash Attention does not currently support training.");
-    }
-    return false;
-  }
-  return true;
+  return any_inputs_require_grad && gradmode_enabled;
+}
+
+bool has_for_nested_inputs(sdp_params params) {
+  return (params.query.is_nested() || params.key.is_nested() ||
+          params.value.is_nested());
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
@@ -55,9 +54,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
   // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
 
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    // See check_for_nested_inputs for details
+  if (has_for_nested_inputs(params)) {
     return efficient_first;
   }
   if (params.query.dim() != 4) {
@@ -78,7 +75,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
     // The training heuristic is taken from
     // https://github.com/pytorch/pytorch/pull/99644 Revisit when updated
     // cutlass kernel is upstreamed.
-    if (check_requires_grad(params, false)) {
+    if (input_requires_grad(params)) {
       if (6 * threads_flash > query_lengths)
         return efficient_first;
     } else if ((small_threads_flash && more_threads_cutlass) || large_head_dim)
@@ -125,14 +122,6 @@ bool check_for_non_zero_dropout(sdp_params params, bool debug) {
     return false;
   }
   return true;
-}
-
-bool check_for_nested_inputs(sdp_params params) {
-  if (params.query.is_nested() || params.key.is_nested() ||
-      params.value.is_nested()) {
-    return true;
-  }
-  return false;
 }
 
 bool try_broadcast_param_size(
@@ -204,7 +193,7 @@ bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
 
 bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (!check_for_nested_inputs(params)) {
+  if (!has_for_nested_inputs(params)) {
     return true;
   }
 
@@ -251,7 +240,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
 
 bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (check_for_nested_inputs(params) && !check_requires_grad(params, false)) {
+  if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
       TORCH_WARN(
           "Memory efficient attention currently doesn't support training with NT inputs.");
@@ -312,7 +301,7 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto k_batch_size = params.key.sym_size(0);
   auto v_batch_size = params.value.sym_size(0);
 
-  bool has_nested_input = check_for_nested_inputs(params);
+  bool has_nested_input = has_for_nested_inputs(params);
   bool same_batch_size =
       q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
@@ -483,14 +472,15 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
-  // Check that the gpu is capable of running flash attention
+bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
+  // Mem Efficient attention supports hardware in the range (sm_50, sm_90]
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm50 = dprops->major >= 5;
-  if (!(is_sm50)) {
+  bool is_gte_sm50 = dprops->major >= 5;
+  bool is_le_sm90 = dprops->major < 9;
+  if (!(is_gte_sm50 && is_le_sm90)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supports sm5x or greater gpu architectures. Attempting to run on a sm ",
+          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90). Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -521,7 +511,7 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 64 And the device is sm86 or newer.
-  if (!check_requires_grad(params, false) &&
+  if (input_requires_grad(params) &&
       !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
     if (debug) {
       TORCH_WARN(
@@ -593,13 +583,15 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto mem_efficient_dtypes =
+  constexpr auto default_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto sm50_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
+      check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
@@ -614,10 +606,12 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 5) {
+    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
   }
-  return true;
+  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
 }
 } // namespace
 
