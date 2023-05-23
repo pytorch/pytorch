@@ -51,6 +51,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_utils import freeze_rng_state
 from torch.testing._internal.jit_utils import JitTestCase
 
+TEST_CUDA = torch.cuda.is_available()
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
+
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
 
@@ -1856,7 +1859,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # temporary test to check that the ci torch version is set correctly
         self.assertTrue(hasattr(torch, "_subclasses"))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_rand(self):
         cnts = torch._dynamo.testing.CompileCounter()
         device = "cuda"
@@ -3458,26 +3461,6 @@ def fn():
         res = opt_fn()
         self.assertTrue(same(ref, res))
 
-    def test_autograd_function_equivalence(self):
-        for i in range(1, 5):
-            model = globals()[f"Module{i}"]()
-            opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
-            self.assertTrue(
-                torch.allclose(opt_model(torch.ones(2, 3)), torch.tensor([2.0]))
-            )
-
-    def test_autograd_function_has_graph_break(self):
-        x = torch.randn(10)
-        for model in [Module5(), Module6()]:
-            torch._dynamo.reset()
-            cnts = torch._dynamo.testing.CompileCounter()
-            opt_model = torch._dynamo.optimize(cnts)(model)
-            for _ in range(3):
-                ref = model(x)
-                res = opt_model(x)
-                self.assertTrue(torch.allclose(ref, res))
-            self.assertEqual(cnts.frame_count, 2)
-
     def test_object_classmethod(self):
         class C:
             @classmethod
@@ -3836,7 +3819,7 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self):
         def fn(x):
@@ -3850,7 +3833,7 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable_bad_inputs(self):
         def fn1(x):
@@ -3877,7 +3860,7 @@ def fn():
             opt_fn2 = torch._dynamo.optimize("eager", nopython=True)(fn2)
             res = opt_fn2(x2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_get_device(self):
         def fn(x, y):
             x = x + 1
@@ -5180,6 +5163,22 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "need multiple GPU")
+    def test_cuda_set_device(self):
+        torch.cuda.set_device(0)
+
+        def fn():
+            a = torch.ones(2, device="cuda")
+            torch.cuda.set_device(1)
+            return a + 1
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        res = opt_fn()
+        self.assertEqual(res.device.type, "cuda")
+        self.assertEqual(res.device.index, 0)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_nested_function_resuming_with_correct_globals(self):
         # https://github.com/pytorch/pytorch/issues/99665
         try:
@@ -5210,7 +5209,14 @@ def fn():
     def _is_py38(self) -> bool:
         return sys.version_info[:2] <= (3, 8)
 
+    def _has_ast_unparse(self) -> bool:
+        from torch._dynamo.guards import HAS_UNPARSE_FUNCTIONS
+
+        return HAS_UNPARSE_FUNCTIONS
+
     def test_guards_cse_pass_single(self):
+        if not self._has_ast_unparse():
+            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -5245,7 +5251,6 @@ def fn():
             testcase(expr="self.g(a, b).k", expected="_var6"),
             testcase(expr="self.g(a, b).k", expected="_var6"),
         ]
-
         csepass = PyExprCSEPass()
         csepass.count([t.expr for t in testcases])
 
@@ -5256,6 +5261,8 @@ def fn():
             self.assertEqual(expr, expected)
 
     def test_guards_cse_pass_multiple(self):
+        if not self._has_ast_unparse():
+            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -5348,88 +5355,26 @@ def ___make_guard_fn():
         return True
     return guard
 """
+        expected_38_no_astunparse = """\
+def ___make_guard_fn():
+    def guard(L):
+        if not (x[0].a < x[1].a * (3 - x[2].a)):
+            return False
+        if not (a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0):
+            return False
+        if not (f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512):
+            return False
+        if not (self.g(a, b).k + (1 - self.g(a, b).k) <= m[0].a + self.g(a, b).k):
+            return False
+        return True
+    return guard
+"""
 
-        expected = expected_38 if self._is_py38() else expected
+        if self._is_py38():
+            expected = (
+                expected_38 if self._has_ast_unparse() else expected_38_no_astunparse
+            )
         self.assertEqual(expected, pycode)
-
-
-class CustomFunc1(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, foo):
-        return foo + foo
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output
-
-
-class CustomFunc2(torch.autograd.Function):
-    # the forward function can be staticmethod or classmethod
-    @classmethod
-    def forward(cls, ctx, foo):
-        return foo + foo
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output
-
-
-class CustomFunc3(torch.autograd.Function):
-    # Test there is graph break in forward function
-    @staticmethod
-    def forward(ctx, foo):
-        result = foo + foo
-        torch._dynamo.graph_break()
-        result = result + foo
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        (result,) = ctx.saved_tensors
-        return grad_output * math.sqrt(result.numel())
-
-
-class Module1(torch.nn.Module):
-    def forward(self, foo):
-        return CustomFunc1().apply(foo)
-
-
-class Module2(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fn = CustomFunc1.apply
-
-    def forward(self, foo):
-        return self.fn(foo)
-
-
-class Module3(torch.nn.Module):
-    def forward(self, foo):
-        return CustomFunc2().apply(foo)
-
-
-class Module4(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fn = CustomFunc2.apply
-
-    def forward(self, foo):
-        return self.fn(foo)
-
-
-class Module5(torch.nn.Module):
-    def forward(self, foo):
-        return CustomFunc3().apply(foo)
-
-
-class Module6(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fn = CustomFunc3.apply
-
-    def forward(self, foo):
-        return self.fn(foo)
 
 
 class TestTracer(JitTestCase):

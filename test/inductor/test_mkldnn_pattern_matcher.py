@@ -16,6 +16,7 @@ unary_list = {
     torch.nn.Hardswish(): 6,
     torch.nn.LeakyReLU(0.1, inplace=False): 4,
     torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
     torch.nn.ReLU6(): 3,
