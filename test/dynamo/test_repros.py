@@ -981,7 +981,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifunspec(37, ifdyn(14, 14)))
+        self.assertEqual(cnt.op_count, ifunspec(37, ifdyn(20, 20)))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
