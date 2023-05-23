@@ -746,7 +746,7 @@ static bool is_int_or_symint_list(
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
-  return broadcast_size > 0 && THPUtils_checkLong(obj);
+  return broadcast_size > 0 && is_int_or_symint(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.

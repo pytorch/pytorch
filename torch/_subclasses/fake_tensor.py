@@ -14,6 +14,7 @@ import torch._custom_op
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -414,10 +415,6 @@ def unsupported_complex_op(op):
 
     op_name = op.name()
     if "fft" in op_name:
-        return True
-    if "_linalg_svd" in op_name:
-        return True
-    if op is torch.ops.prims.svd.default:
         return True
     return False
 
@@ -1077,7 +1074,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
-        log.info("create_mode 0x%x", id(self))
+        log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1296,10 +1293,10 @@ class FakeTensorMode(TorchDispatchMode):
         # Call them if they exist.
         if func.name() in torch._custom_op.global_registry:
             custom_op = torch._custom_op.global_registry[func.name()]
-            if custom_op is not None and custom_op._abstract_impl is not None:
+            if custom_op is not None and custom_op._has_impl("abstract"):
                 ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
                 with torch._custom_op.set_ctx_getter(lambda: ctx), self:
-                    result = custom_op._abstract_impl.func(*args, **kwargs)
+                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
                     return result
 
         # special handling for funcs registered through `register_op_impl`,
@@ -1398,17 +1395,24 @@ class FakeTensorMode(TorchDispatchMode):
         def wrap(e, device=None):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
+
+            if common_device is None:
+                (
+                    common_device,
+                    has_scalar_only_inputs,
+                ) = FakeTensor._find_common_device(func, args, kwargs)
+
+            if isinstance(e, FakeTensor):
+                check(
+                    e.device == common_device,
+                    lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
+                )
+
             if (
                 isinstance(e, torch.Tensor)
                 and not isinstance(e, FakeTensor)
                 and converter is not None
             ):
-                if common_device is None:
-                    (
-                        common_device,
-                        has_scalar_only_inputs,
-                    ) = FakeTensor._find_common_device(func, args, kwargs)
-
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
