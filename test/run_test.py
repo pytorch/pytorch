@@ -947,7 +947,9 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        pytest_args.extend(["-p", "no:xdist", "--use-pytest", f"--sc={stepcurrent_key}"])
+        pytest_args.extend(
+            ["-p", "no:xdist", "--use-pytest", f"--sc={stepcurrent_key}"]
+        )
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
