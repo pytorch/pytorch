@@ -5,6 +5,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/core/DeviceGuard.h>
