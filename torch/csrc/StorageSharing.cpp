@@ -658,28 +658,28 @@ PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
 
   const auto& storage = THPStorage_Unpack(self);
   const auto nbytes = static_cast<uint64_t>(storage.nbytes());
+  const uint64_t count = nbytes / elem_size;
+
+  if (elem_size == 1) {
+    Py_RETURN_NONE;
+  }
+  THPUtils_assert(
+      nbytes % elem_size == 0,
+      "the length of data is not a multiple of %ld",
+      elem_size);
 
   if (elem_size == 2) {
-    THPUtils_assert(
-        nbytes % 2 == 0, "the length of data is not a multiple of 2");
     auto buffer = static_cast<uint16_t*>(storage.mutable_data());
-    const uint64_t count = nbytes / 2;
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap16(*buffer);
     }
   } else if (elem_size == 4) {
-    THPUtils_assert(
-        nbytes % 4 == 0, "the length of data is not a multiple of 4");
     auto buffer = static_cast<uint32_t*>(storage.mutable_data());
-    const uint64_t count = nbytes / 4;
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap32(*buffer);
     }
   } else if (elem_size == 8) {
-    THPUtils_assert(
-        nbytes % 8 == 0, "the length of data is not a multiple of 8");
     auto buffer = static_cast<uint64_t*>(storage.mutable_data());
-    const uint64_t count = nbytes / 8;
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap64(*buffer);
     }
