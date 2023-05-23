@@ -32,7 +32,7 @@ __all__ = [
     "hinge_embedding_loss",
     "huber_loss",
     "l1_loss",
-    "smmooth_l1_loss",
+    "smooth_l1_loss",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
@@ -543,6 +543,10 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def smooth_l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
