@@ -79,37 +79,68 @@ static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
 // in the Id field so in this case, we need to check the stream alignment.
 // The IdType uses an additional bit to match with the 64-bit address alignment
 // making easy to identify an external stream when its value (X & 7) > 0
-enum class StreamIdType : uint8_t {
-  DEFAULT = 0x0,
-  LOW = 0x1, // 01
-  HIGH = 0x2, // 10
-  HIGHEST = 0x3, // 11
-  EXT = 0x4, // bits don't matter, EXT is always special-cased
+
+class StreamIdType {
+  private:
+  uint8_t stream_type;
+  public:
+  static const uint8_t DEFAULT = 0x0;
+  static const uint8_t EXT = 0x4;
+
+  public:
+  StreamIdType(const uint8_t _stream_type): stream_type(_stream_type) {}
+
+  bool isExt() const {
+    return EXT == stream_type;
+  }
+
+  bool isDefault() const {
+    return DEFAULT == stream_type;
+  }
+
+  uint8_t getStreamType() const {
+    return stream_type;
+  }
 };
 
+// enum class StreamIdType : uint8_t {
+//   DEFAULT = 0x0,
+//   LOW = 0x1, // 01
+//   HIGH = 0x2, // 10
+//   HIGHEST = 0x3, // 11
+//   EXT = 0x4, // bits don't matter, EXT is always special-cased
+// };
+
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
-  switch (s) {
-    case StreamIdType::DEFAULT:
-      stream << "DEFAULT";
-      break;
-    case StreamIdType::LOW:
-      stream << "LOW";
-      break;
-    case StreamIdType::HIGH:
-      stream << "HIGH";
-      break;
-    case StreamIdType::HIGHEST:
-      stream << "HIGHEST";
-      break;
-    case StreamIdType::EXT:
-      stream << "EXT";
-      break;
-    default:
-      stream << static_cast<uint8_t>(s);
-      break;
+  if (s.isDefault()) {
+    stream << "DEFAULT";
+  } else if (s.isExt()) {
+    stream << "EXT";
+  } else {
+    stream << "PRIORITY " << s.getStreamType();
   }
-  return stream;
-}
+  // switch (s) {
+  //   case StreamIdType::DEFAULT:
+  //     stream << "DEFAULT";
+  //     break;
+  //   case StreamIdType::LOW:
+  //     stream << "LOW";
+  //     break;
+  //   case StreamIdType::HIGH:
+  //     stream << "HIGH";
+  //     break;
+  //   case StreamIdType::HIGHEST:
+  //     stream << "HIGHEST";
+  //     break;
+  //   case StreamIdType::EXT:
+  //     stream << "EXT";
+  //     break;
+  //   default:
+  //     stream << static_cast<uint8_t>(s);
+  //     break;
+  //}
+   return stream;
+ }
 
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on streamIdIndex and streamIdType being non-negative;
@@ -121,9 +152,10 @@ static inline StreamIdType streamIdType(StreamId s) {
     // Externally allocated streams have their id being the cudaStream_ptr
     // so the bits corresponding to the type will be 0 and will collide with
     // the default stream.
-    return StreamIdType::EXT;
+    return StreamIdType(StreamIdType::EXT);
   }
-  return static_cast<StreamIdType>(s & mask_for_type);
+  return StreamIdType(s & mask_for_type);
+  //return static_cast<StreamIdType>(s & mask_for_type);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
@@ -133,7 +165,7 @@ static inline size_t streamIdIndex(StreamId s) {
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
   return (static_cast<StreamId>(si) << kStreamTypeBits) |
-      static_cast<StreamId>(st);
+      static_cast<StreamId>(st.getStreamType());
 }
 
 // Thread-local current streams
@@ -229,8 +261,7 @@ cudaStream_t CUDAStream::stream() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
-  switch (st) {
-    case StreamIdType::DEFAULT:
+  if (st.isDefault()) {
       TORCH_INTERNAL_ASSERT(
           si == 0,
           "Unrecognized stream ",
@@ -241,23 +272,31 @@ cudaStream_t CUDAStream::stream() const {
           " Did you manufacture the StreamId yourself?  Don't do that; use the",
           " official API like c10::cuda::getStreamFromPool() to get a new stream.");
       return nullptr;
-    case StreamIdType::LOW:
-      return streams[0][device_index][si];
-    case StreamIdType::HIGH:
-      return streams[1][device_index][si];
-    case StreamIdType::HIGHEST:
-      return streams[2][device_index][si];
-    case StreamIdType::EXT:
-      return reinterpret_cast<cudaStream_t>(stream_id);
-    default:
-      TORCH_INTERNAL_ASSERT(
-          0,
-          "Unrecognized stream ",
-          stream_,
-          " (I didn't recognize the stream type, ",
-          st,
-          ")");
+  } else if (st.isExt()) {
+    return reinterpret_cast<cudaStream_t>(stream_id);
+  } else {
+    return streams[st.getStreamType() - 1][device_index][si];
   }
+//  }
+  // switch (st) {
+  //   case StreamIdType::DEFAULT:
+  //   case StreamIdType::LOW:
+  //     return streams[0][device_index][si];
+  //   case StreamIdType::HIGH:
+  //     return streams[1][device_index][si];
+  //   case StreamIdType::HIGHEST:
+  //     return streams[2][device_index][si];
+  //   case StreamIdType::EXT:
+  //     return reinterpret_cast<cudaStream_t>(stream_id);
+  //   default:
+  //     TORCH_INTERNAL_ASSERT(
+  //         0,
+  //         "Unrecognized stream ",
+  //         stream_,
+  //         " (I didn't recognize the stream type, ",
+  //         st,
+  //         ")");
+  // }
 }
 
 // Returns a stream from the requested pool
@@ -281,7 +320,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   pri_idx =
       std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
-  StreamIdType id_type = static_cast<StreamIdType>(pri_idx + 1);
+  StreamIdType id_type = StreamIdType(pri_idx+1); //static_cast<StreamIdType>(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 
 }
