@@ -143,7 +143,7 @@ class Graph:
 @dataclass
 class BackwardSignature:
     gradients_to_parameters: Dict[str, str]
-    gradients_to_userInputs: Dict[str, str]
+    gradients_to_user_inputs: Dict[str, str]
     loss_output: str
 
 
