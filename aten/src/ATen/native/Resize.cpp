@@ -12,6 +12,7 @@
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/_resize_output.h>
+#include <ATen/ops/_resize_output_native.h>
 #endif
 
 namespace at { namespace native {
@@ -44,11 +45,11 @@ bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape) {
   return _resize_output_check(output, shape);
 }
 
-void native_resize_(const Tensor& output, IntArrayRef shape) {
+static void native_resize_(const Tensor& output, IntArrayRef shape) {
   native::resize_(output, shape);
 }
 
-void native_resize_(const Tensor& output, SymIntArrayRef shape) {
+static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
   native::resize__symint(output, shape);
 }
 
@@ -155,7 +156,7 @@ const Tensor& resize_as_(
 }
 
 
-void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
+static void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   storage->set_nbytes(std::move(size_bytes));
 }
@@ -224,7 +225,7 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-TensorImpl* resize_impl_meta_(
+static TensorImpl* resize_impl_meta_(
     TensorImpl* self,
     c10::SymIntArrayRef size,
     at::OptionalSymIntArrayRef stride,
