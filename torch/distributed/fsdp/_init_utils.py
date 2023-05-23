@@ -526,9 +526,6 @@ def _init_param_handles_from_module(
     for fully_sharded_module, (params, buffers) in reversed(
         fully_sharded_module_to_states.items()
     ):
-        state._fully_sharded_module_names.append(
-            fully_sharded_module.__class__.__name__
-        )
         # Materialize the module if needed
         is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
             fully_sharded_module, state._ignored_params
