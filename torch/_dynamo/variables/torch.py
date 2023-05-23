@@ -776,45 +776,39 @@ def speculate_subgraph(
             # TODO: support pytree output
             # We check always_restore because we dont use the output or side effects of always_restore code,
             # like bwd.
-            if (
-                not isinstance(output, (TensorVariable, ListVariable, TupleVariable))
-                and not always_restore
-            ):
-                unimplemented("HigherOrderOperator with body with pytree output")
-
-            if isinstance(output, (ListVariable, TupleVariable)):
-
-                def _is_supported(var):
-                    return isinstance(var, TensorVariable) or (
-                        isinstance(var, ConstantVariable) and var.value is None
-                    )
-
-                if any(
-                    not _is_supported(var) for var in output.unpack_var_sequence(tx)
-                ):
-                    unimplemented(
-                        "HigherOrderOperator body's output must consist of tensors or None only"
-                    )
-
             if always_restore:
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
+            else:
+                if not isinstance(
+                    output, (TensorVariable, ListVariable, TupleVariable)
+                ):
+                    unimplemented("HigherOrderOperator with body with pytree output")
 
-            tx.output.guards.update(output.guards)
-            tx.output.create_node(
-                "output",
-                "output",
-                (tracer.create_arg((output.as_proxy(),))),
-                {},
-            )
-            graph = tx.output.graph
-            lifted_freevars = tracer.lifted_freevars
+                if isinstance(output, (ListVariable, TupleVariable)):
+                    if any(
+                        not isinstance(var, TensorVariable)
+                        for var in output.unpack_var_sequence(tx)
+                    ):
+                        unimplemented(
+                            "HigherOrderOperator body's output must consist of tensors only"
+                        )
 
-            return (
-                output,
-                graph,
-                lifted_freevars,
-            )
+                tx.output.guards.update(output.guards)
+                tx.output.create_node(
+                    "output",
+                    "output",
+                    (tracer.create_arg((output.as_proxy(),))),
+                    {},
+                )
+                graph = tx.output.graph
+                lifted_freevars = tracer.lifted_freevars
+
+                return (
+                    output,
+                    graph,
+                    lifted_freevars,
+                )
 
     except torch._dynamo.exc.Unsupported as ex:
         tx.output.graph = graph_checkpoint

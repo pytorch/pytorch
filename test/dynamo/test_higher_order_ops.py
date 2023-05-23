@@ -438,7 +438,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors or None only": 1},
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_fallback_on_nested_tuple_output(self):
@@ -458,7 +458,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors or None only": 1},
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_fallback_on_output_with_dict(self):
@@ -477,7 +477,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors or None only": 1},
+            {"HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_access_module_attr(self):
