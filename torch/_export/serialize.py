@@ -557,7 +557,7 @@ def convert_tensor_meta_to_fake_tensor(ep: ExportedProgram, shape_env: ShapeEnv 
                     torch.empty(
                         # TODO Support dynamic shape.
                         tuple(s.as_int for s in tensor_meta.sizes),
-                        dtype=_DTYPES_MAPPING[tensor_meta.dtype],
+                        dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                         device="meta",
                         requires_grad=tensor_meta.requires_grad,
                     ),
