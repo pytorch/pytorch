@@ -350,7 +350,7 @@ class Interpreter:
         return attr_itr
 
     @compatibility(is_backward_compatible=True)
-    def fetch_args_kwargs_from_env(self, n : Node) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+    def fetch_args_kwargs_from_env(self, n : Node) -> Tuple[Tuple, Dict]:
         """
         Fetch the concrete values of ``args`` and ``kwargs`` of node ``n``
         from the current execution environment.
