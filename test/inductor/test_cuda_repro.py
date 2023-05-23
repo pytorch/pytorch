@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 
 try:
@@ -705,5 +706,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    if HAS_CUDA and not TEST_WITH_ASAN:
+    if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

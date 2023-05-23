@@ -16,7 +16,7 @@ def _get_default_mps_generator() -> torch._C.Generator:
 
 def synchronize() -> None:
     r"""Waits for all kernels in all streams on a MPS device to complete."""
-    return torch._C._mps_synchronize()
+    return torch._C._mps_deviceSynchronize()
 
 def get_rng_state() -> Tensor:
     r"""Returns the random number generator state as a ByteTensor."""
@@ -98,7 +98,9 @@ def driver_allocated_memory() -> int:
     """
     return torch._C._mps_driverAllocatedMemory()
 
+from . import profiler
+
 __all__ = [
     'get_rng_state', 'manual_seed', 'seed', 'set_rng_state', 'synchronize',
     'empty_cache', 'set_per_process_memory_fraction', 'current_allocated_memory',
-    'driver_allocated_memory']
+    'driver_allocated_memory', 'profiler']

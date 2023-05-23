@@ -42,12 +42,12 @@ tools and their typical usage. For additional help see
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
    * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model, when you
+       between an eager mode model and optimized model, when you
        suspect the problem is in AOTAutograd
      - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
    * - Inductor accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model, when you
+       between an eager mode model and optimized model, when you
        suspect the problem is in the backend (e.g., inductor).
        If this doesn't work, try the Dynamo accuracy minifier
        instead.
@@ -198,7 +198,7 @@ following:
 - ``logging.ERROR``: Print errors only.
 
 If a model is sufficiently large, the logs can become overwhelming. If
-an error occurs deep within a model’s Python code, it can be useful to
+an error occurs deep within a model's Python code, it can be useful to
 execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
@@ -430,7 +430,7 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
 
 The minifier successfully reduced the graph to the op that raises the
 error in ``toy_compiler``. The other difference from the procedure in
-`TorhInductor Errors <#torchinductor-errors>`__ is that the minifier is
+`TorchInductor Errors <#torchinductor-errors>`__ is that the minifier is
 automatically run after encountering a backend compiler error. After a
 successful run, the minifier writes ``repro.py`` to
 ``torch._dynamo.config.base_dir``.

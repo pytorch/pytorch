@@ -6,6 +6,7 @@ import sys
 import warnings
 
 from copy import deepcopy
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -23,7 +24,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides
+from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
@@ -32,6 +33,21 @@ from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
+
+if config.is_fbcode():
+    from torch._inductor.fb.logging import time_and_log
+else:
+    # no-op decorator
+    def time_and_log(attr: str):
+        def wrap(old_func):
+            @wraps(old_func)
+            def newFunction(*args, **kwargs):
+                return old_func(*args, **kwargs)
+
+            return newFunction
+
+        return wrap
+
 
 log = logging.getLogger(__name__)
 ALIGNMENT = 16
@@ -195,6 +211,7 @@ def inner_compile_with_cpp_wrapper(inner_compile):
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
+@time_and_log(attr="compilation time (in seconds)")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -243,7 +260,10 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        post_grad_passes(gm)
+        # has some issues with memory in training
+        locality_reorder = is_inference and config.reordering
+
+        post_grad_passes(gm, locality_reorder=locality_reorder)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -691,12 +711,12 @@ def compile_fx(
                 boxed_forward_device_index=forward_device,
             )
 
-    with overrides.patch_functions():
-        if decompositions is None:
-            decompositions = select_decomp_table()
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-        # once torchdynamo is merged into pytorch
+    if decompositions is None:
+        decompositions = select_decomp_table()
+    # TODO: can add logging before/after the call to create_aot_dispatcher_function
+    # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+    # once torchdynamo is merged into pytorch
+    with V.set_fake_mode(detect_fake_mode(example_inputs_)):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
