@@ -936,6 +936,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                      dilation=(1,), ceil_mode=False: -1),
         torch.quantized_max_pool2d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0),
                                      dilation=(1, 1), ceil_mode=False: -1),
+        torch.quantized_max_pool3d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0),
+                                     dilation=(1, 1, 1), ceil_mode=False: -1),
         torch.quantized_rnn_relu_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                         col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.quantized_rnn_tanh_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
