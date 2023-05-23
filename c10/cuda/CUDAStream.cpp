@@ -11,7 +11,6 @@
 #include <mutex>
 #include <vector>
 
-#include <iostream>
 namespace c10 {
 namespace cuda {
 
@@ -25,9 +24,7 @@ static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 static constexpr int kStreamTypeBits = 3;
 
-// Note: lower numbers are higher priorities, zero is default priority
-static constexpr int kHighPriority = -1;
-static constexpr int kLowPriority = 0;
+static int max_stream_priorities;
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -43,12 +40,12 @@ static constexpr int kLowPriority = 0;
 // crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
 // the destruction.
 static c10::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
-static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
-static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
-static cudaStream_t low_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
-                                        [kStreamsPerPool];
-static cudaStream_t high_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
-                                         [kStreamsPerPool];
+static std::atomic<uint32_t>
+    priority_counters[c10::cuda::max_compile_time_stream_priorities]
+                     [C10_COMPILE_TIME_MAX_GPUS];
+
+static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
+                           [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -61,6 +58,7 @@ static cudaStream_t high_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
 //  000 = default stream or externally allocated if id[63:3] != 0
 //  001 = low priority stream
 //  010 = high priority stream
+//  011 = highest priority stream
 //
 // This is not really for efficiency; it's just easier to write the code
 // to extract the index if we do this with bitmasks :)
@@ -83,9 +81,10 @@ static cudaStream_t high_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
 // making easy to identify an external stream when its value (X & 7) > 0
 enum class StreamIdType : uint8_t {
   DEFAULT = 0x0,
-  LOW = 0x1,
-  HIGH = 0x2,
-  EXT = 0x3,
+  LOW = 0x1, // 01
+  HIGH = 0x2, // 10
+  HIGHEST = 0x3, // 11
+  EXT = 0x4, // bits don't matter, EXT is always special-cased
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
@@ -98,6 +97,9 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
       break;
     case StreamIdType::HIGH:
       stream << "HIGH";
+      break;
+    case StreamIdType::HIGHEST:
+      stream << "HIGHEST";
       break;
     case StreamIdType::EXT:
       stream << "EXT";
@@ -149,6 +151,14 @@ static void initGlobalStreamState() {
       "max number of gpus expected (",
       C10_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile.");
+  int leastPriority = -1, greatestPriority = -1;
+  C10_CUDA_CHECK(
+      cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+  // greatestPriority is negative
+  auto range = leastPriority - greatestPriority + 1;
+  max_stream_priorities = range >= c10::cuda::max_compile_time_stream_priorities
+      ? c10::cuda::max_compile_time_stream_priorities
+      : range;
 }
 
 // Creates the low and high priority stream pools for the specified device
@@ -159,25 +169,19 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   CUDAGuard device_guard{device_index};
 
   for (const auto i : c10::irange(kStreamsPerPool)) {
-    auto& lowpri_stream = low_priority_streams[device_index][i];
-    auto& hipri_stream = high_priority_streams[device_index][i];
+    for (const auto p : c10::irange(max_stream_priorities)) {
+      auto& stream = streams[p][device_index][i];
+      auto pri = -p; // lower number is higher priority
 
-    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &lowpri_stream, kDefaultFlags, kLowPriority));
-    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &hipri_stream, kDefaultFlags, kHighPriority));
-
-    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
-      (*interp)->trace_gpu_stream_creation(
-          reinterpret_cast<uintptr_t>(lowpri_stream));
-      (*interp)->trace_gpu_stream_creation(
-          reinterpret_cast<uintptr_t>(hipri_stream));
+      C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+        (*interp)->trace_gpu_stream_creation(
+            reinterpret_cast<uintptr_t>(stream));
+        priority_counters[p][device_index] = 0;
+      }
     }
   }
-
-  low_priority_counters[device_index] = 0;
-  high_priority_counters[device_index] = 0;
 }
 
 // Init front-end to ensure initialization only occurs once
@@ -238,9 +242,11 @@ cudaStream_t CUDAStream::stream() const {
           " official API like c10::cuda::getStreamFromPool() to get a new stream.");
       return nullptr;
     case StreamIdType::LOW:
-      return low_priority_streams[device_index][si];
+      return streams[0][device_index][si];
     case StreamIdType::HIGH:
-      return high_priority_streams[device_index][si];
+      return streams[1][device_index][si];
+    case StreamIdType::HIGHEST:
+      return streams[2][device_index][si];
     case StreamIdType::EXT:
       return reinterpret_cast<cudaStream_t>(stream_id);
     default:
@@ -257,27 +263,41 @@ cudaStream_t CUDAStream::stream() const {
 // Returns a stream from the requested pool
 // Note: when called the first time on a device, this will create the
 // stream pools for that device.
-CUDAStream getStreamFromPool(
-    const bool isHighPriority,
-    DeviceIndex device_index) {
+CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
     c10::cuda::SetTargetDevice();
   }
+  TORCH_CHECK(
+      priority <= 0,
+      "Expected cuda stream priority to be less than or equal to 0, got ",
+      priority);
   check_gpu(device_index);
-
   // Initializes the stream pools (once)
   c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
+  auto pri_idx = -priority;
+  pri_idx =
+      std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
+  const auto idx = get_idx(priority_counters[pri_idx][device_index]);
+  StreamIdType id_type = static_cast<StreamIdType>(pri_idx + 1);
+  return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 
-  if (isHighPriority) {
-    const auto idx = get_idx(high_priority_counters[device_index]);
-    return CUDAStreamForId(device_index, makeStreamId(StreamIdType::HIGH, idx));
-  }
+  // if (isHighPriority) {
+  //   const auto idx = get_idx(high_priority_counters[device_index]);
+  //   return CUDAStreamForId(device_index, makeStreamId(StreamIdType::HIGH,
+  //   idx));
+  // }
 
-  const auto idx = get_idx(low_priority_counters[device_index]);
-  return CUDAStreamForId(device_index, makeStreamId(StreamIdType::LOW, idx));
+  // const auto idx = get_idx(low_priority_counters[device_index]);
+  // return CUDAStreamForId(device_index, makeStreamId(StreamIdType::LOW, idx));
+}
+
+C10_API CUDAStream
+getStreamFromPool(const bool isHighPriority, DeviceIndex device){
+  int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
+  return getStreamFromPool(priority, device);
 }
 
 CUDAStream getStreamFromExternal(
