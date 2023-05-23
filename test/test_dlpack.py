@@ -149,7 +149,8 @@ class TestTorchDlPack(TestCase):
     @skipCUDAIfRocm
     def test_dlpack_convert_default_stream(self, device):
         torch.cuda.default_stream().synchronize()
-        x = torch.zeros(2**30, device=device)
+        x = torch.zeros(1, device=device)
+        torch.cuda._sleep(2**20)
         self.assertTrue(torch.cuda.default_stream().query())
         d = x.__dlpack__(1)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
