@@ -1,10 +1,7 @@
 set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-
-conda_reinstall() {
-  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
-}
+source "$(dirname "${BASH_SOURCE[0]}")/install.sh"
 
 function install_huggingface() {
   local version
@@ -76,7 +73,6 @@ install_timm
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # Keep the current cmake and numpy version here, so we can reinstall them later
-  CMAKE_VERSION=$(get_conda_version cmake)
   NUMPY_VERSION=$(get_conda_version numpy)
 fi
 
