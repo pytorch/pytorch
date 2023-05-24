@@ -51,20 +51,18 @@ static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 57 bits --  -- 5 bits -----  -- 3 bits --
-// zeros          stream id index  StreamIdType
+// -- 54 bits --  -- 5 bits -----  -- 4 bits --     --1 bit --
+// zeros          stream id index  StreamIdType     Ext/native stream
+//                ignored for ext   ignored for ext
+// for external stream, StreamID is a cudaStream_t pointer
+// this means that last bit will always be 0
+// so when constructing StreamId for a native stream we set last bit to 1
+// to distinguish between native and external streams
 //
-// Where StreamIdType:
-//  000 = default stream or externally allocated if id[63:3] != 0
-//  001 = low priority stream
-//  010 = high priority stream
-//  011 = highest priority stream
-//
-// This is not really for efficiency; it's just easier to write the code
-// to extract the index if we do this with bitmasks :)
 //
 // We are obligated to treat the stream ID 0 as the default stream, per the
-// invariant specified in c10::Stream.  However, all other numbers are entirely
+// invariant specified in c10::Stream, so this is one exception to
+// "last bit = 1 for native streams". However, all other numbers are entirely
 // an internal implementation detail, we reserve the right to renumber streams
 // however we like.
 //
@@ -77,10 +75,11 @@ static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
 //
 // Also, external managed stream pointers (cudaStream_t) can be directly stored
 // in the Id field so in this case, we need to check the stream alignment.
-// The IdType uses an additional bit to match with the 64-bit address alignment
-// making easy to identify an external stream when its value (X & 7) > 0
 
 class StreamIdType {
+  // StreamIdType encodes whether this stream is DEFAULT, EXTernal or
+  // for all other native streams, the stream priority (higher value is higher
+  // priority)
  private:
   uint8_t stream_type;
 
@@ -122,7 +121,7 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
 static inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the cudaStream_ptr
   // so the last bit will be 0
-  if (!(s & 1)) {
+  if ((!(s & 1)) && s) {
     return StreamIdType(StreamIdType::EXT);
   }
   // last bit is external/internal stream, the mask should start from second
@@ -137,6 +136,9 @@ static inline size_t streamIdIndex(StreamId s) {
 }
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
+  if (st.isDefault()) {
+    return static_cast<StreamId>(0);
+  }
   return (static_cast<StreamId>(si) << (kStreamTypeBits + 1)) |
       static_cast<StreamId>(st.getStreamType() << 1) | 1;
 }
