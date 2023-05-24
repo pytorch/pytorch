@@ -5,7 +5,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
 
-#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
 #define compat_copysign c10::cuda::compat::copysign
 #else
