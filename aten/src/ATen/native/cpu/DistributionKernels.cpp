@@ -140,6 +140,8 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
       scalar_t *self_ptr = self.data_ptr<scalar_t>();
       using tmp_scalar_t = typename std::conditional_t<std::is_same<scalar_t, double>::value, double, float>;
       tmp_scalar_t *sample_ptr = tmp_tensor.data_ptr<tmp_scalar_t>();
+      
+      auto eps = std::numeric_limits<tmp_scalar_t>::min();
 
       auto sample = [&](int64_t begin, int64_t end) {
         int64_t len = end - begin;
@@ -149,13 +151,13 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (double *)(sample_ptr + begin), 1.4013e-45, 1./lambda);
+              (double *)(sample_ptr + begin), eps, 1./lambda);
             vslDeleteStream(&stream);
           } else {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
-              (float *) (sample_ptr + begin), 1.4013e-45, 1./lambda);
+              (float *) (sample_ptr + begin), eps, 1./lambda);
             vslDeleteStream(&stream);
           }
           // vectorized copy if using buffer and contiguous
