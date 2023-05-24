@@ -399,6 +399,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
         def remove(self):
             for handle in self.handles:
                 handle.remove()
+            self.grad_fns = None
 
         def __getstate__(self):
             return self.handles
