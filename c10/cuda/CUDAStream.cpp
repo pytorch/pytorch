@@ -81,14 +81,15 @@ static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
 // making easy to identify an external stream when its value (X & 7) > 0
 
 class StreamIdType {
-  private:
+ private:
   uint8_t stream_type;
-  public:
+
+ public:
   static const uint8_t DEFAULT = 0x0;
   static const uint8_t EXT = 0xF;
 
-  public:
-  StreamIdType(const uint8_t _stream_type): stream_type(_stream_type) {}
+ public:
+  StreamIdType(const uint8_t _stream_type) : stream_type(_stream_type) {}
 
   bool isExt() const {
     return EXT == stream_type;
@@ -111,20 +112,21 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   } else {
     stream << "PRIORITY " << int(s.getStreamType());
   }
-   return stream;
- }
+  return stream;
+}
 
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on streamIdIndex and streamIdType being non-negative;
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-// Externally allocated streams have their id being the cudaStream_ptr
-// so the last bit will be 0
+  // Externally allocated streams have their id being the cudaStream_ptr
+  // so the last bit will be 0
   if (!(s & 1)) {
     return StreamIdType(StreamIdType::EXT);
   }
-  //last bit is external/internal stream, the mask should start from second rightmost bit
+  // last bit is external/internal stream, the mask should start from second
+  // rightmost bit
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   return StreamIdType((s >> 1) & mask_for_type);
 }
@@ -278,7 +280,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   pri_idx =
       std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
-  StreamIdType id_type = StreamIdType(pri_idx+1);
+  StreamIdType id_type = StreamIdType(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
 }
 
