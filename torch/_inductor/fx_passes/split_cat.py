@@ -1,7 +1,6 @@
-import functools
 import logging
 import operator
-from typing import List, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import numpy
 
@@ -11,7 +10,8 @@ from torch._dynamo.utils import counters
 from ..pattern_matcher import (
     Arg,
     CallFunction,
-    CallMethod,
+    CallFunctionVarArgs,
+    CallMethodVarArgs,
     config_flag,
     FailedMatch,
     get_arg_value,
@@ -21,56 +21,88 @@ from ..pattern_matcher import (
     Match,
     MatchContext,
     MULTIPLE,
-    PatternEntry,
+    PatternExpr,
     register_graph_pattern,
+    RepeatedExpr,
 )
-from .pre_grad import merge_split_cat_pass, merge_splits_pass
+from .pre_grad import (
+    merge_split_cat_pass,
+    merge_splits_pass,
+    normalize_split_pass,
+    split_squeeze_pass,
+)
 
 log = logging.getLogger(__name__)
 
 
-# Normalize split with split_size into split_with_sizes, so that we only deal with one type of split in
-# subsequent optimizations
-class NormalizeSplit(PatternEntry):
-    def _get_split_args(self, split_node):
-        input_kwarg = "tensor"
-        split_size_kwarg = "split_size_or_sections"
-        dim_kwarg = "dim"
-        if split_node.op == "call_method":
-            split_size_kwarg = "split_size"
-        return (
-            get_arg_value(split_node, 0, input_kwarg),
-            get_arg_value(split_node, 1, split_size_kwarg),
-            get_arg_value(split_node, 2, dim_kwarg),
+def _get_split_args_default(split_node):
+    input_kwarg = "tensor"
+    split_size_kwarg = "split_size_or_sections"
+    dim_kwarg = "dim"
+    if split_node.op == "call_method":
+        split_size_kwarg = "split_size"
+    return (
+        get_arg_value(split_node, 0, input_kwarg),
+        get_arg_value(split_node, 1, split_size_kwarg),
+        get_arg_value(split_node, 2, dim_kwarg),
+    )
+
+
+def normalize_split_base(match: Match, _get_split_args: Callable):
+    """
+    Normalize split with split_size into split_with_sizes, so that we only deal with one type of split in
+    subsequent optimizations
+    """
+    split_node = match.nodes[0]
+    graph = match.graph
+    split_input, split_size, split_dim = _get_split_args(split_node)
+    if split_input is None or split_dim is None or split_size is None:
+        log.warning("couldn't find split args")
+        return
+    if "example_value" not in split_node.meta:
+        log.warning("example value absent for node: %s", split_node)
+        return
+    assert isinstance(split_node.meta["example_value"], (list, tuple))
+    split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
+
+    if any(isinstance(section, torch.SymInt) for section in split_sections):
+        # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
+        return
+    if split_dim < 0:  # Normalize split dim
+        split_dim += split_input.meta["example_value"].dim()
+    with graph.inserting_after(split_node):
+        new_split_node = graph.call_function(
+            torch.split,
+            args=(split_input, split_sections),
+            kwargs={"dim": split_dim},
         )
+    split_node.replace_all_uses_with(new_split_node)
+    new_split_node.meta.update(split_node.meta)
+    graph.erase_node(split_node)
+    counters["inductor"]["split_cat_norm"] += 1
 
-    def apply(self, match, graph, node):
-        split_node = match.nodes[0]
-        split_input, split_size, split_dim = self._get_split_args(split_node)
-        if split_input is None or split_dim is None or split_size is None:
-            log.warning("couldn't find split args")
-            return
-        if "example_value" not in split_node.meta:
-            log.warning("example value absent for node: %s", split_node)
-            return
-        assert isinstance(split_node.meta["example_value"], (list, tuple))
-        split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
 
-        if any(isinstance(section, torch.SymInt) for section in split_sections):
-            # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
-            return
-        if split_dim < 0:  # Normalize split dim
-            split_dim += split_input.meta["example_value"].dim()
-        with graph.inserting_after(split_node):
-            new_split_node = graph.call_function(
-                torch.split,
-                args=(split_input, split_sections),
-                kwargs={"dim": split_dim},
-            )
-        split_node.replace_all_uses_with(new_split_node)
-        new_split_node.meta.update(split_node.meta)
-        graph.erase_node(split_node)
-        counters["inductor"]["split_cat_norm"] += 1
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.split, users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    CallMethodVarArgs("split", users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def normalize_split_default(match: Match, *args, **kwargs):
+    return normalize_split_base(match, _get_split_args_default)
+
+
+def find_next_users(split_node):
+    next_users = []
+    for getitem_node in split_node.users.keys():
+        for getitem_user in getitem_node.users.keys():
+            if getitem_user not in next_users:
+                next_users.append(getitem_user)
+    return next_users
 
 
 class TorchSplit(CallFunction):
@@ -217,7 +249,7 @@ class SplitCatSimplifier:
         split_sections: List[int],
     ):
         # Find the next users (i.e. users after the getitem)
-        next_users = self.find_next_users(split_node)
+        next_users = find_next_users(split_node)
         # Gather inputs of the next users. When inputs come from `split_node`, they are instead represented by
         # a tuple indicating the split ranges. See `get_user_input_list` for more details
         user_inputs_list = self.get_user_input_list(split_node, next_users)
@@ -242,14 +274,6 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list
         )
         self.erase_old_nodes(graph, split_node, next_users)
-
-    def find_next_users(self, split_node):
-        next_users = []
-        for getitem_node in split_node.users.keys():
-            for getitem_user in getitem_node.users.keys():
-                if getitem_user not in next_users:
-                    next_users.append(getitem_user)
-        return next_users
 
     def get_user_input_list(
         self, split_node, next_users
@@ -518,12 +542,33 @@ class SplitCatSimplifier:
             # Handle cat/stack user nodes
             cat_dim = get_arg_value(user_node, 1, "dim")
             user_inputs_new_transformed = []
-            for user_input_new, transform_param in zip(
-                user_inputs_new, transform_params
-            ):
-                # Apply transforms
-                unflatten_params, movedim_params, unsqueeze_params = transform_param
-                with graph.inserting_before(user_node):
+            # For `unsqueeze` transform, we will combine consecutive inputs with the same unsqueeze params, and stack them
+            to_stack = []
+            stack_dim = None
+            with graph.inserting_before(user_node):
+                for user_input_new, transform_param in zip(
+                    user_inputs_new, transform_params
+                ):
+                    # Apply transforms
+                    unflatten_params, movedim_params, unsqueeze_params = transform_param
+                    if unsqueeze_params and (
+                        stack_dim is None or stack_dim == unsqueeze_params[0]
+                    ):
+                        to_stack.append(user_input_new)
+                        stack_dim = unsqueeze_params[0]
+                        continue
+                    elif to_stack:
+                        stacked_input = graph.call_function(
+                            torch.stack, args=(to_stack, stack_dim)
+                        )
+                        to_stack = []
+                        stack_dim = None
+                        user_inputs_new_transformed.append(stacked_input)
+                        if unsqueeze_params:
+                            to_stack.append(user_input_new)
+                            stack_dim = unsqueeze_params[0]
+                            continue
+
                     if unflatten_params:
                         user_input_new = graph.call_function(
                             torch.unflatten, args=(user_input_new, *unflatten_params)
@@ -532,11 +577,12 @@ class SplitCatSimplifier:
                         user_input_new = graph.call_function(
                             torch.movedim, args=(user_input_new, *movedim_params)
                         )
-                    if unsqueeze_params:
-                        user_input_new = graph.call_function(
-                            torch.unsqueeze, args=(user_input_new, *unsqueeze_params)
-                        )
-                user_inputs_new_transformed.append(user_input_new)
+                    user_inputs_new_transformed.append(user_input_new)
+                if to_stack:
+                    stacked_input = graph.call_function(
+                        torch.stack, args=(to_stack, stack_dim)
+                    )
+                    user_inputs_new_transformed.append(stacked_input)
 
             with graph.inserting_after(user_node):
                 if len(user_inputs_new_transformed) > 1:
@@ -570,6 +616,92 @@ class SplitCatSimplifier:
             graph.erase_node(node)
 
 
+class GetItem(CallFunction):
+    def __init__(self, arg, index):
+        super().__init__(operator.getitem, arg, index)
+
+    def find_anchor_nodes(self, ctx: MatchContext, searched):
+        # We generally match GetItem with arg being an Arg(). So, we never return the anchor
+        # nodes as the stored node in ctx.pattern_to_node is returned. Here we override find_anchor_nodes
+        # to not use ctx.pattern_to_node
+        for pattern in self.flat_args_kwargs[0]:
+            if isinstance(pattern, PatternExpr):
+                for other_node in pattern.find_anchor_nodes(ctx, searched):
+                    if not isinstance(other_node, torch.fx.Node):
+                        continue
+                    for node in other_node.users:
+                        if node not in searched:
+                            if self._match_fns(node):
+                                yield node
+                                searched.add(node)
+
+
+@register_graph_pattern(
+    RepeatedExpr(
+        CallFunction(
+            torch.squeeze,
+            GetItem(
+                TorchSplit(
+                    KeywordArg("split_input"),
+                    KeywordArg("split_sizes"),
+                ),
+                Ignored(),
+            ),
+            KeywordArg("dim"),
+            _users=MULTIPLE,
+        ),
+    ),
+    pass_dict=split_squeeze_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    RepeatedExpr(
+        CallFunction(
+            torch.squeeze,
+            GetItem(
+                TorchSplit(
+                    KeywordArg("split_input"),
+                    KeywordArg("split_sizes"),
+                ),
+                Ignored(),
+            ),
+            dim=KeywordArg("dim"),
+            _users=MULTIPLE,
+        )
+    ),
+    pass_dict=split_squeeze_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def merge_split_squeeze(
+    match: Match, split_input: torch.fx.Node, split_sizes: List[int], dim: int
+):
+    graph = match.graph
+    split = next(node for node in match.nodes if node.target == torch.split)
+    if not all(s == 1 for s in split_sizes):
+        return
+    next_users = find_next_users(split)
+    if not all(node.target == torch.squeeze for node in next_users):
+        return
+    with graph.inserting_before(match.output_node()):
+        unbind = graph.call_function(torch.unbind, args=(split_input, dim))
+        for item_index, getitem_node in sorted(
+            [
+                (getitem_node.args[1], getitem_node)
+                for getitem_node in split.users.keys()
+            ]
+        ):
+            squeeze = next(iter(getitem_node.users.keys()))
+            new_get_item = graph.call_function(
+                operator.getitem, args=(unbind, item_index)
+            )
+            squeeze.replace_all_uses_with(new_get_item)
+            new_get_item.meta.update(squeeze.meta)
+            graph.erase_node(squeeze)
+            graph.erase_node(getitem_node)
+    graph.erase_node(split)
+    counters["inductor"]["split_squeeze_replaced"] += 1
+
+
 getitem_split = ListOf(
     CallFunction(
         operator.getitem,
@@ -578,6 +710,7 @@ getitem_split = ListOf(
             KeywordArg("split_sections"),
         ),
         Ignored(),
+        _users=MULTIPLE,
     ),
     partial=True,
 )
@@ -618,31 +751,3 @@ def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
         return
     split_node = next(node for node in match.nodes if node.target == torch.split)
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
-
-
-@functools.lru_cache(None)
-def _split_cat_init():
-    from .pre_grad import normalize_split_pass
-
-    # Pass 1: Normalize split cats
-    for pattern in [
-        CallFunction(torch.split, Arg(), Arg(), Arg(), _users=MULTIPLE),
-        CallFunction(torch.split, Arg(), Arg(), dim=Arg(), _users=MULTIPLE),
-        CallFunction(
-            torch.split, Arg(), split_size_or_sections=Arg(), dim=Arg(), _users=MULTIPLE
-        ),
-        CallFunction(
-            torch.split,
-            tensor=Arg(),
-            split_size_or_sections=Arg(),
-            dim=Arg(),
-            _users=MULTIPLE,
-        ),
-        CallMethod("split", Arg(), Arg(), Arg(), _users=MULTIPLE),
-        CallMethod("split", Arg(), Arg(), dim=Arg(), _users=MULTIPLE),
-        CallMethod("split", Arg(), split_size=Arg(), dim=Arg(), _users=MULTIPLE),
-    ]:
-        pattern = NormalizeSplit(
-            pattern=pattern, extra_check=config_flag("split_cat_fx_passes")
-        )
-        pattern.register(normalize_split_pass)
