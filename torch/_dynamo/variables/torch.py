@@ -128,9 +128,14 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
+        try:
+            if value in tensor_dunder_fns_remap:
+                value = tensor_dunder_fns_remap[value]
+        except TypeError as e:
+            # is it cleaner to somehow exclude unhashable types from the `in` check above?
+            if "unhashable type" not in e.args[0]:
+                raise
 
-        if value in tensor_dunder_fns_remap:
-            value = tensor_dunder_fns_remap[value]
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -494,6 +499,15 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif (
+            self.value == torch.distributed.get_process_group_ranks
+            or self.value == torch.distributed.distributed_c10d._get_group_tag
+        ):
+            # guard on this 'pg'
+            # desugar it at trace-time into ranks by directly calling util
+            # bake the result into the trace
+            assert len(args) == 1, "Expected one arg (pg)"
+            return ConstantVariable(self.value(args[0].value))
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -561,7 +575,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
-
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
