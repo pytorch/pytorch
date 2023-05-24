@@ -812,7 +812,8 @@ def speculate_subgraph(
 
     except torch._dynamo.exc.Unsupported as ex:
         log.warning(
-            "TorchDynamo tracing of HigherOrderOperator did not go well. Falling back to eager behavior. This can result in a slowdown."
+            "TorchDynamo tracing of HigherOrderOperator did not go well. "
+            "Falling back to eager behavior. This can result in a slowdown."
         )
         log.exception(ex)
         tx.output.graph = graph_checkpoint

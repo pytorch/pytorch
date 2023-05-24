@@ -521,6 +521,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 # innermost graph. Instead, we want to raise the params/buffers
                 # as inputs to the higher-order graph, and register them as
                 # get_attrs in the root tracer.
+
+                # Note that Dynamo will still call lift_tracked_freevar_to_input
+                # when these inputs are encountered for the inner graph. The
+                # only difference is what happens at the root tracer for
+                # nn.Parameters vs free inputs. The free inputs are registered
+                # as placeholders in the root graph, whereas the nn.Parameters
+                # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
             if not is_constant_source(source):
