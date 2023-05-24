@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int):
+def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
