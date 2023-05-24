@@ -13,6 +13,8 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
     get_act_qspec,
     get_weight_qspec,
     get_bias_qspec,
+    _annotate_input_qspec_map,
+    _annotate_output_qspec,
 )
 
 from torch.fx import Node
@@ -26,8 +28,6 @@ from .quantizer import (
     QuantizationSpec,
     Quantizer,
     QuantizationAnnotation,
-    _annotate_input_qspec_map,
-    _annotate_output_qspec,
 )
 from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
 from torch.ao.quantization.observer import (
