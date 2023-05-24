@@ -963,16 +963,16 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})({x} ^ {y})"
 
     @staticmethod
-    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+    def rand(seed: sympy.Expr, offset: sympy.Expr):
+        return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
-    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+    def randn(seed: sympy.Expr, offset: sympy.Expr):
+        return f"randn_cpu({seed}, {offset})"
 
     @staticmethod
-    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+    def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
+        return f"randint64_cpu({seed}, {offset}, {low}, {high})"
 
     @staticmethod
     def sigmoid(x):
@@ -2537,9 +2537,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
+        wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
 
 
 class CppWrapperKernelGroup(KernelGroup):
