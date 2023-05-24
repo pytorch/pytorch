@@ -3384,6 +3384,160 @@ TEST_F(VulkanAPITest, unsqueeze_dim2) {
   test_unsqueeze({111, 222}, -1);
 }
 
+void test_t(const at::IntArrayRef input_shape) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::t(in_cpu);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::t(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, transpose_t_1d) {
+  test_t({7});
+}
+
+TEST_F(VulkanAPITest, transpose_t_2d_small) {
+  test_t({1, 1});
+}
+
+TEST_F(VulkanAPITest, transpose_t_2d_medium) {
+  test_t({7, 5});
+}
+
+TEST_F(VulkanAPITest, transpose_t_2d_large) {
+  test_t({53, 117});
+}
+
+void test_transpose(const at::IntArrayRef input_shape, int64_t index0, int64_t index1) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::transpose(in_cpu, index0, index1);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::transpose(in_vulkan, index0, index1);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, transpose_2d_height_and_width_small) {
+  test_transpose({1, 1}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_2d_height_and_width_medium) {
+  test_transpose({7, 5}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_2d_height_and_width_large) {
+  test_transpose({53, 117}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_2d_height_and_height_large) {
+  test_transpose({53, 117}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, transpose_2d_width_and_width_large) {
+  test_transpose({53, 117}, 1, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_height_and_width_small) {
+  test_transpose({1, 1, 1}, 1, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_height_and_width_medium) {
+  test_transpose({3, 2, 5}, 1, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_height_and_width_large) {
+  test_transpose({100, 1, 144}, 1, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_width_and_width_large) {
+  test_transpose({100, 1, 144}, 2, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_width_small) {
+  test_transpose({1, 1, 1}, 0, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_width_medium) {
+  test_transpose({3, 2, 5}, 0, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_width_large) {
+  test_transpose({113, 1, 141}, 0, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_depth_large) {
+  test_transpose({113, 2, 131}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_height_small) {
+  test_transpose({1, 1, 1}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_height_medium) {
+  test_transpose({3, 7, 5}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_depth_and_height_large) {
+  test_transpose({113, 141, 1}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_3d_height_and_height_large) {
+  test_transpose({101, 1, 141}, 1, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_batch_and_batch_large) {
+  test_transpose({7, 51, 41, 3}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_depth_and_depth_large) {
+  test_transpose({7, 51, 41, 3}, 1, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_height_and_height_large) {
+  test_transpose({7, 51, 41, 3}, 2, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_width_and_width_large) {
+  test_transpose({7, 51, 41, 3}, 3, 3);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_batch_and_depth_large) {
+  test_transpose({7, 51, 41, 3}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_batch_and_height_large) {
+  test_transpose({7, 51, 41, 3}, 0, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_batch_and_width_large) {
+  test_transpose({7, 51, 41, 3}, 0, 3);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_depth_and_height_large) {
+  test_transpose({7, 51, 41, 3}, 1, 2);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_depth_and_width_large) {
+  test_transpose({7, 51, 41, 3}, 1, 3);
+}
+
+TEST_F(VulkanAPITest, transpose_4d_height_and_width_large) {
+  test_transpose({7, 51, 41, 3}, 2, 3);
+}
+
 TEST_F(VulkanAPITest, upsample_nearest2d) {
   const auto in_cpu = at::rand({1, 2, 2, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::upsample_nearest2d(in_cpu, {4, 6});
