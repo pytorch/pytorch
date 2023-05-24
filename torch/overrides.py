@@ -411,6 +411,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.batch_norm_stats: lambda input, eps: -1,
         torch.batch_norm_update_stats: lambda input, running_mean, running_var, momentum: -1,
         torch.bernoulli: lambda input, generator=None, out=None: -1,
+        torch.bias: lambda input, weight: -1,
         torch.bilinear: lambda input1, input2, weight, bias: -1,
         torch.binary_cross_entropy_with_logits: (lambda input, target, weight=None, size_average=None, reduce=None,
                                                  reduction='mean', pos_weight=None: -1),
