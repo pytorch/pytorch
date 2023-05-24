@@ -792,6 +792,22 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
+    @requires_cuda()
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_cudagraphs(self):
+        def gn(x):
+            return torch.sigmoid(x)
+
+        def fn(x):
+            return torch.cos(torch.utils.checkpoint.checkpoint(gn, x))
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        args = (x,)
+
+        opt_fn = torch.compile(fn, mode="reduce-overhead")
+        for _ in range(10):
+            opt_fn(*args).sum().backward()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
