@@ -2688,9 +2688,7 @@ class ExternKernel(InputsKernel):
         offset = V.graph.sizevars.offset_var(index, rw.range_vars)
         expected = sympy_dot(rw.range_vars, strides) + offset
 
-        from .sizevars import join_dimensions
-
-        if join_dimensions(index - expected) != 0:
+        if index != expected:
             log.debug(
                 "convert_to_reinterpret_view failed: stride=%s offset=%s index=%s",
                 strides,
