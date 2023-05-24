@@ -216,13 +216,14 @@ class CppPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        mod = self.paren(self.doprint(mod))
-        if div != "1" and div != "1L" and div != "1.0":
+        if div != 1:
+            div = self.paren(self.doprint(div))
+            (x // div) % mod
             if expr.is_integer:
-                x = f"div_floor_internal({x}, {div})"
+                x = f"at::native::div_floor_integer({x}, {div})"
             else:
-                x = f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
+                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
+        mod = self.paren(self.doprint(mod))
         return f"static_cast<long>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
@@ -230,15 +231,17 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"div_floor_internal({x}, {div})"
-        return (
-            f"div_floor_internal(static_cast<double>({x}), static_cast<double>({div}))"
-        )
+            return f"at::native::div_floor_integer({x}, {div})"
+        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        r = f"std::floor({self._print(expr.args[0])})"
-        return f"static_cast<long>({r})" if expr.is_integer else r
+        #  integer exp should not hit this:
+        # s1 = sympy.Symbol("s1", integer=integer)
+        # expr = sympy.ceiling(s1)
+        # expr is alway s1.
+        assert expr.is_integer is not True
+        return f"std::floor({self._print(expr.args[0])})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -268,8 +271,9 @@ class CppPrinter(ExprPrinter):
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        r = f"std::ceil({self._print(expr.args[0])})"
-        return f"static_cast<long>({r})" if expr.is_integer else r
+        # As _print_floor, integer exp should not hit this:
+        assert expr.is_integer is not True
+        return f"std::ceil({self._print(expr.args[0])})"
 
 
 cexpr = CppPrinter().doprint
