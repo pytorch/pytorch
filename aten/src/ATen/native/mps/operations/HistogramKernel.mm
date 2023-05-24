@@ -228,7 +228,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   }
 
   // for MPSProfiler
-  std::vector<Tensor> allTensorsList = bin_edges.vec();
+  auto allTensorsList = bin_edges.vec();
   allTensorsList.push_back(input);
   if (has_weight) {
     allTensorsList.push_back(weight.value());
@@ -397,7 +397,6 @@ static void histogramdd_linear_kernel(const Tensor& self,
   }
 }
 
-template <typename scalar_t>
 void infer_bin_edges_from_input(const Tensor& input,
                                 const int64_t N,
                                 std::vector<double>& leftmost_edges,
@@ -406,8 +405,8 @@ void infer_bin_edges_from_input(const Tensor& input,
   std::tie(min, max) = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
-    leftmost_edges[i] = min[i].item().to<scalar_t>();
-    rightmost_edges[i] = max[i].item().to<scalar_t>();
+    leftmost_edges[i] = min[i].item().to<double>();
+    rightmost_edges[i] = max[i].item().to<double>();
   }
 }
 
@@ -415,9 +414,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
-    infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
-  });
+  infer_bin_edges_from_input(input, N, leftmost_edges, rightmost_edges);
 }
 
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
