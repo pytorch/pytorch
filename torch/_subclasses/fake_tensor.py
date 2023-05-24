@@ -819,6 +819,13 @@ def get_fast_op_impls():
     return FAST_OP_IMPLEMENTATIONS
 
 
+@functools.lru_cache(None)
+def init_cuda_context():
+    # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
+    if torch.cuda.is_available():
+        torch.empty(1, device="cuda")
+
+
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
@@ -922,8 +929,10 @@ class FakeTensor(torch.Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize cuda device.
-        if device.type == "cuda" and device.index is None:
-            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        if device.type == "cuda":
+            init_cuda_context()
+            if device.index is None:
+                device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -1291,11 +1300,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.global_registry:
-            custom_op = torch._custom_op.global_registry[func.name()]
+        if func.name() in torch._custom_op.impl.global_registry:
+            custom_op = torch._custom_op.impl.global_registry[func.name()]
             if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
                     result = custom_op._get_impl("abstract").func(*args, **kwargs)
                     return result
 
