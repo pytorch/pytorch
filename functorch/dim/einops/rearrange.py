@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from typing import List, Sequence, Tuple, Union, TYPE_CHECKING
+
 import torch
-from typing import Dict, List, Sequence, Tuple, Union, TYPE_CHECKING
-from ._parsing import AnonymousAxis, ParsedExpression, _ellipsis
 from functorch._C import dim as _C
+from ._parsing import pattern_to_dim_idxs
 
 if TYPE_CHECKING:
     from functorch.dim.dim import Dim
@@ -25,7 +26,7 @@ def rearrange(
     Args:
         tensor (Tensor or sequence of Tensor): The tensor(s) to rearrange
         pattern (str): The rearrangement pattern
-        axes_lengths (int): any additional specifications for dimensions
+        axes_lengths (int): any additional length specifications for dimensions
 
     Returns:
         Tensor: The rearranged tensor
@@ -62,99 +63,35 @@ def rearrange(
         >>> rearrange(images, 'b (h h1) (w w1) c -> b h w (c h1 w1)', h1=2, w1=2).shape
         torch.Size([32, 15, 20, 12])
     """
-    # validation taken largely from einops.einops._prepare_transformation_recipe
-    # https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/einops/einops.py
-    try:
-        left_str, right_str = pattern.split("->")
-    except ValueError:
-        raise ValueError("Pattern must contain a single '->' separator") from None
-
-    if _ellipsis in axes_lengths:
-        raise ValueError(f"'{_ellipsis}' is not an allowed axis identifier")
-
-    left = ParsedExpression(left_str)
-    right = ParsedExpression(right_str)
-
-    if not left.has_ellipsis and right.has_ellipsis:
-        raise ValueError(f'Ellipsis found in right side, but not left side of a pattern {pattern}')
-    if left.has_ellipsis and left.has_ellipsis_parenthesized:
-        raise ValueError(f'Ellipsis is parenthesis in the left side is not allowed: {pattern}')
-    difference = set.symmetric_difference(left.identifiers, right.identifiers)
-    if left.has_non_unitary_anonymous_axes or right.has_non_unitary_anonymous_axes:
-        raise ValueError('Non-unitary anonymous axes are not supported in rearrange (exception is length 1)')
-    if len(difference) > 0:
-        raise ValueError(f'Identifiers only on one side of expression (should be on both): {difference}')
-    unmatched_axes = axes_lengths.keys() - left.identifiers
-    if len(unmatched_axes) > 0:
-        raise ValueError(f'Identifiers not found in expression: {unmatched_axes}')
-
     if not isinstance(tensor, torch.Tensor):
         tensor = torch.stack(tensor)
 
-    if left.has_ellipsis:
-        n_ellipsis_dims = tensor.ndim - (len(left.composition) - 1)
-        n_dims = len(left.identifiers) - 1
-        total_n_dims = n_dims + n_ellipsis_dims
-    else:
-        n_ellipsis_dims = 0
-        total_n_dims = n_dims = len(left.identifiers)
+    total_n_dims, left_idxs, right_idxs, anon_idxs, axes_idx_map = pattern_to_dim_idxs(
+        tensor.ndim, pattern, **axes_lengths
+    )
 
-    n_anon_dims = sum(not dim for dim in left.composition)
-    total_n_dims += n_anon_dims
+    first_class_dims: Tuple["Dim", ...] = (dims(total_n_dims),) if total_n_dims == 1 else dims(total_n_dims)
 
-    first_class_dims: Tuple[Dim, ...] = (dims(total_n_dims),) if total_n_dims == 1 else dims(total_n_dims)
-    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
-    anon_axes: List[AnonymousAxis] = []
+    for axis in axes_lengths:
+        first_class_dims[axes_idx_map[axis]].size = axes_lengths[axis]
 
-    # map the left-hand side identifiers to first class dims
-    dims_i = 0
-    for dimension in left.composition:
-        if isinstance(dimension, list):
-            for identifier in dimension:
-                # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
-                assert isinstance(identifier, str)
-                identifier_dim_map[identifier] = (first_class_dims[dims_i],)
-                dims_i += 1
-            if not dimension:
-                # unitary anonymous axis
-                anon_axis = AnonymousAxis("1")
-                identifier_dim_map[anon_axis] = (first_class_dims[dims_i],)
-                anon_axes.append(anon_axis)
-                dimension.append(anon_axis)
-                dims_i += 1
-        elif dimension == _ellipsis:
-            identifier = _ellipsis
-            identifier_dim_map[identifier] = tuple(first_class_dims[dims_i + i] for i in range(n_ellipsis_dims))
-            dims_i += n_ellipsis_dims
-        else:
-            raise ValueError(f'Unexpected dimension: {dimension}')
+    def idxs_to_dims(idxs: Sequence[Union[int, Sequence[int]]]) -> Tuple[Union["Dim", Tuple["Dim", ...]], ...]:
+        return tuple(
+            tuple(first_class_dims[idx] for idx in dim) if isinstance(dim, Sequence) else first_class_dims[dim]
+            for dim in idxs
+        )
 
-    for axis, length in axes_lengths.items():
-        identifier_dim_map[axis][0].size = length
-
-    def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
-    ) -> List[Union[Dim, Tuple[Dim, ...]]]:
-        """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of first class dims."""
-        dim_composition: List[Union[Dim, Tuple[Dim, ...]]] = []
-        for dimension in composition:
-            if isinstance(dimension, list):
-                dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
-            elif dimension == _ellipsis:
-                dim_composition.extend(identifier_dim_map[_ellipsis])
-            else:
-                raise ValueError(f'Unexpected dimension: {dimension}')
-        return dim_composition
-
-    left_dims = composition_to_dims(left.composition)
-    right_dims = composition_to_dims(right.composition)
+    left_dims = idxs_to_dims(left_idxs)
+    right_dims = idxs_to_dims(right_idxs)
+    anon_dims = tuple(first_class_dims[idx] for idx in anon_idxs)
 
     # TODO: add type stubs for Tensor.order
     tensor = tensor[left_dims].order(*right_dims)  # type: ignore[attr-defined]
-    if anon_axes:
+
+    if anon_dims:
         # sum over all unitary anonymous axes to convert the functorch.dim.Tensor to its corresponding torch.Tensor
         return tensor.sum(  # type: ignore[union-attr]
-            tuple(identifier_dim_map[axis][0] for axis in anon_axes), keepdim=False  # type: ignore[misc]
+            anon_dims, keepdim=False  # type: ignore[arg-type]
         )
     else:
         return tensor  # type: ignore[return-value]
