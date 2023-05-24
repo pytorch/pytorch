@@ -350,6 +350,9 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0.pin_memory()
 
+        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
+            s0.resize_(10)
+
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
@@ -365,14 +368,6 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
-
-    @onlyCPU
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_storage_meta_ok(self, device, dtype):
-        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
-
-        # This is OK, it changes the meta storage size without allocating
-        s0.resize_(10)
 
     @onlyCUDA
     def test_module_share_memory(self):
