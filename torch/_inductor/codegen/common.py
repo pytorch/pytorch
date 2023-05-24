@@ -86,7 +86,12 @@ class OpDtypeClassifier:
     @staticmethod
     @functools.lru_cache(None)
     def explicit_dtype_ops():
-        return ["constant", "to_dtype", "rand", "randn", "index_expr"]
+        return ["constant", "to_dtype", "index_expr"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def rand_ops():
+        return ["rand", "randn"]
 
 
 class DataTypePropagation:
@@ -125,6 +130,9 @@ class DataTypePropagation:
 
         if node.target in OpDtypeClassifier.explicit_dtype_ops():
             return node.args[-1]
+
+        if node.target in OpDtypeClassifier.rand_ops():
+            return torch.float
 
         if node.target in OpDtypeClassifier.index_ops():
             return torch.int64
