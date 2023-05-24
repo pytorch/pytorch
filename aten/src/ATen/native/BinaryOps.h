@@ -4,14 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
-
-#if defined(__CUDA_ARCH__) || defined(__HIP_ARCH__)
-#include <c10/cuda/CUDAMathCompat.h>
-#define compat_copysign c10::cuda::compat::copysign
-#else
 #include <c10/util/copysign.h>
-#define compat_copysign c10::copysign
-#endif
 
 
 namespace at {
@@ -80,7 +73,7 @@ inline scalar_t div_floor_floating(scalar_t a, scalar_t b) __ubsan_ignore_float_
       floordiv += scalar_t(1.0);
     }
   } else {
-    floordiv = compat_copysign(scalar_t(0), a / b);
+    floordiv = c10::copysign(scalar_t(0), a / b);
   }
   return floordiv;
 }
