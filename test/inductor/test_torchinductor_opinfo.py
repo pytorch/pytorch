@@ -164,8 +164,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
-    # Unsupported: data dependent operator: aten.equal.default
-    "cov": {f16, f32, f64, i64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
     "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
@@ -245,8 +243,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {b8, f16, f32, f64, i32, i64},
     "fft.rfftn": {b8, f16, f32, f64, i32, i64},
-    # AssertionError: Scalars are not close!
-    "empty_strided": {b8, i32, i64, f16, f32, f64},
 }
 
 
@@ -264,7 +260,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "combinations": {b8, f16, f32, f64, i32, i64},
     "corrcoef": {f16, f32, f64, i32, i64},
     "cov": {f16, f32, f64, i32, i64},
-    "equal": {b8, f16, f32, f64, i32, i64},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
@@ -300,7 +295,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     ("round", "decimals_3"): {f16},
     ("scatter_reduce", "prod"): {f16, f32, f64},
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
     "stft": {f32, f64},
