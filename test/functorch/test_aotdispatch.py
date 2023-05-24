@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
-from torch.testing._internal.optests.aot_autograd import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx

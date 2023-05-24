@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
-import torch.testing._internal.opcheck as opcheck
+import torch.testing._internal.optests as optests
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     constrain_range, guard_int, GuardOnDataDependentSymNode
@@ -1576,10 +1576,10 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
         kwargs = sample_input.kwargs
 
         try:
-            opcheck.make_fx_check(fn, args, kwargs, tracing_mode, self.assertEqual)
+            optests.make_fx_check(fn, args, kwargs, tracing_mode, self.assertEqual)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
-        except opcheck.TestFrameworkError:
+        except optests.TestFrameworkError:
             return
 
 
