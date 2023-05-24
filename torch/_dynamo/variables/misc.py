@@ -629,7 +629,13 @@ class SkipFilesVariable(VariableTracker):
             and len(args) <= 1
             and DefaultDictVariable.is_supported_arg(args[0])
         ):
-            return DefaultDictVariable({}, collections.defaultdict, args[0], mutable_local=MutableLocal(), **options)
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
+                **options,
+            )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (

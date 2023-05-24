@@ -617,7 +617,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref[1]["c"], res[1]["c"]))
         self.assertTrue(same(ref[1][param], res[1][param]))
 
-
     def test_default_dict(self):
         self._test_default_dict_helper(dict)
 
