@@ -673,6 +673,63 @@ def linalg_lu_factor_ex_meta(
     return LU, pivots, info
 
 
+@register_meta([aten.linalg_lu_solve.default, aten.linalg_lu_solve.out])
+@out_wrapper()
+def linalg_lu_solve_meta(
+    LU: Tensor,
+    pivots: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    adjoint: bool = False,
+) -> Tensor:
+    # dtype
+    checkFloatingOrComplex(LU, "torch.linalg.lu_solve")
+    check(
+        LU.dtype == B.dtype,
+        lambda: (
+            f"linalg.lu_solve: Expected LU and B to have the same dtype, "
+            f"but found LU of type {LU.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    check(
+        pivots.dtype == torch.int,
+        lambda: "linalg.lu_solve: pivots should be a Tensor of scalar type torch.int32",
+    )
+
+    # matrix shapes
+    squareCheckInputs(LU, "torch.linalg.lu_solve")
+    checkInputsSolver(LU, B, left, "linalg.lu_solve")
+    check(
+        LU.size(-1) == pivots.size(-1),
+        lambda: "linalg.lu_solve: Number of pivots per batch should be same as the dimension of the matrix",
+    )
+
+    # batches
+    check(
+        LU.shape[:-1] == pivots.shape,
+        lambda: (
+            f"linalg.lu_solve: Expected LU.shape[:-1] and pivots.shape to be the same, "
+            f"but got pivots with shape {pivots.shape} instead"
+        ),
+    )
+
+    B_broadcast_size, _ = _linalg_broadcast_batch_dims(B, LU)
+
+    result = torch.empty_strided(
+        size=B_broadcast_size,
+        stride=make_contiguous_strides_for(B_broadcast_size, row_major=not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+
+    if result.numel() != 0 and not left:
+        if result.is_complex():
+            result = result.conj()
+
+    return result
+
+
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
 def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
     if mode == "reduced":
@@ -3013,6 +3070,20 @@ def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
 def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
+
+
+@register_meta([aten.multinomial.default, aten.multinomial.out])
+@out_wrapper()
+def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
+    check(
+        0 < input.dim() <= 2,
+        lambda: f"The probabilty distributions dimensions must be 1 or 2, but got {input.dim()}",
+    )
+    if input.dim() == 1:
+        return torch.empty(num_samples, dtype=torch.long, device=input.device)
+    return torch.empty(
+        input.size(0), num_samples, dtype=torch.long, device=input.device
+    )
 
 
 def multiply_integers(vs):
