@@ -129,7 +129,7 @@ static inline StreamIdType streamIdType(StreamId s) {
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto val = (s >> 1) & mask_for_type;
   TORCH_INTERNAL_ASSERT(val || !(s & 1), "invalid StreamId", s);
-  return StreamIdType((s >> 1) & mask_for_type);
+  return StreamIdType(val);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
