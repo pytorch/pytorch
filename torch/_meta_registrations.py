@@ -3724,6 +3724,7 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
+import torch.onnx
 import torch.ao.quantization.fx._decomposed
 
 
