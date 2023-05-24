@@ -161,6 +161,7 @@ def get_flops(dtype):
     else:
         return get_max_simd_tflops(torch.float32)
 
+
 def is_mm_compute_bound(M, K, N, dtype):
     from triton.testing import get_dram_gbps
 
@@ -170,7 +171,6 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     return arithmetic_intensity > machine_balance
 
-_PAD_MM_CACHE = None
 
 @functools.lru_cache(None)
 def get_pad_cache():
