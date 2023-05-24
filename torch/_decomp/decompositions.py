@@ -936,7 +936,7 @@ def col2im(
         [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
     )
     idx = (None, None, indices_row, indices_col)
-    output = aten._unsafe_index_put(output, idx, input, accumulate=True)
+    output = aten.index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
@@ -972,8 +972,7 @@ def unfold_backward(
     # It could potentially be fused into one call to scatter_reduce,
     # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    index = (None,) * dim + (idx,)
-    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
+    return torch.index_add(grad_input, dim, idx, grad)
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -1102,7 +1101,7 @@ def embedding_dense_backward(
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
+        counts = counts.index_put([indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
@@ -1111,9 +1110,7 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
-        result_dtype
-    )
+    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
 
 
 def prod(x: List[int]):

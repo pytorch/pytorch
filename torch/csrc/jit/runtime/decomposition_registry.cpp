@@ -70,7 +70,7 @@ void loadDecompositionFunctions() {
 
 } // anonymous namespace
 
-static void DecomposeOp(Node* n) {
+void DecomposeOp(Node* n) {
   auto schema = n->maybeSchema();
   if (!schema) {
     return;
@@ -89,7 +89,7 @@ static void DecomposeOp(Node* n) {
   n->destroy();
 }
 
-static void RunDecompositions(Block* block) {
+void RunDecompositions(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // advance iterator bc the current node may be destroyed
