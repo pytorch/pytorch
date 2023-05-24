@@ -153,6 +153,7 @@ class GraphLowering(torch.fx.Interpreter):
         super().__init__(gm)
 
         self.layout_opt = self.decide_layout_opt()
+        self.num_channels_last_conv = 0
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -596,6 +597,11 @@ class GraphLowering(torch.fx.Interpreter):
                     pass
 
         self.finalize()
+        log.debug(
+            "Force channels last inputs for %d conv for the current graph with id %d",
+            self.num_channels_last_conv,
+            self.graph_id,
+        )
 
     def finalize(self):
         for buf in self.buffers:
