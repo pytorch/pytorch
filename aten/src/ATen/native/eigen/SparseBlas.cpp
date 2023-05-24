@@ -42,15 +42,6 @@ void inline csr_col_indices_and_values_resize(
             input.values().resize_({nnz}),
             input.sizes());
   }
-
-  if (input.layout() == kSparseCsr) {
-    static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
-        ->set_member_tensors(
-            input.crow_indices(),
-            input.col_indices().resize_({nnz}),
-            input.values().resize_({nnz}),
-            input.sizes());
-  }
 }
 
 template <typename scalar_t, typename index_t>
