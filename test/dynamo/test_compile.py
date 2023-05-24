@@ -71,8 +71,6 @@ class InPlaceCompilationTests(unittest.TestCase):
             loaded_model = torch.jit.load(os.path.join(tmpdirname, "model.pt"))
             loaded_model(torch.randn(1, 10))
 
-
-
 # The private variants of teh below functions are all extensively tested extensively
 # So as long as the signatures match we're good
 class PublicTorchCompilerTests(unittest.TestCase):

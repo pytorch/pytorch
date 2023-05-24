@@ -10,6 +10,7 @@ from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
+    _init_device_handle,
     _init_ignored_module_states,
     _init_param_handles_from_module,
     _init_prefetching_state,
@@ -56,6 +57,7 @@ def fully_shard(
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")
     state = fully_shard.state(module)
     state = _init_ignored_module_states(state, module, ignored_modules)
+    state = _init_device_handle(state, module, state._ignored_params, device_id)
     state = _init_process_group_state(
         state, process_group, ShardingStrategy.FULL_SHARD, policy
     )
