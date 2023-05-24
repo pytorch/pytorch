@@ -15,7 +15,11 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
+from torch.testing._internal.optests.compile_check import compile_check
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
+from torch.testing._internal.custom_op_db import custom_op_db
 from torch._custom_op.impl import custom_op, CustomOp
+from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx
 import typing
 import collections
@@ -411,7 +415,7 @@ class TestPythonRegistration(TestCase):
         self.assertEquals(out_val, 13)
 
 
-class TestCustomOp(TestCase):
+class TestCaseWithCustomOpTearDown(TestCase):
     test_ns = '_test_custom_op'
 
     def tearDown(self):
@@ -422,6 +426,8 @@ class TestCustomOp(TestCase):
                 continue
             torch._custom_op.impl.global_registry[key]._destroy()
 
+
+class TestCustomOp(TestCaseWithCustomOpTearDown):
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
         # basic test.
@@ -1322,6 +1328,52 @@ def forward(self, x_1):
         f(torch.randn(20, 4), torch.randn(20), 0.1)
 
         self.assertEqual(len(counters['graph_break']), 0)
+
+
+class TestCompileCheck(TestCaseWithCustomOpTearDown):
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    def test_compile_check_op(self, device, dtype, op):
+        for sample_input in op.sample_inputs(device, dtype, requires_grad=op.supports_autograd):
+            dynamic_only = op.name in ("NumpyNMSCustomOp", "NumpyNonzeroCustomOp")
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+            inference_only = not op.supports_autograd
+            compile_check(
+                op.op, args, kwargs,
+                inference_only=inference_only,
+                dynamic_only=dynamic_only,
+                fullgraph=False,  # Dynamo graph breaks on CustomOp today
+            )
+
+    def test_compile_check_fails_basic(self, device):
+        @custom_op(f'{TestCaseWithCustomOpTearDown.test_ns}::foo')
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo.impl(['cpu', 'cuda'])
+        def foo_impl(x):
+            return x.sum()
+
+        x = torch.randn(3, device=device, requires_grad=True)
+        # Triggers the CustomOp autograd NYI error
+        with self.assertRaisesRegex(RuntimeError, "Autograd has not been implemented for operator"):
+            compile_check(lambda x: foo(x), (x,), {})
+
+    def test_assert_raises_regex(self, device):
+        from torch.testing._internal.optests.aot_autograd import assert_raises_regex
+        with assert_raises_regex(RuntimeError, 'c'):
+            raise RuntimeError("abcd")
+        with assert_raises_regex(RuntimeError, 'c.*'):
+            raise RuntimeError("abcd")
+        with self.assertRaisesRegex(AssertionError, 'instead got'):
+            with assert_raises_regex(RuntimeError, 'c.*'):
+                raise ValueError("abcd")
+        with self.assertRaisesRegex(AssertionError, 'Expected exception'):
+            with assert_raises_regex(RuntimeError, 'c.*'):
+                pass
+        with self.assertRaisesRegex(AssertionError, 'to match regex'):
+            with assert_raises_regex(RuntimeError, 'f'):
+                raise RuntimeError("abcd")
 
 
 class TestPythonDispatch(TestCase):
@@ -2804,6 +2856,9 @@ class TestPythonDispatcher(TestCase):
         r = torch._C._EnablePythonDispatcher()
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(TestCompileCheck, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()

@@ -7,9 +7,10 @@ import warnings
 import operator
 from collections.abc import Iterable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed, skip, xfail, skipOps
+from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
+import torch.testing._internal.opcheck as opcheck
 from torch.fx.experimental.symbolic_shapes import (
     sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     constrain_range, guard_int, GuardOnDataDependentSymNode
@@ -1564,18 +1565,8 @@ def _get_safe_inplace(inplace_variant):
     return _fn
 
 def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
-    def f(args, kwargs, extra_args, extra_kwargs):
-        if extra_args:
-            for i, t in extra_args:
-                args[i] = t.size()
-        if extra_kwargs:
-            for k, t in extra_kwargs.items():
-                kwargs[k] = t.size()
-
-        fn = _get_safe_inplace(op.get_inplace()) if inplace else op.op
-        return fn(*args, **kwargs)
+    fn = _get_safe_inplace(op.get_inplace()) if inplace else op.op
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-    new_f = None
 
     # Limit ourselves to first 100 inputs so symbolic tracing tests don't take too long
     for sample_input in itertools.islice(sample_inputs_itr, 100):
@@ -1584,34 +1575,13 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False):
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
 
-        # If any argument is a torch.Size(), maybe get dynamic shapes for it by:
-        # - Create a temporary Tensor whose size is the torch.Size() we want. Note that
-        #   we use an expanded Tensor as we cannot pass "meta" Tensors to make_fx.
-        # - Pass it to make_fx such that it is is converted to a proxy Tensor
-        # - Unpack the size in the wrapper to get a torch.Size with dynamic shapes (in
-        #   symbolic mode, a no-op otherwise)
-        extra_args = []
-        extra_kwargs = {}
-        for i, arg in enumerate(args):
-            if isinstance(arg, torch.Size):
-                extra_args.append((i, torch.empty(arg, device="cpu")))
-        for key, value in kwargs.items():
-            if isinstance(value, torch.Size):
-                extra_kwargs[key] = torch.empty(value, device="cpu")
-
         try:
-            new_f = make_fx(f, tracing_mode=tracing_mode)(args, kwargs, extra_args, extra_kwargs)
-        except DynamicOutputShapeException as e:
+            opcheck.make_fx_check(fn, args, kwargs, tracing_mode, self.assertEqual)
+        except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
-        for arg in args:
-            if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
-                arg.uniform_(0, 1)
-        try:
-            old_out = f(args, kwargs, extra_args, extra_kwargs)
-        except Exception:
-            continue
-        new_out = wrapper_set_seed(new_f, args, kwargs, extra_args, extra_kwargs)
-        self.assertEqual(new_out, old_out)
+        except opcheck.TestFrameworkError:
+            return
+
 
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
