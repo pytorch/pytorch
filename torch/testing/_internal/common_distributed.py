@@ -1013,6 +1013,7 @@ class MultiThreadedTestCase(TestCase):
     def _run(cls, test_name, rank, world_size):
         self = cls(test_name)
         self.rank = rank
+
         # precision/rel_tol is a thread-local setting since it may be overridden per test, need to make
         # every thread have the same value. This would be relevant when we use op db tests, where it
         # needs those states to be set i.e. using instantiate_device_type_tests()
