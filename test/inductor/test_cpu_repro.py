@@ -18,7 +18,11 @@ from torch._inductor.codegen.cpp import (
     CppVecKernelChecker,
     CppVecOverrides,
 )
-from torch._inductor.compile_fx import compile_fx_inner, complex_memory_overlap
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import timed
@@ -1598,6 +1602,48 @@ class CPUReproTests(TestCase):
 
         x = torch.rand(2, 3, 14, 14).bfloat16()
         self.common(f, (x,))
+
+    def test_linear_buffer_reuse(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 16)
+                self.tanh = torch.nn.Tanh()
+                self.linear2 = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.tanh(x)
+                x = self.linear2(x)
+                return x
+
+        mod = M().eval()
+        v = torch.randn(1, 16)
+
+        with torch.no_grad():
+
+            def compile_fx_wrapper(model_, example_inputs_):
+                return compile_fx(model_, example_inputs_)
+
+            def run(*ex, **kwargs):
+                return mod(*ex, **kwargs)
+
+            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
+            code = run_and_get_cpp_code(run, v)
+            self.assertFalse("= as_strided(" in code)
+            self.assertEqual(run(*v), mod(*v))
+
+    @config.patch(inplace_buffers=True)
+    def test_in_out_buffer(self):
+        def fn(x, y):
+            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
+            return z
+
+        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertTrue("in_out_ptr" in code)
+        self.assertEqual(fn_opt(*inps), fn(*inps))
 
 
 if __name__ == "__main__":
