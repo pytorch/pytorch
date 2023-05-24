@@ -30,7 +30,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
       gpu_kernel_with_scalars(
           iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
             TORCH_CHECK(b != 0, "ZeroDivisionError");
-            return div_floor_integer(a, b)
+            return div_floor_integer(a, b);
           });
     });
   } else if (iter.is_cpu_scalar(2)) {
@@ -70,7 +70,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           gpu_kernel_with_scalars(
               iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-                return div_floor_floating(a, b)
+                return div_floor_floating(a, b);
               });
         });
   }
