@@ -1021,9 +1021,10 @@ class SubgraphTracer(fx.Tracer):
         # A list of previously free variables that we lifted to being inputs of
         # the graph. If we are tracing a HigherOrderOperator's body_fn, then we
         # need to keep track of this so we can rewrite the HigherOrderOperator
-        # call using the traced body_fn. This is a list (instead of set) so that
-        # we can maintain the order of args for the HigherOrderOperator call.
-        self.lifted_freevars = list()
+        # call using the traced body_fn. This is a OrderedDict (instead of set)
+        # so that we can maintain the order of args for the HigherOrderOperator
+        # call. The values are None.
+        self.lifted_freevars = collections.OrderedDict()
 
     def create_proxy(
         self,
@@ -1194,7 +1195,7 @@ class SubgraphTracer(fx.Tracer):
             self.parent is not None
         ), "lift_tracked_freevar_to_input on root SubgraphTracer"
         self.create_graph_input(proxy.node.name)
-        self.lifted_freevars.append(proxy)
+        self.lifted_freevars[proxy] = None
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
             self.parent.lift_tracked_freevar_to_input(proxy)
 

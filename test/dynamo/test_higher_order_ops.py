@@ -587,6 +587,40 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
 
+    def test_hooks(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+        activations = dict()
+
+        def save_activations(mod, inp, out):
+            activations[name] = inp
+
+        for name, module in model.named_children():
+            forward_handles[name] = module.register_forward_hook(save_activations)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return wrap(lambda x: model(x), x)
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((10, 10))
+            pred = fn(x)
+            loss = pred.sum()
+            loss.backward()
+
+        self.assertTrue(activations.keys() == forward_handles.keys())
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
