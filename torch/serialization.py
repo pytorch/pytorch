@@ -670,7 +670,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    default_load_endian: DefaultLoadEndian = DefaultLoadEndian.NATIVE,
+    default_load_endian: DefaultLoadEndian = DefaultLoadEndian.LITTLE,
     weights_only: bool = False,
     **pickle_load_args: Any
 ) -> Any:
@@ -1098,7 +1098,7 @@ def _load(
     map_location,
     pickle_module,
     pickle_file='data.pkl',
-    _default_load_endian=DefaultLoadEndian.NATIVE,
+    _default_load_endian=DefaultLoadEndian.LITTLE,
     **pickle_load_args
 ):
     restore_location = _get_restore_location(map_location)
