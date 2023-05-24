@@ -55,7 +55,7 @@
 namespace c10 {
 namespace cuda {
 
-static constexpr int max_compile_time_stream_priorities = 3;
+static constexpr int max_compile_time_stream_priorities = 4;
 
 // Value object representing a CUDA stream.  This is just a wrapper
 // around c10::Stream, but it comes with a little extra CUDA-specific

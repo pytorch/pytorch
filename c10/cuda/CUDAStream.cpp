@@ -22,7 +22,7 @@ static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
-static constexpr int kStreamTypeBits = 3;
+static constexpr int kStreamTypeBits = 4;
 
 static int max_stream_priorities;
 
@@ -85,7 +85,7 @@ class StreamIdType {
   uint8_t stream_type;
   public:
   static const uint8_t DEFAULT = 0x0;
-  static const uint8_t EXT = 0x4;
+  static const uint8_t EXT = 0xF;
 
   public:
   StreamIdType(const uint8_t _stream_type): stream_type(_stream_type) {}
@@ -103,42 +103,14 @@ class StreamIdType {
   }
 };
 
-// enum class StreamIdType : uint8_t {
-//   DEFAULT = 0x0,
-//   LOW = 0x1, // 01
-//   HIGH = 0x2, // 10
-//   HIGHEST = 0x3, // 11
-//   EXT = 0x4, // bits don't matter, EXT is always special-cased
-// };
-
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
   if (s.isDefault()) {
     stream << "DEFAULT";
   } else if (s.isExt()) {
     stream << "EXT";
   } else {
-    stream << "PRIORITY " << s.getStreamType();
+    stream << "PRIORITY " << int(s.getStreamType());
   }
-  // switch (s) {
-  //   case StreamIdType::DEFAULT:
-  //     stream << "DEFAULT";
-  //     break;
-  //   case StreamIdType::LOW:
-  //     stream << "LOW";
-  //     break;
-  //   case StreamIdType::HIGH:
-  //     stream << "HIGH";
-  //     break;
-  //   case StreamIdType::HIGHEST:
-  //     stream << "HIGHEST";
-  //     break;
-  //   case StreamIdType::EXT:
-  //     stream << "EXT";
-  //     break;
-  //   default:
-  //     stream << static_cast<uint8_t>(s);
-  //     break;
-  //}
    return stream;
  }
 
@@ -147,25 +119,24 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-  int mask_for_type = (1 << kStreamTypeBits) - 1;
-  if (s && ((s & mask_for_type) == 0)) {
-    // Externally allocated streams have their id being the cudaStream_ptr
-    // so the bits corresponding to the type will be 0 and will collide with
-    // the default stream.
+// Externally allocated streams have their id being the cudaStream_ptr
+// so the last bit will be 0
+  if (!(s & 1)) {
     return StreamIdType(StreamIdType::EXT);
   }
-  return StreamIdType(s & mask_for_type);
-  //return static_cast<StreamIdType>(s & mask_for_type);
+  //last bit is external/internal stream, the mask should start from second rightmost bit
+  int mask_for_type = (1 << kStreamTypeBits) - 1;
+  return StreamIdType((s >> 1) & mask_for_type);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
   return static_cast<size_t>(
-      (s >> kStreamTypeBits) & ((1 << kStreamsPerPoolBits) - 1));
+      (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
 }
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
-  return (static_cast<StreamId>(si) << kStreamTypeBits) |
-      static_cast<StreamId>(st.getStreamType());
+  return (static_cast<StreamId>(si) << (kStreamTypeBits + 1)) |
+      static_cast<StreamId>(st.getStreamType() << 1) | 1;
 }
 
 // Thread-local current streams
@@ -199,7 +170,6 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   // Switches to the requested device so streams are properly associated
   // with it.
   CUDAGuard device_guard{device_index};
-
   for (const auto i : c10::irange(kStreamsPerPool)) {
     for (const auto p : c10::irange(max_stream_priorities)) {
       auto& stream = streams[p][device_index][i];
@@ -262,41 +232,29 @@ cudaStream_t CUDAStream::stream() const {
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
   if (st.isDefault()) {
-      TORCH_INTERNAL_ASSERT(
-          si == 0,
-          "Unrecognized stream ",
-          stream_,
-          " (I think this should be the default stream, but I got a non-zero index ",
-          si,
-          ").",
-          " Did you manufacture the StreamId yourself?  Don't do that; use the",
-          " official API like c10::cuda::getStreamFromPool() to get a new stream.");
-      return nullptr;
+    TORCH_INTERNAL_ASSERT(
+        si == 0,
+        "Unrecognized stream ",
+        stream_,
+        " (I think this should be the default stream, but I got a non-zero index ",
+        si,
+        ").",
+        " Did you manufacture the StreamId yourself?  Don't do that; use the",
+        " official API like c10::cuda::getStreamFromPool() to get a new stream.");
+    return nullptr;
   } else if (st.isExt()) {
     return reinterpret_cast<cudaStream_t>(stream_id);
   } else {
+    auto streamType = st.getStreamType();
+    TORCH_INTERNAL_ASSERT(
+        streamType >= 1 && streamType <= max_stream_priorities,
+        "Unrecognized stream ",
+        stream_,
+        " (I didn't recognize the stream type, ",
+        streamType,
+        ")");
     return streams[st.getStreamType() - 1][device_index][si];
   }
-//  }
-  // switch (st) {
-  //   case StreamIdType::DEFAULT:
-  //   case StreamIdType::LOW:
-  //     return streams[0][device_index][si];
-  //   case StreamIdType::HIGH:
-  //     return streams[1][device_index][si];
-  //   case StreamIdType::HIGHEST:
-  //     return streams[2][device_index][si];
-  //   case StreamIdType::EXT:
-  //     return reinterpret_cast<cudaStream_t>(stream_id);
-  //   default:
-  //     TORCH_INTERNAL_ASSERT(
-  //         0,
-  //         "Unrecognized stream ",
-  //         stream_,
-  //         " (I didn't recognize the stream type, ",
-  //         st,
-  //         ")");
-  // }
 }
 
 // Returns a stream from the requested pool
@@ -320,9 +278,8 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   pri_idx =
       std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
-  StreamIdType id_type = StreamIdType(pri_idx+1); //static_cast<StreamIdType>(pri_idx + 1);
+  StreamIdType id_type = StreamIdType(pri_idx+1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
-
 }
 
 CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
