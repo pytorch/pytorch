@@ -329,6 +329,12 @@ CHECK_STRIDES_SKIPS = {
     # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
+CHECK_CONJ_SKIPS = {
+    # The conj bit is not copied, see:
+    # https://github.com/pytorch/pytorch/pull/101836
+    aten.linalg_lu_solve.out,
+}
+
 class CheckStrides(Enum):
     NONE = 0
     SIGNIFICANT = 1
@@ -377,7 +383,8 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
         test_assert(meta_r.requires_grad == r.requires_grad, f"but real requires_grad was {r.requires_grad}")
-        test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
+        if func not in CHECK_CONJ_SKIPS:
+            test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
         test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
 
 
@@ -613,7 +620,6 @@ meta_function_expected_failures = {
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
-    torch.multinomial : {f64, bf16, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
@@ -662,9 +668,7 @@ meta_function_skips = {
     torch.functional.einsum : {bf16, c128, f64, f32, f16, c64},
     torch.functional.tensordot : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
-    torch.linalg.lu_solve : {c128, c64},
     torch.linalg.matrix_norm : {c128, f32, c64, f64},
-    torch.linalg.matrix_power : {c128, c64},
     torch.linalg.matrix_rank : {c128, c64},
     torch.linalg.svd : {c128, c64},
     torch.matmul : {bf16, c128, f64, f32, f16, c64},
@@ -716,7 +720,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
-    torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_unpool1d: {f16},  # aten::max_unpool2d
@@ -739,7 +742,6 @@ meta_function_device_skips['cpu'] = {
 meta_function_device_skips['cuda'] = {
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
-    torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
     torch.nn.functional.cross_entropy: {f16},
@@ -856,8 +858,6 @@ meta_dispatch_expected_failures = {
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
     aten.multi_margin_loss.default : {f32, f64},
     aten.multilabel_margin_loss_forward.default : {f32, f64},
-    aten.multinomial.default : {bf16, f32, f64},
-    aten.multinomial.out : {bf16, f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
     aten.segment_reduce.default : {bf16, f32, f16, f64},
@@ -871,8 +871,6 @@ meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.linalg_lu_solve.default: {c32, c64, c128},
-    aten.linalg_lu_solve.out: {c32, c64, c128},
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -924,8 +922,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.median.dim: {f16},  # aten::median.dim_values
     aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
-    aten.multinomial.default: {f16},  # aten::multinomial
-    aten.multinomial.out: {f16},  # aten::multinomial.out
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
