@@ -511,12 +511,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.cuda.streams.Stream):
-            return CUDAStreamVariable(
-                None,
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            unimplemented("CUDAStreamVariable does not currently work soundly.")
+            # return CUDAStreamVariable(
+            #     None,
+            #     value,
+            #     source=self.source,
+            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
+            # )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
