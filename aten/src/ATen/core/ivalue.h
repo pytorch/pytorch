@@ -582,10 +582,6 @@ public:
   IValue(int64_t i) : tag(Tag::Int) {
     payload.u.as_int = i;
   }
-    
-  IValue(ssize_t i) : tag(Tag::Int) {
-    payload.u.as_int = i;
-  }
 
   IValue(c10::SymInt i) {
     if (auto mi = i.maybe_as_int()) {
