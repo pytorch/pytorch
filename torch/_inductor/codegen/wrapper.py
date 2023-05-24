@@ -540,7 +540,7 @@ class WrapperCodeGen(CodeGen):
             return offsets_name
 
         @functools.lru_cache(None)
-        def strideof(name):
+        def strideof(name, is_nested=False):
             # Need to view as jagged format for this to work correctly
             rhs_name = name
             if is_nested:
@@ -585,13 +585,18 @@ class WrapperCodeGen(CodeGen):
                     )
 
         for name, value in graph_inputs_tensors:
+            try:
+                is_nested = value.data.data.layout.full_nested_size is not None
+            except Exception:
+                is_nested = False
+
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
                     code.writeline(
-                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
+                        f"{self.declare}{shape} = {strideof(name, is_nested)}[{dim}]{self.ending}"
                     )
 
     def codegen_precomputed_sizes(self, code: IndentedBuffer):
