@@ -1376,17 +1376,6 @@ if(USE_UCC)
   endif()
 endif()
 
- #---[ CUSPARSELT
-#if(USE_CUDA)
-  #find_package(CUSPARSELT)
-  #if(CUSPARSELT_FOUND)
-    #include_directories(SYSTEM ${CUSPARSELT_INCLUDE_DIRS})
-    #list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUSPASRELT_LIBRARIES})
-  #else()
-    #message(WARNING "CUSAPARSE not found!!")
-  #endif()
-#endif()
-
 # ---[ CUB
 if(USE_CUDA)
   find_package(CUB)
