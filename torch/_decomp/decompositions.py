@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int):
+def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
@@ -360,6 +360,19 @@ def mse_loss_backward(
 ):
     norm = 2.0 / input.numel() if reduction == Reduction.MEAN.value else 2.0
     return norm * (input - target) * grad_output
+
+
+@register_decomposition(aten.smooth_l1_loss)
+@pw_cast_for_opmath
+def smooth_l1_loss(
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    beta: float = 1.0,
+):
+    loss = (self - target).abs()
+    loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
+    return apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(aten.smooth_l1_loss_backward.default)
