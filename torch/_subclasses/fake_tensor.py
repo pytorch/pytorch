@@ -11,6 +11,7 @@ from weakref import ReferenceType
 
 import torch
 import torch._custom_op
+import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
@@ -27,7 +28,10 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    TorchDispatchMode,
+)
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
@@ -36,6 +40,7 @@ from torch.utils.weak import WeakIdRef
 DimList = List
 
 log = logging.getLogger(__name__)
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -987,7 +992,13 @@ class FakeTensor(torch.Tensor):
         # because the next dispatch after a fake mode will attempt to use
         # subclasses of tensors to dispatch, and any FakeTensor arguments
         # will be considered eligible.
-        if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
+        unrecognized_types = [
+            t for t in types if not issubclass(t, FakeTensor) and t is not torch.Tensor
+        ]
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FakeTensor unrecognized subclass(es): %s", unrecognized_types
+            )
             return NotImplemented
 
         fake_mode = None
@@ -997,6 +1008,21 @@ class FakeTensor(torch.Tensor):
                 break
 
         assert fake_mode is not None
+
+        # If the fake mode is already active, don't try to reapply it!
+        # NotImplemented is the right thing to return here, because the
+        # typical situation this can occur is if ProxyTensorMode returned a
+        # NotImplemented because of a not implemented subclass; we may have
+        # unluckily attempted to hit FakeTensor's dispatch first,
+        # NotImplemented lets us keep chaining until we find the actual
+        # subclass
+        cur_stack = _get_current_dispatch_mode_stack()
+        if fake_mode in cur_stack:
+            not_implemented_log.debug(
+                "FakeTensor mode already active: %s in %s", fake_mode, cur_stack
+            )
+            return NotImplemented
+
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
@@ -1107,15 +1133,36 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
+        # True if we enter'ed and actually enabled fake tensor mode,
+        # false if it was a no-op.  Not thread safe but neither is
+        # in_kernel_invocation
+        self.enter_stack: List[bool] = []
+
         self.shape_env = shape_env
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        assert self not in _get_current_dispatch_mode_stack(), func
         try:
             return self.dispatch(func, types, args, kwargs)
         except TypeError:
             log.exception("fake tensor raised TypeError")
             raise
+
+    # No-op if FakeTensorMode is already on the stack
+    def __enter__(self):
+        if self not in _get_current_dispatch_mode_stack():
+            self.enter_stack.append(True)
+            return super().__enter__()
+        else:
+            # no-op
+            self.enter_stack.append(False)
+            return self
+
+    def __exit__(self, a, b, c):
+        live = self.enter_stack.pop()
+        if live:
+            return super().__exit__(a, b, c)
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -1182,7 +1229,11 @@ class FakeTensorMode(TorchDispatchMode):
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        if self.check_for_subclass(args, kwargs):
+        unrecognized_types = self.check_for_subclass(args, kwargs)
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
+            )
             return NotImplemented
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
@@ -1348,7 +1399,9 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
+        return [
+            type(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)) if check(x)
+        ]
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
