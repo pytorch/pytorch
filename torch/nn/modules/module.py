@@ -2043,7 +2043,7 @@ class Module:
 
         def load(module, local_state_dict, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
-            local_metadata['assign_to_params_buffers'] = assign
+            local_metadata['assign_to_params_buffers'] = int(assign)
             module._load_from_state_dict(
                 local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
