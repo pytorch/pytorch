@@ -190,6 +190,7 @@ case "$image" in
     ROCM_VERSION=5.3
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-rocm-n-py3)
     ANACONDA_PYTHON_VERSION=3.8
@@ -200,6 +201,7 @@ case "$image" in
     ROCM_VERSION=5.4.2
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
+    TRITON=yes
     ;;
   pytorch-linux-focal-py3.8-gcc7)
     ANACONDA_PYTHON_VERSION=3.8
@@ -262,6 +264,7 @@ case "$image" in
       NINJA_VERSION=1.9.0
       # Need conda cmake to detect conda mkl and build with mkl support
       CONDA_CMAKE=yes
+      TRITON=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
@@ -330,6 +333,7 @@ docker build \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
+       --build-arg "TRITON=${TRITON}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
