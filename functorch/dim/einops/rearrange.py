@@ -32,8 +32,8 @@ def _create_rearrange_callable(
     Returns:
         Callable[[torch.Tensor], torch.Tensor]: a callable that performs the rearrangement
     """
-    left, right = parse_pattern(pattern)
-    validate_rearrange_expressions(left, right)
+    left, right = parse_pattern(pattern, **axes_lengths)
+    validate_rearrange_expressions(left, right, **axes_lengths)
 
     if left.has_ellipsis:
         n_ellipsis_dims = tensor_ndim - (len(left.composition) - 1)

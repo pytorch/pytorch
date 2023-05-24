@@ -195,6 +195,9 @@ def validate_rearrange_expressions(left: ParsedExpression, right: ParsedExpressi
         right (ParsedExpression): right-hand side expression
         axes_lengths (int): any additional length specifications for dimensions
     """
+    for length in axes_lengths.values():
+        if type(length) is not int:
+            raise TypeError("Axis lengths must be integers")
     difference = set.symmetric_difference(left.identifiers, right.identifiers)
     if left.has_non_unitary_anonymous_axes or right.has_non_unitary_anonymous_axes:
         raise ValueError("Non-unitary anonymous axes are not supported in rearrange (exception is length 1)")
