@@ -1896,6 +1896,10 @@ class Module:
         For state dicts without metadata, :attr:`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
+        Additionally, :attr:`local_metadata` can also contain the key
+        `assign_to_params_buffers` that indicates whether keys that are meta
+        tensors in the module should be assigned their corresponding tensor
+        in the state_dict.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -1926,6 +1930,7 @@ class Module:
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
+        assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
 
         for name, param in local_state.items():
             key = prefix + name
@@ -1954,7 +1959,15 @@ class Module:
                     continue
                 try:
                     with torch.no_grad():
-                        param.copy_(input_param)
+                        if assign_to_params_buffers:
+                            # Shape checks are already done above
+                            is_persistent_buffer = name in persistent_buffers
+                            if is_persistent_buffer:
+                                self.__setattr__(name, input_param)
+                            else:
+                                self.__setattr__(name, torch.nn.Parameter(input_param))
+                        else:
+                            param.copy_(input_param)
                 except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
@@ -1982,7 +1995,7 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
-                        strict: bool = True):
+                        strict: bool = True, assign: bool = False):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
@@ -1994,6 +2007,10 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+            assign (bool, optional): whether to assign items in the state
+            dictionary to their corresponding keys in the module instead
+            of copying them inplace into the module's parameters and buffers.
+            Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -2005,6 +2022,11 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
+        if assign:
+            warnings.warn("If using ``load_state_dict`` with ``assign=True``, "
+                          "please make sure to initialize the optimizer or anything that"
+                          "references module parameters and persistent buffers after"
+                          "``load_state_dict``.")
         if not isinstance(state_dict, Mapping):
             raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
 
@@ -2021,6 +2043,7 @@ class Module:
 
         def load(module, local_state_dict, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            local_metadata['assign_to_params_buffers'] = assign
             module._load_from_state_dict(
                 local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
