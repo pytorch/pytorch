@@ -541,8 +541,12 @@ class WrapperCodeGen(CodeGen):
 
         @functools.lru_cache(None)
         def strideof(name):
+            # Need to view as jagged format for this to work correctly
+            rhs_name = name
+            if is_nested:
+                rhs_name = f"torch.ops.aten._nested_view_as_jagged({name})"
             code.writeline(
-                f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
+                f"{self.declare}{name}_stride = {rhs_name}.{self.stride}{self.ending}"
             )
             return f"{name}_stride"
 

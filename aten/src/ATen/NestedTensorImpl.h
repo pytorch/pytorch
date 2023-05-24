@@ -110,6 +110,34 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     return storage_.nbytes() / data_type_.itemsize();
   }
 
+  /**
+   * Generates a non-nested key_set from a nested tensor.
+   *
+   * For many nested tensor kernel implementations a buffer tensor
+   * is generated and redispatched to a non-nested kernel this function
+   * generates the key set used by that buffer tensor
+   *
+   * @return Appropriate key set for non-nested tensor
+   */
+  inline c10::DispatchKeySet generate_buffer_key_set() const {
+    auto buffer_key_set = this->key_set();
+    const bool Autograd = buffer_key_set.has_any(c10::autograd_dispatch_keyset);
+    // Remove nested tensor specific keys
+    buffer_key_set = buffer_key_set -
+        c10::DispatchKeySet{
+            c10::DispatchKey::NestedTensor,
+            c10::DispatchKey::AutogradNestedTensor};
+
+    // Add dense tensor specific keys
+    buffer_key_set =
+        buffer_key_set | c10::DispatchKeySet{c10::DispatchKey::Dense};
+    buffer_key_set = Autograd
+        ? c10::DispatchKeySet{c10::DispatchKey::Autograd} | buffer_key_set
+        : buffer_key_set;
+
+    return buffer_key_set;
+  }
+
  protected:
   const char* tensorimpl_type_name() const override;
 
@@ -177,34 +205,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
-
-  /**
-   * Generates a non-nested key_set from a nested tensor.
-   *
-   * For many nested tensor kernel implementations a buffer tensor
-   * is generated and redispatched to a non-nested kernel this function
-   * generates the key set used by that buffer tensor
-   *
-   * @return Appropriate key set for non-nested tensor
-   */
-  inline c10::DispatchKeySet generate_buffer_key_set() const {
-    auto buffer_key_set = this->key_set();
-    const bool Autograd = buffer_key_set.has_any(c10::autograd_dispatch_keyset);
-    // Remove nested tensor specific keys
-    buffer_key_set = buffer_key_set -
-        c10::DispatchKeySet{
-            c10::DispatchKey::NestedTensor,
-            c10::DispatchKey::AutogradNestedTensor};
-
-    // Add dense tensor specific keys
-    buffer_key_set =
-        buffer_key_set | c10::DispatchKeySet{c10::DispatchKey::Dense};
-    buffer_key_set = Autograd
-        ? c10::DispatchKeySet{c10::DispatchKey::Autograd} | buffer_key_set
-        : buffer_key_set;
-
-    return buffer_key_set;
-  }
 };
 
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(

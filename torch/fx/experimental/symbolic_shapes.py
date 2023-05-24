@@ -2287,6 +2287,14 @@ class ShapeEnv:
                 # TODO: Fix source
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, 0)
                 track_symint(property_source, t.jagged_sizes[0], None)
+                property_source = TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
+                track_symint(property_source, t.jagged_storage_offset, None)
+                for i, ss in enumerate(t.jagged_strides):
+                    track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
+
+                    # TODO: Fix this hackery; assume contiguous for NT and avoid guarding
+                    if t.is_nested:
+                        input_guards.pop()
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression

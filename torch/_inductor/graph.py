@@ -366,6 +366,7 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.symbolic_sizes_strides(jt)
             jagged_offsets = torch.ops.aten._nested_get_jagged_offsets(example)
             offset_sizes, offset_strides = self.symbolic_sizes_strides(jagged_offsets)
+            storage_offset = convert_shape_to_inductor([jt.storage_offset()])[0]
             jagged_offsets_tensor = TensorBox.create(
                 InputBuffer(
                     f"{target}_jagged_offsets",
@@ -376,8 +377,14 @@ class GraphLowering(torch.fx.Interpreter):
             tensor = JaggedTensorBox.create(
                 InputBuffer(
                     target,
-                    FixedLayout(example.device, example.dtype, sizes, strides,
-                                full_nested_size=nested_sizes, jagged_offsets_src=target),
+                    FixedLayout(
+                        example.device,
+                        example.dtype,
+                        sizes,
+                        strides,
+                        offset=storage_offset,
+                        full_nested_size=nested_sizes,
+                        jagged_offsets_src=target),
                 ),
                 jagged_offsets=jagged_offsets_tensor
             )

@@ -1307,6 +1307,8 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     Nodes that are not call_function, call_method, call_module, or get_attr will
     raise an AssertionError.
     """
+    from .exc import Unsupported
+
     op = node.op
     try:
         if op == "call_function":
@@ -1321,6 +1323,9 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
+    # TODO: Verify it's okay to bubble this up?
+    except Unsupported:
+        raise
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
         raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e

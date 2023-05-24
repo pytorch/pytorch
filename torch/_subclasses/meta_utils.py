@@ -276,11 +276,24 @@ class MetaConverter:
                     ), "Dynamic shapes must be enabled for nested tensors"
                     is_leaf = safe_is_leaf(t)
 
+                    def _is_contiguous_enough(t):
+                        for size, stride in zip(t._nested_tensor_size(), t._nested_tensor_strides()):
+                            # Only support (B, *, D) here for now -> 2D size / stride data
+                            assert len(size) == len(stride) == 2
+                            # For (B, *, D) format, make sure constituent strides for inner dim
+                            # are all 1 and constituent strides for other dim is >= size
+                            # TODO: Check that all constituent strides are consistent with each other
+                            if stride[-1] != 1:
+                                return False
+                            if stride[0] < size[-1]:
+                                return False
+                        return True
+
                     # Only support contiguous (B, *, D) format for now.
                     try:
                         supported_format = (
-                            t.is_contiguous() and
                             t.dim() == 3 and
+                            _is_contiguous_enough(t) and
                             t.size(2) > 0
                         )
                     except Exception:
@@ -324,6 +337,27 @@ class MetaConverter:
                         ),
                     ]
 
+                    # Use the first storage offset and assume the data can be indexed via
+                    # consistent size / stride. This isn't symbolic because it's data-dependent.
+                    first_storage_offset = t._nested_tensor_storage_offsets()[0].item()
+                    sym_jagged_storage_offset = first_storage_offset
+
+                    # At this point, we assume each constituent has a consistent stride of [s3, 1]
+                    dim0_stride = t._nested_tensor_strides()[0][0].item()
+                    sym_jagged_strides = [
+                        shape_env.create_symintnode(
+                            # TODO: Fix the number if it matters
+                            shape_env.create_symbol(
+                                dim0_stride,
+                                TensorPropertySource(
+                                    source, TensorProperty.STRIDE, 43
+                                )
+                            ),
+                            hint=dim0_stride
+                        ), 1
+                    ]
+
+                    # TODO: Anything to do here to handle strides / storage offset?
                     buffer_size = sym_jagged_sizes[0] * sym_jagged_sizes[1]
                     buffer = callback(
                         lambda: torch.empty(buffer_size, device="meta", dtype=t.dtype)
@@ -350,7 +384,13 @@ class MetaConverter:
 
                     # NB: callback isn't called here to avoid fake-ifying the NT itself.
                     # Rather, we return a NestedTensor with a fake buffer and symbolic sizes.
-                    r = NestedTensor(buffer, sym_sizes, sym_jagged_sizes)
+                    r = NestedTensor(
+                        buffer,
+                        sym_sizes,
+                        jagged_sizes=sym_jagged_sizes,
+                        jagged_strides=sym_jagged_strides,
+                        jagged_storage_offset=sym_jagged_storage_offset,
+                    )
 
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:

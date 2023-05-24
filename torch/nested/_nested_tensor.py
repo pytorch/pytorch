@@ -22,6 +22,8 @@ class NestedTensor(Tensor):
             buffer: Tensor,
             sizes: List[Union[int, List[int], SymInt]],
             jagged_sizes: List[Union[int, List[int], SymInt]],
+            jagged_strides: List[Union[int, List[int], SymInt]],
+            jagged_storage_offset: Union[int, SymInt],
             acting_as_nt=True,
     ):
         self.buffer = buffer
@@ -32,6 +34,8 @@ class NestedTensor(Tensor):
         # It's useful to disable this if it's in JT format.
         self.acting_as_nt = acting_as_nt
         self.jagged_sizes = jagged_sizes
+        self.jagged_strides = jagged_strides
+        self.jagged_storage_offset = jagged_storage_offset
 
     @classmethod
     def _sizes_from_shape_list(cls, shape_list: Union[Tensor, List[torch.Size]]):
@@ -102,10 +106,13 @@ class NestedTensor(Tensor):
                 curr *= sizes[i]
             return strides[::-1]
 
-        strides = _calc_contiguous_strides(self.size())
+        strides = _calc_contiguous_strides(self.size()) if self.acting_as_nt else self.jagged_strides
         if dim is None:
             return strides
         return strides[dim]
+
+    def storage_offset(self):
+        return 0 if self.acting_as_nt else self.jagged_storage_offset
 
     # Returns size for the ith component of the NT
     def _component_size(self, i):
@@ -176,7 +183,14 @@ class NestedTensor(Tensor):
             # TODO: Make sure this is right!
             # Assume for now that the NT is already in jagged format, so just return itself but
             # don't act like a NT anymore.
-            return NestedTensor(nt.buffer, nt.sizes, nt.jagged_sizes, acting_as_nt=False)
+            return NestedTensor(
+                nt.buffer,
+                nt.sizes,
+                nt.jagged_sizes,
+                nt.jagged_strides,
+                nt.jagged_storage_offset,
+                acting_as_nt=False,
+            )
 
         if func is torch.ops.aten._nested_get_jagged_offsets.default:
             nt = args[0]
@@ -189,6 +203,7 @@ class NestedTensor(Tensor):
             torch.ops.aten.native_layer_norm.default,
             torch.ops.aten.silu.default,
             torch.ops.aten.view.default,
+            torch.ops.aten.split_with_sizes.default,
             torch.ops.aten.split_with_sizes_copy.default,
             torch.ops.aten.transpose.int,
         }
@@ -210,7 +225,10 @@ class NestedTensor(Tensor):
                 # Collapse buffer to 1D
                 buffer=t.view(args[0].jagged_sizes[0] * args[0].jagged_sizes[1]),
                 sizes=args[0].sizes,
-                jagged_sizes=args[0].jagged_sizes)
+                jagged_sizes=args[0].jagged_sizes,
+                jagged_strides=args[0].jagged_strides,
+                jagged_storage_offset=args[0].jagged_storage_offset,
+            )
 
         # TODO: Fix this; the size is certainly wrong and we can't always naively operate
         # on the buffer and rewrap. Need to graph break if we're not calling a pointwise func.

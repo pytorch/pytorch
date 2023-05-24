@@ -179,6 +179,8 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x) and x.get_layout().full_nested_size is not None:
         # NB: This is only used for fallbacks; no need to touch this for pointwise fusion.
 
+        # TODO: Update this for non-contiguous NestedTensors!!
+
         from torch.fx.experimental.symbolic_shapes import constrain_range
 
         # Handle nested tensors
@@ -3384,6 +3386,7 @@ class FallbackKernel(ExternKernelAlloc):
                             output.dtype,
                             convert_shape_to_inductor(output.size()),
                             convert_shape_to_inductor(output.stride()),
+                            offset=convert_shape_to_inductor(output.storage_offset()),
                             full_nested_size=convert_shape_to_inductor(full_nested_size)
                         ),
                         packed,
@@ -4088,6 +4091,7 @@ class StorageBox(MutableBox):
         full_nested_size = getattr(self.data, "full_nested_size", None)
         jagged_offsets_src = getattr(self.data, "jagged_offsets_src", None)
         if full_nested_size is not None:
+            # TODO: Figure out why there's no stride / storage offset set here?
             layout = FixedLayout(
                 device=self.data.get_device(),
                 dtype=self.data.get_dtype(),

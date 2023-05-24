@@ -905,22 +905,66 @@ Tensor _nested_view_from_jagged(
     nested_size);
 }
 
+bool _nested_is_contiguous_enough(const Tensor& self) {
+  // Assume input is 3D
+  auto nt_impl = get_nested_tensor_impl(self);
+  auto nt_size = nt_impl->get_nested_sizes();
+  auto nt_stride = nt_impl->get_nested_strides();
+  for (int i = 0; i < self.size(0); ++i) {
+    auto *constituent_size = nt_size.select(0, i).data_ptr<int64_t>();
+    auto *constituent_stride = nt_stride.select(0, i).data_ptr<int64_t>();
+    if (constituent_stride[1] != 1) {
+      return false;
+    }
+    if (constituent_stride[0] < constituent_size[1]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void _check_nested_is_jagged(const Tensor& self) {
   TORCH_CHECK(self.is_nested(), "Expected a NT");
   auto nt_impl = get_nested_tensor_impl(self);
-  TORCH_CHECK(self.is_contiguous() &&
+  TORCH_CHECK(
       self.dim() == 3 &&
-      nt_impl->opt_size(1) == c10::nullopt &&
+      _nested_is_contiguous_enough(self) &&
       nt_impl->opt_size(2) != c10::nullopt,
-      "Expected NT to be contiguous and in (B, *, D) format");
+      "Expected NT to be in (B, *, D) format");
 }
 
 Tensor _nested_view_as_jagged(const Tensor& self) {
   _check_nested_is_jagged(self);
   auto nt_impl = get_nested_tensor_impl(self);
-  auto buffer = nt_impl->get_buffer();
-  auto nt_view = buffer.view({-1, self.size(2)});
-  return nt_view;
+  auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
+      c10::TensorImpl::VIEW,
+      Storage(nt_impl->storage()),
+      nt_impl->generate_buffer_key_set(),
+      nt_impl->dtype());
+
+  // Support limited form of non-contiguity where each constituent has the same stride.
+
+  // Calculate sum(*) from (B, *, D)
+  auto nt_size = nt_impl->get_nested_sizes();
+  auto sum_star = 0;
+  for (int i = 0; i < nt_impl->size(0); ++i) {
+    auto *constituent_size = nt_size.select(0, i).data_ptr<int64_t>();
+    sum_star += *constituent_size;
+  }
+
+  // Each constituent has the same stride; just use the first.
+  auto nt_stride = nt_impl->get_nested_strides();
+  auto stride_ptr = nt_stride.select(0, 0).data_ptr<int64_t>();
+
+  // Use the first NT storage offset.
+  auto jagged_storage_offset = nt_impl->get_storage_offsets().data_ptr<int64_t>()[0];
+
+  buffer_tensor_impl->set_sizes_and_strides(
+      c10::IntArrayRef({sum_star, nt_impl->size(2)}),
+      c10::IntArrayRef({stride_ptr[0], stride_ptr[1]}),
+      jagged_storage_offset);
+
+  return Tensor(buffer_tensor_impl);
 }
 
 Tensor _nested_get_jagged_offsets(const Tensor& self) {
