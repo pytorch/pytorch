@@ -204,7 +204,9 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            assert fsdp_state.compute_device is not None, "compute_device has not been initialized"
+            assert (
+                fsdp_state.compute_device is not None
+            ), "compute_device has not been initialized"
             if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state

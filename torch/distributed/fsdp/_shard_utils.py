@@ -60,13 +60,13 @@ def _gather_state_dict(
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             output_tensor = _all_gather_sharded_tensor(tensor, pg)
-            unsharded_device = (
+            local_shard_device = (
                 tensor.local_shards()[0].tensor.device
                 if tensor.local_shards()
                 else torch.device("cpu")
             )
-            if output_tensor.device != unsharded_device:
-                tensor = output_tensor.to(unsharded_device)
+            if output_tensor.device != local_shard_device:
+                tensor = output_tensor.to(local_shard_device)
             else:
                 tensor = output_tensor
         new_state_dict[key] = tensor
