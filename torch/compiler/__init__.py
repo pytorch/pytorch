@@ -1,7 +1,7 @@
 import torch
 import torch._dynamo
 import torch._inductor
-from typing import Callable, Union, List, Set
+from typing import Callable, Union, List, Set, Tuple
 from torch._dynamo.eval_frame import OptimizedModule
 
 
