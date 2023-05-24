@@ -1,5 +1,3 @@
-from typing import Callable, List, Union
-
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
