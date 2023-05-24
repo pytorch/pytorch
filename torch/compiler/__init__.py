@@ -1,7 +1,7 @@
 import torch
 import torch._dynamo
 import torch._inductor
-from typing import Callable, Union, List, Set, Tuple, Any
+from typing import Callable, Union, List, Set, Tuple, Any, Dict
 from torch._dynamo.eval_frame import OptimizedModule
 
 __all__ = [
@@ -67,9 +67,9 @@ def allow_in_graph(fn : Union[Callable, List[Callable]]) -> Union[Callable, List
 
     Usage:
     ::
-        torch._dynamo.allow_in_graph(my_custom_function)
+        torch.compiler.allow_in_graph(my_custom_function)
 
-        @torch._dynamo.optimize(...)
+        @torch.compile(...)
         def fn(a):
             x = torch.add(x, 1)
             x = my_custom_function(x)
@@ -99,9 +99,9 @@ def allow_in_graph(fn : Union[Callable, List[Callable]]) -> Union[Callable, List
     generated graph. We can use the `allow_in_graph()` function as follows:
 
     ::
-        torch._dynamo.allow_in_graph(my_custom_function)
+        torch.compiler.allow_in_graph(my_custom_function)
 
-        @torch._dynamo.optimize(...)
+        @torch.compiler.optimize(...)
         def fn(a):
             x = torch.add(x, 1)
             x = my_custom_function(x)
@@ -171,16 +171,12 @@ def explain(f, *args, **kwargs) -> Tuple[Any]:
         - explanation_verbose: A detailed explanation including the break reasons with formatted stack traces.
 
     Note:
-    - This function is decorated with `@patch("torch._dynamo.symbolic_convert.explain", True)`
-      to enable explanation output alongside the run or as part of a run.
     - The function imports and uses the `reset()` function from the same module to reset
       compilations internal state before running `f`.
     - The function internally defines several helper functions to accumulate graphs, count operations,
       export guards, and format explanations.
     - The function temporarily patches the `most_recent_backend` attribute to None using the `patch()` function
       from the `unittest.mock` module.
-    - The `optimize()` function is used to optimize `f` with the specified configuration.
-    - The results and information about the optimization process are gathered and returned as a tuple.
 
     Example:
     To run a function `my_function()` with compilation and obtain an explanation of the optimization process,
@@ -225,13 +221,13 @@ def is_compiling() -> bool:
     process or not.
 
     Returns:
-    - A boolean value indicating if compilation is currently compiling (`True`) or not (`False`).
+    - A boolean value indicating if compilation is currently compiling
 
     Example:
     We can check if compilation is currently compiling by calling the function as follows:
 
     ::
-        compiling = torch._dynamo.is_compiling()
+        compiling = torch.compiler.is_compiling()
     """
     return torch._dynamo.is_compiling()
 
@@ -310,7 +306,7 @@ def list_options() -> Dict[str, Any]:
     we can call the `list_options()` function as follows:
 
     ::
-        options = torch._inductor.list_options()
+        options = torch.compiler.list_options()
 r
     The `options` dictionary will contain the available optimizations and debug configurations,
     providing information about the supported options that can be used with `torch.compile()`.
@@ -338,14 +334,14 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
     we can call the `list_mode_options()` function as follows:
 
     ::
-        options = torch._inductor.list_mode_options()
+        options = torch.compiler.list_mode_options()
 
     The `options` dictionary will contain the optimizations specific to each mode
 
     To retrieve the optimizations for a specific mode, we can pass the mode name as an argument:
 
     ::
-        options = torch._inductor.list_mode_options(mode="max-autotune")
+        options = torch.compiler.list_mode_options(mode="max-autotune")
 
     In this example, `options` will contain the optimizations specific to the "max-autotune" mode.
 
