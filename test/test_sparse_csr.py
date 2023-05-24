@@ -3340,7 +3340,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         import sys
 
-        if sys.executable == 'torch_deploy':
+        if torch._running_with_deploy():
             self.skipTest("Skipped for torch_deploy")
 
         from functools import partial
@@ -3349,7 +3349,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         def kernel_impl(*args, **kwargs):
             return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
-        kernel = torch._TritonLibrary.probablyRegisterOp(
+        kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,

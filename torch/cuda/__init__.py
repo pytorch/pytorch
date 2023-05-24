@@ -1166,7 +1166,7 @@ def _register_triton_kernels():
 
     has_triton = importlib.util.find_spec("triton") is not None
     if has_triton:
-        torch._TritonLibrary.probablyRegisterOp(
+        torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
             kernel_impl,

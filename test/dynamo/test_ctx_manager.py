@@ -188,10 +188,11 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        res = opt_fn(x, s)
-        self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 8)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "CUDAStreamVariable does not currently work soundly.",
+        ):
+            res = opt_fn(x, s)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
@@ -675,6 +676,27 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
             self.assertEqual(cnts.frame_count, 3)
             self.assertEqual(cnts.op_count, 3)
+
+    def test_graph_break_inlining(self):
+        def gn(z):
+            with torch.no_grad():
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y, z):
+            a = torch.mm(x, y)
+            z = gn(z)
+            return a
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4)
+        opt_fn(x, y, z).sum().backward()
+
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":
