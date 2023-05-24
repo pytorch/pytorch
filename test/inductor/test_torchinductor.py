@@ -6203,7 +6203,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
-    @torch._dynamo.config.patch(dynamic_shapes=False)
     def test_eliminate_meaningless_copy(self):
         def fn(x1, x2):
             permute = torch.ops.aten.permute.default(x2, [0, 2, 1, 3])
