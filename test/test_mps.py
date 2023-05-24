@@ -6719,6 +6719,7 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
         helper(3, 5, 7, [0, 1, 2])
+        helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
