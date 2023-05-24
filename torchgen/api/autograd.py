@@ -462,6 +462,76 @@ def gen_foreach_derivativeinfo(
             for arg in foreach_function.func.arguments.flat_non_out
             if arg.name in all_var_names
         ]
+
+    forward_derivatives: List[ForwardDerivative] = []
+    fw_derivative: ForwardDerivative
+    for fw_derivative in ref_diff_info.forward_derivatives:
+        var_names = list(fw_derivative.var_names)
+        var_types = list(fw_derivative.var_types)
+        # required_inputs_fw_grad = list(fw_derivative.required_inputs_fw_grad)
+        # required_inputs_primal = list(fw_derivative.required_inputs_primal)
+        modified_formula = fw_derivative.formula.replace("result", "result[i]")
+        for ref_input in ref_diff_info.all_saved_inputs:
+            ref_input_jit_name = ref_input.expr.split(".")[0]
+            mapped_name = map_refarg2foreacharg[ref_input_jit_name]
+            mapped_type = map_name2arg[mapped_name].type
+            if isinstance(mapped_type, ListType) and not mapped_type.is_tensor_like():
+                mapped_expr = mapped_name + "[i]"
+            else:
+                mapped_expr = mapped_name
+            new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_expr)
+            modified_formula = modified_formula.replace(
+                cast(str, ref_input.nctype.name), new_expr
+            )
+
+            for i, name in enumerate(var_names):
+                if ref_input_jit_name == name:
+                    var_names[i] = mapped_name
+                    var_types[i] = mapped_type
+        forward_derivatives.append(
+            ForwardDerivative(
+                formula=modified_formula,
+                var_names=tuple(var_names),
+                var_types=tuple(var_types),
+                required_inputs_fw_grad=fw_derivative.required_inputs_fw_grad,
+                required_inputs_primal=fw_derivative.required_inputs_primal,
+                required_original_self_value=fw_derivative.required_original_self_value,
+                is_reusing_outplace_formula=fw_derivative.is_reusing_outplace_formula,
+            )
+        )
+
+    # TODO(crcrpar): Handle `other_p` and `other_t.` for `_foreach_clamp_(max|min).List`
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_4.cpp:1268:54: error: use of undeclared identifier 'other_p'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = where(self_p <= other_p, self_t, other_t);
+    #                                                      ^
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_4.cpp:1268:71: error: use of undeclared identifier 'other_t'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = where(self_p <= other_p, self_t, other_t);
+    # TODO(crcrpar): _foreach_norm.Scalar codegen produces wrong str.replace'd pattern:
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_2.cpp:3002:49: error: use of undeclared identifier 'self_ord'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = norm_jvord(self_ord, self_t, ord, result[i]);
+    #                                                 ^
+    # TODO(crcrpar): _foreach_lerp.List suffers other tensors.
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_0.cpp:3051:55: error: use of undeclared identifier 'tensors1_t'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = at::lerp(self_t, tensors1_t, weights_p) + weights_t * (tensors1_p - self_p);
+    #                                                       ^
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_0.cpp:3051:67: error: use of undeclared identifier 'weights_p'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = at::lerp(self_t, tensors1_t, weights_p) + weights_t * (tensors1_p - self_p);
+    #                                                                   ^
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_0.cpp:3051:80: error: use of undeclared identifier 'weights_t'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = at::lerp(self_t, tensors1_t, weights_p) + weights_t * (tensors1_p - self_p);
+    #                                                                                ^
+    # TODO(crcrpar): _foreach_lerp_Scalar suffers other tensor.
+    # /home/mkozuki/ghq/github.com/crcrpar/pytorch/torch/csrc/autograd/generated/VariableType_0.cpp:3129:55: error: use of undeclared identifier 'end_t'  # noqa: E501
+    #         result_new_fw_grad_opts[i] = at::lerp(self_t, end_t, weight);
+    #                                                       ^
+    if str(foreach_function.func.name) in {
+        "_foreach_clamp_max.List",
+        "_foreach_clamp_min.List",
+        "_foreach_norm.Scalar",
+        "_foreach_lerp.List",
+        "_foreach_lerp.Scalar",
+    }:
+        forward_derivatives.clear()
     return (
         DifferentiabilityInfo(
             name=foreach_function.func.name.name.base,
@@ -470,7 +540,7 @@ def gen_foreach_derivativeinfo(
                 ref_diff_info.op, foreach_function.func.name.overload_name
             ),
             derivatives=modified_derivative_formulas,
-            forward_derivatives=[],
+            forward_derivatives=forward_derivatives,
             all_saved_inputs=tuple(set(all_saved_inputs)),
             all_saved_outputs=tuple(set(all_saved_outputs)),
             available_named_gradients=(),
