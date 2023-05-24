@@ -4,7 +4,15 @@ from __future__ import annotations
 import functools
 import keyword
 import warnings
-from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, TYPE_CHECKING
+
+import torch
+from functorch._C import dim as _C
+
+if TYPE_CHECKING:
+    from functorch.dim.dim import Dim
+
+dims = _C.dims
 
 _ellipsis: str = "…"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 
@@ -153,13 +161,7 @@ class ParsedExpression:
 @functools.lru_cache(256)
 def pattern_to_dim_idxs(
     tensor_ndim: int, pattern: str, **axes_lengths: int
-) -> Tuple[
-    int,
-    List[Union[int, Tuple[int, ...]]],
-    List[Union[int, Tuple[int, ...]]],
-    Tuple[int, ...],
-    Dict[str, int],
-]:
+) -> Callable[[torch.Tensor], torch.Tensor]:
     r"""Translate an `einops`-style pattern into lists/tuples of first class dims that can be used to perform
     `rearrange`.
 
@@ -208,60 +210,76 @@ def pattern_to_dim_idxs(
 
     if left.has_ellipsis:
         n_ellipsis_dims = tensor_ndim - (len(left.composition) - 1)
-        n_dims = len(left.identifiers) - 1
-        total_n_dims = n_dims + n_ellipsis_dims
+        n_named_dims = len(left.identifiers) - 1
     else:
         n_ellipsis_dims = 0
-        total_n_dims = n_dims = len(left.identifiers)
+        n_named_dims = len(left.identifiers)
 
     n_anon_dims = sum(not dim for dim in left.composition)
-    total_n_dims += n_anon_dims
+    n_dims = n_named_dims + n_ellipsis_dims + n_anon_dims
 
-    identifier_index_map: Dict[Union[str, AnonymousAxis], Tuple[int, ...]] = {}
+    first_class_dims: Tuple[Dim, ...] = (dims(n_dims),) if n_dims == 1 else dims(n_dims)
+    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
     anon_axes: List[AnonymousAxis] = []
 
-    # map the left-hand side identifiers to the indices of the first class dims
-    dim_i = 0
+    # map the left-hand side identifiers to first class dims
+    dims_i = 0
     for dimension in left.composition:
         if isinstance(dimension, list):
             for identifier in dimension:
+                # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
                 assert isinstance(identifier, str)
-                identifier_index_map[identifier] = (dim_i,)
-                dim_i += 1
+                identifier_dim_map[identifier] = (first_class_dims[dims_i],)
+                dims_i += 1
             if not dimension:
+                # unitary anonymous axis
                 anon_axis = AnonymousAxis("1")
-                identifier_index_map[anon_axis] = (dim_i,)
+                identifier_dim_map[anon_axis] = (first_class_dims[dims_i],)
                 anon_axes.append(anon_axis)
                 dimension.append(anon_axis)
-                dim_i += 1
+                dims_i += 1
         elif dimension == _ellipsis:
             identifier = _ellipsis
-            identifier_index_map[identifier] = tuple(dim_i + j for j in range(n_ellipsis_dims))
-            dim_i += n_ellipsis_dims
+            identifier_dim_map[identifier] = tuple(first_class_dims[dims_i + i] for i in range(n_ellipsis_dims))
+            dims_i += n_ellipsis_dims
         else:
-            raise ValueError(f"Unexpected dimension: {dimension}")
+            raise ValueError(f'Unexpected dimension: {dimension}')
 
     def composition_to_dims(
         composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
-    ) -> List[Union[int, Tuple[int, ...]]]:
-        """Convert identifiers in a `ParsedExpression.composition` to their corresponding first class dim index."""
-        index_composition: List[Union[int, Tuple[int, ...]]] = []
+    ) -> List[Union[Dim, Tuple[Dim, ...]]]:
+        """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of first class dims."""
+        dim_composition: List[Union[Dim, Tuple[Dim, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
-                index_composition.append(
-                    tuple(dim for identifier in dimension for dim in identifier_index_map[identifier])
-                )
+                dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
             elif dimension == _ellipsis:
-                index_composition.extend(identifier_index_map[_ellipsis])
+                dim_composition.extend(identifier_dim_map[_ellipsis])
             else:
-                raise ValueError(f"Unexpected dimension: {dimension}")
-        return index_composition
+                raise ValueError(f'Unexpected dimension: {dimension}')
+        return dim_composition
 
-    left_idxs = composition_to_dims(left.composition)
-    right_idxs = composition_to_dims(right.composition)
-    anon_idxs = tuple(identifier_index_map[axis][0] for axis in anon_axes)
-    axes_idx_map = {
-        axis: identifier_index_map[axis][0] for axis in axes_lengths
-    }
+    left_dims = composition_to_dims(left.composition)
+    right_dims = composition_to_dims(right.composition)
+    anon_dims = tuple(identifier_dim_map[axis][0] for axis in anon_axes)
+    specified_lengths = tuple(
+        (identifier_dim_map[axis][0], length) for axis, length in axes_lengths.items()
+    )
 
-    return total_n_dims, left_idxs, right_idxs, anon_idxs, axes_idx_map
+    custom_rearrange_callable_name = "do_rearrange"
+    custom_rearrange_callable_code = (
+        (
+            f"def {custom_rearrange_callable_name}(tensor):\n"
+            f"    {', '.join(str(dim) for dim in first_class_dims)} = dims({n_dims})\n"
+            + (
+                f"    for dim, length in {specified_lengths}:\n"
+                "        dim.size = length\n"
+                if specified_lengths else ""
+            )
+            + f"    tensor = tensor[{left_dims}].order({', '.join(str(dim) for dim in right_dims)})\n"
+            + (f"    return tensor.sum({anon_dims}, keepdim=False)\n" if anon_dims else "    return tensor\n")
+        )
+    )
+
+    exec(custom_rearrange_callable_code)
+    return locals()[custom_rearrange_callable_name]

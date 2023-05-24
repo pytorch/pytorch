@@ -66,32 +66,6 @@ def rearrange(
     if not isinstance(tensor, torch.Tensor):
         tensor = torch.stack(tensor)
 
-    total_n_dims, left_idxs, right_idxs, anon_idxs, axes_idx_map = pattern_to_dim_idxs(
-        tensor.ndim, pattern, **axes_lengths
-    )
+    rearrange_callable = pattern_to_dim_idxs(tensor.ndim, pattern, **axes_lengths)
 
-    first_class_dims: Tuple["Dim", ...] = (dims(total_n_dims),) if total_n_dims == 1 else dims(total_n_dims)
-
-    for axis in axes_lengths:
-        first_class_dims[axes_idx_map[axis]].size = axes_lengths[axis]
-
-    def idxs_to_dims(idxs: Sequence[Union[int, Sequence[int]]]) -> Tuple[Union["Dim", Tuple["Dim", ...]], ...]:
-        return tuple(
-            tuple(first_class_dims[idx] for idx in dim) if isinstance(dim, Sequence) else first_class_dims[dim]
-            for dim in idxs
-        )
-
-    left_dims = idxs_to_dims(left_idxs)
-    right_dims = idxs_to_dims(right_idxs)
-    anon_dims = tuple(first_class_dims[idx] for idx in anon_idxs)
-
-    # TODO: add type stubs for Tensor.order
-    tensor = tensor[left_dims].order(*right_dims)  # type: ignore[attr-defined]
-
-    if anon_dims:
-        # sum over all unitary anonymous axes to convert the functorch.dim.Tensor to its corresponding torch.Tensor
-        return tensor.sum(  # type: ignore[union-attr]
-            anon_dims, keepdim=False  # type: ignore[arg-type]
-        )
-    else:
-        return tensor  # type: ignore[return-value]
+    return rearrange_callable(tensor)
