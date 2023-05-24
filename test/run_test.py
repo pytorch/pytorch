@@ -953,7 +953,7 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
-        pytest_args.extend(["-n", "auto"])
+        pytest_args.extend(["-n", str(NUM_PROCS)])
 
         if IS_CI:
             # Add the option to generate XML test report here as C++ tests
