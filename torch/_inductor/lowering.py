@@ -1130,7 +1130,7 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
     return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
 
 
-def philox_rand_offset(shape):
+def philox_rand_offset(shape, device):
     """
     TorchInductor offset calculation differs from PyTorch eager offset
     calculation for random ops (tl.rand vs torch.rand). In future, we should
@@ -1139,7 +1139,7 @@ def philox_rand_offset(shape):
     numel = 1
     for s in shape:
         numel = numel * s
-    return tensor(numel, dtype=torch.int64)
+    return tensor(numel, dtype=torch.int64, device=device)
 
 
 @register_lowering(torch.ops.rngprims.philox_rand, type_promotion_kind=None)
@@ -1177,7 +1177,7 @@ def philox_rand(size, seed, offset, stride, device, dtype):
         ranges=list(size),
     )
 
-    offset_node = philox_rand_offset(size)
+    offset_node = philox_rand_offset(size, device)
     return random_values_node, offset_node
 
 

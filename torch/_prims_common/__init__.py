@@ -1781,8 +1781,8 @@ class CUDARngStateHelper:
             raise RuntimeError("CUDA not available")
 
         with fake_mode:
-            seed = torch.tensor(torch.cuda.initial_seed())
-            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            seed = torch.tensor(torch.cuda.initial_seed(), device="cuda")
+            offset = torch.tensor(torch.cuda._get_rng_state_offset(), device="cuda")
             return seed, offset
 
     @staticmethod
@@ -1790,7 +1790,7 @@ class CUDARngStateHelper:
         # Rng state is [64-bit seed, 64-bit offset]
         seed_portion = seed.reshape([1]).view(torch.uint8)
         offset_portion = offset.reshape([1]).view(torch.uint8)
-        new_state = torch.cat([seed_portion, offset_portion])
+        new_state = torch.cat([seed_portion, offset_portion]).to(device="cpu")
         torch.cuda.set_rng_state(new_state)
 
     @staticmethod
