@@ -552,7 +552,6 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
-@register_op_impl(aten._unsafe_index_put.default)
 def index_put(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 

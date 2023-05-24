@@ -407,7 +407,6 @@ def has_incompatible_cudagraph_ops(gm):
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
             {
-                "aten._unsafe_index_put.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
