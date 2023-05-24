@@ -606,7 +606,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         for name, module in model.named_children():
             forward_handles[name] = module.register_forward_hook(save_activations)
 
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             return wrap(lambda x: model(x), x)
 
