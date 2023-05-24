@@ -416,12 +416,10 @@ class KernelArgs:
         if "load_seed_offset" in self.sizevars.values():
             name = "%s%d" % (
                 name,
-                len(
-                    [
-                        x
-                        for x in self.sizevars.values()
-                        if x.startswith("load_seed_offset")
-                    ]
+                sum(
+                    1
+                    for value in self.sizevars.values()
+                    if value.startswith("load_seed_offset")
                 ),
             )
         self.sizevars[value] = name
