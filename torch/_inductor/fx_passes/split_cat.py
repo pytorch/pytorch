@@ -542,12 +542,33 @@ class SplitCatSimplifier:
             # Handle cat/stack user nodes
             cat_dim = get_arg_value(user_node, 1, "dim")
             user_inputs_new_transformed = []
-            for user_input_new, transform_param in zip(
-                user_inputs_new, transform_params
-            ):
-                # Apply transforms
-                unflatten_params, movedim_params, unsqueeze_params = transform_param
-                with graph.inserting_before(user_node):
+            # For `unsqueeze` transform, we will combine consecutive inputs with the same unsqueeze params, and stack them
+            to_stack = []
+            stack_dim = None
+            with graph.inserting_before(user_node):
+                for user_input_new, transform_param in zip(
+                    user_inputs_new, transform_params
+                ):
+                    # Apply transforms
+                    unflatten_params, movedim_params, unsqueeze_params = transform_param
+                    if unsqueeze_params and (
+                        stack_dim is None or stack_dim == unsqueeze_params[0]
+                    ):
+                        to_stack.append(user_input_new)
+                        stack_dim = unsqueeze_params[0]
+                        continue
+                    elif to_stack:
+                        stacked_input = graph.call_function(
+                            torch.stack, args=(to_stack, stack_dim)
+                        )
+                        to_stack = []
+                        stack_dim = None
+                        user_inputs_new_transformed.append(stacked_input)
+                        if unsqueeze_params:
+                            to_stack.append(user_input_new)
+                            stack_dim = unsqueeze_params[0]
+                            continue
+
                     if unflatten_params:
                         user_input_new = graph.call_function(
                             torch.unflatten, args=(user_input_new, *unflatten_params)
@@ -556,11 +577,12 @@ class SplitCatSimplifier:
                         user_input_new = graph.call_function(
                             torch.movedim, args=(user_input_new, *movedim_params)
                         )
-                    if unsqueeze_params:
-                        user_input_new = graph.call_function(
-                            torch.unsqueeze, args=(user_input_new, *unsqueeze_params)
-                        )
-                user_inputs_new_transformed.append(user_input_new)
+                    user_inputs_new_transformed.append(user_input_new)
+                if to_stack:
+                    stacked_input = graph.call_function(
+                        torch.stack, args=(to_stack, stack_dim)
+                    )
+                    user_inputs_new_transformed.append(stacked_input)
 
             with graph.inserting_after(user_node):
                 if len(user_inputs_new_transformed) > 1:
