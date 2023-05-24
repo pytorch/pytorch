@@ -103,7 +103,7 @@ struct ShapeArg
   }
 };
 
-static std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
+std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
   if (auto val = sa.asConstantInt()) {
     out << *val;
   } else if (auto ss = sa.asShapeSymbol()) {
@@ -149,7 +149,7 @@ struct ShapeArguments {
   std::vector<ShapeArg> maybe_shape_symbols_;
 };
 
-static std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
+std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
   if (!sa.has_dim()) {
     os << "(UNKNOWN DIM)";
     return os;
@@ -176,7 +176,7 @@ bool symbolicShapeAnalysisTestModeEnabled() {
 
 using SSArgument = c10::variant<ShapeArguments, IValue>;
 
-static std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
+std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
   if (const IValue* iv = c10::get_if<IValue>(&sa)) {
     out << *iv;
   } else {
