@@ -14811,3 +14811,6 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: bias(Tensor input, Tensor weight) -> Tensor
+  python_module: nn
