@@ -21,8 +21,8 @@ class Stream(torch._C._CudaStreamBase):
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
         priority(int, optional): priority of the stream, should be 0 or
-        negative, where negative numbers indicate higher priority. By default,
-        streams have priority 0.
+            negative, where negative numbers indicate higher priority. By default,
+            streams have priority 0.
 
     """
 
