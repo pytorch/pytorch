@@ -218,7 +218,6 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         if div != 1:
             div = self.paren(self.doprint(div))
-            (x // div) % mod
             if expr.is_integer:
                 x = f"at::native::div_floor_integer({x}, {div})"
             else:
