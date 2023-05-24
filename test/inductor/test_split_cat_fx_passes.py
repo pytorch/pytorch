@@ -660,6 +660,153 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    def test_unbind_stack(self):
+        def unbind_stack(x):
+            return torch.stack(torch.unbind(x, dim=1), 1)
+
+        def unbind_cat(x):
+            return torch.cat(torch.unbind(x, dim=1), 1)
+
+        def unbind_stack_argspec1(x):
+            return torch.stack(torch.unbind(x, dim=1), dim=1)
+
+        def unbind_stack_argspec2(x):
+            return torch.stack(tensors=torch.unbind(x, dim=1), dim=1)
+
+        def dim_mismatch(x):
+            return torch.stack(torch.unbind(x, dim=1), 0)
+
+        def split_squeeze_stack(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items, 1)
+
+        def other_users(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items, 1), torch.relu(items[0])
+
+        def other_users_2(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items[1:]]
+            return torch.stack(split_items, 1), torch.relu(items[0])
+
+        def unbind_cat_addn_args(x):
+            split_output = list(torch.unbind(x, dim=1))
+
+            return torch.cat(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=1,
+            )
+
+        def unbind_stack_addn_args(x):
+            split_output = list(torch.unbind(x, dim=1))
+            return torch.stack(
+                [torch.ones(2, 32, 16)]
+                + split_output
+                + [torch.ones(2, 32, 16), torch.ones(2, 32, 16)],
+                dim=1,
+            )
+
+        def unbind_cat_addn_args_dim2(x):
+            split_output = list(torch.unbind(x, dim=2))
+            return torch.cat(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=2,
+            )
+
+        # split_dim=1, cat_dim=2
+        def unbind_cat_dim_mismatch(x):
+            split_output = list(torch.unbind(x, dim=1))
+            return torch.cat(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=2,
+            )
+
+        def unbind_stack_dim_mismatch(x):
+            split_output = list(torch.unbind(x, dim=1))
+            return torch.stack(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=2,
+            )
+
+        def unbind_cat_multi_users(x):
+            split_output = list(torch.unbind(x, dim=1))
+            return torch.cat(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=1,
+            ), torch.stack(
+                [torch.ones(2, 32, 16)]
+                + split_output
+                + [torch.ones(2, 32, 16), torch.ones(2, 32, 16)],
+                dim=1,
+            )
+
+        def unbind_cat_multi_users_diff_dims(x):
+            split_output = list(torch.unbind(x, dim=1))
+            return torch.cat(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=1,
+            ), torch.stack(
+                [torch.ones(2, 32, 16)] + split_output + [torch.ones(2, 32, 16)],
+                dim=2,
+            )
+
+        args = [
+            torch.randn(2, 32, 32, 16),
+        ]
+        for (
+            fn,
+            expected_unbind_added,
+            expected_unbind_removed,
+            expected_cat_added,
+            expected_cat_removed,
+            expected_sections_removed,
+        ) in [
+            (unbind_stack, 0, 1, 0, 1, 31),
+            (unbind_stack_argspec1, 0, 1, 0, 1, 31),
+            (unbind_stack_argspec2, 0, 1, 0, 1, 31),
+            (dim_mismatch, 0, 1, 0, 1, 31),
+            (split_squeeze_stack, 0, 1, 0, 1, 31),
+            (other_users, 0, 0, 0, 0, 0),
+            (other_users_2, 0, 0, 0, 0, 0),
+            (unbind_cat_addn_args, 0, 1, 1, 1, 31),
+            (unbind_stack_addn_args, 0, 1, 1, 1, 31),
+            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31),
+            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31),
+            (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31),
+            (unbind_cat_multi_users, 0, 1, 2, 2, 31),
+            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31),
+        ]:
+            print()
+            print(fn)
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=True)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_added"],
+                expected_unbind_added,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_removed"],
+                expected_unbind_removed,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_added"],
+                expected_cat_added,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_removed"],
+                expected_cat_removed,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_sections_removed"],
+                expected_sections_removed,
+            )
+            counters.clear()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:

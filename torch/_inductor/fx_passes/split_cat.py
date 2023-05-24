@@ -26,10 +26,10 @@ from ..pattern_matcher import (
     RepeatedExpr,
 )
 from .pre_grad import (
-    merge_split_cat_pass,
     merge_splits_pass,
     normalize_split_pass,
-    split_squeeze_pass,
+    split_cat_pass,
+    unbind_stack_pass,
 )
 
 log = logging.getLogger(__name__)
@@ -268,7 +268,7 @@ class SplitCatSimplifier:
 
         # Start actual replacement
         user_inputs_list_new = self.replace_split(
-            graph, split_node, user_inputs_list, simplified_split_ranges
+            graph, split_node, split_sections, user_inputs_list, simplified_split_ranges
         )
         self.replace_cat(
             graph, split_node, next_users, user_inputs_list_new, transform_params_list
@@ -423,7 +423,7 @@ class SplitCatSimplifier:
             for user_input in user_inputs:
                 if split_dim == cat_dim and user_node.target == torch.cat:
                     # No transform needed
-                    transform_params.append((None, None, None))
+                    transform_params.append((None, None, None, None))
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[
@@ -438,13 +438,15 @@ class SplitCatSimplifier:
                     movedim_params = (
                         (split_dim, cat_dim) if split_dim != cat_dim else None
                     )
-                    transform_params.append((unflatten_params, movedim_params, None))
+                    transform_params.append(
+                        (unflatten_params, movedim_params, None, None)
+                    )
                 elif (
                     user_node.target == torch.stack or split_dim != cat_dim
                 ):  # We need to unsqueeze inputs not coming through split
-                    transform_params.append((None, None, (cat_dim,)))
+                    transform_params.append((None, None, (cat_dim,), None))
                 else:  # Non-split inputs
-                    transform_params.append((None, None, None))
+                    transform_params.append((None, None, None, None))
             transform_params_list.append(transform_params)
         return transform_params_list
 
@@ -452,6 +454,7 @@ class SplitCatSimplifier:
         self,
         graph: torch.fx.Graph,
         split_node: torch.fx.Node,
+        split_sections: List[int],
         user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
         split_ranges: List[Tuple[int, int]],
     ) -> List[List[torch.fx.Node]]:
@@ -462,8 +465,7 @@ class SplitCatSimplifier:
         Returns the new `user_inputs_list`, with tuples replaced with new getitems from the newer split node.
         """
         split_input = split_node.args[0]
-        split_sections = get_arg_value(split_node, 1, "split_size_or_sections")
-        split_dim = get_arg_value(split_node, 2, "dim")
+        split_dim = split_node.kwargs["dim"]
         if len(split_ranges) == 1:  # We can completely eliminate the split node
             split_items = [split_input]
         else:
@@ -550,7 +552,12 @@ class SplitCatSimplifier:
                     user_inputs_new, transform_params
                 ):
                     # Apply transforms
-                    unflatten_params, movedim_params, unsqueeze_params = transform_param
+                    (
+                        unflatten_params,
+                        movedim_params,
+                        unsqueeze_params,
+                        flatten_params,
+                    ) = transform_param
                     if unsqueeze_params and (
                         stack_dim is None or stack_dim == unsqueeze_params[0]
                     ):
@@ -577,6 +584,10 @@ class SplitCatSimplifier:
                         user_input_new = graph.call_function(
                             torch.movedim, args=(user_input_new, *movedim_params)
                         )
+                    if flatten_params:
+                        user_input_new = graph.call_function(
+                            torch.flatten, args=(user_input_new, *flatten_params)
+                        )
                     user_inputs_new_transformed.append(user_input_new)
                 if to_stack:
                     stacked_input = graph.call_function(
@@ -594,7 +605,11 @@ class SplitCatSimplifier:
                 else:
                     new_cat_node = user_inputs_new_transformed[-1]
 
-            if user_node.target == torch.cat and split_dim != cat_dim:
+            if (
+                user_node.target == torch.cat
+                and split_dim != cat_dim
+                and split_node.target == torch.split
+            ):
                 with graph.inserting_after(new_cat_node):
                     new_cat_node = graph.call_function(
                         torch.flatten, args=(new_cat_node, cat_dim, cat_dim + 1)
@@ -616,9 +631,97 @@ class SplitCatSimplifier:
             graph.erase_node(node)
 
 
+class UnbindCatRemover(SplitCatSimplifier):
+    """
+    Helper class to merge Unbind->Cat/Stack. Many of the cases are similar to SplitCatSimplifier.
+
+    Unbind can't be simplified like splits. So, we can only remove the unbind node. Other than this,
+    other cases like multiple users, additional args, dim mismatch are similar to `SplitCatSimplifier`,
+    hence we extend that class.
+    """
+
+    def remove_unbind(
+        self,
+        graph: torch.fx.Graph,
+        unbind_node: torch.fx.Node,
+    ):
+        num_unbind = (
+            max(getitem_node.args[1] for getitem_node in unbind_node.users.keys()) + 1
+        )
+        split_sections = [1 for _ in range(num_unbind)]
+
+        super().simplify(graph, unbind_node, split_sections)
+
+    def get_simplified_split_ranges(
+        self,
+        split_sections,
+        next_users,
+        user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
+    ) -> List[Tuple[int, int]]:
+        simplified_split_ranges = super().get_simplified_split_ranges(
+            split_sections, next_users, user_inputs_list
+        )
+        if not simplified_split_ranges or len(simplified_split_ranges) != 1:
+            return None
+        return simplified_split_ranges
+
+    def get_transform_params(
+        self,
+        unbind_node: torch.fx.Node,
+        next_users: List[torch.fx.Node],
+        user_inputs_list: List[List[Union[torch.fx.Node, Tuple[int, int]]]],
+    ) -> List[List[Tuple]]:
+        """
+        Figure out what transforms are needed for each input to each cat node.
+
+        Here is the rough transforms we apply:
+
+        x -> unbind -> stack => x -> movedim
+
+        x -> unbind -> cat => x -> movedim -> flatten
+
+        When cat/stack nodes have additional args:
+
+             addn ---|              addn -> unsqueeze ---|
+        x -> unbind -> stack  =>           x -> movedim  -> cat
+
+             addn ---|                            addn ---|
+        x -> unbind -> cat  =>   x -> movedim -> flatten  -> cat
+
+        (Note application of these depends on the dims as well)
+
+
+        """
+        split_dim = unbind_node.kwargs["dim"]
+        transform_params_list = []
+        for user_node, user_inputs in zip(next_users, user_inputs_list):
+            cat_dim = get_arg_value(user_node, 1, "dim")
+            transform_params = []
+            for user_input in user_inputs:
+                if isinstance(user_input, tuple):
+                    # User input is coming from unbind
+                    movedim_params = (
+                        (split_dim, cat_dim) if split_dim != cat_dim else None
+                    )
+                    flatten_params = None
+                    if user_node.target == torch.cat:
+                        flatten_params = (cat_dim, cat_dim + 1)
+                    transform_params.append(
+                        (None, movedim_params, None, flatten_params)
+                    )
+                elif (
+                    user_node.target == torch.stack
+                ):  # We need to unsqueeze inputs not coming through unbind into cat
+                    transform_params.append((None, None, (cat_dim,), None))
+                else:  # Non-unbind inputs
+                    transform_params.append((None, None, None, None))
+            transform_params_list.append(transform_params)
+        return transform_params_list
+
+
 class GetItem(CallFunction):
-    def __init__(self, arg, index):
-        super().__init__(operator.getitem, arg, index)
+    def __init__(self, arg, index, _users=1):
+        super().__init__(operator.getitem, arg, index, _users=_users)
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         # We generally match GetItem with arg being an Arg(). So, we never return the anchor
@@ -651,7 +754,7 @@ class GetItem(CallFunction):
             _users=MULTIPLE,
         ),
     ),
-    pass_dict=split_squeeze_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -669,7 +772,7 @@ class GetItem(CallFunction):
             _users=MULTIPLE,
         )
     ),
-    pass_dict=split_squeeze_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 def merge_split_squeeze(
@@ -683,7 +786,9 @@ def merge_split_squeeze(
     if not all(node.target == torch.squeeze for node in next_users):
         return
     with graph.inserting_before(match.output_node()):
-        unbind = graph.call_function(torch.unbind, args=(split_input, dim))
+        unbind = graph.call_function(
+            torch.unbind, args=(split_input,), kwargs={"dim": dim}
+        )
         for item_index, getitem_node in sorted(
             [
                 (getitem_node.args[1], getitem_node)
@@ -700,6 +805,45 @@ def merge_split_squeeze(
             graph.erase_node(getitem_node)
     graph.erase_node(split)
     counters["inductor"]["split_squeeze_replaced"] += 1
+
+
+getitem_unbind = ListOf(
+    GetItem(
+        CallFunction(
+            torch.unbind,
+            KeywordArg("unbind_input"),
+            dim=KeywordArg("dim"),
+            _users=MULTIPLE,
+        ),
+        Ignored(),
+        _users=MULTIPLE,
+    ),
+    partial=True,
+)
+
+
+@register_graph_pattern(
+    CallFunction([torch.stack, torch.cat], getitem_unbind, Ignored(), _users=MULTIPLE),
+    pass_dict=unbind_stack_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    CallFunction(
+        [torch.stack, torch.cat], getitem_unbind, dim=Ignored(), _users=MULTIPLE
+    ),
+    pass_dict=unbind_stack_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    CallFunction(
+        [torch.stack, torch.cat], tensors=getitem_unbind, dim=Ignored(), _users=MULTIPLE
+    ),
+    pass_dict=unbind_stack_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def merge_unbind_stack(match: Match, unbind_input: torch.fx.Node, dim: int):
+    unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
+    UnbindCatRemover().remove_unbind(match.graph, unbind_node)
 
 
 getitem_split = ListOf(
@@ -723,7 +867,7 @@ getitem_split = ListOf(
         dim=Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -733,7 +877,7 @@ getitem_split = ListOf(
         dim=Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
@@ -743,7 +887,7 @@ getitem_split = ListOf(
         Ignored(),
         _users=MULTIPLE,
     ),
-    pass_dict=merge_split_cat_pass,
+    pass_dict=split_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
 )
 def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
