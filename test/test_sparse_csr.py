@@ -3540,7 +3540,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             k = max(0, k + dk)
             # Non-trivial sparsity pattern.
             # Plus with tril inputs the result is also tril,
-            # so we can compare BSR and CSR impelementations.
+            # so we can compare BSR and CSR implementations.
             input = tensor(bi + (m, n)).tril_()
             bsr = input.to_sparse_bsr(block_size)
             mat1 = tensor(bm1 + (m, k)).tril_()

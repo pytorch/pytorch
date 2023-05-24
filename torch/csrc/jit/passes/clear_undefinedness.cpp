@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-static void clearUndefinedness(Value* o) {
+void clearUndefinedness(Value* o) {
   if (o->type()->kind() == TensorType::Kind) {
     o->setType(TensorType::get());
   } else if (
@@ -16,7 +16,7 @@ static void clearUndefinedness(Value* o) {
   }
 }
 
-static void clearUndefinedness(Block* block) {
+void clearUndefinedness(Block* block) {
   for (auto n : block->nodes()) {
     for (auto o : n->outputs()) {
       clearUndefinedness(o);
