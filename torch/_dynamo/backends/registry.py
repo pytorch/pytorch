@@ -1,6 +1,6 @@
 import functools
 import sys
-from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Sequence, Set, Tuple
 
 import torch
 from torch import fx
@@ -64,7 +64,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends(exclude_tags=("debug", "experimental")):
+def list_backends(exclude_tags: Set = ("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to:
 

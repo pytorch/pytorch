@@ -60,7 +60,7 @@ def reset() -> None:
     """
     torch._dynamo.reset()
 
-def allow_in_graph(fn : Union[Callable, List[Callable]]) -> Union[Callable, List[Callable]]:
+def allow_in_graph(fn):
     """
     Customize which functions compilation will include in the generated graph.
     Similar to `torch.fx.wrap()`.
@@ -147,7 +147,7 @@ def list_backends(exclude_tags : Set = ("debug", "experimental")) -> List[str]:
     """
     return torch._dynamo.list_backends(exclude_tags)
 
-def explain(f, *args, **kwargs) -> Tuple[Any]:
+def explain(f, *args, **kwargs):
     """
     Run the function `f` with compilation and provide an explanation of the optimization process.
 
@@ -191,9 +191,9 @@ def explain(f, *args, **kwargs) -> Tuple[Any]:
 
     """
 
-    return torch._dynamo.explain()
+    return torch._dynamo.explain(f, *args, **kwargs)
 
-def assume_constant_result(fn) -> None:
+def assume_constant_result(fn):
     """
     This function is used to mark a function `fn` as having a constant result.
     The marking is done for optimization purposes, allowing compilation to treat
@@ -231,7 +231,7 @@ def is_compiling() -> bool:
     """
     return torch._dynamo.is_compiling()
 
-def disable(fn : Callable = None, recursive : bool = True) -> None:
+def disable(fn=None, recursive=True):
     """
     This function provides both a decorator and a context manager to disable compilation.
 
@@ -290,7 +290,7 @@ def disable(fn : Callable = None, recursive : bool = True) -> None:
     processing for the function frame but still processes recursively invoked functions.
 
     """
-    return torch._dynamo.disable()
+    return torch._dynamo.disable(fn, recursive)
 
 def list_options() -> Dict[str, Any]:
     """
@@ -347,4 +347,4 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
 
     """
 
-    return torch._inductor.list_mode_options()
+    return torch._inductor.list_mode_options(mode)

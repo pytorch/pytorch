@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import inspect
 import os
 import tempfile
 import unittest
@@ -85,12 +86,14 @@ class PublicTorchCompilerTests(unittest.TestCase):
         self.assertEqual(
             public_sig,
             private_sig,
-            f"Signatures do not match for function {public_fn_name}! Public: {public_sig}, Private: {private_sig}",
+            f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
+
+    def test_is_enabled(self):
+        self.assertTrue(torch.compiler.is_enabled())
 
     def test_dynamo_signatures(self):
         function_names = [
-            "is_enabled",
             "reset",
             "allow_in_graph",
             "list_backends",
