@@ -3,10 +3,7 @@
 import sys
 import torch
 import torch.distributed as dist
-from unittest import skip, SkipTest
-import operator
-from functools import reduce
-import threading
+import unittest
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
