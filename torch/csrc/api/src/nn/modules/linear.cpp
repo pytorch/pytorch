@@ -173,5 +173,28 @@ Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
   return F::bilinear(input1, input2, weight, bias);
 }
 
+// =======================================================================
+
+BiasImpl::BiasImpl(const BiasOptions& options_) : options(options_) {
+  reset();
+}
+
+void BiasImpl::reset() {
+  weight = register_parameter("weight", torch::empty(options.num_features()));
+  reset_parameters();
+}
+
+void BiasImpl::reset_parameters() {
+  torch::nn::init::uniform_(weight);
+}
+
+void BiasImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Bias(num_features=" << options.num_features() << ")";
+}
+
+Tensor BiasImpl::forward(const Tensor& input) {
+  return F::bias(input, weight);
+}
+
 } // namespace nn
 } // namespace torch

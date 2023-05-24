@@ -210,5 +210,29 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Bilinear);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies a bias
+
+class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
+ public:
+  BiasImpl(int64_t num_features) : BiasImpl(BiasOptions(num_features)) {}
+  explicit BiasImpl(const BiasOptions& options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  Tensor weight;
+
+  BiasOptions options;
+};
+
+TORCH_MODULE(Bias);
+
 } // namespace nn
 } // namespace torch
