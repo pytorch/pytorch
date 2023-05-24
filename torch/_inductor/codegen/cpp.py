@@ -235,12 +235,8 @@ class CppPrinter(ExprPrinter):
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        # integer expr should not hit this:
-        # s1 = sympy.Symbol("s1", integer=integer)
-        # expr = sympy.ceiling(s1)
-        # expr is alway s1.
-        assert expr.is_integer is not True
-        return f"std::floor({self._print(expr.args[0])})"
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -270,9 +266,8 @@ class CppPrinter(ExprPrinter):
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        # As _print_floor, integer exp should not hit this:
-        assert expr.is_integer is not True
-        return f"std::ceil({self._print(expr.args[0])})"
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
 
 cexpr = CppPrinter().doprint

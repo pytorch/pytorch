@@ -203,25 +203,29 @@ class ExprPrinterTests(TorchTestCase):
     def test_print_floor(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
-            expr = sympy.floor(s1)
+            expr = sympy.floor(s1 / 2)
             if integer:
-                self.assertEqual(pexpr(expr), "s1")
-                self.assertEqual(cexpr(expr), "s1")
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                )
             else:
-                self.assertEqual(pexpr(expr), "math.floor(s1)")
-                self.assertEqual(texpr(expr), "tl.math.floor(s1)")
-                self.assertEqual(cexpr(expr), "std::floor(s1)")
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(texpr(expr), "tl.math.floor(((1/2)*s1))")
+                self.assertEqual(cexpr(expr), "std::floor((1.0/2.0)*s1)")
 
     def test_print_ceil(self):
         for integer in [True, False]:
             s1 = sympy.Symbol("s1", integer=integer)
-            expr = sympy.ceiling(s1)
+            expr = sympy.ceiling(s1 / 2)
             if integer:
-                self.assertEqual(pexpr(expr), "s1")
-                self.assertEqual(cexpr(expr), "s1")
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::ceil((1.0/2.0)*s1))"
+                )
             else:
-                self.assertEqual(pexpr(expr), "math.ceil(s1)")
-                self.assertEqual(cexpr(expr), "std::ceil(s1)")
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(cexpr(expr), "std::ceil((1.0/2.0)*s1)")
 
     def test_print_floor_div(self):
         for integer in [True, False]:
