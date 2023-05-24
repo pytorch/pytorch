@@ -20,7 +20,7 @@ static Dtype dtypeOfIndices(const std::vector<ExprPtr>& indices) {
   return indices.at(0)->dtype();
 }
 
-static void castIndicesToInts(std::vector<ExprPtr>& indices) {
+void castIndicesToInts(std::vector<ExprPtr>& indices) {
   // Cast all indices to either Int or Long
   auto index_dtype = ScalarType::Int;
   for (auto& index : indices) {
