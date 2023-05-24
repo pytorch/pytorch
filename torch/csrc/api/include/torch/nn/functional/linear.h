@@ -32,6 +32,10 @@ inline Tensor linear(
   }
 }
 
+inline Tensor bias(const Tensor& input, const Tensor& weight) {
+  return torch::add(input, weight);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
