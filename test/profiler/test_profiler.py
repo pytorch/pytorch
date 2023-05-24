@@ -1591,6 +1591,42 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             if e.returncode != 0:
                 self.assertTrue(False, "Kineto is not working properly with the Dynolog environment variable")
 
+    def test_concrete_inputs_profiling(self):
+        x = torch.rand(2, 6)
+        with profile(record_shapes=True) as p:
+            y = x.as_strided([4, 3], [1, 4])
+
+        found = False
+        for e in p.events():
+            if e.name in ("aten::as_strided"):
+                found = True
+                self.assertTrue(len(e.input_shapes) > 0)
+                self.assertTrue(len(e.concrete_inputs) > 0)
+                self.assertEqual([2, 6], e.input_shapes[0])
+                self.assertEqual([4, 3], e.concrete_inputs[1])
+                self.assertEqual([1, 4], e.concrete_inputs[2])
+
+        self.assertTrue(found, "Expected to find aten::as_strided but did not")
+
+    def test_concrete_inputs_profiling_toggling(self):
+        try:
+            for (before, after) in [(True, False), (False, True)]:
+                x = torch.rand(2, 6)
+                torch._C._profiler._set_record_concrete_inputs_enabled_val(before)
+                with profile(record_shapes=True) as p:
+                    y = x.as_strided([4, 3], [1, 4])
+                    torch._C._profiler._set_record_concrete_inputs_enabled_val(after)
+
+                found = False
+                for e in p.events():
+                    if e.name in ("aten::as_strided"):
+                        found = True
+                        self.assertTrue(len(e.input_shapes))
+
+                self.assertTrue(found, "Expected to find aten::as_strided but did not")
+        finally:
+            torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+
 
 def find_node_with_name(nodes, name):
     for node in _utils.traverse_dfs(nodes):

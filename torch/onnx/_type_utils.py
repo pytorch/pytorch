@@ -185,8 +185,13 @@ class JitScalarType(enum.IntEnum):
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
 
-        # value must be a non-list torch._C.Value scalar
-        scalar_type = value.type().scalarType()
+        scalar_type = None
+        if value.node().kind() != "prim::Constant" or not isinstance(
+            value.type(), torch._C.NoneType
+        ):
+            # value must be a non-list torch._C.Value scalar
+            scalar_type = value.type().scalarType()
+
         if scalar_type is not None:
             return cls._from_name(scalar_type)
 
