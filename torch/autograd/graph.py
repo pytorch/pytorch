@@ -366,6 +366,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             return t.grad_fn
 
     grad_fns = list(map(get_grad_fn, tensors))
+    len_tensors = len(tensors)
 
     def get_inner_hook(idx):
         def inner_hook(grad: torch.Tensor):
@@ -373,7 +374,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             count[id] = count.get(id, 0)
-            buffer[id] = buffer.get(id, [None] * len(tensors))
+            buffer[id] = buffer.get(id, [None] * len_tensors)
 
             if count[id] == 0:
                 # On the first call, compute the actual nb_calls and buffer
@@ -391,8 +392,9 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     class Handle(RemovableHandle):
         handles: Tuple[RemovableHandle, ...]
 
-        def __init__(self, handles: Tuple[RemovableHandle, ...]):
+        def __init__(self, handles: Tuple[RemovableHandle, ...], grad_fns: Tuple[Node, ...]):
             self.handles = handles
+            self.grad_fns: Optional[Tuple] = grad_fns
 
         def remove(self):
             for handle in self.handles:
@@ -408,7 +410,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     for i, t in enumerate(tensors):
         handles.append(t.register_hook(get_inner_hook(i)))
 
-    return Handle(tuple(handles))
+    return Handle(tuple(handles), tuple(grad_fns))
 
 
 # NOTE [Allow mutation on tensors saved for backward]
