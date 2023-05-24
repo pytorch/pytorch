@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import warnings
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
 import yaml
@@ -40,11 +40,19 @@ VALID_TEST_CONFIG_LABELS = {
     }
 }
 
+
+def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
+    if not job_name:
+        return False
+
+    return "cuda" in job_name or "rocm" in job_name
+
+
 # Supported modes when running periodically. Only applying the mode when
 # its lambda condition returns true
-SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[str], bool]] = {
+SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
     # Memory leak check is only needed for CUDA and ROCm jobs utilizing GPU memory
-    "mem_leak_check": lambda job_name: "cuda" in job_name or "rocm" in job_name,
+    "mem_leak_check": is_cuda_or_rocm_job,
     "rerun_disabled_tests": lambda job_name: True,
 }
 
@@ -162,7 +170,7 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
 
 
 def set_periodic_modes(
-    test_matrix: Dict[str, List[Any]], job_name: str
+    test_matrix: Dict[str, List[Any]], job_name: Optional[str]
 ) -> Dict[str, List[Any]]:
     """
     Apply all periodic modes when running under a schedule

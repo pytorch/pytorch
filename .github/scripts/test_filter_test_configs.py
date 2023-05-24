@@ -191,10 +191,19 @@ class TestConfigFilter(TestCase):
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
                 "descripion": "Replicate each periodic mode in a different config for a ROCm job",
             },
+            {
+                "job_name": "",
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Empty job name",
+            },
+            {
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Missing job name",
+            },
         ]
 
         for case in testcases:
-            job_name = case["job_name"]
+            job_name = case.get("job_name", None)
             test_matrix = yaml.safe_load(case["test_matrix"])
             scheduled_test_matrix = set_periodic_modes(test_matrix, job_name)
 
