@@ -15,6 +15,7 @@ __all__ = [
     'Identity',
     'LazyLinear',
     'Linear',
+    'Bias',
 ]
 
 
@@ -43,6 +44,50 @@ class Identity(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         return input
+
+
+class Bias(Module):
+    r"""Applies a bias to the incoming data :math:`y = x + b`
+
+    Args:
+        num_features: size of each input sample
+
+    Shape:
+        - Input: :math:`(*, H_{num\_features})` where :math:`*` means any number of
+          dimensions including none
+        - Output: :math:`(*, H_{num\_features})` where :math:`*` means same shape as input
+          except the last
+
+    Attributes:
+        weight: The learnable bias weights of the module of the shape :math:`H_{num\_features}`.
+              The values are intialized from a standard normal distribution.
+
+    Examples::
+
+        >>> m = nn.Bias(num_features=10)
+        >>> input = torch.randn(128, 10)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([128, 10])
+    """
+    __constants__ = ['num_features']
+    num_features: int
+
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+        self.num_features = num_features 
+        self.weight = Parameter(torch.empty(num_features, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.normal_(self.weight)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.bias(input, self.weight)
+
+    def extra_repr(self) -> str:
+        return 'bias={}'.format(self.weight)
 
 
 class Linear(Module):
