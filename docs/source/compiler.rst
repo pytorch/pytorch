@@ -1,13 +1,13 @@
-.. _torch_dynamo:
+.. _torch_compiler:
 
-torch._dynamo
+torch.compiler
 --------------------------
 
 .. warning ::
      This module is an early prototype and is subject to change.
 
-.. currentmodule:: torch._dynamo
+.. currentmodule:: torch.compiler
 
-.. automodule:: torch._dynamo
+.. automodule:: torch.compiler
     :members:
     :member-order: bysource
