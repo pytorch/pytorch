@@ -332,7 +332,7 @@ struct PeepholeOptimizeImpl {
   bool shape_peepholes_;
 };
 
-bool FuseAddMM(Block* block) {
+static bool FuseAddMM(Block* block) {
   bool changed = false;
   for (Node* node : block->nodes()) {
     // XXX: remember that if you want to simplify an expression by combining
