@@ -1,13 +1,14 @@
-import copy
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from torch.fx import Node
 from typing import Callable, List, NamedTuple, Optional, Dict, Any
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 import torch
 
 __all__ = [
     "Quantizer",
+    "QuantizationSpec",
     "QuantizationAnnotation",
 ]
 
@@ -21,27 +22,19 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_affine_float_qparams,
 ]
 
-# TODO: add support for torch dtype in quant code base
-# this includes observers and prepare/convert code
-_TORCH_DTYPE_TO_QDTYPE = {
-    torch.int8: torch.qint8,
-    torch.uint8: torch.quint8,
-    torch.int32: torch.qint32,
-    torch.float16: torch.float16,
-}
-
-
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec:
     dtype: torch.dtype
-    is_dynamic: bool = False
+    # observer or fake_quantize constructor such as
+    # MinMaxObserver, PerChannelHistogramObserver etc.
+    # or we can attach some custom args to them
+    # e.g. MinMaxObserver.with_args(eps=eps)
+    observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
     ch_axis: Optional[int] = None
-    # TODO: add this in a separate diff
-    # Kind of observer such as MinMaxObserver, PerChannelHistogramObserver etc.
-    # observer_or_fake_quant_type: Union[ObserverBase, FakeQuantizeBase]
+    is_dynamic: bool = False
 
     def __post_init__(self):
         # check dtype is one of the supported types
@@ -68,18 +61,13 @@ class QuantizationSpec:
             raise ValueError("Ch_axis is < 0.")
 
 
-def get_observer_kwargs(quant_spec: QuantizationSpec):
-    kwargs_dict = asdict(quant_spec)
-    kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
-    return copy.deepcopy(kwargs_dict)
-
-
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
 class QuantizationConfig:
     activation: Optional[QuantizationSpec]
     weight: Optional[QuantizationSpec]
     bias: Optional[QuantizationSpec]
+    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
     is_qat: bool = False
 
 OperatorPatternType = List[Callable]

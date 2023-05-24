@@ -529,7 +529,6 @@ aten::_unique.out
 aten::_unique2
 aten::_unique2.out
 aten::_unsafe_index.Tensor
-aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
