@@ -47,7 +47,7 @@ struct integer_iterator {
   }
 
   bool operator==(const integer_iterator& other) const {
-    if /* constexpr -- we don't have C++17 yet, see #85969 */ (one_sided) {
+    if constexpr (one_sided) {
       // Range-for loops' end test is `begin != end`, not `begin <
       // end`. To handle `c10::irange(n)` where n < 0 (which should be
       // empty), we just make `begin != end` fail whenever `end` is
