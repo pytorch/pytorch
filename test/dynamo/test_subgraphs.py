@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifunspec
+from torch._dynamo.utils import disable_cache_limit, ifdyn, ifdynstaticdefault, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -313,7 +313,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return a * x + len_(b)
 
         if config.dynamic_shapes:
-            self._common(fn, 2, 5)
+            self._common(fn, 2, ifdynstaticdefault(4, 5))
         else:
             self._common(fn, 2, 4)
 
@@ -630,7 +630,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 2)
+        self._common(fn, 1, ifdyn(ifdynstaticdefault(2, 7), 2))
 
 
 if __name__ == "__main__":
