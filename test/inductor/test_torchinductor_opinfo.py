@@ -158,16 +158,14 @@ inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
     "allclose": {f64},
-    "amin": {f16},
     "angle": {f64},
     "cholesky": {f32, f64},
-    "combinations": {b8, f16, f32, f64, i32, i64},
     "equal": {b8, f16, f32, f64, i32, i64},
     "index_add": {f16},
     "index_reduce": {f16, f32, f64},
     "istft": {f32, f64},
     # Unsupported: data dependent operator: aten.equal.default
-    "cov": {f16, f32, f64, i32, i64},
+    "cov": {f16, f32, f64, i64},
     # Unsupported: data dependent operator: aten._local_scalar_dense.default
     "item": {b8, f16, f32, f64, i32, i64},
     "linalg.eig": {f32, f64},
@@ -230,7 +228,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var_mean": {f16},
     "view_as_complex": {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
-    "fft.fft2": {b8, f16, f32, f64, i32, i64},
+    "fft.fft2": {b8, f16, f32, f64, i32},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
     "fft.hfft": {b8, f16, f32, f64, i32, i64},
     "fft.hfft2": {b8, f16, f32, f64, i32, i64},
@@ -249,13 +247,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfftn": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Scalars are not close!
     "empty_strided": {b8, i32, i64, f16, f32, f64},
-    # These return complex tensors
-    "complex": {f16, f32, f64},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
     "addr": {f16},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},

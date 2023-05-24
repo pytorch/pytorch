@@ -839,7 +839,7 @@ static void reflection_pad3d_backward_out_loop(
 
 // TODO: I tihnk this function should be removed since we implement it with
 // TORCH_IMPL_FUNC below
-Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
+static Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
     Tensor& output) {
   reflection_pad1d_out_template(output, input, padding);
   return output;
