@@ -4,7 +4,18 @@ import torch._inductor
 from typing import Callable, Union, List, Set, Tuple, Any
 from torch._dynamo.eval_frame import OptimizedModule
 
-__all__ == ["OptimizedModule", "is_enabled", "reset", "allow_in_graph", "list_backends", "explain", "is_compiling", "disable", "list_options", "list_mode_options"]
+__all__ = [
+    "OptimizedModule",
+    "is_enabled",
+    "reset",
+    "allow_in_graph",
+    "list_backends",
+    "explain",
+    "is_compiling",
+    "disable",
+    "list_options",
+    "list_mode_options",
+]
 
 def is_enabled() -> bool:
     """
