@@ -837,7 +837,7 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test \
+    tools/bazel test --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \

@@ -24,7 +24,7 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides
+from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
@@ -193,8 +193,17 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 }
                 compiled = inner_compile(gm, example_inputs, **kwargs_patched)
                 if detect_fake_mode(example_inputs):
+
+                    def materialize(x):
+                        if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                            # Need concrete value to run dynamic shapes and tune the result
+                            return x.node.hint
+                        else:
+                            # TODO: the defaked value may be problematic in some cases
+                            return defake(x)
+
                     with torch.utils._python_dispatch._disable_current_modes():
-                        inputs_real = [defake(t) for t in example_inputs]
+                        inputs_real = [materialize(t) for t in example_inputs]
                 else:
                     inputs_real = deepcopy(example_inputs)
 
@@ -711,12 +720,12 @@ def compile_fx(
                 boxed_forward_device_index=forward_device,
             )
 
-    with overrides.patch_functions():
-        if decompositions is None:
-            decompositions = select_decomp_table()
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-        # once torchdynamo is merged into pytorch
+    if decompositions is None:
+        decompositions = select_decomp_table()
+    # TODO: can add logging before/after the call to create_aot_dispatcher_function
+    # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+    # once torchdynamo is merged into pytorch
+    with V.set_fake_mode(detect_fake_mode(example_inputs_)):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
