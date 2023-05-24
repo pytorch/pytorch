@@ -5,8 +5,8 @@ import tempfile
 import unittest
 
 import torch
-from torch._dynamo.testing import CompileCounter
 import torch.compiler
+from torch._dynamo.testing import CompileCounter
 
 
 class ToyModel(torch.nn.Module):
@@ -71,6 +71,7 @@ class InPlaceCompilationTests(unittest.TestCase):
             loaded_model = torch.jit.load(os.path.join(tmpdirname, "model.pt"))
             loaded_model(torch.randn(1, 10))
 
+
 # The private variants of teh below functions are all extensively tested extensively
 # So as long as the signatures match we're good
 class PublicTorchCompilerTests(unittest.TestCase):
@@ -81,17 +82,29 @@ class PublicTorchCompilerTests(unittest.TestCase):
         public_sig = inspect.signature(public_fn)
         private_sig = inspect.signature(private_fn)
 
-        self.assertEqual(public_sig, private_sig, f'Signatures do not match for function {public_fn_name}! Public: {public_sig}, Private: {private_sig}')
-    
+        self.assertEqual(
+            public_sig,
+            private_sig,
+            f"Signatures do not match for function {public_fn_name}! Public: {public_sig}, Private: {private_sig}",
+        )
+
     def test_dynamo_signatures(self):
-        function_names = ['is_enabled', 'reset', 'allow_in_graph', 'list_backends', 'explain',
-                          'assume_constant_result', 'is_compiling', 'disable']
+        function_names = [
+            "is_enabled",
+            "reset",
+            "allow_in_graph",
+            "list_backends",
+            "explain",
+            "assume_constant_result",
+            "is_compiling",
+            "disable",
+        ]
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
 
     def test_inductor_signatures(self):
-        function_names = ['list_options', 'list_mode_options']
+        function_names = ["list_options", "list_mode_options"]
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._inductor)
