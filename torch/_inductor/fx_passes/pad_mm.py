@@ -164,10 +164,8 @@ def get_flops(dtype):
 def is_mm_compute_bound(M, K, N, dtype):
     from triton.testing import get_dram_gbps
 
-    # Calculate the arithmetic intensity
     arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
 
-    # Calculate the machine balance
     machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
 
     return arithmetic_intensity > machine_balance
