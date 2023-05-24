@@ -499,7 +499,7 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(str(outer))
+            call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
 
         return arg_defs, call_args, precompile_args

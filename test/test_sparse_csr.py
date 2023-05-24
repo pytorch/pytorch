@@ -3397,8 +3397,7 @@ class TestSparseCompressedTritonKernels(TestCase):
             coo = input.to_sparse().to(torch.float)
 
             res_tri = bsr_softmax(bsr)
-            # NOTE: torch.sparse.softmax does not tolerate negative `dim`.
-            res_coo = torch.sparse.softmax(coo, dim=coo.dim() - 1)
+            res_coo = torch.sparse.softmax(coo, -1)
             self.assertEqual(res_tri, res_coo.to(input.dtype))
 
     @parametrize("block_size", [16, 32, 64])
