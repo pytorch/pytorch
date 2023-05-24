@@ -128,10 +128,10 @@ static inline void checkIsMatrix(const Tensor& A, const char* const f_name, cons
 }
 static inline void squareCheckInputs(const Tensor& self, const char* const f_name, const char* const arg_name = "A") {
   checkIsMatrix(self, f_name, arg_name);
-  TORCH_CHECK(self.size(-1) == self.size(-2),
+  TORCH_CHECK(self.sym_size(-1) == self.sym_size(-2),
               f_name,
               ": ", arg_name, " must be batches of square matrices, "
-              "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
+              "but they are ", self.sym_size(-2), " by ", self.sym_size(-1), " matrices");
 }
 
 static inline void checkInputsSolver(const Tensor& A,

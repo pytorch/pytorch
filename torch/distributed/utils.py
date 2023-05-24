@@ -87,6 +87,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                     if isinstance(obj, PackedSequence):
                         output.data.record_stream(current_stream)  # type: ignore[arg-type]
                     else:
+                        assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):
