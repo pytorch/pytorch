@@ -6,7 +6,18 @@
 import contextlib
 import functools
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type, Sequence
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+)
 
 import torch.nn as nn
 
@@ -161,9 +172,7 @@ def _or_policy(
     ``policies`` returns ``True``.
     """
     return any(
-        policy(
-            module=module, recurse=recurse, nonwrapped_numel=nonwrapped_numel
-        )
+        policy(module=module, recurse=recurse, nonwrapped_numel=nonwrapped_numel)
         for policy in policies
     )
 

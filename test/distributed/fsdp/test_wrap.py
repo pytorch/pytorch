@@ -10,7 +10,6 @@ from typing import Callable, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.modules.batchnorm import _BatchNorm
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
     CPUOffload,
@@ -28,6 +27,7 @@ from torch.distributed.fsdp.wrap import (
     wrap,
 )
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     _maybe_cuda,
@@ -160,7 +160,12 @@ class TestFSDPWrap(FSDPTest):
         def never_wrap_policy(*args, **kwargs):
             return False
 
-        wrap_batchnorm_individually = functools.partial(_wrap_module_cls_individually, module_classes=[_BatchNorm,])
+        wrap_batchnorm_individually = functools.partial(
+            _wrap_module_cls_individually,
+            module_classes=[
+                _BatchNorm,
+            ],
+        )
         policy = (
             functools.partial(
                 _or_policy, policies=[never_wrap_policy, wrap_batchnorm_individually]
@@ -194,8 +199,15 @@ class TestFSDPWrap(FSDPTest):
                 return True
             return isinstance(module, BatchNormNet)
 
+        wrap_batchnorm_individually = functools.partial(
+            _wrap_module_cls_individually,
+            module_classes=[
+                _BatchNorm,
+            ],
+        )
+
         my_policy = functools.partial(
-            _or_policy, policies=[wrap_bn_container, _wrap_module_cls_individually]
+            _or_policy, policies=[wrap_bn_container, wrap_batchnorm_individually]
         )
         mod = MyModule()
         fsdp = FSDP(mod, auto_wrap_policy=my_policy)

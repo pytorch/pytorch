@@ -1,18 +1,16 @@
 from functools import partial
-from typing import Any, cast, Type, Dict
+from typing import Any, cast, Dict, Type
 
 import torch
 
 from torch.distributed.utils import _apply_to_tensors
-from torch.nn.modules.batchnorm import _BatchNorm
-from torch.nn.modules.normalization import LayerNorm
 from torch.utils._mode_utils import no_dispatch
 
 
 def _override_module_mixed_precision(
     root: torch.nn.Module,
     module_cls_to_override: Type[torch.nn.Module],
-    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},
+    wrap_override_dict: Dict[str, Any] = {"mixed_precision": None},  # noqa: B006
 ):
     for mod in root.modules():
         if isinstance(mod, module_cls_to_override):

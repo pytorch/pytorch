@@ -5,11 +5,11 @@ constructor arguments.
 
 from dataclasses import dataclass
 from enum import auto, Enum
-from torch.nn.modules.batchnorm import _BatchNorm
 
 from typing import Optional, Sequence
 
 import torch
+from torch.nn.modules.batchnorm import _BatchNorm
 
 __all__ = [
     "ShardingStrategy",
@@ -215,7 +215,6 @@ class MixedPrecision:
     cast_forward_inputs: bool = False
     cast_root_forward_inputs: bool = True
     _module_classes_to_ignore: Optional[Sequence[type]] = (_BatchNorm,)
-
 
 
 @dataclass

@@ -7,9 +7,7 @@ from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._utils import (
-    _override_module_mixed_precision,
-)
+from torch.distributed.fsdp._utils import _override_module_mixed_precision
 
 from torch.distributed.fsdp.wrap import (
     _FSDPPolicy,
@@ -69,7 +67,8 @@ def _auto_wrap(
             policies=[
                 auto_wrap_policy,
                 partial(
-                    _wrap_module_cls_individually, module_classes=mixed_precision._module_classes_to_ignore
+                    _wrap_module_cls_individually,
+                    module_classes=mixed_precision._module_classes_to_ignore,
                 ),
             ],
         )
