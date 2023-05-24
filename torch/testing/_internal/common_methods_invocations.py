@@ -17452,8 +17452,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
             # Tensor-likes are not close
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
-                         device_type='cuda', dtypes=(torch.float32,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples', dtypes=(torch.float32,)),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-3, rtol=0)}), 'TestDecomp', 'test_comprehensive'),
 
             # TODO skip this for now since we can't skip on runtime arch support (taken from scaled_dot_product_attention)
