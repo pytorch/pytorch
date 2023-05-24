@@ -4,6 +4,7 @@ import sys
 import torch
 import torch.distributed as dist
 import unittest
+import torch.testing._internal.distributed.fake_pg
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
