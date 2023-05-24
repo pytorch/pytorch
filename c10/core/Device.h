@@ -186,6 +186,9 @@ struct C10_API Device final {
 
 C10_API std::ostream& operator<<(std::ostream& stream, const Device& device);
 
+C10_API void set_default_device(const std::string& device_str);
+C10_API DeviceType get_default_device();
+
 } // namespace c10
 
 namespace std {

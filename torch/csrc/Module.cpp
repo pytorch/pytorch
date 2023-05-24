@@ -514,6 +514,27 @@ static PyObject* THModule_get_privateuse1_backend_name(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THModule_setDefaultDevice(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "set_default_device expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  const std::string device_name = THPUtils_unpackString(arg);
+  c10::set_default_device(device_name);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THModule_getDefaultDevice(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  c10::DeviceType device_type = c10::get_default_device();
+  std::string device_name = c10::DeviceTypeName(device_type, true);
+  return THPUtils_packString(device_name);
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1176,6 +1197,11 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_get_privateuse1_backend_name",
      THModule_get_privateuse1_backend_name,
+     METH_NOARGS,
+     nullptr},
+    {"_set_default_device", THModule_setDefaultDevice, METH_O, nullptr},
+    {"_get_default_device_name",
+     THModule_getDefaultDevice,
      METH_NOARGS,
      nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},

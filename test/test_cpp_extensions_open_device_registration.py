@@ -340,6 +340,18 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Overflow'):
                 foo_storage.resize_(8**29)
 
+        def test_default_device():
+            default_device_name = torch._C._get_default_device_name()
+            self.assertEqual(default_device_name, 'cuda')
+            with self.assertRaisesRegex(NotImplementedError, 'Could not run'):
+                x = torch.empty(10, 10).pin_memory()
+            torch.utils.rename_privateuse1_backend('foo')
+            torch._C._set_default_device('foo')
+            default_device_name = torch._C._get_default_device_name()
+            self.assertEqual(default_device_name, 'foo')
+            x = torch.empty(10, 10).pin_memory()
+            self.assertTrue(x.is_pinned())
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -352,6 +364,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_pin_memory()
         test_open_device_serialization()
         test_open_device_storage_resize()
+        test_default_device()
 
 
 if __name__ == "__main__":

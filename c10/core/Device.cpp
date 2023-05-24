@@ -156,4 +156,17 @@ std::ostream& operator<<(std::ostream& stream, const Device& device) {
   return stream;
 }
 
+static DeviceType default_device = DeviceType::CUDA;
+
+void set_default_device(const std::string& device_str) {
+  if (device_str.empty()) {
+    return;
+  }
+  default_device = parse_type(device_str);
+}
+
+DeviceType get_default_device() {
+  return default_device;
+}
+
 } // namespace c10

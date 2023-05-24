@@ -28,14 +28,16 @@ bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
   if (!self.is_cpu()) {
     return false;
   }
+  at::Device default_device = at::Device(c10::get_default_device());
   // TODO: fetch scalar type from Tensor? But it doesn't really matter...
-  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(default_device)));
   return at::_ops::is_pinned::redispatch(_dk, self, device);
 }
 
 at::Tensor _pin_memory(const Tensor& self, c10::optional<at::Device> device) {
   TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
-  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  at::Device default_device = at::Device(c10::get_default_device());
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(default_device)));
   return at::_ops::_pin_memory::redispatch(_dk, self, device);
 }
 
