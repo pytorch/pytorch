@@ -6,6 +6,7 @@ from torch._dynamo.eval_frame import OptimizedModule
 
 __all__ = [
     "OptimizedModule",
+    "compile",
     "is_enabled",
     "reset",
     "allow_in_graph",
@@ -16,6 +17,12 @@ __all__ = [
     "list_options",
     "list_mode_options",
 ]
+
+def compile(*args, **kwargs):
+    """
+    See :func:`torch.compile` for details on the arguments for this function.
+    """
+    return torch.compile(*args, **kwargs)
 
 def is_enabled() -> bool:
     """
