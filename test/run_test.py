@@ -496,7 +496,9 @@ def run_test(
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
     if is_cpp_test and RERUN_DISABLED_TESTS:
-        print_to_stderr("Skipping C++ tests when running under RERUN_DISABLED_TESTS mode")
+        print_to_stderr(
+            "Skipping C++ tests when running under RERUN_DISABLED_TESTS mode"
+        )
         return 0
 
     if use_sharded_test:
@@ -966,7 +968,7 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
-        pytest_args.extend(["-n", "auto"])
+        pytest_args.extend(["-n", str(NUM_PROCS)])
 
         if IS_CI:
             # Add the option to generate XML test report here as C++ tests
