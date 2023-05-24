@@ -564,6 +564,69 @@ class TestSplitCatFxPasses(TestCase):
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
 
+    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    def test_split_squeeze(self):
+        def split_squeeze_stack(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items)
+
+        def split_squeeze_stack_kwarg1(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, dim=1) for s in items]
+            return torch.stack(split_items)
+
+        def split_squeeze_multi_squeeze_users(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return (
+                torch.stack(split_items),
+                torch.relu(split_items[0]),
+                torch.tanh(split_items[1]),
+            )
+
+        def split_size_not_1(x):
+            items = list(torch.split(x, 2, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items)
+
+        def dim_mismatch(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 0) for s in items]
+            return torch.stack(split_items)
+
+        def other_users(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items), torch.relu(items[0])
+
+        def other_users_2(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items[1:]]
+            return torch.stack(split_items), torch.relu(items[0])
+
+        args = [
+            torch.randn(2, 32),
+        ]
+        for fn, split_squeeze_replaced in [
+            (split_squeeze_stack, 1),
+            (split_squeeze_stack_kwarg1, 1),
+            (split_squeeze_multi_squeeze_users, 1),
+            (split_size_not_1, 0),
+            (dim_mismatch, 0),
+            (other_users, 0),
+            (other_users_2, 0),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=True)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["split_squeeze_replaced"],
+                split_squeeze_replaced,
+            )
+            counters.clear()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
