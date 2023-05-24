@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import collections
+import contextlib
 import copy
 import csv
 import functools
@@ -15,7 +16,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -39,6 +40,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map, tree_map_only
 
+from tqdm.auto import tqdm, trange
+
 try:
     from .microbenchmarks.operator_inp_utils import OperatorInputsMode
 except ImportError:
@@ -55,10 +58,15 @@ log = logging.getLogger(__name__)
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# Suppress torch.profiler spam
+os.environ["KINETO_LOG_LEVEL"] = "5"
+
 current_name = ""
 current_device = ""
 current_batch_size = None
 output_filename = None
+
+MAX_DOWNLOAD_ATTEMPTS = 5
 
 
 class CI(NamedTuple):
@@ -83,11 +91,6 @@ CI_SKIP[CI("eager", training=False)] = [
     "torchrec_dlrm",
     # Huggingface
     "DebertaV2ForQuestionAnswering",  # OOM
-    # KeyError: '_ignore_torch_cuda_oom'
-    "detectron2_maskrcnn_r_101_c4",
-    "detectron2_maskrcnn_r_101_fpn",
-    "detectron2_maskrcnn_r_50_c4",
-    "detectron2_maskrcnn_r_50_fpn",
 ]
 
 CI_SKIP[CI("eager", training=True)] = [
@@ -97,7 +100,8 @@ CI_SKIP[CI("eager", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
-    "vision_maskrcnn",  # eager_two_runs_differ
+    "llama",  # Accuracy failed: allclose not within tol=0.001
+    "vision_maskrcnn",  # The size of tensor a (29) must match the size of tensor b (33) (doesn't repro)
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -122,7 +126,6 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "moco",  # Please convert all Tensors to FakeTensors first
     "hf_BigBird",  # OOM
     "tacotron2",  # AssertionError: Deduped args out of bounds
     # Huggingface
@@ -141,9 +144,7 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "hf_T5_base",  # fp64_OOM
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
-    "moco",
     "pytorch_struct",
-    "vision_maskrcnn",
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -183,12 +184,10 @@ CI_SKIP[CI("inductor", training=False)] = [
     "hf_GPT2_large",  # OOM
     "maml",  # accuracy
     "mobilenet_v2_quantized_qat",  # The eval test only supports CPU
-    "moco",  # accuracy
     "pytorch_struct",  # Test eval is not implemented
     "pyhpc_equation_of_state",  # Accuracy
     "pyhpc_turbulent_kinetic_energy",  # Accuracy
     "tacotron2",
-    "vision_maskrcnn",  # accuracy
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -214,15 +213,11 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
-    "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
     # Huggingface
-    "AllenaiLongformerBase",
-    "BartForConditionalGeneration",  # OOM
-    "DebertaV2ForQuestionAnswering",  # OOM
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
@@ -240,22 +235,35 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
+    "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
+    "mobilevit_s",
+    "pit_b_224",
+    "twins_pcpvt_base",
+    "visformer_small",
+    "vit_base_patch16_224",
+    "xcit_large_24_p8_224",
 ]
 
 # Skips for dynamic=True
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    "cm3leon_generate",  # Could not validate constraint UnspecConstraint
+    "hf_T5_generate",  # Could not validate constraint UnspecConstraint
+    "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    "llama",  # AssertionError: cannot compute free_symbols of True
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False)],
+    "nanogpt_generate",  # Assertion `index out of bounds: 0 <= tmp0 < 64` failed.
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -332,15 +340,7 @@ def output_csv(filename, headers, row):
     with open(filename, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
-            writer.writerow(line + ["0"] * (len(headers) - len(line)))
-
-
-class NullContext:
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+            writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
 def nothing(f):
@@ -639,7 +639,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
-        for rep in range(args.repeat):
+        for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
                 randomize_input(copy.deepcopy(example_inputs))
                 if should_randomize_input
@@ -940,6 +940,43 @@ def try_script(model, example_inputs):
         return None
 
 
+def download_retry_decorator(download_fn):
+    """
+    Decorator function for applying retry logic to a download function.
+
+    The wrapped function will be called up to 5 times and raises an exception if the function fails each time.
+    After each unsuccessful attempt, there is a delay before the next attempt, which is increased linearly with the number of tries.
+
+    Usage:
+    @download_retry_decorator
+    def download_function(model_name: str):
+        # download logic goes here
+    """
+
+    @functools.wraps(download_fn)
+    def wrapper(self, *args, **kwargs) -> Any:
+        tries = 0
+        total_allowed_tries = MAX_DOWNLOAD_ATTEMPTS
+        while tries <= total_allowed_tries:
+            try:
+                model = download_fn(self, *args, **kwargs)
+                return model
+            except Exception as e:
+                tries += 1
+                if tries <= total_allowed_tries:
+                    wait = tries * 30
+                    print(
+                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise RuntimeError(
+                        f"Failed to load model '{args}' with following error(s): {str(e)}."
+                    )
+
+    return wrapper
+
+
 def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
@@ -1064,7 +1101,7 @@ def get_dynamo_stats():
 
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
-        cache_minder = NullContext()
+        cache_minder = contextlib.nullcontext()
         if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_inductor_cache(cache_entries)
@@ -1111,7 +1148,7 @@ class BenchmarkRunner:
     def __init__(self):
         self.model_iter_fn = None
         self.grad_scaler = DummyGradScaler()
-        self.autocast = NullContext
+        self.autocast = contextlib.nullcontext
         self.optimizer = None
         self._args = None
 
@@ -1139,7 +1176,7 @@ class BenchmarkRunner:
             #  harder.
             # self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
-        elif self.args.bfloat16 and self.args.devices == ["cpu"]:
+        elif (self.args.bfloat16 or self.args.amp) and self.args.devices == ["cpu"]:
             self.autocast = torch.cpu.amp.autocast
 
     def init_optimizer(self, name, device, params):
@@ -1162,6 +1199,10 @@ class BenchmarkRunner:
 
     @property
     def skip_models_for_cuda(self):
+        return set()
+
+    @property
+    def skip_models_for_cpu(self):
         return set()
 
     @property
@@ -1590,7 +1631,7 @@ class BenchmarkRunner:
         msg = f"{current_device:4} {mode:5} {current_name:34} "
         if tag:
             msg += f" {tag:26}"
-        print(msg, end=" ", flush=True)
+        print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
 
@@ -2210,7 +2251,6 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
-            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -2303,6 +2343,7 @@ def run(runner, args, original_dir=None):
 
     if args.devices == ["cpu"]:
         runner.skip_models.update(runner.very_slow_models)
+        runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
@@ -2330,7 +2371,7 @@ def run(runner, args, original_dir=None):
 
     experiment = null_experiment
     global current_name, current_device, current_batch_size, output_filename, optimize_ctx
-    optimize_ctx = NullContext()
+    optimize_ctx = contextlib.nullcontext()
 
     if args.overhead:
         optimize_ctx = torch._dynamo.optimize(dummy_fx_compile, nopython=args.nopython)
@@ -2481,24 +2522,30 @@ def run(runner, args, original_dir=None):
                 )
             else:
                 try:
-                    if args.part:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(
-                            device, model_name, batch_size=batch_size, part=args.part
-                        )
-                    else:
-                        (
-                            device,
-                            name,
-                            model,
-                            example_inputs,
-                            batch_size,
-                        ) = runner.load_model(device, model_name, batch_size=batch_size)
+                    with tqdm(desc="loading model"):
+                        if args.part:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device,
+                                model_name,
+                                batch_size=batch_size,
+                                part=args.part,
+                            )
+                        else:
+                            (
+                                device,
+                                name,
+                                model,
+                                example_inputs,
+                                batch_size,
+                            ) = runner.load_model(
+                                device, model_name, batch_size=batch_size
+                            )
                 except NotImplementedError as e:
                     print(e)
                     import traceback
