@@ -6,7 +6,6 @@ import numbers
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
-from torch import Tensor
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._decomp.decompositions import pw_cast_for_opmath
 from torch._decomp.decompositions_for_rng import extra_random_decomps

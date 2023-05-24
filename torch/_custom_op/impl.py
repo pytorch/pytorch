@@ -10,7 +10,8 @@ from torchgen.model import FunctionSchema, OperatorName, SchemaKind
 import torch
 import torch._C as _C
 import torch.library as library
-import torch.utils._pytree as pytree
+
+from .autograd import autograd_kernel_indirection, construct_autograd_kernel
 
 """
 There are various APIs for defining custom-operator-like things in PyTorch:
@@ -143,18 +144,14 @@ def custom_op(
         lib = library.Library(ns, "FRAGMENT")
         lib.define(schema_str)
         ophandle = find_ophandle_or_throw(ns, function_schema.name)
-        result = CustomOp(lib, ns, function_schema.name, ophandle, _private_access=True)
+        result = CustomOp(lib, ns, function_schema, function_schema.name, ophandle, _private_access=True)
 
         result.__name__ = func.__name__
         result.__module__ = func.__module__
         result.__doc__ = func.__doc__
 
-        # NYI: autograd not supported
-        # In the near future we will either directly use the
-        # autograd_not_implemented kernels or make those the default fallback
-        # for the Autograd and ADInplaceOrView keys. Both of those are a bit tricky.
         library.impl(lib, result._opname, "Autograd")(
-            get_autograd_not_implemented_kernel(weakref.proxy(result))
+            autograd_kernel_indirection(weakref.proxy(result))
         )
 
         torch._C._dispatch_set_report_error_callback(
@@ -185,7 +182,7 @@ class CustomOp:
     To construct a `CustomOp`, use `custom_op`.
     """
 
-    def __init__(self, lib, cpp_ns, operator_name, ophandle, *, _private_access=False):
+    def __init__(self, lib, cpp_ns, schema, operator_name, ophandle, *, _private_access=False):
         super(CustomOp, self).__init__()
         if not _private_access:
             raise RuntimeError(
@@ -193,6 +190,7 @@ class CustomOp:
                 "BC for it. Please use custom_op(...) to create a CustomOp object"
             )
         name = f"{cpp_ns}::{str(operator_name.name)}"
+        self._schema = schema
         self._cpp_ns = cpp_ns
         self._lib: library.Library = lib
         self._ophandle: _C._DispatchOperatorHandle = ophandle
@@ -417,6 +415,90 @@ class CustomOp:
 
         return inner
 
+    # NOTE ["backward", "save_for_backward", and "autograd"]
+    # As a part of the explicit autograd API, a user must provide us
+    # a "save_for_backward" function and a "backward" function.
+    # When both of these have been provided, then we automatically
+    # construct the "autograd" kernel.
+    def _register_autograd_kernel(self):
+        assert self._has_impl("backward")
+        assert self._has_impl("save_for_backward")
+        kernel = construct_autograd_kernel(
+            self._schema,
+            self._output_differentiability,
+            self,
+            self._get_impl("save_for_backward").func,
+            self._get_impl("backward").func)
+        self._register_impl("autograd", kernel)
+
+    def impl_save_for_backward(self):
+        r"""Register a function that tells us what to save for backward.
+
+        Please see impl_backward for more details.
+        """
+        def inner(f):
+            self._register_impl("save_for_backward", f)
+            if self._has_impl("backward"):
+                self._register_autograd_kernel()
+        return inner
+
+    def impl_backward(self, output_differentiability=None):
+        r"""Registers a backward formula.
+
+        In order for the CustomOp to work with autograd, you need to register
+        a backward formula. There are two pieces to this:
+        1. You must give us a function to specify what to save for backward.
+           Call this the "save for backward" function.
+        2. You must give us a function that computes gradients. Call this the
+           "backward" function.
+
+        Use `impl_save_for_backward` to define a "save for backward" function
+        that specifies what gets saved for backward. The function should accept
+        two arguments ``(inputs, output)`` and return the quantities to be saved
+        for backward.
+
+        During runtime, when you call the CustomOp, PyTorch will invoke the
+        "save for backward" function with the inputs and output of the CustomOp.
+
+        Use `impl_backward` to define the "backward" function. The backward
+        function must accept ``(ctx, saved, *grads)``:
+        - ``ctx`` is a context object where we may provide information
+        - ``saved`` is exactly what gets returned from the "save for backward"
+          function
+        - ``grads`` is one or more gradients. The number of gradients matches
+          the number of outputs of the CustomOp.
+
+        The backward function must return a dict that maps the name of
+        an input to the CustomOp to its corresponding gradient. All inputs that
+        were declared to be Tensors in the CustomOp definition must be accounted
+        for in the dict. The gradient may be a Tensor or None.
+
+        TODO(rzou): Add example when this PR is closer to landing.
+
+        """
+        if output_differentiability is not None:
+            def yell():
+                raise RuntimeError(
+                    f"impl_backward(output_differentiability): expected "
+                    f"output_differentiability to be a list of bools with "
+                    f"length equal to the number of outputs of this CustomOp "
+                    f"got: {output_differentiability}")
+
+            if not isinstance(output_differentiability, list):
+                yell()
+            for diff in output_differentiability:
+                if not isinstance(diff, bool):
+                    yell()
+            if len(self._schema.returns) != len(output_differentiability):
+                yell()
+
+        def inner(f):
+            self._register_impl("backward", f)
+            self._output_differentiability = output_differentiability
+            if self._has_impl("save_for_backward"):
+                self._register_autograd_kernel()
+        return inner
+
 
 @dataclasses.dataclass
 class FuncAndLocation:
@@ -488,21 +570,6 @@ def validate_device_type(device_type: str) -> None:
             f"CustomOp.impl(device_types=[{device_type}, ...]): we only support device_type "
             f"in {SUPPORTED_DEVICE_TYPE_TO_KEY.keys()}."
         )
-
-
-def get_autograd_not_implemented_kernel(custom_op) -> typing.Callable:
-    def autograd_not_implemented(*args, **kwargs) -> None:
-        if pytree.tree_any(
-            lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
-        ):
-            raise RuntimeError("Autograd has not been implemented for operator")
-        guard = _C._AutoDispatchBelowAutograd()
-        try:
-            return custom_op(*args, **kwargs)
-        finally:
-            del guard
-
-    return autograd_not_implemented
 
 
 def supported_param(param: inspect.Parameter) -> bool:
