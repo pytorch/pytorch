@@ -776,7 +776,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)

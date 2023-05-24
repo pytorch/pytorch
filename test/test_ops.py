@@ -1746,7 +1746,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
-        '_refs.item',
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',

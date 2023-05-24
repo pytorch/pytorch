@@ -294,6 +294,9 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_disable_execution_graph_observer",
       &torch::profiler::impl::disableExecutionGraphObserver);
+  m.def(
+      "_set_record_concrete_inputs_enabled_val",
+      &torch::profiler::impl::set_record_concrete_inputs_enabled_val);
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");
