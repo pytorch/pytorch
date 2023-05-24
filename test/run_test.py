@@ -496,7 +496,9 @@ def run_test(
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
     if is_cpp_test and RERUN_DISABLED_TESTS:
-        print_to_stderr("Skipping C++ tests when running under RERUN_DISABLED_TESTS mode")
+        print_to_stderr(
+            "Skipping C++ tests when running under RERUN_DISABLED_TESTS mode"
+        )
         return 0
 
     if use_sharded_test:
