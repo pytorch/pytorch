@@ -32,7 +32,7 @@
 
 namespace torch::jit {
 
-static std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
+std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   std::vector<Method> methods;
   // Use DFS on IValue's to traverse dependencies of module._ivalue and
   // add all setstate/getstates to initial stack.
@@ -63,7 +63,7 @@ static std::vector<Method> gatherGetSetStates(ObjectPtr obj) {
   return methods;
 }
 
-static std::vector<Method> findAllDependentFunctions(
+std::vector<Method> findAllDependentFunctions(
     const Module& module,
     Graph& graph) {
   std::vector<Method> methods;
@@ -92,7 +92,7 @@ static std::vector<Method> findAllDependentFunctions(
 // 2. All the dependent functions will come afterwards.
 // This order is meaningful because currently mobile Module looks up
 // methods with linear search.
-static std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
+std::vector<std::unique_ptr<GraphFunction>> inlineFunctions(
     const std::vector<Method>& initial_methods,
     bool incl_dependent_functions) {
   std::set<std::pair<std::string, Function*>> visited;
@@ -297,7 +297,7 @@ IValue convertMobileFunctionToCodeTable(
   return codeTable;
 }
 
-static void checkSchema(const c10::FunctionSchema& schema) {
+void checkSchema(const c10::FunctionSchema& schema) {
   TORCH_CHECK(
       schema.overload_name().empty(), // @TODO: is this check correct?
       "Overloads are not supported in mobile modules.");
@@ -308,7 +308,7 @@ static void checkSchema(const c10::FunctionSchema& schema) {
       "A variable number of return values is not supported in mobile modules.");
 }
 
-static bool isLoweredModule(const Module& m) {
+bool isLoweredModule(const Module& m) {
   c10::QualifiedName type_name;
   if (m.type()->name()) {
     type_name = m.type()->name().value();
@@ -326,7 +326,7 @@ static bool isLoweredModule(const Module& m) {
 // Check if the global static map of backend debug info
 // contains debug info for this module and any of its children.
 // If so combine all the maps together and return one.
-static void getBackendDebugInfoMap(
+void getBackendDebugInfoMap(
     const Module& m,
     BackendDebugInfoMapType& debug_map) {
   if (isLoweredModule(m)) {
@@ -342,7 +342,7 @@ static void getBackendDebugInfoMap(
   }
 }
 
-static uint64_t get_min_operator_version_from_version_map(
+uint64_t get_min_operator_version_from_version_map(
     const mobile::Module& module) {
   uint64_t min_version = caffe2::serialize::kMinSupportedFileFormatVersion;
   for (const auto& func : module.compilation_unit().methods()) {

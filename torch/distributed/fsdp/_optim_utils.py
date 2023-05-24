@@ -371,7 +371,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -985,7 +985,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
         ):
-            if type(param) is not FlatParameter:
+            if not isinstance(param, FlatParameter):
                 continue
             fqn = clean_tensor_name(prefix + param_name)
             flat_param_to_fqn[param] = fqn
