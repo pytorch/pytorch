@@ -2176,29 +2176,12 @@ void svd_magma(const Tensor& A,
                    .mT();
   // U, S, Vh, info are the right size and strides, but are on GPU
   // We copy them into CPU in pinned_memory
-  const auto empty_like_cpu = [](const Tensor& t, bool make_contiguous = false) {
-    if (!make_contiguous) {
-      return at::empty_like(t,
-                            t.options()
-                            .device(kCPU)
-                            .pinned_memory(true));
-    } else {
-      return at::empty_like(t.mT(),
-                            t.options()
-                            .device(kCPU)
-                            .memory_format(at::MemoryFormat::Contiguous)
-                            .pinned_memory(true)).mT();
-    }
+  const auto empty_like_cpu = [](const Tensor& t) {
+    return at::empty_like(t, t.options().device(kCPU).pinned_memory(true));
   };
   auto U_ = compute_uv ? empty_like_cpu(U) : Tensor{};
   auto S_ = empty_like_cpu(S);
-#if defined(USE_LINALG_SOLVER) && defined(USE_ROCM)
-  // However, on ROCM platform, Vh is not guaranteed to have correct storage
-  // order, so processing similar to A matrix is essential
-  auto Vh_ = compute_uv ? empty_like_cpu(Vh, true) : Tensor{};
-#else
   auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor{};
-#endif
   auto info_ = empty_like_cpu(info);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda", [&] {
