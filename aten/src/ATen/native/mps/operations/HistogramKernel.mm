@@ -227,7 +227,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   }
 
   // for MPSProfiler
-  std::vector<Tensor> allTensorsList = bin_edges.vec();
+  auto allTensorsList = bin_edges.vec();
   allTensorsList.push_back(input);
   if (has_weight) {
     allTensorsList.push_back(weight.value());
