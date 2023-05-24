@@ -100,7 +100,7 @@ class PhiloxState:
 
     def set_state_from_tensor(self, state):
         # Only needed because we override set_rng_state.
-        self.seed, self.base_offset = torch.split(state, 1)
+        self.seed, self.base_offset = torch.unbind(state)
         self.relative_offset = 0
 
 
