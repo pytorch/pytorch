@@ -249,6 +249,8 @@ TORCH_IMPL_FUNC(clamp_max_out_mps)
 }
 
 Tensor& where_self_out_mps(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
+  TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
+              "Expected all tensors to be on the same device, but found at least two devices.");
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
 
   if (condition.scalar_type() == ScalarType::Byte) {

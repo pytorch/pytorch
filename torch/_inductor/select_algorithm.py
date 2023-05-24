@@ -896,7 +896,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-autotune_select_algorithm = AlgorithmSelectorCache()
+_ALGORITHM_SELECTOR_CACHE = None
+
+
+def autotune_select_algorithm(*args, **kwargs):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
 def realize_inputs(*args):

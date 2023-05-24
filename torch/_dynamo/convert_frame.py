@@ -11,7 +11,10 @@ import torch
 import torch._logging
 from torch._guards import tracing
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    GuardOnDataDependentSymNode,
+)
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -237,10 +240,16 @@ def convert_frame_assert(
         if code in input_codes and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
-            )
+            if config.report_guard_failures:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+            else:
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    "set env var TORCHDYNAMO_REPORT_GUARD_FAILURES=1 to debug further",
+                )
 
             if recompiles_log.isEnabledFor(logging.DEBUG):
                 recompiles_log.debug(message)
@@ -297,19 +306,31 @@ def convert_frame_assert(
             def format_guard_failures(code):
                 # For the common case, it's sufficient to see just the most recent failure.
                 # We could add a verbose mode if needed
-                return f"{str(guard_failures[code][-1])}"
+                return f"  reasons: {str(guard_failures[code][-1])}\n"
 
-            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
-                "   function: %s\n"
-                "   reasons:  %s\n"
-                "to diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
-                format_func_info(code),
-                format_guard_failures(code),
-                troubleshooting_url,
-            )
+            if config.report_guard_failures:
+                assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "   reasons:  %s\n"
+                    "to diagnose recompilation issues, see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    format_guard_failures(code),
+                    troubleshooting_url,
+                )
+            else:
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "to diagnose recompilation issues, set env variable TORCHDYNAMO_REPORT_GUARD_FAILURES=1"
+                    " and also see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    troubleshooting_url,
+                )
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
@@ -480,13 +501,13 @@ def _compile(
         BackendCompilerFailed,
         AssertionError,
         ConstraintViolationError,
+        GuardOnDataDependentSymNode,
     ) as e:
         exception_handler(e, code, frame)
         raise
     except Exception as e:
         exception_handler(e, code, frame)
-        # TODO: Why???  Why not raise the original exception as is
-        raise InternalTorchDynamoError() from e
+        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

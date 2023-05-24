@@ -42,59 +42,6 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
 
 
 @compatibility(is_backward_compatible=False)
-def check_valid(gm: GraphModule) -> None:  # noqa: C901
-
-    for node in gm.graph.nodes:
-        # TODO(T140410192): should have fake tensor for all dialects
-        if node.op in {"call_module", "call_method"}:
-            raise SpecViolationError(
-                "call_module is not valid: got a class '{}' ".format(node.target),
-            )
-
-        if node.op == "call_function":
-            _check_has_fake_tensor(node)
-            op_name = (
-                node.target.name
-                if hasattr(node.target, "name")
-                else node.target.__name__
-            )
-            is_builtin_func = node.target in [
-                'while_loop',
-                operator.getitem,
-                'cond',
-                control_flow.cond,
-                control_flow.map,
-            ]
-            if not isinstance(node.target, OpOverload) and not is_builtin_func:
-                raise SpecViolationError(
-                    "Operator '{}' is not a registered Op".format(op_name),
-                )
-
-            # All ops functional
-            if not is_builtin_func and not is_functional(node.target):
-                raise SpecViolationError(
-                    f"operator '{op_name}' is not functional"
-                )
-
-            if isinstance(node.target, OpOverload):
-                # Check preserved metadata
-                for meta in PRESERVED_META_KEYS:
-                    if node.meta.get(meta, None) is None:
-                        raise SpecViolationError(
-                            f"node {node} is missing metadata {meta}"
-                        )
-
-
-@compatibility(is_backward_compatible=False)
-def is_valid(gm: GraphModule) -> bool:
-    try:
-        check_valid(gm)
-        return True
-    except SpecViolationError:
-        return False
-
-
-@compatibility(is_backward_compatible=False)
 def _check_tensors_are_contiguous(gm: GraphModule) -> None:
     # Tensors be of contiguous format
     for name, param in itertools.chain(gm.named_parameters(), gm.named_buffers()):
@@ -106,37 +53,91 @@ def _check_tensors_are_contiguous(gm: GraphModule) -> None:
 
 
 @compatibility(is_backward_compatible=False)
-def check_valid_aten_dialect(gm: GraphModule) -> None:
-    """Raises exception if gm is not in aten dialect.
+class Verifier:
+    def __call__(self, gm: GraphModule) -> None:
+        self.check_valid(gm)
 
-    Args:
-        gm: GraphModule
-    """
-    # need to be first valid
-    check_valid(gm)
+    @compatibility(is_backward_compatible=False)
+    def valid_builtin_funcs(self):
+        return [
+            operator.getitem,
+            control_flow.cond,
+            control_flow.map,
+        ]
 
-    # Operators be aten cannonical
-    for n in gm.graph.nodes:
-        if n.op == "call_function" and isinstance(n.target, OpOverload):
-            if (
-                torch.Tag.core not in n.target.tags  # type: ignore[attr-defined]
-                and torch.Tag.view_copy not in n.target.tags  # type: ignore[attr-defined]
-            ):
-                # NOTE(qihan): whether view_copy operators are marked as canonical is still under
-                #            discussion.
+    @compatibility(is_backward_compatible=False)
+    def check_valid_op(self, op):
+        op_name = op.name if hasattr(op, "name") else op.__name__
+
+        if not isinstance(op, OpOverload):
+            raise SpecViolationError(
+                "Operator '{}' is not a registered Op".format(op_name),
+            )
+
+        # All ops functional
+        if not is_functional(op):
+            raise SpecViolationError(
+                f"operator '{op_name}' is not functional"
+            )
+
+    @compatibility(is_backward_compatible=False)
+    def check_valid(self, gm: GraphModule) -> None:  # noqa: C901
+
+        for node in gm.graph.nodes:
+            # TODO(T140410192): should have fake tensor for all dialects
+            if node.op in {"call_module", "call_method"}:
                 raise SpecViolationError(
-                    "Operator {}.{} is not Aten Canonical.".format(
-                        n.target.__module__, n.target.__name__
-                    )
+                    "call_module is not valid: got a class '{}' ".format(node.target),
                 )
 
-    _check_tensors_are_contiguous(gm)
+            if node.op == "call_function":
+                _check_has_fake_tensor(node)
+
+                if node.target not in self.valid_builtin_funcs():
+                    self.check_valid_op(node.target)
+
+                if isinstance(node.target, OpOverload):
+                    # Check preserved metadata
+                    for meta in PRESERVED_META_KEYS:
+                        if node.meta.get(meta, None) is None:
+                            raise SpecViolationError(
+                                f"node {node} is missing metadata {meta}"
+                            )
+
+    @compatibility(is_backward_compatible=False)
+    def is_valid(self, gm: GraphModule) -> bool:
+        try:
+            self.check_valid(gm)
+            return True
+        except SpecViolationError:
+            return False
 
 
-@compatibility(is_backward_compatible=False)
-def is_valid_aten_dialect(gm: GraphModule) -> bool:
-    try:
-        check_valid_aten_dialect(gm)
-        return True
-    except SpecViolationError:
-        return False
+class ATenDialectVerifier(Verifier):
+    @compatibility(is_backward_compatible=False)
+    def check_valid_op(self, op) -> None:
+        super().check_valid_op(op)
+
+        op_name = op.name if hasattr(op, "name") else op.__name__
+
+        if not isinstance(op, OpOverload):
+            raise SpecViolationError(
+                "Operator '{}' is not a registered Op".format(op_name),
+            )
+
+        if (
+            torch.Tag.core not in op.tags  # type: ignore[attr-defined]
+            and torch.Tag.view_copy not in op.tags  # type: ignore[attr-defined]
+        ):
+            # NOTE(qihan): whether view_copy operators are marked as canonical is still under
+            #            discussion.
+            raise SpecViolationError(
+                "Operator {}.{} is not Aten Canonical.".format(
+                    op.__module__, op.__name__
+                )
+            )
+
+    @compatibility(is_backward_compatible=False)
+    def check_valid(self, gm: GraphModule) -> None:
+        super().check_valid(gm)
+        _check_tensors_are_contiguous(gm)

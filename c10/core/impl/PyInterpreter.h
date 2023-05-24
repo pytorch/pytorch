@@ -141,6 +141,9 @@ struct C10_API PyInterpreterVTable {
   virtual void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const = 0;
 
+  virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
+      const = 0;
+
   // This is only invoked in the multipy/torchdeploy situation from
   // pythonOpRegistrationTrampoline; this lets us get to the Python
   // interpreter to actually find the appropriate Python op registration

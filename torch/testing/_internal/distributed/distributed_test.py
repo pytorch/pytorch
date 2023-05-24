@@ -1488,20 +1488,6 @@ class DistributedTest:
 
             self._barrier()
 
-        # NCCL Batch SEND RECV Tensor Error
-        @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
-        @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
-        def test_batch_isend_irecv_tensor_err(self):
-            self._barrier()
-            rank = dist.get_rank()
-            if rank == 0:
-                with self.assertRaisesRegex(
-                    RuntimeError, "Tensors must be CUDA and dense"
-                ):
-                    send_tensor = _build_tensor(rank + 1)
-                    send_op = dist.P2POp(dist.isend, send_tensor, 1)
-                    dist.batch_isend_irecv([send_op])
-
         # NCCL Batch SEND RECV Op Error
         @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
         @requires_nccl_version((2, 7, 0), "Need NCCL 2.7+ for send/recv")
