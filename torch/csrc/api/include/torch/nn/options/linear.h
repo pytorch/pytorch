@@ -92,5 +92,21 @@ struct TORCH_API BilinearOptions {
   TORCH_ARG(bool, bias) = true;
 };
 
+// ============================================================================
+
+/// Options for the `Bias` module
+///
+/// Example:
+/// ```
+/// Bias model(BiasOptions(5));
+/// ```
+
+struct TORCH_API BiasOptions {
+  BiasOptions(int64_t num_features);
+
+  /// The number of features in bias
+  TORCH_ARG(int64_t, num_features);
+};
+
 } // namespace nn
 } // namespace torch
