@@ -172,8 +172,50 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     return arithmetic_intensity > machine_balance
 
+_PAD_MM_CACHE = None
+
+@functools.lru_cache(None)
+def get_pad_cache():
+    return torch._inductor.codecache.LocalCache()
+
+
+def get_cached_should_pad(key):
+    return get_pad_cache().lookup(key)
+
+
+def set_cached_should_pad(key, value):
+    return get_pad_cache().set_value(key, value=value)
+
+
+def should_pad_bench_key(mat1, mat2, op, input=None):
+    def tensor_key(t):
+        return (t.shape, t.stride(), t.dtype)
+
+    key = (
+        tensor_key(mat1),
+        tensor_key(mat2),
+        op,
+        input if input is None else tensor_key(input),
+    )
+
+    return str(key)
+
 
 def should_pad_bench(mat1, mat2, op, input=None):
+    key = should_pad_bench_key(mat1, mat2, op, input)
+
+    cached_pad = get_cached_should_pad(key)
+    if cached_pad is not None:
+        return cached_pad
+
+    should_pad = _should_pad_bench_impl(mat1, mat2, op, input)
+
+    set_cached_should_pad(key, should_pad)
+
+    return should_pad
+
+
+def _should_pad_bench_impl(mat1, mat2, op, input=None):
     if not utils.has_triton():
         return False
 
