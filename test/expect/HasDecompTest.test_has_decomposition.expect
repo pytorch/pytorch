@@ -1013,6 +1013,8 @@ aten::quantized_max_pool1d
 aten::quantized_max_pool1d.out
 aten::quantized_max_pool2d
 aten::quantized_max_pool2d.out
+aten::quantized_max_pool3d
+aten::quantized_max_pool3d.out
 aten::rand
 aten::rand.generator
 aten::rand.generator_with_names
@@ -1159,8 +1161,6 @@ aten::slow_conv_transpose2d
 aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
-aten::smooth_l1_loss
-aten::smooth_l1_loss.out
 aten::softmax.int_out
 aten::sort
 aten::sort.stable

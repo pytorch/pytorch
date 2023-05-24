@@ -721,10 +721,54 @@ def register_graph_pattern(
     return decorator
 
 
+def is_start_of_fx_graph(graph, node):
+    # first node in the graph
+    return node is next(iter(graph.nodes))
+
+
+def is_mutation_op(node):
+    if node.op == "call_function":
+        if node.target.__name__.endswith("_"):
+            return True
+    elif node.op == "call_method":
+        if node.target.endswith("_"):
+            return True
+    if "out" in node.kwargs:
+        if node.kwargs["out"] in node.all_input_nodes:
+            return True
+    return False
+
+
+def get_mutation_region_id(graph, node):
+    n = node
+    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
+        n = n.prev
+    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    while n is not node:
+        n = n.next
+        if is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+    return mutation_region_id
+
+
+def should_compute_mutation_region_ids(graph):
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+
+
+def compute_mutation_region_ids(graph):
+    mutation_region_id = 0
+    for nd in graph.nodes:
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+
+
 class PatternMatcherPass:
-    def __init__(self):
+    def __init__(self, prevent_match_across_mutations=False):
         super().__init__()
         self.patterns = defaultdict(list)
+        self.prevent_match_across_mutations = prevent_match_across_mutations
 
     def __getitem__(self, item):
         return self.patterns[item]
@@ -734,6 +778,12 @@ class PatternMatcherPass:
             return 0
         if isinstance(graph, torch.fx.GraphModule):
             graph = graph.graph
+        if self.prevent_match_across_mutations:
+            if should_compute_mutation_region_ids(graph):
+                compute_mutation_region_ids(graph)
+            get_mutation_region_id_partial = functools.partial(
+                get_mutation_region_id, graph
+            )
         count = 0
         for node in reversed(graph.nodes):
             if (
@@ -750,6 +800,13 @@ class PatternMatcherPass:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if (
+                        self.prevent_match_across_mutations
+                        and m
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                    ):
+                        continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if m and entry.extra_check(m):

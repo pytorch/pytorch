@@ -1809,36 +1809,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_linear_buffer_reuse(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(16, 16)
-                self.tanh = torch.nn.Tanh()
-                self.linear2 = torch.nn.Linear(16, 16)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.tanh(x)
-                x = self.linear2(x)
-                return x
-
-        mod = M().eval()
-        v = torch.randn(1, 16)
-
-        with torch.no_grad():
-
-            def compile_fx_wrapper(model_, example_inputs_):
-                return compile_fx(model_, example_inputs_)
-
-            def run(*ex, **kwargs):
-                return mod(*ex, **kwargs)
-
-            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
-            self.assertFalse("= as_strided(" in code)
-            self.assertEqual(run(*v), mod(*v))
-
     def test_aliased_buffer_reuse(self):
         def fn(x, y):
             x = 2 * x
@@ -2468,6 +2438,18 @@ class CommonTemplate:
             (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_avg_pool2d8(self):
+        # https://github.com/pytorch/pytorch/issues/100987
+        def fn(x):
+            return aten.avg_pool2d(
+                x, kernel_size=3, stride=2, padding=1, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn(1, 3, 6, 6),),
+        )
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -5827,18 +5809,6 @@ class CommonTemplate:
             fn,
             [x],
         )
-
-    @config.patch(inplace_buffers=True)
-    def test_in_out_buffer(self):
-        def fn(x, y):
-            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
-            return z
-
-        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("in_out_ptr" in code)
-        self.assertEqual(fn_opt(*inps), fn(*inps))
 
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):

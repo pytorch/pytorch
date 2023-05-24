@@ -948,11 +948,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @tf32_on_and_off(0.01)
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
