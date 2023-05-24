@@ -305,20 +305,28 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     # For more detail, see https://github.com/pytorch/pytorch/issues/100419.
 
     for r in replacements_with_conv_bias + replacements_no_conv_bias:
-        # Find replacement conv and bn nodes by climbing upwards from anchor node
-        assert len(r.replacements) == 1, "expected only one replacement node"
         replacement_conv_node = None
         replacement_bn_node = None
-        replacement_getitem_node = r.replacements[0]
-        assert replacement_getitem_node.target == operator.getitem
-        n = replacement_getitem_node
-        while replacement_conv_node is None or replacement_bn_node is None:
-            if n.target == torch.ops.aten.convolution.default:
-                replacement_conv_node = n
-            if n.target == torch.ops.aten._native_batch_norm_legit.default:
-                replacement_bn_node = n
-            assert isinstance(n.args[0], Node)
-            n = n.args[0]
+        for replacement in r.replacements:
+            if (
+                replacement.op == "call_function"
+                and replacement.target == torch.ops.aten.convolution.default
+            ):
+                replacement_conv_node = replacement
+            elif (
+                replacement.op == "call_function"
+                and replacement.target == torch.ops.aten._native_batch_norm_legit.default
+            ):
+                replacement_bn_node = replacement
+            elif (
+                replacement.op == "call_function"
+                and replacement.target == operator.getitem
+            ):
+                replacement_getitem_node = replacement
+
+        assert replacement_conv_node is not None
+        assert replacement_bn_node is not None
+        assert replacement_getitem_node is not None
 
         # Copy over metadata for all three nodes in [conv - bn - getitem]
         # Also copy over constant args for conv
@@ -326,12 +334,44 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
             # bias can be None
             if original_node is None:
                 continue
+            # We expect the subgraph rewriter to erase the non-literal args of the matched nodes.
+            # However, this is not done for placeholder nodes, since these nodes do not need to
+            # be replaced. Here we filter out these placeholder nodes since they do not need
+            # metadata copying. E.g. we want to filter out `getitem_placeholder` in this pattern:
+            #
+            #   getitem_placeholder -> conv -> bn -> getitem
+            #
+            if any(isinstance(a, Node) for a in original_node.args):
+                continue
             if original_node.target == torch.ops.aten.convolution.default:
                 replacement_conv_node.meta = original_node.meta
                 # Note: Unlike other tensor args like conv weights and biases, literal args are
                 # preserved in the original nodes after replacement, so we can access them here
                 # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
                 replacement_conv_node.args = replacement_conv_node.args[:3] + original_node.args[3:]
+
+                # original annotation is referring to the node object in the graph
+                # after rewrite we'll need to update this mapping (input_qspec_map)
+                # update quantization_annotation
+                original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
+                if "quantization_annotation" not in original_node.meta:
+                    continue
+
+                input_qspec_map = {}
+                # get the list of configs, it should be ordered as input, weight, bias
+                # note: this is really hacky, we need a better solution, hopefully
+                # in subgraph_rewriter, issue tracking the problem: https://github.com/pytorch/pytorch/issues/101820
+                all_configs = list(original_input_qspec_map.items())
+                # input activation
+                input_qspec_map[replacement_conv_node.args[0]] = all_configs[0][1]
+                # weight
+                input_qspec_map[replacement_conv_node.args[1]] = all_configs[1][1]
+                # bias
+                print("lens:", len(replacement_conv_node.args), len(all_configs))
+                if len(replacement_conv_node.args) > 2 and len(all_configs) > 2:
+                    input_qspec_map[replacement_conv_node.args[2]] = all_configs[2][1]
+
+                replacement_conv_node.meta["quantization_annotation"].input_qspec_map = input_qspec_map
             if original_node.target == torch.ops.aten._native_batch_norm_legit.default:
                 replacement_bn_node.meta = original_node.meta
             if original_node.target == operator.getitem:

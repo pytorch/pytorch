@@ -16,6 +16,7 @@ unary_list = {
     torch.nn.Hardswish(): 6,
     torch.nn.LeakyReLU(0.1, inplace=False): 4,
     torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
     torch.nn.ReLU6(): 3,
@@ -429,6 +430,21 @@ class TestPaternMatcher(TestCase):
                 out = torch.add(out, out)
                 return out
 
+        # https://github.com/pytorch/pytorch/issues/101374.
+        # we can't do the fusion when add's inputs are mixed dtype.
+        class Model3(torch.nn.Module):
+            def __init__(self):
+                super(Model3, self).__init__()
+                self.conv = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, stride=1, padding=1
+                )
+
+            def forward(self, x):
+                temp = self.conv(x)
+                other = torch.ones(temp.shape, dtype=torch.double)
+                out = torch.add(temp, other)
+                return out
+
         input = torch.randn(1, 3, 28, 28).to(memory_format=torch.channels_last)
         others = [
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
@@ -446,6 +462,9 @@ class TestPaternMatcher(TestCase):
             self._test_code_common(mod, (input, other, alpha), include_ops, exclude_ops)
         # case2:
         mod = Model2().to(memory_format=torch.channels_last).eval()
+        self._test_code_common(mod, (input,), include_ops, exclude_ops)
+        # case3:
+        mod = Model3().to(memory_format=torch.channels_last).eval()
         self._test_code_common(mod, (input,), include_ops, exclude_ops)
 
     def test_reproduce_99842_issue(self):

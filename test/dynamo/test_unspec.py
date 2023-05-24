@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import math
 import random
 import unittest
 
@@ -6,6 +7,7 @@ import numpy as np
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
@@ -244,6 +246,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(30)
         torch._dynamo.mark_dynamic(y, 0)
         opt_fn(y)
+
+    def test_conv1d_symint_padding(self):
+        kernel = torch.randn(1, 1, 4)
+
+        def func(x):
+            padding = math.ceil((kernel.shape[-1] + x.shape[-1] % 2) / 2) - 1
+            out = F.conv1d(x, kernel, padding=padding, stride=2)
+            return out
+
+        opt_func = torch.compile(func, dynamic=True)
+
+        x = torch.randn(1, 1, 175)
+        opt_func(x)  # passes
+        x = torch.randn(1, 1, 249)
+        opt_func(x)  # crashes
 
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_propagate_dynamic_dim(self):
