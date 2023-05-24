@@ -1,7 +1,7 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,pass,0
 AlbertForQuestionAnswering,pass,0
-AllenaiLongformerBase,pass,3
+AllenaiLongformerBase,pass,4
 BartForCausalLM,pass,0
 BartForConditionalGeneration,pass,0
 BertForMaskedLM,pass,0
@@ -19,10 +19,10 @@ DistilBertForQuestionAnswering,pass,0
 DistillGPT2,pass,0
 ElectraForCausalLM,pass,0
 ElectraForQuestionAnswering,pass,0
-GPT2ForSequenceClassification,pass,1
+GPT2ForSequenceClassification,pass,2
 GoogleFnet,pass,0
 LayoutLMForMaskedLM,pass,0
-LayoutLMForSequenceClassification,pass,1
+LayoutLMForSequenceClassification,pass,2
 M2M100ForConditionalGeneration,pass,0
 MBartForCausalLM,pass,0
 MBartForConditionalGeneration,pass,0
