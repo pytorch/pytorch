@@ -12,14 +12,20 @@ from .quantizer import (
     QuantizationAnnotation,
 )
 from torch.ao.quantization._pt2e.quantizer.utils import (
-    get_act_obs_or_fq_ctr,
-    get_bias_obs_or_fq_ctr,
-    get_weight_obs_or_fq_ctr,
+    get_act_qspec,
+    get_weight_qspec,
+    get_bias_qspec,
 )
 from .qnnpack_quantizer import (
     _is_annotated,
 )
-from typing import Callable, List, Dict, Optional, Set
+from torch.ao.quantization.observer import (
+    HistogramObserver,
+    PlaceholderObserver,
+    PerChannelMinMaxObserver,
+)
+from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+from typing import Callable, List, Dict, Optional, Set, Any
 from torch.fx import Node
 
 __all__ = [
@@ -86,6 +92,9 @@ def get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
 
 @functools.lru_cache
 def get_default_x86_inductor_quantization_config():
+    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = \
+        HistogramObserver
+
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
     act_quantization_spec = QuantizationSpec(
         dtype=torch.uint8,
@@ -93,7 +102,11 @@ def get_default_x86_inductor_quantization_config():
         quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
         is_dynamic=False,
+        observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(eps=2**-12),
     )
+
+    weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = PerChannelMinMaxObserver
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
@@ -101,8 +114,13 @@ def get_default_x86_inductor_quantization_config():
         qscheme=torch.per_channel_symmetric,
         ch_axis=0,  # 0 corresponding to weight shape = (oc, ic, kh, kw) of conv
         is_dynamic=False,
+        observer_or_fake_quant_ctr=weight_observer_or_fake_quant_ctr.with_args(**extra_args),
     )
-    bias_quantization_spec = QuantizationSpec(dtype=torch.float)
+    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = PlaceholderObserver
+    bias_quantization_spec = QuantizationSpec(
+        dtype=torch.float,
+        observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
+    )
     quantization_config = QuantizationConfig(
         act_quantization_spec, weight_quantization_spec, bias_quantization_spec
     )
@@ -221,28 +239,28 @@ class X86InductorQuantizer(Quantizer):
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
-        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[input_node] = get_act_qspec(quantization_config)
 
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
-        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
         bias_node = conv_node.args[2]
         if isinstance(bias_node, Node):
-            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True
         )
         binary_node_input_qspec_map = {}
-        binary_node_input_qspec_map[extra_input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        binary_node_input_qspec_map[extra_input_node] = get_act_qspec(quantization_config)
         binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=binary_node_input_qspec_map,
             _annotated=True
         )
         unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -281,15 +299,15 @@ class X86InductorQuantizer(Quantizer):
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
-        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[input_node] = get_act_qspec(quantization_config)
 
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
-        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
         bias_node = conv_node.args[2]
         if isinstance(bias_node, Node):
-            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -297,10 +315,10 @@ class X86InductorQuantizer(Quantizer):
         )
 
         binary_node_input_qspec_map = {}
-        binary_node_input_qspec_map[extra_input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        binary_node_input_qspec_map[extra_input_node] = get_act_qspec(quantization_config)
         binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=binary_node_input_qspec_map,
-            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -319,21 +337,21 @@ class X86InductorQuantizer(Quantizer):
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
-        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[input_node] = get_act_qspec(quantization_config)
 
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
-        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
         bias_node = conv_node.args[2]
         if isinstance(bias_node, Node):
-            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True
         )
         unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -347,19 +365,19 @@ class X86InductorQuantizer(Quantizer):
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
-        input_qspec_map[input_node] = get_act_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[input_node] = get_act_qspec(quantization_config)
 
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
-        input_qspec_map[weight_node] = get_weight_obs_or_fq_ctr(quantization_config)
+        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
 
         bias_node = conv_node.args[2]
         if isinstance(bias_node, Node):
-            input_qspec_map[bias_node] = get_bias_obs_or_fq_ctr(quantization_config)
+            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
-            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
+            output_qspec=get_act_qspec(quantization_config),
             _annotated=True
         )
 
