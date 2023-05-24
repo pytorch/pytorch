@@ -398,7 +398,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
     def test_modules(self):
         counters.clear()
-        cnt = CompileCounter()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
@@ -410,6 +411,24 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, mod(x))
         self.assertEqual(cnt.frame_count, 1)
+
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        # 3 args - 1 for input, and other 2 for the weight and bias
+        self.assertTrue(len(wrap_node.args), 3)
+
+        # Check that the linear bias and weight are getattr in the outer graph
+        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+
+        # Check that the inner function has one op and its a linear op
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 1)
+        linear_node = find_first_node(body_function, torch._C._nn.linear)
+        self.assertTrue(linear_node is not None)
+
+        # Check that the innermost graph does not have any params
+        self.assertTrue(len(dict(body_function.named_parameters())) == 0)
+        self.assertTrue(len(dict(body_function.named_children())) == 0)
 
     def test_flat_list_output(self):
         def f(x):
@@ -476,7 +495,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
     def test_access_module_attr(self):
         counters.clear()
-        cnt = CompileCounter()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
@@ -488,6 +508,21 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         result = f(x)
         self.assertEqual(result, mod(x) - mod.bias)
         self.assertEqual(cnt.frame_count, 1)
+
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        self.assertTrue(len(wrap_node.args), 3)
+
+        # Check that the linear bias and weight are getattr in the outer graph
+        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+
+        # Check that the inner function has one op and its a linear op
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 1)
+
+        # Check that the innermost graph does not have any params
+        self.assertTrue(len(dict(body_function.named_parameters())) == 0)
+        self.assertTrue(len(dict(body_function.named_children())) == 0)
 
     def test_make_closure(self):
         def f(x, y):
@@ -629,6 +664,23 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(
+            fn, backend, x, y, skip_check=True
+        )  # dropout decomp is known to diverge with eager
+
+    @requires_cuda()
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_dropout_inductor(self):
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        backend = "inductor"
         self._validate(
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager

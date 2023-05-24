@@ -311,7 +311,10 @@ class UserMethodVariable(UserFunctionVariable):
 
         # If we are tracing the higher order op, we want Dynamo to step inside
         # the module call so that Dynamo can see the underlying parameters and
-        # buffers and raise them as inputs to the graph.
+        # buffers and raise them as inputs to the graph. The is_root_tracer
+        # check bypasses the if condition for non-root tracers and directly
+        # calls the super().call_function at the end, which is basically
+        # equivalent of inlining the method.
         if tx.output.is_root_tracer() and isinstance(
             self.obj, variables.NNModuleVariable
         ):
