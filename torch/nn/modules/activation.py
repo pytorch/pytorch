@@ -1079,6 +1079,9 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
             If both attn_mask and key_padding_mask are supplied, their types should match.
+        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
+            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
+            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
         is_causal: If specified, applies a causal mask as attention mask.
             Default: ``False``.
             Warning:
@@ -1086,9 +1089,6 @@ class MultiheadAttention(Module):
             causal mask. Providing incorrect hints can result in
             incorrect execution, including forward and backward
             compatibility.
-        average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
-            heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
-            effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,

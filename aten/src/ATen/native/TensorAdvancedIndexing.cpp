@@ -85,6 +85,7 @@
 #include <ATen/ops/_index_put_impl.h>
 #include <ATen/ops/_index_put_impl_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/_unsafe_index_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argwhere_native.h>
 #include <ATen/ops/as_strided.h>
@@ -618,6 +619,19 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
   auto result = at::index(self_dq, indices);
   return at::quantize_per_tensor(
       result, self.q_scale(), self.q_zero_point(), self.scalar_type());
+}
+
+Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices) {
+  // Disallow boolean indexing since it leads to dynamic output shapes
+  for (auto i : c10::irange(indices.size())) {
+    auto index = indices.get(i);
+    if (index.has_value()) {
+      auto dtype = index->scalar_type();
+      TORCH_CHECK(dtype == kLong || dtype == kInt,
+                  "_unsafe_index found unexpected index type ", dtype);
+    }
+  }
+  return at::index(self, indices);
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {

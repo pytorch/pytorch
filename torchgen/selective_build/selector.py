@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -110,10 +111,12 @@ class SelectiveBuilder:
         et_kernel_metadata: Dict[str, List[List[str]]] = {}
 
         custom_classes = data.get("custom_classes", [])
-        custom_classes = set(custom_classes)  # type: ignore[arg-type]
+        assert isinstance(custom_classes, Iterable)
+        custom_classes = set(custom_classes)
 
         build_features = data.get("build_features", [])
-        build_features = set(build_features)  # type: ignore[arg-type]
+        assert isinstance(build_features, Iterable)
+        build_features = set(build_features)
 
         include_all_non_op_selectives = data.get("include_all_non_op_selectives", False)
         assert isinstance(include_all_non_op_selectives, bool)
