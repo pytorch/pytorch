@@ -559,15 +559,12 @@ class TestSymNumberMagicMethods(TestCase):
             lambda_apply = getattr(operator, fn)
 
         def guard_fn(v):
-            try:
-                if type(v) in (SymBool, bool):
-                    return guard_bool(v)
-                elif type(v) in (SymFloat, float):
-                    return guard_float(v)
-                else:  # SymInt, int
-                    return guard_int(v)
-            except Exception as e:
-                raise e
+            if type(v) in (SymBool, bool):
+                return guard_bool(v)
+            elif type(v) in (SymFloat, float):
+                return guard_float(v)
+            else:  # SymInt, int
+                return guard_int(v)
 
         # Get reference result
         with maybe_xfail(inp1, inp2):
@@ -1794,7 +1791,7 @@ def specializations(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
         expected_dynamic = '''
 def specify_constraints(x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x11, x12):
     return [
-        2 <= dynamic_dim(x6, 1),
+        dynamic_dim(x6, 1),
         dynamic_dim(x10, 1) == dynamic_dim(x6, 1),
         dynamic_dim(x9, 1) == dynamic_dim(x6, 1),
     ]

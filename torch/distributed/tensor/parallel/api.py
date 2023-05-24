@@ -30,7 +30,7 @@ __all__ = [
 
 # switch the DTensor propagator to use the caching propagator to speed up
 # the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
+DTensor._propagator = _CachingPropagator(DTensor._propagator)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
