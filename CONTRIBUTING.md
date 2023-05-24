@@ -1228,7 +1228,7 @@ an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
 Fairly often, a CI failure might be unrelated to your changes. You can
-confirm by going to our [HUD](hud.pytorch.org) and seeing if the CI job
+confirm by going to our [HUD](https://hud.pytorch.org) and seeing if the CI job
 is failing upstream already. In this case, you
 can usually ignore the failure. See [the following
 subsection](#which-commit-is-used-in-ci) for more details.
