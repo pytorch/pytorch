@@ -273,6 +273,8 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
         # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
+        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
+        # bringing perf gains.
         for n in gm.graph.nodes:
             if n.target == torch.ops.aten._scaled_dot_product_flash_attention.default:
                 log.debug(
@@ -286,14 +288,14 @@ class GraphLowering(torch.fx.Interpreter):
         """
         The rule to decide if an node prefer channels last is simple.
         1. if it's input/output of a convolution
-        2. if one of its user preferes channels last
+        2. if one of its user prefers channels last
 
         We have rule 1 because cudnn runs a faster convolution kernel for channels last inputs;
         Rule 2 is also important. It makes sure that indirect inputs to convolution also prefers
         channels last.
 
         Consider the scenario: conv -> batch-norm -> relu -> conv
-        Without rule 2, batch-norm output may use a congituous layout. That will cause 2 extra copies:
+        Without rule 2, batch-norm output may use a contiguous layout. That will cause 2 extra copies:
         1. the output of batch-norm should be channels last initially since its input is a conv's output.
            Forcing the batch-norm's output to be contiguous results in the first copy
         2. The second conv's input is initially contiguous. This layout is propagated from the batch-norm's output.
