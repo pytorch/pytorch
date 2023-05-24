@@ -566,7 +566,7 @@ def smooth_l1_loss(
     _check_reduction_value(reduction)
 
     if beta == 0.0:
-        return l1_loss(
+        return torch.nn.functional.l1_loss(
             input, target, size_average=size_average, reduce=reduce, reduction=reduction
         )
     else:
