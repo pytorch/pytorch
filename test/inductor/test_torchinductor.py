@@ -2469,6 +2469,18 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_avg_pool2d8(self):
+        # https://github.com/pytorch/pytorch/issues/100987
+        def fn(x):
+            return aten.avg_pool2d(
+                x, kernel_size=3, stride=2, padding=1, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn(1, 3, 6, 6),),
+        )
+
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
