@@ -684,6 +684,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
+    "torch/csrc/sparse/CusparseLtKernels.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
