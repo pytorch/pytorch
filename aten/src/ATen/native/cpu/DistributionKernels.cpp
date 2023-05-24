@@ -140,7 +140,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
       scalar_t *self_ptr = self.data_ptr<scalar_t>();
       using tmp_scalar_t = typename std::conditional_t<std::is_same<scalar_t, double>::value, double, float>;
       tmp_scalar_t *sample_ptr = tmp_tensor.data_ptr<tmp_scalar_t>();
-      
+
       // Intel MKL vRngExponential variate originally does not exclude 0.
       // However, to align with pytorch exponential variate definition which excludes 0,
       // we shift the MKL vRngExponential distribution location by adding a very small constant, eps.
