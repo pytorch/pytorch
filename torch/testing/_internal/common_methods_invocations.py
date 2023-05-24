@@ -1614,7 +1614,7 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=Fals
 def sample_inputs_empty_strided(op, device, dtype, requires_grad=False, **kwargs):
 
     inputs = [
-        ((), (), {}),
+        ((), (), {'dtype': dtype, 'device': device}),
         ((S,), (4,), {'dtype': dtype, 'device': device}),
         ((S, S), (2, 1), {'dtype': dtype, 'device': device}),
         ((S, S, S), (2, 0, 1), {'dtype': dtype, 'device': device}),
@@ -15817,7 +15817,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_multiple_devices', device_type='cuda'),
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
                # Lazy tensor failures
                DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
