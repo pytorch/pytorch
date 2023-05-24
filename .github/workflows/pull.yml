@@ -175,12 +175,12 @@ jobs:
       docker-image: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_11-clang9-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-build:
-    name: linux-bionic-cuda11.8-py3.10-gcc7
+  linux-bionic-cuda12_1-py3_10-gcc7-build:
+    name: linux-bionic-cuda12.1-py3.10-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
@@ -194,14 +194,14 @@ jobs:
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7
+  linux-bionic-cuda12_1-py3_10-gcc7-test:
+    name: linux-bionic-cuda12.1-py3.10-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-build
+    needs: linux-bionic-cuda12_1-py3_10-gcc7-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-build.outputs.test-matrix }}
 
   linux-focal-py3-clang7-mobile-build:
     name: linux-focal-py3-clang7-mobile-build
@@ -276,21 +276,21 @@ jobs:
     name: linux-bionic-cpu-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-bazel-test
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
       cuda-version: cpu
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-bazel-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-bazel-test
+  linux-bionic-cuda12_1-py3_10-gcc7-bazel-test:
+    name: linux-bionic-cuda12.1-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-bazel-test
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
-      cuda-version: "11.8"
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
+      cuda-version: "12.1"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
@@ -346,12 +346,12 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-sm86-build:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-sm86
+  linux-bionic-cuda12_1-py3_10-gcc7-sm86-build:
+    name: linux-bionic-cuda12.1-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -362,11 +362,11 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-sm86-test:
-    name: linux-bionic-cuda11.8-py3.10-gcc7-sm86
+  linux-bionic-cuda12_1-py3_10-gcc7-sm86-test:
+    name: linux-bionic-cuda12.1-py3.10-gcc7-sm86
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-sm86-build
+    needs: linux-bionic-cuda12_1-py3_10-gcc7-sm86-build
     with:
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-sm86-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
+      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-sm86-build.outputs.test-matrix }}
