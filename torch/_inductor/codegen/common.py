@@ -414,7 +414,7 @@ class KernelArgs:
 
     def seed_offset(self, name, value):
         if name in self.sizevars.values():
-            name = f"{name}{sum(1 for value in self.sizevars.values() if value.startswith('load_seed_offset'))}"
+            name = f"{name}{sum(1 for value in self.sizevars.values() if value.startswith(name))}"
         self.sizevars[value] = name
         return name
 
