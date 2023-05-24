@@ -223,7 +223,7 @@ class CppPrinter(ExprPrinter):
             else:
                 x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
-        return f"static_cast<long>({x}) % static_cast<{INDEX_TYPE}>({mod})"
+        return f"static_cast<INDEX_TYPE>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
@@ -248,7 +248,7 @@ class CppPrinter(ExprPrinter):
         base = self._print(base)
         if exp == 0.5:
             r = f"std::sqrt({base})"
-            return f"static_cast<long>({r})" if expr.is_integer else r
+            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -258,7 +258,7 @@ class CppPrinter(ExprPrinter):
         else:  # exp == 0
             r = "1.0"
 
-        return f"static_cast<long>({r})" if expr.is_integer else r
+        return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
@@ -266,7 +266,7 @@ class CppPrinter(ExprPrinter):
             r = f"{expr.p}"
         else:
             r = f"{expr.p}.0/{expr.q}.0"
-        return f"static_cast<long>({r})" if expr.is_integer else r
+        return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
@@ -279,7 +279,7 @@ cexpr = CppPrinter().doprint
 
 
 def cexpr_index(index):
-    return f"static_cast<long>({cexpr(index)})"
+    return f"static_cast<INDEX_TYPE>({cexpr(index)})"
 
 
 class RecordOptimizationContext:
