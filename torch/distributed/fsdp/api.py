@@ -136,7 +136,7 @@ class MixedPrecision:
             (Default: ``True``)
         _module_classes_to_ignore: (Sequence[type]): Module classes to ignore
             for mixed precision. This will make the specified ``nn.Module`` types ignore mixed precision,
-            by wrapping them in their own FSDP unit and setting mixed_precision=None. Note that
+            by wrapping them in their own FSDP unit and setting ``mixed_precision=None``. Note that
             this setting is only relevant for auto wrapping with ``auto_wrap_policy``, and that this
             implies the ultimate wrapping of your FSDP module will be different than what the policy
             specifies. Note that this API is experimental and subject to change.
