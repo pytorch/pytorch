@@ -540,7 +540,12 @@ static void addmm_out_sparse_csr_native_cpu(
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  r.mul_(beta);
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    r.zero_();
+  } else {
+    r.mul_(beta);
+  }
   AT_DISPATCH_INDEX_TYPES(
       col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
         auto csr_accessor = csr.accessor<index_t, 1>();

@@ -2010,13 +2010,11 @@ class TestSparseCSR(TestCase):
         m2 = torch.randn(50, 25, device=device).to(dtype)
         _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=layout, mode="all_sparse")
 
-        # TODO: handle M=nan in Eigen
-        if not no_mkl_sparse:
-            # Test beta=0, M=nan
-            M = torch.full((10, 25), float('nan'), device=device).to(dtype)
-            m1 = torch.randn(10, 50, device=device).to(dtype)
-            m2 = torch.randn(50, 25, device=device).to(dtype)
-            _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), float('nan'), device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, beta=0, layout=layout, mode="all_sparse")
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
