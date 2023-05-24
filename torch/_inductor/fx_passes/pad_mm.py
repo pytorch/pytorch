@@ -161,6 +161,7 @@ def get_flops(dtype):
     else:
         return get_max_simd_tflops(torch.float32)
 
+
 def is_mm_compute_bound(M, K, N, dtype):
     from triton.testing import get_dram_gbps
 
