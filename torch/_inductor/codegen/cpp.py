@@ -34,12 +34,13 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
-    data_type_propagation,
+    DataTypePropagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
+    OpDtypeClassifier,
     OpOverrides,
     OptimizationContext,
 )
@@ -2130,7 +2131,51 @@ class CppKernelProxy(CppKernel):
     def data_type_propagation(self, nodes):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            data_type_propagation(_node)
+            DataTypePropagation.propagate_scheduler_node(_node)
+
+    # Check if all the nodes of a given fx graph can support BF16
+    def is_bf16_scheduler(self, scheduler_node: SchedulerNode):
+        if not isinstance(scheduler_node._body, ir.LoopBody):
+            return True
+
+        scheduler_node.is_bf16 = False
+
+        # Propagate the dtype to check if all the fx node is bf16
+        DataTypePropagation.propagate_scheduler_node(scheduler_node)
+
+        sub_blocks = [scheduler_node._body.root_block] + list(
+            scheduler_node._body.subblocks.values()
+        )
+        for sub_block in sub_blocks:
+            for _node in sub_block.graph.nodes:
+                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+                # the data type as well.
+                if (
+                    _node.op in OpDtypeClassifier.io_ops()
+                    or _node.target in OpDtypeClassifier.index_ops()
+                ):
+                    continue
+
+                # Fast path if all operations can support bf16 without converting to fp32
+                if _node.target not in [
+                    "load",
+                    "constant",
+                    "store",
+                    "abs",
+                    "neg",
+                ]:
+                    return False
+
+                if hasattr(_node, "meta") and _node.meta:
+                    assert OptimizationContext.key in _node.meta
+                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                    if not opt_ctx.dtype or opt_ctx.dtype is not torch.bfloat16:
+                        return False
+                else:
+                    return False
+
+        scheduler_node.is_bf16 = True
+        return True
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2267,6 +2312,29 @@ class CppKernelProxy(CppKernel):
             sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
+
+        if all(
+            isinstance(_node, SchedulerNode) and self.is_bf16_scheduler(_node)
+            for _node in nodes
+        ):
+            # Mark the load node to load bf16
+            for _node in nodes:
+                sub_blocks = [_node._body.root_block] + list(
+                    _node._body.subblocks.values()
+                )
+                for sub_block in sub_blocks:
+                    for fx_node in sub_block.graph.nodes:
+                        if fx_node.target in ["load", "constant", "store"]:
+                            assert fx_node.meta
+                            assert OptimizationContext.key in fx_node.meta
+                            opt_ctx: OptimizationContext = fx_node.meta[
+                                OptimizationContext.key
+                            ]
+                            assert opt_ctx.dtype is torch.bfloat16
+                            opt_ctx.is_bf16_mem_copy = True
+
+            # Bypass the legalization as the kernel can run with bf16 directly
+            return
 
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
