@@ -34,7 +34,6 @@ def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
             return ["module: unmarked"]
     return None
 
-
 def get_test_stat_aggregates(date: datetime.date) -> Any:
     # Initialize the Rockset client with your API key
     rockset_api_key = os.environ["ROCKSET_API_KEY"]
