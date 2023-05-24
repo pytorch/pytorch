@@ -17,7 +17,6 @@
 #endif
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
-#include <c10/util/copysign.h>
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;

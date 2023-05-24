@@ -236,7 +236,7 @@ class CppPrinter(ExprPrinter):
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        #  integer exp should not hit this:
+        # integer expr should not hit this:
         # s1 = sympy.Symbol("s1", integer=integer)
         # expr = sympy.ceiling(s1)
         # expr is alway s1.
