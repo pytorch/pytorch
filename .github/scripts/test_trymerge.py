@@ -9,6 +9,7 @@
 
 import json
 import os
+import warnings
 from hashlib import sha256
 from typing import Any, Dict, List, Optional
 from unittest import main, mock, TestCase
@@ -124,6 +125,10 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     return Object()
 
 
+def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+    pass
+
+
 def mock_revert(
     repo: GitRepo,
     pr: GitHubPR,
@@ -136,7 +141,7 @@ def mock_revert(
 
 
 def mock_merge(
-    pr_num: int,
+    pr: GitHubPR,
     repo: GitRepo,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
@@ -164,6 +169,7 @@ def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeR
             patterns=["*"],
             approved_by=[],
             mandatory_checks_name=["Lint", "Facebook CLA Check", "nonexistent"],
+            ignore_flaky_failures=True,
         ),
     ]
 
@@ -179,6 +185,7 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
                 "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
+            ignore_flaky_failures=True,
         ),
     ]
 
@@ -191,12 +198,14 @@ def empty_flaky_rules() -> List[FlakyRule]:
     return []
 
 
+def xla_is_flaky_rules() -> List[FlakyRule]:
+    return [
+        FlakyRule("xla", ["FAILED: Build did NOT complete successfully"]),
+    ]
+
+
 def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     return []
-
-
-def dummy_merge_base() -> str:
-    return "dummy"
 
 
 class DummyGitRepo(GitRepo):
@@ -212,7 +221,6 @@ class DummyGitRepo(GitRepo):
 
 @mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
 @mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
-@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestTryMerge(TestCase):
     def test_merge_rules_valid(self, *args: Any) -> None:
@@ -376,6 +384,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, True))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_force(
         self, mock_merge: Any, mock_parse_args: Any, *args: Any
@@ -392,6 +401,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
     @mock.patch("trymerge.parse_args", return_value=mock_parse_args(False, False))
+    @mock.patch("trymerge.gh_remove_label", side_effect=mock_remove_label)
     @mock.patch("trymerge.merge", side_effect=mock_merge)
     def test_main_merge(self, mock_merge: Any, *args: Any) -> None:
         trymerge_main()
@@ -547,6 +557,20 @@ class TestBypassFailures(TestCase):
             checks, list(checks.keys()), ok_failed_checks_threshold=1
         )
         self.assertTrue(len(failed) == 0)
+
+    @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
+    def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
+        """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
+        pr = GitHubPR("pytorch", "pytorch", 100369)
+        repo = DummyGitRepo()
+        # Check that failure is classified as flaky but still raises exception
+        with warnings.catch_warnings(record=True) as w, self.assertRaises(RuntimeError):
+            rule = find_matching_merge_rule(pr, repo)
+        self.assertEqual(len(w), 1)
+        self.assertIn(
+            "1 checks failed but were likely due flakiness or broken trunk",
+            str(w[0].message),
+        )
 
 
 if __name__ == "__main__":

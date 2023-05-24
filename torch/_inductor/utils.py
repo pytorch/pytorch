@@ -32,31 +32,35 @@ log = logging.getLogger(__name__)
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
-try:
-    from triton.testing import do_bench as triton_do_bench
+def do_bench(*args, **kwargs):
+    @functools.lru_cache(None)
+    def load_triton():
+        try:
+            # NB: Lazily load triton, as importing triton is slow
+            # see https://github.com/openai/triton/issues/1599
+            from triton.testing import do_bench as triton_do_bench
+        except ImportError:
+            raise NotImplementedError("requires Triton")
 
-    # triton PR https://github.com/openai/triton/pull/1513 change the
-    # quantile fields name from 'percentiles' to 'quantiles'
-    # and change the default value from (0.5, 0.2, 0.8) to None.
-    # This may break inductor since a caller expects a tuple may get a item.
-    #
-    # Add a wrapper to maintain the same behavior for inductor.
-    # Maybe we should have own implementation of this function?
-    quantile_field_name = (
-        "quantiles"
-        if inspect.signature(triton_do_bench).parameters.get("quantiles") is not None
-        else "percentiles"
-    )
+        # triton PR https://github.com/openai/triton/pull/1513 change the
+        # quantile fields name from 'percentiles' to 'quantiles'
+        # and change the default value from (0.5, 0.2, 0.8) to None.
+        # This may break inductor since a caller expects a tuple may get a item.
+        #
+        # Add a wrapper to maintain the same behavior for inductor.
+        # Maybe we should have own implementation of this function?
+        return triton_do_bench, (
+            "quantiles"
+            if inspect.signature(triton_do_bench).parameters.get("quantiles")
+            is not None
+            else "percentiles"
+        )
 
-    def do_bench(*args, **kwargs):
-        if quantile_field_name not in kwargs:
-            kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
-        return triton_do_bench(*args, **kwargs)[0]
+    triton_do_bench, quantile_field_name = load_triton()
 
-except ImportError:
-
-    def do_bench(*args, **kwargs):
-        raise NotImplementedError("requires Triton")
+    if quantile_field_name not in kwargs:
+        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+    return triton_do_bench(*args, **kwargs)[0]
 
 
 @functools.lru_cache(None)
@@ -273,12 +277,12 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_fused_kernel_name(node_schedule):
+def get_fused_kernel_name(node_schedule, descriptive_names):
     all_origins = functools.reduce(
         operator.or_,
         [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
-    if config.triton.descriptive_names == "original_aten":
+    if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
@@ -286,17 +290,17 @@ def get_fused_kernel_name(node_schedule):
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "torch":
+    elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"], str):
-                    sources.append(origin.meta["source_fn"])
+                if isinstance(origin.meta["source_fn"][1], str):
+                    sources.append(origin.meta["source_fn"][1])
                 else:
-                    sources.append(origin.meta["source_fn"].__name__)
+                    sources.append(origin.meta["source_fn"][1].__name__)
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "inductor_node":
+    elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
@@ -363,14 +367,14 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
@@ -454,7 +458,7 @@ def fresh_inductor_cache(cache_entries=None):
                         )
 
 
-def argsort(seq):
+def argsort(seq) -> List[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -888,6 +892,16 @@ def is_cpu_device(inputs):
         for item in inputs
         if isinstance(item, torch.Tensor)
     )
+
+
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
 
 
 @contextlib.contextmanager

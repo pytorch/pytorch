@@ -14,7 +14,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import LocalSource, Source
-from .utils import object_new
+from .utils import nn_module_new, object_new
 from .variables.base import VariableTracker
 
 
@@ -238,6 +238,8 @@ class SideEffects:
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
             obj = torch.autograd.Function()
+        elif issubclass(user_cls, torch.nn.Module):
+            obj = nn_module_new(user_cls)
         else:
             obj = object_new(user_cls)
         variable = variable_cls(
@@ -438,3 +440,7 @@ class SideEffects:
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.save_for_backward
         )
+
+    def clear(self):
+        self.keepalive.clear()
+        self.id_to_variable.clear()
