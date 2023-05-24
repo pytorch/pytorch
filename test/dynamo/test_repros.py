@@ -890,7 +890,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(boxes1), boxes1.tensor + 4.0))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(3, 6), 1))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(1, 6), 1))
 
     def _reformer(self, nopython):
         input = torch.randn([1, 64, 256])
@@ -964,8 +964,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
-        self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 10)
+        self.assertEqual(cnt.frame_count, ifunspec(ifdyn(3, 1), 3))
+        self.assertEqual(cnt.op_count, ifunspec(ifdyn(10, 11), 10))
 
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])
@@ -981,7 +981,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifunspec(37, ifdyn(20, 4)))
+        self.assertEqual(
+            cnt.op_count, ifunspec(37, ifdyn(ifdynstaticdefault(15, 20), 4))
+        )
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -992,7 +994,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(12, 11))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(11, 12), 11))
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -1089,7 +1091,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(cnt.frame_count, 5)
+            self.assertEqual(cnt.frame_count, 4)
         else:
             self.assertEqual(cnt.frame_count, 6)
 
@@ -1282,7 +1284,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(x), correct))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(21, 27), 14))
+        self.assertEqual(cnt.op_count, ifdyn(ifdynstaticdefault(14, 27), 14))
 
     def test_recursive_map(self):
         # https://github.com/pytorch/torchdynamo/issues/132
@@ -2829,6 +2831,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertRaises(AttributeError, lambda: fn(x, obj1))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     def test_dynamic_shapes_implicit_guard(self):
         def f(x):
             y = x * x.size(x.shape[0])
