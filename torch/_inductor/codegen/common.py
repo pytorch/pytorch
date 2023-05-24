@@ -21,10 +21,9 @@ from ..utils import (
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsValue, V
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -500,7 +499,7 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(str(outer))
+            call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
 
         return arg_defs, call_args, precompile_args
@@ -613,10 +612,13 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: typing.Union[str, CSEVariable],
+        expr: typing.Union[str, CSEVariable, OpsValue],
         write=True,
         assignment=True,
     ) -> CSEVariable:
+        if isinstance(expr, OpsValue):
+            expr = expr.value
+
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
@@ -741,8 +743,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size):
-                return sympy_symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

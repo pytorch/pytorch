@@ -1273,21 +1273,21 @@ DEFINE_CLAMP_MAXMIN_FUNCS(int64_t)
 DEFINE_CLAMP_MAXMIN_FUNCS(float)
 DEFINE_CLAMP_MAXMIN_FUNCS(double)
 
+namespace { /* unnamed namespace */
+
 #if !defined(vec_float) || __ARCH__ < 13
 #warning \
     "float->int and int->float conversion is simulated. compile for z15 for improved performance"
-ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
+inline ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
   return ZSimdVect<float>{float(x[0]), float(x[1]), float(x[2]), float(x[3])};
 }
-ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
+inline ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
   return ZSimdVect<int>{int(x[0]), int(x[1]), int(x[2]), int(x[3])};
 }
 #else
 #define vec_int_flt vec_float
 #define vec_flt_int vec_signed
 #endif
-
-namespace { /* unnamed namespace */
 
 Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
@@ -2325,6 +2325,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   Vectorized<T> exp2() const {
     return mapOrdinary(exp2_impl);
   }
+  Vectorized<T> expm1() const {
+    return mapOrdinary(std::expm1);
+  }
+
   Vectorized<T> expm1() const {
     return mapOrdinary(std::expm1);
   }

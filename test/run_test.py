@@ -15,6 +15,8 @@ from datetime import datetime
 from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, Optional
 
+import pkg_resources
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -490,6 +492,15 @@ def run_test(
         use_sharded_test = True
 
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
+    # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
+    # to just return successfully here
+    if is_cpp_test and RERUN_DISABLED_TESTS:
+        print_to_stderr(
+            "Skipping C++ tests when running under RERUN_DISABLED_TESTS mode"
+        )
+        return 0
+
     if use_sharded_test:
         if is_cpp_test:
             stepcurrent_key = test_file
@@ -951,7 +962,7 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
-        pytest_args.extend(["-n", "auto"])
+        pytest_args.extend(["-n", str(NUM_PROCS)])
 
         if IS_CI:
             # Add the option to generate XML test report here as C++ tests
@@ -1245,7 +1256,6 @@ def must_serial(file: str) -> bool:
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
         or "distributed" in os.getenv("TEST_CONFIG", "")
-        or "dynamo" in os.getenv("TEST_CONFIG", "")
         or "distributed" in file
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
@@ -1530,7 +1540,25 @@ def run_tests(
     return failure_messages
 
 
+def check_pip_packages() -> None:
+    packages = [
+        "pytest-rerunfailures",
+        "pytest-shard",
+        "pytest-flakefinder",
+        "pytest-xdist",
+    ]
+    installed_packages = [i.key for i in pkg_resources.working_set]
+    for package in packages:
+        if package not in installed_packages:
+            print(
+                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+            )
+            sys.exit(1)
+
+
 def main():
+    check_pip_packages()
+
     options = parse_args()
 
     test_directory = str(REPO_ROOT / "test")
