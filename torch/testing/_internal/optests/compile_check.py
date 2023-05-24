@@ -3,7 +3,6 @@ from .make_fx import make_fx_check
 from .aot_autograd import aot_autograd_check
 from .common import TestFrameworkError
 from torch._subclasses.schema_check_mode import SchemaCheckMode
-import contextlib
 
 
 def compile_check(
@@ -31,8 +30,6 @@ def compile_check(
             autograd-related tests.
         fullgraph (bool, optional): If we expect the entire function
             to be captured with torch.compile without any graph breaks.
-        raise_error (bool, optional): If True, this API raises errors
-            when they are encountered.
 
     """
     def run_static_or_dynamic_tests(dynamic):
@@ -44,11 +41,6 @@ def compile_check(
                 aot_autograd_check(func, args, kwargs, dynamic=dynamic)
         with ignore_test_framework_error():
             check_compile(func, args, kwargs, fullgraph, dynamic=dynamic)
-
-    if not raise_error:
-        # In this case, we should return a nice report walking through
-        # all of the tests and what failed. This is not yet implemented.
-        raise NotImplementedError("NYI: raise_error=False")
 
     with ignore_test_framework_error():
         schema_check(func, args, kwargs)
@@ -69,9 +61,14 @@ def check_compile(func, args, kwargs, fullgraph, dynamic):
     torch.testing._comparison.assert_close(expected, result)
 
 
-@contextlib.contextmanager
-def ignore_test_framework_error():
-    try:
-        yield
-    except TestFrameworkError:
-        return
+class ignore_test_framework_error:
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, traceback):
+        if exc_type == TestFrameworkError:
+            # Squash exception
+            return True
