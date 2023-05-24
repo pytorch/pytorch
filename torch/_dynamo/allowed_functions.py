@@ -152,7 +152,7 @@ def _allowed_function_ids():
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = (
             "torch.optim.",
-            "torch.utils._foreach_utils", # yes we do not want the period here
+            "torch.utils._foreach_utils",  # yes we do not want the period here
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
