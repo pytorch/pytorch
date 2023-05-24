@@ -70,9 +70,12 @@ coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
 
-# prepend an underscore on purpose since most of the code should
-# use V.graph.layout_opt
-_layout_opt = os.environ.get("TORCHINDUCTOR_LAYOUT_OPT", "1") == "1"
+layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+# Enabling this will let compiler print warning messages if a generated triton
+# kernel has inputs with mixed layouts.  This is helpful for perf debugging
+# since kernel with mixed layout inputs may run much slower then one whose inputs
+# have uniform layouts.
 warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 
 # control store vs recompute heuristic

@@ -341,7 +341,7 @@ def convolution(
 
     # ndim can be 1 for convolution in models such as demucs
     if V.graph.layout_opt and ndim == 2:
-        log.debug("FORCE CHANNELS LAST INPUTS FOR CONV")
+        log.debug("Force channels last inputs for conv")
         x = ir.ExternKernel.require_channels_last(x)
         # TODO maybe we can convert weights to channels last just once before
         # running the model.

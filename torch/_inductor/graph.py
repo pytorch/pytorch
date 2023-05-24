@@ -217,7 +217,7 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
-        if not config._layout_opt:
+        if not config.layout_optimization:
             return False
 
         gm = self.module
@@ -233,7 +233,7 @@ class GraphLowering(torch.fx.Interpreter):
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
-            log.debug("ONLY A FEW CONV, SKIP LAYOUT OPT")
+            log.debug("Only a few conv, skip layout optimization")
             return False
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
@@ -256,7 +256,7 @@ class GraphLowering(torch.fx.Interpreter):
         if any(
             n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
         ):
-            log.debug("FOUND GROUPED CONVOLUTION with >1 in_channels!")
+            log.debug("Found grouped convolution with >1 in_channels!")
             return False
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
@@ -272,7 +272,7 @@ class GraphLowering(torch.fx.Interpreter):
             for n in conv_nodes
         ):
             log.debug(
-                "SKIP LAYOUT OPT BECAUSE SOME CONVOLUTTION HAS SMALLER OUT_CHANNEL"
+                "Skip layout optimization because some convoluttions have smaller out_channel"
             )
             return False
 
@@ -282,7 +282,7 @@ class GraphLowering(torch.fx.Interpreter):
             n.args[1].meta["val"].size(0) <= 64 and n.args[1].meta["val"].size(1) <= 64
             for n in conv_nodes
         ):
-            log.debug("SKIP LAYOUT OPT BECAUSE ALL CONVOLUTION CHANNELS TOO SMALL")
+            log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
         # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
@@ -299,7 +299,7 @@ class GraphLowering(torch.fx.Interpreter):
         for n in gm.graph.nodes:
             if n.target == torch.ops.aten._scaled_dot_product_flash_attention.default:
                 log.debug(
-                    "SKIP LAYOUT OPT BECAUSE _scaled_dot_product_flash_attention found"
+                    "Skip layout optimization because _scaled_dot_product_flash_attention is found"
                 )
                 return False
 
