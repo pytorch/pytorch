@@ -396,15 +396,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # leading to four graphs being compiled: clone, sin, sin, clone
         self.assertEqual(cnt.frame_count, 4)
 
-    def test_fallback_on_modules(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
+    def test_modules(self):
         counters.clear()
-        cnt = CompileCounter()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return wrap(lambda x: mod(x), x)
 
@@ -412,10 +411,24 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, mod(x))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"Invoking an nn.Module inside HigherOrderOperator": 1},
-        )
+
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        # 3 args - 1 for input, and other 2 for the weight and bias
+        self.assertTrue(len(wrap_node.args), 3)
+
+        # Check that the linear bias and weight are getattr in the outer graph
+        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+
+        # Check that the inner function has one op and its a linear op
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 1)
+        linear_node = find_first_node(body_function, torch._C._nn.linear)
+        self.assertTrue(linear_node is not None)
+
+        # Check that the innermost graph does not have any params
+        self.assertTrue(len(dict(body_function.named_parameters())) == 0)
+        self.assertTrue(len(dict(body_function.named_children())) == 0)
 
     def test_flat_list_output(self):
         def f(x):
@@ -481,25 +494,35 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_access_module_attr(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
         counters.clear()
-        cnt = CompileCounter()
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
         mod = torch.nn.Linear(3, 3)
         x = torch.randn(3, 3)
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             y = mod(x)
             return wrap(lambda y: y - mod.bias, y)
 
         result = f(x)
         self.assertEqual(result, mod(x) - mod.bias)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(
-            dict(counters["graph_break"]),
-            {"accessing attribute of nn.Module inside HigherOrderOperator": 1},
-        )
+        self.assertEqual(cnt.frame_count, 1)
+
+        self.assertEqual(len(backend.graphs), 1)
+        wrap_node = find_first_node(backend.graphs[0], wrap)
+        self.assertTrue(len(wrap_node.args), 3)
+
+        # Check that the linear bias and weight are getattr in the outer graph
+        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+
+        # Check that the inner function has one op and its a linear op
+        body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 1)
+
+        # Check that the innermost graph does not have any params
+        self.assertTrue(len(dict(body_function.named_parameters())) == 0)
+        self.assertTrue(len(dict(body_function.named_children())) == 0)
 
     def test_make_closure(self):
         def f(x, y):
@@ -543,6 +566,60 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3, expected_opcount=2)
+
+    def test_nested_wrap(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule()
+
+        # Two levels of wrap ops
+        def gn(x):
+            return torch.cos(x) + wrap(mod, x)
+
+        def fn(x):
+            return wrap(gn, x)
+
+        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
+
+    def test_hooks(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+        activations = dict()
+
+        def save_activations(mod, inp, out):
+            activations[name] = inp
+
+        for name, module in model.named_children():
+            forward_handles[name] = module.register_forward_hook(save_activations)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return wrap(lambda x: model(x), x)
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((10, 10))
+            pred = fn(x)
+            loss = pred.sum()
+            loss.backward()
+
+        self.assertTrue(activations.keys() == forward_handles.keys())
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
@@ -671,8 +748,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    # Higher order op does not support nn.Modules yet
-    @unittest.expectedFailure
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
@@ -691,10 +766,12 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(10, 10, requires_grad=True)
 
-        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
         bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
+            count_ops, freq=1, op=torch.ops.aten.sigmoid.default
+        )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
