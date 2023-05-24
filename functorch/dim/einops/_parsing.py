@@ -1,18 +1,9 @@
 """Adapted from https://github.com/arogozhnikov/einops/blob/36c7bb16e57d6e57f8f3050f9e07abdf3f00469f/einops/parsing.py."""
 from __future__ import annotations
 
-import functools
 import keyword
 import warnings
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, TYPE_CHECKING
-
-import torch
-from functorch._C import dim as _C
-
-if TYPE_CHECKING:
-    from functorch.dim.dim import Dim
-
-dims = _C.dims
+from typing import List, Optional, Set, Tuple, Union
 
 _ellipsis: str = "…"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 
@@ -131,6 +122,9 @@ class ParsedExpression:
         Args:
             name (str): the axis name to check
             allow_underscore (bool): whether axis names are allowed to start with an underscore
+
+        Returns:
+            Tuple[bool, str]: whether the axis name is valid, a message explaining why if not
         """
         if not str.isidentifier(name):
             return False, "not a valid python identifier"
@@ -153,32 +147,24 @@ class ParsedExpression:
 
         Args:
             name (str): the axis name to check
+
+        Returns:
+            bool: whether the axis name is valid
         """
         is_valid, _ = ParsedExpression.check_axis_name_return_reason(name)
         return is_valid
 
 
-@functools.lru_cache(256)
-def pattern_to_dim_idxs(
-    tensor_ndim: int, pattern: str, **axes_lengths: int
-) -> Callable[[torch.Tensor], torch.Tensor]:
-    r"""Translate an `einops`-style pattern into lists/tuples of first class dims that can be used to perform
-    `rearrange`.
 
-    Since the an equivalent result is computed for tensors with the same number of dimensions, with the same pattern and
-    specified axes lengths, this function can be memoized.
+def parse_pattern(pattern: str, **axes_lengths: int) -> Tuple[ParsedExpression, ParsedExpression]:
+    """Parse an `einops`-style pattern into a left-hand side and right-hand side `ParsedExpression` object.
 
     Args:
-        tensor_ndim (int): the number of dimensions in the tensor to rearrange
         pattern (str): the `einops`-style rearrangement pattern
         axes_lengths (int): any additional length specifications for dimensions
 
     Returns:
-        A tuple of three elements:
-            * a list of first class dims to use to index the tensor to rearrange
-            * a list of first class dims to use to reorder the tensor
-            * a tuple of first class dims representing any anonymous axes in the pattern, i.e. 1 -> 1, which should be
-              summed over to produce the final tensor
+       Tuple[ParsedExpression, ParsedExpression]: a tuple containing the left-hand side and right-hand side expressions
     """
     # validation taken largely from einops.einops._prepare_transformation_recipe
     # https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/einops/einops.py
@@ -198,7 +184,17 @@ def pattern_to_dim_idxs(
     if left.has_ellipsis and left.has_ellipsis_parenthesized:
         raise ValueError(f"Ellipsis is parenthesis in the left side is not allowed: {pattern}")
 
-    # rearrange-specific validations
+    return left, right
+
+
+def validate_rearrange_expressions(left: ParsedExpression, right: ParsedExpression, **axes_lengths: int) -> None:
+    """Perform expression validations that are specific to the `rearrange` operation.
+
+    Args:
+        left (ParsedExpression): left-hand side expression
+        right (ParsedExpression): right-hand side expression
+        axes_lengths (int): any additional length specifications for dimensions
+    """
     difference = set.symmetric_difference(left.identifiers, right.identifiers)
     if left.has_non_unitary_anonymous_axes or right.has_non_unitary_anonymous_axes:
         raise ValueError("Non-unitary anonymous axes are not supported in rearrange (exception is length 1)")
@@ -207,79 +203,3 @@ def pattern_to_dim_idxs(
     unmatched_axes = axes_lengths.keys() - left.identifiers
     if len(unmatched_axes) > 0:
         raise ValueError(f"Identifiers not found in expression: {unmatched_axes}")
-
-    if left.has_ellipsis:
-        n_ellipsis_dims = tensor_ndim - (len(left.composition) - 1)
-        n_named_dims = len(left.identifiers) - 1
-    else:
-        n_ellipsis_dims = 0
-        n_named_dims = len(left.identifiers)
-
-    n_anon_dims = sum(not dim for dim in left.composition)
-    n_dims = n_named_dims + n_ellipsis_dims + n_anon_dims
-
-    first_class_dims: Tuple[Dim, ...] = (dims(n_dims),) if n_dims == 1 else dims(n_dims)
-    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
-    anon_axes: List[AnonymousAxis] = []
-
-    # map the left-hand side identifiers to first class dims
-    dims_i = 0
-    for dimension in left.composition:
-        if isinstance(dimension, list):
-            for identifier in dimension:
-                # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
-                assert isinstance(identifier, str)
-                identifier_dim_map[identifier] = (first_class_dims[dims_i],)
-                dims_i += 1
-            if not dimension:
-                # unitary anonymous axis
-                anon_axis = AnonymousAxis("1")
-                identifier_dim_map[anon_axis] = (first_class_dims[dims_i],)
-                anon_axes.append(anon_axis)
-                dimension.append(anon_axis)
-                dims_i += 1
-        elif dimension == _ellipsis:
-            identifier = _ellipsis
-            identifier_dim_map[identifier] = tuple(first_class_dims[dims_i + i] for i in range(n_ellipsis_dims))
-            dims_i += n_ellipsis_dims
-        else:
-            raise ValueError(f'Unexpected dimension: {dimension}')
-
-    def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
-    ) -> List[Union[Dim, Tuple[Dim, ...]]]:
-        """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of first class dims."""
-        dim_composition: List[Union[Dim, Tuple[Dim, ...]]] = []
-        for dimension in composition:
-            if isinstance(dimension, list):
-                dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
-            elif dimension == _ellipsis:
-                dim_composition.extend(identifier_dim_map[_ellipsis])
-            else:
-                raise ValueError(f'Unexpected dimension: {dimension}')
-        return dim_composition
-
-    left_dims = composition_to_dims(left.composition)
-    right_dims = composition_to_dims(right.composition)
-    anon_dims = tuple(identifier_dim_map[axis][0] for axis in anon_axes)
-    specified_lengths = tuple(
-        (identifier_dim_map[axis][0], length) for axis, length in axes_lengths.items()
-    )
-
-    custom_rearrange_callable_name = "do_rearrange"
-    custom_rearrange_callable_code = (
-        (
-            f"def {custom_rearrange_callable_name}(tensor):\n"
-            f"    {', '.join(str(dim) for dim in first_class_dims)} = dims({n_dims})\n"
-            + (
-                f"    for dim, length in {specified_lengths}:\n"
-                "        dim.size = length\n"
-                if specified_lengths else ""
-            )
-            + f"    tensor = tensor[{left_dims}].order({', '.join(str(dim) for dim in right_dims)})\n"
-            + (f"    return tensor.sum({anon_dims}, keepdim=False)\n" if anon_dims else "    return tensor\n")
-        )
-    )
-
-    exec(custom_rearrange_callable_code)
-    return locals()[custom_rearrange_callable_name]
