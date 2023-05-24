@@ -61,6 +61,10 @@ static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weigh
     return result.view_symint({input_sizes[0], input_sizes[1], result.sym_size(1)});
 }
 
+Tensor bias(const Tensor &input, const Tensor &weight) {
+  return at::add(input, weight);
+}
+
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
