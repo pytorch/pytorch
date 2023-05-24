@@ -17,7 +17,12 @@ def _override_module_mixed_precision(
     for mod in root.modules():
         if isinstance(mod, module_cls_to_override):
             mod._wrap_overrides = wrap_override_dict  # type: ignore[assignment]
-            # if isinstance(mod, LayerNorm): # TODO: generalize this logic if additional types need to be supported
+            # TODO: We need to run this mixed precision ignored module in fp32,
+            # but ensure subsequent modules, that may possibly be running with
+            # mixed precision, still receive the appropriate precision inputs
+            # without user having to adjust mixed precision config too much.
+            # As a result, we attach pre and post forward hooks to up / down
+            # cast. We should revisit this design.
             old_dtype = None
 
             def cast_fn(dtype, x: torch.Tensor) -> torch.Tensor:

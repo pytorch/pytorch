@@ -739,10 +739,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 auto_wrap_policy=never_wrap_policy,
             )
 
-        no_mixed_precision = MixedPrecision()
+        no_mp = MixedPrecision()
         for mod in [model.ln, model.bn]:
             self.assertTrue(isinstance(mod, FSDP))
-            self.assertEqual(no_mixed_precision, mod.mixed_precision)
+            self.assertEqual(no_mp, mod.mixed_precision)
         # policy should not have wrapped any other submodules
         for mod in [model.fc1, model.fc2, model.fc3]:
             self.assertFalse(isinstance(mod, FSDP))
