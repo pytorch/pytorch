@@ -1814,11 +1814,7 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
     return [torch.empty_like(e) for e in exponent]
 
 
-@register_meta(
-    [
-        aten._foreach_addcdiv_.Tensor,
-    ]
-)
+@register_meta([aten._foreach_addcdiv_.Tensor, aten._foreach_addcmul_.Tensor])
 def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     check(
         all(isinstance(l, List) for l in [self, tensor1, tensor2])
