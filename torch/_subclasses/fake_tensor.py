@@ -552,7 +552,6 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
-@register_op_impl(aten._unsafe_index_put.default)
 def index_put(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
@@ -1301,11 +1300,11 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.global_registry:
-            custom_op = torch._custom_op.global_registry[func.name()]
+        if func.name() in torch._custom_op.impl.global_registry:
+            custom_op = torch._custom_op.impl.global_registry[func.name()]
             if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
+                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
                     result = custom_op._get_impl("abstract").func(*args, **kwargs)
                     return result
 
