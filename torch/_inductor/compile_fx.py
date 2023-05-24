@@ -28,7 +28,7 @@ from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
@@ -246,6 +246,24 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
+
+    # Convert view to reshape in the graph. This is necessary primarily for
+    # layout optimization. Do it unconditionally for uniformity.
+    #
+    # It's needed because when we do layout optimization, an contiguous tensor
+    # in eager mode may becomes a channels last tensor. A view op previously
+    # can be applied to the contiguous tensor may not be able to be applied
+    # on the channels tensor any more. An error like
+    #   RuntimeError: view size is not compatible with input tensor's size and stride
+    #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+    # will be printed.
+    #
+    # Replace view op to reshape op in this case.
+    # As an example, timm_resnest/botnet26t_256/convnext_base etc. will fail if we don't do this.
+    #
+    # Also this has to be done before FakeTensorProp below to avoid the failed
+    # .view() call.
+    view_to_reshape(gm)
 
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
