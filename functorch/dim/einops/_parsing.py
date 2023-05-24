@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import List, Optional, Set, Tuple, Union
+from typing import List, Mapping, Optional, Set, Tuple, Union
 
 _ellipsis: str = "…"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 
@@ -156,7 +156,7 @@ class ParsedExpression:
 
 
 
-def parse_pattern(pattern: str, **axes_lengths: int) -> Tuple[ParsedExpression, ParsedExpression]:
+def parse_pattern(pattern: str, axes_lengths: Mapping[str, int]) -> Tuple[ParsedExpression, ParsedExpression]:
     """Parse an `einops`-style pattern into a left-hand side and right-hand side `ParsedExpression` object.
 
     Args:
@@ -187,7 +187,9 @@ def parse_pattern(pattern: str, **axes_lengths: int) -> Tuple[ParsedExpression, 
     return left, right
 
 
-def validate_rearrange_expressions(left: ParsedExpression, right: ParsedExpression, **axes_lengths: int) -> None:
+def validate_rearrange_expressions(
+    left: ParsedExpression, right: ParsedExpression, axes_lengths: Mapping[str, int]
+) -> None:
     """Perform expression validations that are specific to the `rearrange` operation.
 
     Args:
