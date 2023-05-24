@@ -1,8 +1,11 @@
 import torch
 import torch._dynamo
 import torch._inductor
+from typing import Callable, Union, List, Set
+from torch._dynamo.eval_frame import OptimizedModule
+
     
-def is_enabled():
+def is_enabled() -> bool:
     """
     Check if compilation is enabled in the current environment.
 
@@ -23,7 +26,7 @@ def is_enabled():
     else:
         return False
 
-def reset():
+def reset() -> None:
     """
     Clear all compile caches and restore the initial state.
 
@@ -45,7 +48,7 @@ def reset():
     """
     torch._dynamo.reset()
 
-def allow_in_graph():
+def allow_in_graph(Union[Callable, List[Callable]]):
     """
     Customize which functions compilation will include in the generated graph.
     Similar to `torch.fx.wrap()`.
@@ -101,7 +104,7 @@ def allow_in_graph():
     """
     return torch._dynamo.allow_in_graph()
 
-def list_backends(exclude_tags=("debug", "experimental")):
+def list_backends(exclude_tags=("debug", "experimental") : Set) -> List[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
@@ -132,7 +135,7 @@ def list_backends(exclude_tags=("debug", "experimental")):
     """
     return torch._dynamo.list_backends(exclude_tags)
 
-def explain(f, *args, **kwargs):
+def explain(f, *args, **kwargs) -> Tuple[Any]:
     """
     Run the function `f` with compilation and provide an explanation of the optimization process.
 
@@ -181,7 +184,7 @@ def explain(f, *args, **kwargs):
 
     return torch._dynamo.explain()
 
-def assume_constant_result():
+def assume_constant_result(fn) -> None:
     """
     This function is used to mark a function `fn` as having a constant result.
     The marking is done for optimization purposes, allowing compilation to treat
@@ -200,7 +203,7 @@ def assume_constant_result():
     ::
         marked_function = assume_constant_result(my_function)
     """
-    return torch._dynamo.assume_constant_result()
+    return torch._dynamo.assume_constant_result(fn)
 
 def is_compiling():
     """
@@ -219,7 +222,7 @@ def is_compiling():
     """
     return torch._dynamo.is_compiling()
 
-def disable():
+def disable(fn=None : Callable, recursive=True : bool) -> None:
     """
     This function provides both a decorator and a context manager to disable compilation.
 
@@ -280,7 +283,7 @@ def disable():
     """
     return torch._dynamo.disable()
 
-def list_options():
+def list_options() -> Dict[str, Any]:
     """
     This function returns a dictionary that provides information about the available
     optimizations and debug configurations that can be used with the `torch.compile()`
@@ -302,7 +305,7 @@ r
     """
     return torch._inductor.list_options()
 
-def list_mode_options():
+def list_mode_options(mode: str = None) -> Dict[str, Any]:
     """
     This function returns a dictionary that provides information about the optimizations
     performed by each available mode passed to the `torch.compile()` function. The dictionary
