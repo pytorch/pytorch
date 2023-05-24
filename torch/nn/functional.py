@@ -5408,3 +5408,11 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
         return attn_output, None
+
+def bias(input, bias):
+    r"""bias(input, bias) -> Tensor
+
+    Applied bias to the input tensor.
+    See :class:`~torch.nn.Bias` for more details.
+    """
+    return input + bias
