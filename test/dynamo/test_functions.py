@@ -18,7 +18,6 @@ from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_stati
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
-tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True

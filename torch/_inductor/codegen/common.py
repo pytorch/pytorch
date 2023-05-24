@@ -17,20 +17,20 @@ from .. import metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
+    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsValue, V
 
-log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def data_type_logger(msg):
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("Data type propagation: %s", msg)
+    if schedule_log.isEnabledFor(logging.DEBUG):
+        schedule_log.debug("Data type propagation: %s", msg)
 
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
@@ -60,7 +60,7 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "eq",
             "ne",
         ]
-        ops_with_dtype_arg = ["constant", "to_dtype", "rand", "randn"]
+        ops_with_dtype_arg = ["constant", "to_dtype"]
         reduction_to_dtype = {
             "any": torch.bool,
             "argmin": torch.int64,
@@ -77,6 +77,10 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             return False
         if _node.target in ops_to_bool:
             opt_ctx.dtype = torch.bool
+        elif _node.target in ("rand", "randn"):
+            opt_ctx.dtype = torch.float32
+        elif _node.target in ("randint64",):
+            opt_ctx.dtype = torch.int64
         elif _node.target in ops_with_dtype_arg:
             opt_ctx.dtype = _node.args[-1]
         elif _node.target == "reduction":
@@ -94,7 +98,6 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
 
         # node.target not belong to any ops which can directly get the dtype
         # need propogate dtype with it's input node
-        dtype = None
         inputs = node.all_input_nodes
         input_nodes = [
             n
@@ -261,12 +264,6 @@ class OpOverrides:
         return ops.mul(x, x)
 
     @staticmethod
-    def sign(x):
-        left = ops.where(ops.lt("0", x), "1", "0")
-        right = ops.where(ops.lt(x, "0"), "1", "0")
-        return ops.sub(left, right)
-
-    @staticmethod
     def bitwise_not(x):
         return f"~{ExprPrinter.paren(x)}"
 
@@ -300,6 +297,10 @@ class OpOverrides:
     def remainder(a, b):
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+
+    @staticmethod
+    def load_seed(name, offset):
+        return ops.load(name, sympy.Integer(offset))
 
 
 class DeferredLine(DeferredLineBase):
@@ -434,10 +435,7 @@ class KernelArgs:
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
-                if val.is_integer:
-                    buffer_types[name] = torch.int64
-                else:
-                    buffer_types[name] = torch.float64
+                buffer_types[name] = get_sympy_Expr_dtype(val)
             else:
                 buffer_types[name] = val.get_dtype()
         buffer_types.update(
@@ -614,10 +612,13 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: typing.Union[str, CSEVariable],
+        expr: typing.Union[str, CSEVariable, OpsValue],
         write=True,
         assignment=True,
     ) -> CSEVariable:
+        if isinstance(expr, OpsValue):
+            expr = expr.value
+
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
@@ -742,8 +743,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size):
-                return sympy_symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

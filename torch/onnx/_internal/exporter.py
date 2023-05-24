@@ -389,7 +389,7 @@ class FXGraphExtractor(abc.ABC):
         fx_module_args: Sequence[Any],
     ) -> ExportOutput:
         # TODO: Import here to prevent circular dependency
-        import torch.onnx._internal.fx.passes as passes
+        from torch.onnx._internal.fx import analysis, passes
 
         diagnostic_context = options.diagnostic_context
 
@@ -426,6 +426,10 @@ class FXGraphExtractor(abc.ABC):
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
+            analysis.UnsupportedFxNodesAnalysis(diagnostic_context, module).analyze(
+                infra.levels.ERROR
+            )
+
             onnxscript_graph = passes.export_fx_to_onnxscript(
                 diagnostic_context, module, options
             )
@@ -516,6 +520,16 @@ class UnsatisfiedDependencyError(RuntimeError):
     def __init__(self, package_name: str, message: str):
         super().__init__(message)
         self.package_name = package_name
+
+
+class OnnxExporterError(RuntimeError):
+    """Raised when an ONNX exporter error occurs. Diagnostic context is enclosed."""
+
+    diagnostic_context: Final[infra.DiagnosticContext]
+
+    def __init__(self, diagnostic_context: infra.DiagnosticContext, message: str):
+        super().__init__(message)
+        self.diagnostic_context = diagnostic_context
 
 
 @_beartype.beartype
@@ -619,7 +633,9 @@ def dynamo_export(
             f"Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
-        raise RuntimeError(message) from e
+        raise OnnxExporterError(
+            resolved_export_options.diagnostic_context, message
+        ) from e
 
 
 __all__ = [

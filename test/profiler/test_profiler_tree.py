@@ -292,10 +292,7 @@ class TestProfilerTree(TestCase):
             autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
               torch::autograd::AccumulateGrad
                 aten::detach
-                  detach
-            cudaGetDeviceCount
-            cudaGetDeviceCount
-            cudaGetDeviceProperties"""
+                  detach"""
         )
 
     @ProfilerTree.test
