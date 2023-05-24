@@ -397,10 +397,10 @@ static void histogramdd_linear_kernel(const Tensor& self,
   }
 }
 
-void infer_bin_edges_from_input(const Tensor& input,
-                                const int64_t N,
-                                std::vector<double>& leftmost_edges,
-                                std::vector<double>& rightmost_edges) {
+static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
+                                                    const int64_t N,
+                                                    std::vector<double>& leftmost_edges,
+                                                    std::vector<double>& rightmost_edges) {
   Tensor min, max;
   std::tie(min, max) = at::aminmax(input, 0);
 
@@ -408,13 +408,6 @@ void infer_bin_edges_from_input(const Tensor& input,
     leftmost_edges[i] = min[i].item().to<double>();
     rightmost_edges[i] = max[i].item().to<double>();
   }
-}
-
-static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
-                                                    const int64_t N,
-                                                    std::vector<double>& leftmost_edges,
-                                                    std::vector<double>& rightmost_edges) {
-  infer_bin_edges_from_input(input, N, leftmost_edges, rightmost_edges);
 }
 
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
