@@ -11,7 +11,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch.fx.experimental.proxy_tensor import make_fx
-
+from torch.testing._internal.common_utils import skipIfRocm
 
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
@@ -1660,6 +1660,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
 
     @config.patch(capture_scalar_outputs=True, dynamic_shapes=True)
+    @skipIfRocm
     def test_dynamic_slicing_simple(self):
         def f(x):
             return x[slice(None, None, None)]
@@ -1673,6 +1674,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    @skipIfRocm 
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
             def true_fn(self, x, y):
@@ -1793,7 +1795,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         out_graph = exported[0]
         dynamo_result = out_graph(inp)
         self.assertEqual(dynamo_result, m(inp))
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

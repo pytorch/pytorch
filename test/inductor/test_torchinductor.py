@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
@@ -942,12 +943,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 17, 8, 9),))
 
+    @skipIfRocm
     def test_reduction1(self):
         def fn(a):
             return (a.sum(), a.max(), a.min(), a.argmax(), a.argmin())
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
+    @skipIfRocm
     @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
@@ -956,6 +959,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
+    @skipIfRocm
     @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
@@ -964,6 +968,7 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("-inf")),))
 
+    @skipIfRocm
     def test_reduction4(self):
         if self.device == "cpu":
             raise unittest.SkipTest("Non-deterministic CPU results")
@@ -975,6 +980,7 @@ class CommonTemplate:
         for i in inputs:
             self.common(fn, (i,))
 
+    @skipIfRocm
     @config.patch(unroll_reductions_threshold=1)
     def test_reduction5(self):
         if self.device == "cpu":
@@ -2457,6 +2463,8 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    @skipIfRocm
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -2904,6 +2912,8 @@ class CommonTemplate:
             (torch.randn([10, 4]), torch.randint(10, [8]), torch.tensor([0, 2, 6])),
         )
 
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3597
+    @skipIfRocm
     def test_batch_norm_2d(self):
         m = torch.nn.Sequential(
             torch.nn.BatchNorm2d(10),
@@ -3593,6 +3603,8 @@ class CommonTemplate:
                 ),
             )
 
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3465
+    @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -4121,6 +4133,7 @@ class CommonTemplate:
         )
 
     @unittest.skipIf(not has_torchvision_roi_align(), "requires torchvision")
+    @skipIfRocm
     def test_roi_align(self):
         def fn(a, b):
             return torch.ops.torchvision.roi_align(a, b, 0.25, 7, 7, 2, False)
@@ -4905,6 +4918,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @skipIfRocm
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5111,6 +5125,7 @@ class CommonTemplate:
         b = torch.rand(2, 2, 1, 4, 1).int()
         self.common(fn, (a, b))
 
+    @skipIfRocm
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5122,6 +5137,9 @@ class CommonTemplate:
             ],
         )
 
+    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3849
+    @skipIfRocm
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -5443,7 +5461,7 @@ class CommonTemplate:
         else:
             contexts = [
                 contextlib.nullcontext,
-                lambda: config.patch({"triton.cudagraphs": True}),
+                lambda: config.patch({"triton.cudagraphs": True if not torch.version.hip else False}),
             ]
 
         for context in contexts:
@@ -7195,6 +7213,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
+        @skipIfRocm
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
@@ -7207,6 +7226,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @skipIfRocm
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
@@ -7224,6 +7244,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        @skipIfRocm
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -7250,6 +7271,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
+        @skipIfRocm
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")

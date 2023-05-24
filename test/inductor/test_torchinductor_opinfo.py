@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -188,6 +189,20 @@ inductor_skips["cuda"] = {
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {f16, f32, f64},
     "fft.rfftn": {f16, f32, f64},
+
+    # ROCm
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3817
+    "cumulative_trapezoid": {f16, f32, f64, b8, i32, i64},
+    "trapezoid": {f16, f32, f64, b8, i32, i64},
+    "trapz": {f16, f32, f64, b8, i32, i64},
+    # FIXME: LAPACK support - can skip like this https://github.com/ROCmSoftwarePlatform/pytorch/pull/1177 - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3598
+    "linalg.pinv.hermitian": {f16, f32, f64, b8, i32, i64},
+    "linalg.matrix_rank.hermitian": {f16, f32, f64, b8, i32, i64},
+    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    "logcumsumexp": {f32},
+    # FIXME: MIOpen batch norm failure
+    "nn.functional.batch_norm": {f32},
+    "nn.functional.instance_norm": {f32}, 
 }
 
 inductor_expected_failures_single_sample = defaultdict(dict)
@@ -342,16 +357,23 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
+    # AssertionError: Scalars are not close!
+    "nn.functional.soft_margin_loss": {f16},
+}
+
+if not TEST_WITH_ROCM:
     # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
     # linalg._svd's return value has different strides on CUDA vs CPU which causes this
     # In test_meta.py there is a mechanism to skipping strides checks for some ops
     # (including _linalg_svd), possibly we should have something similar here
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "norm.nuc": {f32, f64},
-    # AssertionError: Scalars are not close!
-    "nn.functional.soft_margin_loss": {f16},
-}
+    inductor_expected_failures_single_sample["cuda"]["linalg.cond"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["linalg.svdvals"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["linalg.svd"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["linalg.matrix_rank"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["svd"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["norm.nuc"] = {f32, f64}
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
@@ -371,8 +393,14 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "tanh": {f16},
 }
+
+if not TEST_WITH_ROCM:
+    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+else:
+    # aten.miopen_batch_norm is unsupported for lowering
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {f16, f32}
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {f16, f32}  
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
@@ -385,7 +413,6 @@ inductor_should_fail_with_exception["cuda"] = {
         i64: "Pow input must be floating point.",
     }
 }
-
 
 def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout

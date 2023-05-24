@@ -4,7 +4,7 @@ import logging
 import torch
 import torch._dynamo as torchdynamo
 import torch._inductor.config as torchinductor_config
-from torch.testing._internal.common_utils import IS_LINUX, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM, TestCase
 
 
 class MLP(torch.nn.Module):
@@ -58,5 +58,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     if IS_LINUX and torch.cuda.is_available():
-        if torch.cuda.get_device_properties(0).major > 5:
+        if torch.cuda.get_device_properties(0).major > 5 or TEST_WITH_ROCM:
             run_tests()
