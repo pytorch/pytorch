@@ -168,7 +168,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-static std::unordered_set<std::string> RegisterPrePackingParams(
+std::unordered_set<std::string> RegisterPrePackingParams(
     Module& module,
     const std::string& method_name) {
   auto filter_fn = [](const Node* n) -> bool {
