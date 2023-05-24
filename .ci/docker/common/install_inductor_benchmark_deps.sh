@@ -1,7 +1,6 @@
 set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/install.sh"
 
 function install_huggingface() {
   local version
