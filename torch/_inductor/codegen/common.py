@@ -12,6 +12,7 @@ import sympy
 from sympy.printing.printer import Printer
 
 import torch
+import torch.fx
 
 from .. import metrics
 from ..utils import (
@@ -44,10 +45,31 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-def _data_type_propagation(sub_graph: torch.fx.Graph):
-    def propagate_node(node: torch.fx.Node):
-        _node: torch.fx.Node = node
-        ops_to_bool = [
+class OpDtypeClassifier:
+    @staticmethod
+    @functools.lru_cache(None)
+    def io_ops():
+        return ["placeholder", "output"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def index_ops():
+        return ["get_index", "index_expr"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def load_store_ops():
+        return ["load", "store"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def reduction_ops():
+        return ["reduction"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def boolean_ops():
+        return [
             "is_inf",
             "is_nan",
             "bitwise_xor",
@@ -60,95 +82,96 @@ def _data_type_propagation(sub_graph: torch.fx.Graph):
             "eq",
             "ne",
         ]
-        ops_with_dtype_arg = ["constant", "to_dtype"]
-        reduction_to_dtype = {
-            "any": torch.bool,
-            "argmin": torch.int64,
-            "argmax": torch.int64,
-        }
-        ops_without_dtype = ["ops", "get_index"]
-        if _node.target in ops_without_dtype:
-            return False
-        if OptimizationContext.key in _node.meta:
-            opt_ctx = _node.meta[OptimizationContext.key]
-        else:
-            opt_ctx = OptimizationContext()
-        if opt_ctx.dtype is not None:
-            return False
-        if _node.target in ops_to_bool:
-            opt_ctx.dtype = torch.bool
-        elif _node.target in ("rand", "randn"):
-            opt_ctx.dtype = torch.float32
-        elif _node.target in ("randint64",):
-            opt_ctx.dtype = torch.int64
-        elif _node.target in ops_with_dtype_arg:
-            opt_ctx.dtype = _node.args[-1]
-        elif _node.target == "reduction":
-            reduction_type = _node.args[4]
-            if reduction_type in reduction_to_dtype:
-                opt_ctx.dtype = reduction_to_dtype[reduction_type]
-        elif _node.target == "load":
-            opt_ctx.dtype = V.graph.get_dtype(_node.args[1])
-        if opt_ctx.dtype is not None:
-            data_type_logger(
-                f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}"
-            )
-            _node.meta[OptimizationContext.key] = opt_ctx
-            return True
 
-        # node.target not belong to any ops which can directly get the dtype
-        # need propogate dtype with it's input node
+    @staticmethod
+    @functools.lru_cache(None)
+    def explicit_dtype_ops():
+        return ["constant", "to_dtype", "index_expr"]
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def rand_ops():
+        return ["rand", "randn"]
+
+
+class DataTypePropagation:
+    def __init__(self, graph: torch.fx.Graph) -> None:
+        self.graph: torch.fx.Graph = graph
+
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
         inputs = node.all_input_nodes
         input_nodes = [
             n
             for n in inputs
-            if isinstance(n, torch.fx.node.Node) and n.target not in ops_without_dtype
+            if isinstance(n, torch.fx.Node) and n.op not in OpDtypeClassifier.io_ops()
         ]
         if len(input_nodes) == 0:
-            return False
+            return None
+
         all_input_nodes_propogated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
         if not all_input_nodes_propogated:
-            return False
-        # all input nodes have propogated dtype, we will promot to dtype with highest precision
-        dtype = functools.reduce(
+            return None
+
+        return functools.reduce(
             torch.promote_types,
             [n.meta[OptimizationContext.key].dtype for n in input_nodes],
         )
-        opt_ctx.dtype = dtype
-        msg = f"for node.target = {_node.target}, dtype is propagated to {opt_ctx.dtype}, "
-        input_msg = "inputs dtypes: "
-        for n in input_nodes:
-            input_msg += (
-                f"input {n.name}.dtype = {n.meta[OptimizationContext.key].dtype}"
-            )
-        data_type_logger(msg + input_msg)
-        _node.meta[OptimizationContext.key] = opt_ctx
-        return True
 
-    new_node_propogated = False
-    for node in sub_graph.nodes:
-        new_node_propogated = propagate_node(node) or new_node_propogated
+    def deduce_node_dtype(self, node: torch.fx.Node):
+        if node.target in OpDtypeClassifier.boolean_ops():
+            return torch.bool
 
-    if new_node_propogated:
-        _data_type_propagation(sub_graph)
+        if node.op in OpDtypeClassifier.io_ops():
+            return None
 
+        if node.target in OpDtypeClassifier.explicit_dtype_ops():
+            return node.args[-1]
 
-def data_type_propagation(node):
-    from ..ir import LoopBody
-    from ..scheduler import SchedulerNode
+        if node.target in OpDtypeClassifier.rand_ops():
+            return torch.float
 
-    assert isinstance(node, SchedulerNode)
-    _node: SchedulerNode = node
-    if isinstance(_node._body, LoopBody):
-        body: LoopBody = node._body
-        sub_blocks = [body.root_block] + list(body.subblocks.values())
-        for sub_block in sub_blocks:
-            _sub_graph: torch.fx.Graph = sub_block.graph
-            _data_type_propagation(_sub_graph)
+        if node.target in OpDtypeClassifier.index_ops():
+            return torch.int64
+
+        if node.target in OpDtypeClassifier.load_store_ops():
+            buf_name = node.args[1]
+            return V.graph.get_dtype(buf_name)
+
+        if node.target in OpDtypeClassifier.reduction_ops():
+            _, _, dtype, _, _, _, _ = node.args
+            return dtype
+
+        return self.deduce_node_dtype_by_inputs(node)
+
+    def propagate(self):
+        for node in self.graph.nodes:
+            if OptimizationContext.key in node.meta:
+                opt_ctx = node.meta[OptimizationContext.key]
+            else:
+                opt_ctx = OptimizationContext()
+
+            opt_ctx.dtype = self.deduce_node_dtype(node)
+            node.meta[OptimizationContext.key] = opt_ctx
+
+    @classmethod
+    def propagate_graph(cls, graph: torch.fx.Graph):
+        return cls(graph).propagate()
+
+    @classmethod
+    def propagate_scheduler_node(cls, node):
+        from ..ir import LoopBody
+        from ..scheduler import SchedulerNode
+
+        assert isinstance(node, SchedulerNode)
+        if isinstance(node._body, LoopBody):
+            body: LoopBody = node._body
+            sub_blocks = [body.root_block] + list(body.subblocks.values())
+            for sub_block in sub_blocks:
+                DataTypePropagation.propagate_graph(sub_block.graph)
 
 
 class ExprPrinter(Printer):
