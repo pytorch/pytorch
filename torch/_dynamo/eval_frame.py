@@ -921,7 +921,9 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (
+        shape_env := getattr(fake_mode, "shape_env", None)
+    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
