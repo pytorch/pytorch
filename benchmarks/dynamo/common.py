@@ -58,6 +58,9 @@ log = logging.getLogger(__name__)
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# Suppress torch.profiler spam
+os.environ["KINETO_LOG_LEVEL"] = "5"
+
 current_name = ""
 current_device = ""
 current_batch_size = None
@@ -98,7 +101,7 @@ CI_SKIP[CI("eager", training=True)] = [
     "hf_BigBird",  # fp64_OOM
     "hf_T5_base",  # fp64_OOM
     "llama",  # Accuracy failed: allclose not within tol=0.001
-    "vision_maskrcnn",  # shape mismatch in accuracy check!
+    "vision_maskrcnn",  # The size of tensor a (29) must match the size of tensor b (33) (doesn't repro)
     # Huggingface
     "XGLMForCausalLM",  # OOM
     # TIMM
@@ -142,7 +145,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
     "pytorch_struct",
-    "vision_masrkcnn",  # AssertionError: nothing in example_inputs had a dim with 4
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -249,7 +251,7 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "cm3leon_generate",  # Could not validate constraint UnspecConstraint
     "hf_T5_generate",  # Could not validate constraint UnspecConstraint
-    "vision_maskrcnn",  # nothing in example_inputs had a dim with 4
+    "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -338,7 +340,7 @@ def output_csv(filename, headers, row):
     with open(filename, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
-            writer.writerow(line + ["0"] * (len(headers) - len(line)))
+            writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
 def nothing(f):
