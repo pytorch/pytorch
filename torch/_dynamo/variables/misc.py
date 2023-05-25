@@ -637,14 +637,20 @@ class SkipFilesVariable(VariableTracker):
                 value, mutable_local=MutableLocal(), **options
             )
         elif (
-            self.value is itertools.product
+            inspect.getmodule(self.value) is itertools
             and not kwargs
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item), **options))
+            if self.value is itertools.product:
+                for item in itertools.product(*seqs):
+                    items.append(variables.TupleVariable(list(item), **options))
+            elif self.value is itertools.chain:
+                for item in itertools.chain(*seqs):
+                    items.append(item)
+            else:
+                unimplemented(f"call_function {self.value} with {args}")
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
