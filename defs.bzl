@@ -55,6 +55,7 @@ compiler_specific_flags = {
         "-Wno-absolute-value",
         "-Wno-pass-failed",
         "-Wno-braced-scalar-init",
+        "-Wno-ambiguous-reversed-operator",
     ],
     "gcc": [
         "-Wno-error=array-bounds",
