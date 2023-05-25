@@ -701,6 +701,7 @@ class NumpyNdarrayVariable(VariableTracker):
         super().unpack_var_sequence(tx)
 
     def var_getattr(self, tx, name):
+        from torch._dynamo.variables import GetAttrVariable, TupleVariable
         from ..utils import attr_wrapper
         from .builder import wrap_fx_proxy_cls
 
@@ -719,7 +720,36 @@ class NumpyNdarrayVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
-        elif name in ["size", "itemsize", "strides", "shape", "ndim"]:
+        elif name in ["ndim", "itemsize", "shape"]:
+            result = wrap_fx_proxy_cls(
+                target_cls=ConstantVariable,
+                tx=tx,
+                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                example_value=None,
+                **options,
+            )
+        elif name == "shape":
+            result = wrap_fx_proxy_cls(
+                target_cls=TupleVariable,
+                tx=tx,
+                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                example_value=None,
+                **options,
+            )
+        elif name == "size":
+            result = wrap_fx_proxy_cls(
+                target_cls=ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    (self.as_proxy(),),
+                    {},
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name == "strides":
             result = wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,
                 tx=tx,

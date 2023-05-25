@@ -41,7 +41,6 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 from ..utils import (
-    attr_wrapper,
     clone_input,
     get_fake_value,
     getfile,
@@ -55,7 +54,6 @@ from ..utils import (
     odict_values,
     preserve_rng_state,
     tensor_always_has_static_shape,
-    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -1181,15 +1179,21 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(
-        example_value, (np.ndarray, torch_np.ndarray)
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return target_cls(proxy, **options)
+    elif config.numpy_ndarray_as_tensor:
+        if isinstance(example_value, int):
+            proxy.node.meta["example_value"] = example_value
+            return ConstantVariable(example_value, **options)
+        elif (
+            istype(example_value, torch.Size)
+            and all(isinstance(x, int) for x in example_value)
+            and target_cls is TupleVariable
+        ):  # convert torch.Size to tuple
+            return TupleVariable(
+                [ConstantVariable(x, **options) for x in example_value], **options
+            )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
-        attr_wrapper,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
