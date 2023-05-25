@@ -143,9 +143,8 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def postprocess_placeholders(self):
         # Add runtime asserts for input shape constraints. We do this here
         # because we can handle both (unary) predicates and (binary) relations.
-
         assert self.current_gm is not None
-        equality_constraints = []
+
         for name, arg in self.input_name_to_args.items():
             current_inp = self.input_name_to_example_inputs[name]
             all_dims = set(range(current_inp.dim()))

@@ -147,9 +147,6 @@ class ExportPassBase(PassBase):
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
-            # state that keeps track of when placeholders are still being processed
-            # (note that placeholders are always processed before other nodes)
-            self._processing_placeholders = True
 
         def placeholder(
             self,
@@ -218,8 +215,8 @@ class ExportPassBase(PassBase):
 
         def run_node(self, n: torch.fx.Node) -> Argument:
             self.node = n
-            if self._processing_placeholders and n.op != "placeholder":
-                self._processing_placeholders = False
+            if self.callback._processing_placeholders and n.op != "placeholder":
+                self.callback._processing_placeholders = False
                 self.callback.postprocess_placeholders()
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
@@ -236,6 +233,9 @@ class ExportPassBase(PassBase):
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
+        # state that keeps track of when placeholders are still being processed
+        # (note that placeholders are always processed before other nodes)
+        self._processing_placeholders = True
 
     def _fx(
         self,
