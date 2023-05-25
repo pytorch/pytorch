@@ -91,7 +91,7 @@ def allow_in_graph(fn):
     """
 
 
-def list_backends(exclude_tags : Set = ("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
     Return valid strings that can be passed to `torch.compile(..., backend="name")`.
 
