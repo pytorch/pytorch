@@ -42,10 +42,12 @@ struct PoolingCachedGraph3D : public MPSCachedGraph {
 };
 
 typedef MPSGraphTensor* (^PoolingOpBlock2D)(PoolingCachedGraph2D&, MPSGraphPooling2DOpDescriptor*);
-#define PoolingOpFn2D(graph, desc) MPSGraphTensor*(mps::PoolingCachedGraph2D & graph, MPSGraphPooling2DOpDescriptor * desc)
+#define PoolingOpFn2D(graph, desc) \
+  MPSGraphTensor*(mps::PoolingCachedGraph2D & graph, MPSGraphPooling2DOpDescriptor * desc)
 
 typedef MPSGraphTensor* (^PoolingOpBlock3D)(PoolingCachedGraph3D&, MPSGraphPooling4DOpDescriptor*);
-#define PoolingOpFn3D(graph, desc) MPSGraphTensor*(mps::PoolingCachedGraph3D & graph, MPSGraphPooling4DOpDescriptor * desc)
+#define PoolingOpFn3D(graph, desc) \
+  MPSGraphTensor*(mps::PoolingCachedGraph3D & graph, MPSGraphPooling4DOpDescriptor * desc)
 
 // Pooling ops (1D/2D forward and backward Max and Average pooling)
 static void pool2d_template(const Tensor& input,
@@ -445,15 +447,26 @@ static void pool3d_template(const Tensor& input,
 
   pool3d_shape_check(input,
                      nInputPlane,
-                     kT, kH, kW,
-                     dT, dH, dW,
-                     padT, padH, padW,
-                     dilationT, dilationH, dilationW,
-                     inputDepth, inputHeight, inputWidth,
-                     outputDepth, outputHeight, outputWidth,
+                     kT,
+                     kH,
+                     kW,
+                     dT,
+                     dH,
+                     dW,
+                     padT,
+                     padH,
+                     padW,
+                     dilationT,
+                     dilationH,
+                     dilationW,
+                     inputDepth,
+                     inputHeight,
+                     inputWidth,
+                     outputDepth,
+                     outputHeight,
+                     outputWidth,
                      op_name.data(),
                      true);
-
 
   auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
@@ -491,15 +504,21 @@ static void pool3d_template(const Tensor& input,
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
 
     auto cachedGraph = LookUpOrCreateCachedGraph<PoolingCachedGraph3D>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-      MPSGraphPooling4DOpDescriptor* desc = [MPSGraphPooling4DOpDescriptor
-          descriptorWithKernelSizes:@[ @1, @(kT), @(kW), @(kH) ]
-                            strides:@[ @1, @(dT), @(dW), @(dH) ]
-                      dilationRates:@[ @1, @(dilationT), @(dilationW), @(dilationH) ]
-                      paddingValues:@[ @0, @0,
-                                       @(padT), ceil_mode ? @(padT * dT) : @(padT),
-                                       @(padW), ceil_mode ? @(padW * dW) : @(padW),
-                                       @(padH), ceil_mode ? @(padH * dH) : @(padH) ]
-                        paddingStyle:MPSGraphPaddingStyleExplicit];
+      MPSGraphPooling4DOpDescriptor* desc =
+          [MPSGraphPooling4DOpDescriptor descriptorWithKernelSizes:@[ @1, @(kT), @(kW), @(kH) ]
+                                                           strides:@[ @1, @(dT), @(dW), @(dH) ]
+                                                     dilationRates:@[ @1, @(dilationT), @(dilationW), @(dilationH) ]
+                                                     paddingValues:@[
+                                                       @0,
+                                                       @0,
+                                                       @(padT),
+                                                       ceil_mode ? @(padT * dT) : @(padT),
+                                                       @(padW),
+                                                       ceil_mode ? @(padW * dW) : @(padW),
+                                                       @(padH),
+                                                       ceil_mode ? @(padH * dH) : @(padH)
+                                                     ]
+                                                      paddingStyle:MPSGraphPaddingStyleExplicit];
 
       desc.ceilMode = (padT == 0 && padW == 0 && padH == 0) ? ceil_mode : false;
       if (has_indices) {
@@ -633,16 +652,12 @@ Tensor mps_max_pool3d(const Tensor& input,
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   mps::PoolingOpBlock3D pooling_op_block = ^PoolingOpFn3D(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
-    cachedGraph.expandedInputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.inputTensor
-                                                        axis:2
-                                                        name:nil];
+    cachedGraph.expandedInputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.inputTensor axis:2 name:nil];
 
     cachedGraph.pooledTensor = [mpsGraph maxPooling4DWithSourceTensor:cachedGraph.expandedInputTensor
-                                                               descriptor:desc
-                                                                     name:nil];
-    return [mpsGraph squeezeTensor:cachedGraph.pooledTensor
-                              axis:2
-                              name:nil];
+                                                           descriptor:desc
+                                                                 name:nil];
+    return [mpsGraph squeezeTensor:cachedGraph.pooledTensor axis:2 name:nil];
   };
   mps::pool3d_template(input,
                        output,
@@ -671,21 +686,15 @@ Tensor mps_max_pool3d_backward(const Tensor& grad_output,
   Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
   mps::PoolingOpBlock3D pooling_op_block = ^PoolingOpFn3D(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
-    cachedGraph.expandedInputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.inputTensor
-                                                        axis:2
-                                                        name:nil];
+    cachedGraph.expandedInputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.inputTensor axis:2 name:nil];
 
-    cachedGraph.expandedGradOutputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.gradOutputTensor
-                                                                   axis:2
-                                                                   name:nil];
+    cachedGraph.expandedGradOutputTensor = [mpsGraph expandDimsOfTensor:cachedGraph.gradOutputTensor axis:2 name:nil];
 
     cachedGraph.pooledTensor = [mpsGraph maxPooling4DGradientWithGradientTensor:cachedGraph.expandedGradOutputTensor
-                                                                               sourceTensor:cachedGraph.expandedInputTensor
-                                                                                 descriptor:desc
-                                                                                       name:nil];
-    return [mpsGraph squeezeTensor:cachedGraph.pooledTensor
-                              axis:2
-                              name:nil];
+                                                                   sourceTensor:cachedGraph.expandedInputTensor
+                                                                     descriptor:desc
+                                                                           name:nil];
+    return [mpsGraph squeezeTensor:cachedGraph.pooledTensor axis:2 name:nil];
   };
   mps::pool3d_template(input,
                        grad_input,
