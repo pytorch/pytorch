@@ -115,17 +115,14 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self._call_lazy_check
 
     def __getstate__(self):
-        return {"_orig_mod": self._orig_mod}
+        state = dict(self.__dict__)
+        state.pop("forward", None)
+        state.pop("__call__", None)
+        return state
 
     def __setstate__(self, state):
-        orig_mod = state["_orig_mod"]
-        self.__class__ = orig_mod.__class__
-        self.__dict__.update(orig_mod.__dict__)
-
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        super(OptimizedModule, instance).__init__()
-        return instance
+        self.__dict__ = state
+        self._initialize()
 
     def __getattr__(self, name):
         if name == "_orig_mod":
@@ -344,11 +341,23 @@ class _TorchDynamoContext:
 
         return _fn
 
-
 class OptimizeContext(_TorchDynamoContext):
     @staticmethod
     def _different_backend(old, new):
         return not (old == new or old is None)
+
+    def on_enter(self):
+        global most_recent_backend
+        if self._different_backend(most_recent_backend, self.compiler_fn):
+            if config.raise_on_backend_change:
+                raise ResetRequired()
+            else:
+                warnings.warn(
+                    "changing options to `torch.compile()` may require "
+                    "calling `torch._dynamo.reset()` to take effect"
+                )
+        most_recent_backend = self.compiler_fn
+        install_generation_tagging_init()
 
     def __init__(
         self,
@@ -359,29 +368,17 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=False,
     ):
-        def on_enter():
-            global most_recent_backend
-            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
-                if config.raise_on_backend_change:
-                    raise ResetRequired()
-                else:
-                    warnings.warn(
-                        "changing options to `torch.compile()` may require "
-                        "calling `torch._dynamo.reset()` to take effect"
-                    )
-            most_recent_backend = compiler_fn
-            install_generation_tagging_init()
-
-        compiler_fn = innermost_fn(callback)
+        self.compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
-            on_enter=on_enter,
+            on_enter=self.on_enter,
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
             export=export,
             dynamic=dynamic,
         )
+
 
 
 class RunOnlyContext(_TorchDynamoContext):
@@ -406,14 +403,16 @@ def first_real_inst_idx(code):
             return inst.offset // 2
     raise RuntimeError("RESUME instruction not found in code")
 
+class ErrorCatcher:
+    def __init__(self, callback, hooks: Hooks):
+        self.callback = callback
+        self.hooks = hooks
+        self._torchdynamo_orig_callable = callback
 
-def catch_errors_wrapper(callback, hooks: Hooks):
-    @functools.wraps(callback)
-    def catch_errors(frame, cache_size, frame_state):
+    def catch_errors(self, frame, cache_size, frame_state):
         assert frame_state is not None
 
         if (
-            # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
             or skipfiles.check(frame.f_code.co_filename)
             or config.disable
@@ -431,19 +430,23 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
-                        backend_compile_fn=callback._torchdynamo_orig_callable,
+                        backend_compile_fn=self.callback._torchdynamo_orig_callable,
                     )
                     hijacked_callback = convert_frame.convert_frame(
                         ddp_optimizer.compile_fn,
-                        hooks=hooks,
+                        hooks=self.hooks,
                     )
-                    return hijacked_callback(frame, cache_size, hooks, frame_state)
+                    return hijacked_callback(frame, cache_size, self.hooks, frame_state)
 
         with compile_lock:
-            return callback(frame, cache_size, hooks, frame_state)
+            return self.callback(frame, cache_size, self.hooks, frame_state)
 
-    catch_errors._torchdynamo_orig_callable = callback  # type: ignore[attr-defined]
-    return catch_errors
+    def __call__(self, frame, cache_size, frame_state):
+        return self.catch_errors(frame, cache_size, frame_state)
+
+
+def catch_errors_wrapper(callback, hooks: Hooks):
+    return ErrorCatcher(callback, hooks)
 
 
 def _optimize_catch_errors(

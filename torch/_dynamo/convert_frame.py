@@ -98,18 +98,12 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     skip_code(result.__code__)
     return result
 
+class WrapConvertContext:
+    def __init__(self, fn):
+        self.fn = fn
+        self._torchdynamo_orig_callable = fn
 
-def wrap_convert_context(fn):
-    """
-    Context manager to:
-        1) Save/restore torch.is_grad_enabled() state
-        2) Save/restore python random state
-        3) Save/restore torch random state
-        4) Monkey patch torch.fx.graph_module._forward_from_src
-    """
-
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
+    def __call__(self, *args, **kwargs):
         prior_grad_mode = torch.is_grad_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
@@ -119,7 +113,7 @@ def wrap_convert_context(fn):
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         cleanup = setup_compile_debug()
         try:
-            return fn(*args, **kwargs)
+            return self.fn(*args, **kwargs)
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
@@ -129,8 +123,15 @@ def wrap_convert_context(fn):
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
 
-    _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
-    return _fn
+def wrap_convert_context(fn):
+    """
+    Context manager to:
+        1) Save/restore torch.is_grad_enabled() state
+        2) Save/restore python random state
+        3) Save/restore torch random state
+        4) Monkey patch torch.fx.graph_module._forward_from_src
+    """
+    return WrapConvertContext(fn)
 
 
 @TorchPatcher.suppress_torch_distributed_warnings
@@ -213,143 +214,161 @@ def exception_handler(e, code, frame=None):
 
 FRAME_COUNTER = 0
 
+class FrameConverterAssert:
+    def __init__(self, compiler_fn: CompilerFn, one_graph: bool = True, export: bool = False, export_constraints=None):
+        self.compiler_fn = compiler_fn
+        self.one_graph = one_graph
+        self.export = export
+        self.export_constraints = export_constraints
+        self._torchdynamo_orig_callable = compiler_fn
+        reset_graph_break_dup_checker()
 
-def convert_frame_assert(
-    compiler_fn: CompilerFn,
-    one_graph: bool = True,
-    export: bool = False,
-    export_constraints=None,
-):
-    """Fully convert a frame into an FX graph"""
-    reset_graph_break_dup_checker()
+        
 
-    def _convert_frame_assert(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    def convert_frame_assert(
+        compiler_fn: CompilerFn,
+        one_graph: bool = True,
+        export: bool = False,
+        export_constraints=None,
     ):
-        increment_frame()
-        global FRAME_COUNTER
-        if "_id" not in frame_state:
-            frame_state["_id"] = FRAME_COUNTER
-            FRAME_COUNTER += 1
+        """Fully convert a frame into an FX graph"""
+        reset_graph_break_dup_checker()
 
-        code = frame.f_code
-
-        if code in input_codes and (
-            recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
+        def _convert_frame_assert(
+            frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
         ):
-            message = (
-                f"Recompiling function {code.co_name} in {code.co_filename}",
-                f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+            increment_frame()
+            global FRAME_COUNTER
+            if "_id" not in frame_state:
+                frame_state["_id"] = FRAME_COUNTER
+                FRAME_COUNTER += 1
+
+            code = frame.f_code
+
+            if code in input_codes and (
+                recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
+            ):
+                message = (
+                    f"Recompiling function {code.co_name} in {code.co_filename}",
+                    f"triggered by the following guard failure: {str(guard_failures[code][-1])}",
+                )
+
+                if recompiles_log.isEnabledFor(logging.DEBUG):
+                    recompiles_log.debug(message)
+
+                if config.error_on_recompile:
+                    raise exc.RecompileError(message)
+
+            input_codes.add(code)
+            if code in output_codes:
+                return None
+            if (
+                os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
+                and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
+            ):
+                return None
+            if code.co_name == "<genexpr>" and code.co_filename.endswith(
+                ("transformers/file_utils.py", "transformers/utils/generic.py")
+            ):
+                # not needed, but cleans up torchbench error stats
+                return None
+            if code.co_name == "__setattr__":
+                # setattr could be tricky to handle generally,
+                # but also not likely useful to compile- skip the whole frame
+                return None
+            if code.co_name == "__init__" and code.co_filename.startswith(
+                os.path.dirname(torch.optim.__file__)
+            ):
+                # optimizer support is still incomplete see
+                # test_state_dict in test/dynamo/test_optimizers.py
+                return None
+
+            # Check if the frame is generated by an exec builtin call
+            # TODO - Running exec generated frame seems propagates f_globals to the
+            # next frames.
+            if code.co_name == "<module>" and code.co_filename == "<string>":
+                return None
+
+            if (
+                code.co_name == "<lambda>"
+                and code.co_filename == "<string>"
+                and not bool(frame.f_builtins)
+            ):
+                # namedtuple subclass constructor. Empty builtins cause issue with
+                # len keyword in LIST_LEN guard.
+                return None
+
+            if is_generator(code):
+                unimplemented("generator")
+            if cache_size >= config.cache_size_limit:
+
+                def format_func_info(code):
+                    return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+
+                def format_guard_failures(code):
+                    # For the common case, it's sufficient to see just the most recent failure.
+                    # We could add a verbose mode if needed
+                    return f"{str(guard_failures[code][-1])}"
+
+                assert code in guard_failures, "TODO(whc) any other recompile reasons?"
+                log.warning(
+                    "torch._dynamo hit config.cache_size_limit (%s)\n"
+                    "   function: %s\n"
+                    "   reasons:  %s\n"
+                    "to diagnose recompilation issues, see %s.",
+                    config.cache_size_limit,
+                    format_func_info(code),
+                    format_guard_failures(code),
+                    troubleshooting_url,
+                )
+                unimplemented("cache_size_limit reached")
+
+            if not has_tensor_in_frame(frame):
+                return None
+
+            global initial_grad_state
+            initial_grad_state = torch.is_grad_enabled()
+
+            global initial_deterministic_algorithms_state
+            initial_deterministic_algorithms_state = (
+                torch.are_deterministic_algorithms_enabled()
             )
 
-            if recompiles_log.isEnabledFor(logging.DEBUG):
-                recompiles_log.debug(message)
-
-            if config.error_on_recompile:
-                raise exc.RecompileError(message)
-
-        input_codes.add(code)
-        if code in output_codes:
-            return None
-        if (
-            os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION")
-            and os.environ.get("TORCHDYNAMO_DEBUG_FUNCTION") != code.co_name
-        ):
-            return None
-        if code.co_name == "<genexpr>" and code.co_filename.endswith(
-            ("transformers/file_utils.py", "transformers/utils/generic.py")
-        ):
-            # not needed, but cleans up torchbench error stats
-            return None
-        if code.co_name == "__setattr__":
-            # setattr could be tricky to handle generally,
-            # but also not likely useful to compile- skip the whole frame
-            return None
-        if code.co_name == "__init__" and code.co_filename.startswith(
-            os.path.dirname(torch.optim.__file__)
-        ):
-            # optimizer support is still incomplete see
-            # test_state_dict in test/dynamo/test_optimizers.py
-            return None
-
-        # Check if the frame is generated by an exec builtin call
-        # TODO - Running exec generated frame seems propagates f_globals to the
-        # next frames.
-        if code.co_name == "<module>" and code.co_filename == "<string>":
-            return None
-
-        if (
-            code.co_name == "<lambda>"
-            and code.co_filename == "<string>"
-            and not bool(frame.f_builtins)
-        ):
-            # namedtuple subclass constructor. Empty builtins cause issue with
-            # len keyword in LIST_LEN guard.
-            return None
-
-        if is_generator(code):
-            unimplemented("generator")
-        if cache_size >= config.cache_size_limit:
-
-            def format_func_info(code):
-                return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
-
-            def format_guard_failures(code):
-                # For the common case, it's sufficient to see just the most recent failure.
-                # We could add a verbose mode if needed
-                return f"{str(guard_failures[code][-1])}"
-
-            assert code in guard_failures, "TODO(whc) any other recompile reasons?"
-            log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
-                "   function: %s\n"
-                "   reasons:  %s\n"
-                "to diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
-                format_func_info(code),
-                format_guard_failures(code),
-                troubleshooting_url,
+            signpost_event(
+                "dynamo",
+                "_convert_frame_assert._compile",
+                {
+                    "co_name": code.co_name,
+                    "co_filename": code.co_filename,
+                    "co_firstlineno": code.co_firstlineno,
+                    "cache_size": cache_size,
+                },
             )
-            unimplemented("cache_size_limit reached")
 
-        if not has_tensor_in_frame(frame):
-            return None
+            return _compile(
+                frame.f_code,
+                frame.f_globals,
+                frame.f_locals,
+                frame.f_builtins,
+                compiler_fn,
+                one_graph,
+                export,
+                export_constraints,
+                hooks,
+                frame,
+                frame_state=frame_state,
+            )
 
-        global initial_grad_state
-        initial_grad_state = torch.is_grad_enabled()
+        _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
+        return wrap_convert_context(_convert_frame_assert)
 
-        global initial_deterministic_algorithms_state
-        initial_deterministic_algorithms_state = (
-            torch.are_deterministic_algorithms_enabled()
-        )
 
-        signpost_event(
-            "dynamo",
-            "_convert_frame_assert._compile",
-            {
-                "co_name": code.co_name,
-                "co_filename": code.co_filename,
-                "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size,
-            },
-        )
+    def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
+        return self._convert_frame_assert(frame, cache_size, hooks, frame_state)
 
-        return _compile(
-            frame.f_code,
-            frame.f_globals,
-            frame.f_locals,
-            frame.f_builtins,
-            compiler_fn,
-            one_graph,
-            export,
-            export_constraints,
-            hooks,
-            frame,
-            frame_state=frame_state,
-        )
-
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    return wrap_convert_context(_convert_frame_assert)
+def convert_frame_assert(compiler_fn: CompilerFn, one_graph: bool = True, export: bool = False, export_constraints=None):
+    """Fully convert a frame into an FX graph"""
+    return wrap_convert_context(FrameConverterAssert(compiler_fn, one_graph, export, export_constraints))
 
 
 @dynamo_timed(phase_name="entire_frame_compile")
@@ -489,16 +508,15 @@ def _compile(
         raise InternalTorchDynamoError() from e
 
 
-def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
-    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
-    inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+class FrameConverter:
+    def __init__(self, compiler_fn: CompilerFn, hooks: Hooks):
+        self.inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
+        self._torchdynamo_orig_callable = compiler_fn
 
-    def _convert_frame(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
-    ):
+    def _convert_frame(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks, frame_state)
+            result = self.inner_convert(frame, cache_size, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except (NotImplementedError, Unsupported):
@@ -509,9 +527,13 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
             log.info("converting frame raised error, suppressing error")
         return None
 
-    _convert_frame._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
-    return _convert_frame
+    def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
+        return self._convert_frame(frame, cache_size, hooks, frame_state)
 
+
+def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
+    """Try to convert a frame into an FX graph, if error leave frame unmodified"""
+    return FrameConverter(compiler_fn, hooks)
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
