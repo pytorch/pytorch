@@ -304,6 +304,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def current_tracer(self):
         return self.tracers[-1]
 
+    def is_root_tracer(self):
+        # Helper to tell if we are inside the higher order operator tracing.
+        return len(self.tracers) == 1
+
     @property
     def graph(self):
         return self.current_tracer.graph
@@ -514,10 +518,21 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
-            if len(self.tracers) > 1:
-                unimplemented(
-                    "accessing attribute of nn.Module inside HigherOrderOperator"
-                )
+            tracer = self.current_tracer
+            if not self.is_root_tracer():
+                # For higher order ops, we don't want to insert the get_attr in
+                # innermost graph. Instead, we want to raise the params/buffers
+                # as inputs to the higher-order graph, and register them as
+                # get_attrs in the root tracer.
+
+                # Note that Dynamo will still call lift_tracked_freevar_to_input
+                # when these inputs are encountered for the inner graph. The
+                # only difference is what happens at the root tracer for
+                # nn.Parameters vs free inputs. The free inputs are registered
+                # as placeholders in the root graph, whereas the nn.Parameters
+                # are registered as get_attr nodes in the root graph.
+                tracer = self.root_tracer
+
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -526,7 +541,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 self.param_name_to_source[module_key] = source
                 return wrap_fx_proxy(
                     self.root_tx,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    tracer.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
                 )
@@ -1006,11 +1021,13 @@ class SubgraphTracer(fx.Tracer):
         # list to determine that, when tracing the body function of a HigherOrderOperator,
         # if a new proxy is actually a free variable.
         self.seen_proxies = set({})
-        # A list of previously free variables that we lifted to being inputs
-        # of the graph. If we are tracing a HigherOrderOperator's body_fn,
-        # then we need to keep track of this so we can rewrite the
-        # HigherOrderOperator call using the traced body_fn.
-        self.lifted_freevars = set({})
+        # A list of previously free variables that we lifted to being inputs of
+        # the graph. If we are tracing a HigherOrderOperator's body_fn, then we
+        # need to keep track of this so we can rewrite the HigherOrderOperator
+        # call using the traced body_fn. This is a OrderedDict (instead of set)
+        # so that we can maintain the order of args for the HigherOrderOperator
+        # call. The values are None.
+        self.lifted_freevars = collections.OrderedDict()
 
     def create_proxy(
         self,
@@ -1181,7 +1198,7 @@ class SubgraphTracer(fx.Tracer):
             self.parent is not None
         ), "lift_tracked_freevar_to_input on root SubgraphTracer"
         self.create_graph_input(proxy.node.name)
-        self.lifted_freevars.add(proxy)
+        self.lifted_freevars[proxy] = None
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
             self.parent.lift_tracked_freevar_to_input(proxy)
 
