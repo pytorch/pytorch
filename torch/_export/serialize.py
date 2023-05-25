@@ -212,7 +212,7 @@ def import_call_spec(call_spec: CallSpec) -> Optional[ep.CallSpec]:
     return None
 
 
-def export_signature(sig: Optional[ep.GraphSignature]) -> GraphSignature:
+def export_signature(sig: Optional[ep.ExportGraphSignature]) -> GraphSignature:
     if sig is None:
         return GraphSignature(
             inputs_to_parameters={},
@@ -243,15 +243,15 @@ def export_signature(sig: Optional[ep.GraphSignature]) -> GraphSignature:
     return graph_signature
 
 
-def import_signature(sig: GraphSignature) -> ep.GraphSignature:
+def import_signature(sig: GraphSignature) -> ep.ExportGraphSignature:
     backward_signature = None
     if bw_sig := sig.backward_signature:
-        backward_signature = ep.BackwardSignature(
+        backward_signature = ep.ExportBackwardSignature(
             gradients_to_parameters=dict(bw_sig.gradients_to_parameters),
             gradients_to_user_inputs=dict(bw_sig.gradients_to_user_inputs),
             loss_output=bw_sig.loss_output,
         )
-    return ep.GraphSignature(
+    return ep.ExportGraphSignature(
         parameters=list(sig.inputs_to_parameters.values()),
         buffers=list(sig.inputs_to_buffers.values()),
         user_inputs=list(sig.user_inputs),
@@ -671,39 +671,39 @@ class Deserializer:
 
     def import_input(self, value: Argument) -> Any:
         type_ = value.type
-        if type_ == Argument.fields().as_none:
+        if type_ == Argument.fields().as_none.name:
             # None should converted as None, but is encoded as bool in serialized
             # Convert serialized object to torch equivalent
             return None
-        elif type_ == Argument.fields().as_tensor:
+        elif type_ == Argument.fields().as_tensor.name:
             return self.serialized_name_to_node[value.as_tensor.name]
-        elif type_ == Argument.fields().as_tensors:
+        elif type_ == Argument.fields().as_tensors.name:
             return [self.serialized_name_to_node[arg.name] for arg in value.as_tensors]
-        elif type_ == Argument.fields().as_int:
+        elif type_ == Argument.fields().as_int.name:
             return value.as_int
-        elif type_ == Argument.fields().as_ints:
+        elif type_ == Argument.fields().as_ints.name:
             # convert from serialized.python.types.List to python list
             return list(value.as_ints)
-        elif type_ == Argument.fields().as_float:
+        elif type_ == Argument.fields().as_float.name:
             return value.as_float
-        elif type_ == Argument.fields().as_floats:
+        elif type_ == Argument.fields().as_floats.name:
             # convert from serialized.python.types.List to python list
             return list(value.as_floats)
-        elif type_ == Argument.fields().as_string:
+        elif type_ == Argument.fields().as_string.name:
             return str(value.as_string)
-        elif type_ == Argument.fields().as_sym_int or type_ == Argument.fields().as_sym_ints:
+        elif type_ in {Argument.fields().as_sym_int.name, Argument.fields().as_sym_ints.name}:
             raise ValueError("Symints not yet supported")
-        elif type_ == Argument.fields().as_scalar_type:
+        elif type_ == Argument.fields().as_scalar_type.name:
             return _SERIALIZE_TO_TORCH_DTYPE[value.as_scalar_type]
-        elif type_ == Argument.fields().as_memory_format:
+        elif type_ == Argument.fields().as_memory_format.name:
             return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[value.as_memory_format]
-        elif type_ == Argument.fields().as_layout:
+        elif type_ == Argument.fields().as_layout.name:
             return _SERIALIZE_TO_TORCH_LAYOUT[value.as_layout]
-        elif type_ == Argument.fields().as_device:
+        elif type_ == Argument.fields().as_device.name:
             return import_device(value.as_device),
-        elif type_ == Argument.fields().as_bool:
+        elif type_ == Argument.fields().as_bool.name:
             return value.as_bool
-        elif type_ == Argument.fields().as_bools:
+        elif type_ == Argument.fields().as_bools.name:
             # convert from serialized.python.types.List to python list
             return list(value.as_bools)
         else:
@@ -723,11 +723,11 @@ class Deserializer:
         # serialization, see [NOTE: Multiple outputs]
         output_names = []
         if len(serialized_node.outputs) == 1:
-            assert serialized_node.outputs[0].type == Argument.fields().as_tensors
+            assert serialized_node.outputs[0].type == Argument.fields().as_tensors.name
             output_names = [arg.name for arg in serialized_node.outputs[0].as_tensors]
         else:
             for output in serialized_node.outputs:
-                assert output.type == Argument.fields().as_tensor
+                assert output.type == Argument.fields().as_tensor.name
                 output_names.append(output.as_tensor.name)
 
         for idx, name in enumerate(output_names):

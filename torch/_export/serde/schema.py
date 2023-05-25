@@ -1,7 +1,7 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import dataclass, fields
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
@@ -15,8 +15,7 @@ class _Union:
 
     @classmethod
     def fields(cls):
-        field_name = [(f.name, str, field(default=f.name)) for f in fields(cls)]
-        return make_dataclass("FieldDataClass", field_name)()
+        return Enum("FieldEnum", {f.name: f.name for f in fields(cls)})
 
     def __post_init__(self):
         assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
