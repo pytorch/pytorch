@@ -1821,6 +1821,17 @@ def forward(self, tangents_1):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
+    def test_inference_mode(self):
+        m = torch.nn.Linear(4, 4)
+        inp = torch.randn(4, 4)
+
+        aot_mod = aot_module(m, fw_compiler=nop)
+
+        with torch.inference_mode():
+            out_ref = m(inp)
+            out_test = aot_mod(inp)
+        self.assertEqual(out_ref, out_test)
+
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -2676,7 +2687,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            AssertionError, "Unexpected fake buffer"
+            TypeError, "FakeTensor"
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
@@ -2766,8 +2777,6 @@ symbolic_aot_autograd_failures = {
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
     skip('linalg.householder_product'),  # flaky
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
@@ -2775,7 +2784,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function...
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('linalg.matrix_power', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/dec...
     xfail('linalg.pinv', 'hermitian'),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta fu...
@@ -2833,7 +2841,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
-    xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...
