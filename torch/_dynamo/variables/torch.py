@@ -1,3 +1,5 @@
+import collections
+import inspect
 import logging
 
 import math
@@ -72,8 +74,23 @@ constant_fold_functions = [
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
+
+constant_processgroup_functions = []
+
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
+    from torch.distributed.distributed_c10d import (
+        _get_group_tag,
+        get_process_group_ranks,
+    )
+
+    constant_processgroup_functions.extend(
+        [
+            get_process_group_ranks,
+            _get_group_tag,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -128,13 +145,11 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-        try:
-            if value in tensor_dunder_fns_remap:
-                value = tensor_dunder_fns_remap[value]
-        except TypeError as e:
-            # is it cleaner to somehow exclude unhashable types from the `in` check above?
-            if "unhashable type" not in e.args[0]:
-                raise
+        if (
+            isinstance(value, collections.abc.Hashable)
+            and value in tensor_dunder_fns_remap
+        ):
+            value = tensor_dunder_fns_remap[value]
 
         self.value = value
 
@@ -500,10 +515,10 @@ class TorchVariable(VariableTracker):
                 tx, [args[0], result], {}
             )
         elif (
-            self.value == torch.distributed.get_process_group_ranks
-            or self.value == torch.distributed.distributed_c10d._get_group_tag
+            inspect.isfunction(self.value)
+            and self.value in constant_processgroup_functions
         ):
-            # guard on this 'pg'
+            # We will guard on the processgroup input (TODO)
             # desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"

@@ -5,7 +5,6 @@ from unittest.mock import patch
 import torch
 from torch._C import FileCheck
 # for some reason importing functional collectives after dynamo breaks collectives handling!
-# import torch.distributed
 import torch.distributed._functional_collectives as _functional_collectives
 import torch._dynamo
 import torch._dynamo.test_case
@@ -424,6 +423,32 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
         assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
+
+
+    def test_dynamo_graphbreaks_unsupported_async_op(self):
+
+        def func(inp, out, *, pg):
+            work = torch.distributed.reduce_scatter_tensor(
+                out,
+                inp,
+                group=pg,
+                async_op=True
+            )
+            work.wait()
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 0
+        assert counter.op_count == 0
         assert same(outputs, correct_outputs)
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
