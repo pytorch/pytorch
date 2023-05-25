@@ -590,9 +590,7 @@ def get_static_input_idxs_for_bw(fx_g: torch.fx.GraphModule):
     return out
 
 
-def get_static_input_idxs_for_fw(
-    num_primary_inputs: int, num_aot_graph_inputs: int
-):
+def get_static_input_idxs_for_fw(num_primary_inputs: int, num_aot_graph_inputs: int):
     # This function returns the range of ids pointing to the location of parameters in the fwd pass
     # The input signature for the fwd pass from AOT Autograd is
     #   (*parameters, *primary_inputs)
