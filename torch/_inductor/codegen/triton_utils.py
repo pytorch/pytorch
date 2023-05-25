@@ -1,5 +1,4 @@
 import sympy
-from triton.runtime.jit import JITFunction
 
 from .. import config
 from ..utils import instance_descriptor
@@ -8,6 +7,8 @@ from .common import SizeArg, TensorArg
 
 
 def signature_of(arg):
+    from triton.runtime.jit import JITFunction
+
     if isinstance(arg, TensorArg):
         tye = JITFunction._type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):
@@ -34,7 +35,12 @@ def config_of(args):
             if isinstance(x.expr, (int, sympy.Integer)):
                 # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
                 # _maybe_evaluate_static...
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
+                if x.name.startswith("load_seed_offset"):
+                    return False
+                else:
+                    return V.graph.sizevars.statically_known_multiple_of(
+                        x.expr, ALIGNMENT
+                    )
             else:
                 return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")

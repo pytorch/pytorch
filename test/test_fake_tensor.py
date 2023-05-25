@@ -29,6 +29,7 @@ import copy
 import torch._functorch.config
 from unittest.mock import patch
 
+from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
@@ -76,6 +77,16 @@ class FakeTensorTest(TestCase):
             x = torch.rand([4])
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fsdp_flat_param(self):
+        from torch.distributed.fsdp.flat_param import FlatParameter
+        with FakeTensorMode() as m:
+            data = torch.randn(2, 2)
+            param = FlatParameter(data, requires_grad=True)
+        self.assertIsInstance(param, FlatParameter)
+        self.assertIsInstance(param, torch.nn.Parameter)
+        self.assertIsInstance(param, FakeTensor)
 
     def test_non_parameter_grad(self):
         mode = FakeTensorMode()

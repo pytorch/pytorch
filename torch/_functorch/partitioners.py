@@ -542,7 +542,7 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
             continue
 
-        if node.op == 'placeholder' and "primals" in node.target:
+        if _is_primal(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
         # If a node can't be recomputed (too expensive or involves randomness),
