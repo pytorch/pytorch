@@ -133,7 +133,7 @@ Tensor fake_quantize_per_tensor_affine_cachemask_backward(
   return dY * mask;
 }
 
-static int64_t _get_zero_point_from_tensor(
+int64_t _get_zero_point_from_tensor(
     const Tensor& zero_point,
     int64_t quant_min,
     int64_t quant_max,
