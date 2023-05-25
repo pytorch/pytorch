@@ -650,15 +650,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(model, (x, y, z), input_names=("x", "y", "z"))
         self.run_test(model, (x,), {"y": y, "z": z}, input_names=("x", "y", "z"))
-
-        # Requires input_names to be set so that we can feed the inputs properly into ORT.
-        # TODO: Export default values as ONNX initializers, then this should not raise.
-        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
-        # Default values are accessible via FunctionSchema.
-        with self.assertRaisesRegex(
-            ValueError, "Model requires 3 inputs. Input Feed contains 2"
-        ):
-            self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
+        self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
 
         for example_inputs, example_kwargs in (
             ((x, y, None), {}),
@@ -746,7 +738,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x,))
         # TODO: AssertionError: Tensor-likes are not close!
         # This might be the first arg x is skipped.
-        # self.run_test(model, (), {"y": y}, input_names=["y"])
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            self.run_test(model, (), {"y": y}, input_names=["y"])
 
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
