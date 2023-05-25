@@ -748,6 +748,27 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3, 3, 3)
         self._grad_compile_check(wrapper_fn, x)
 
+    def test_grad_with_graph_break(self):
+        counters.clear()
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn)(x)
+
+        with self.assertRaises(AssertionError):
+            # TODO(kshitij12345):
+            # Something weird is happening on graph break,
+            # torch.compile(wrapper_fn)(x) returns `torch.func.grad` function
+            # and hence we get an error here.
+            self.assertEqual(actual, expected)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
