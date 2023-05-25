@@ -200,29 +200,17 @@ def import_operator(serialized_target, op_version):
     return target
 
 
-def export_call_spec(call_spec: Optional[ep.CallSpec]) -> CallSpec:
-    if call_spec is None:
-        return CallSpec(in_spec="", out_spec="")
+def export_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     # TODO(angelayi): spec
     return CallSpec(in_spec="", out_spec="")
 
 
-def import_call_spec(call_spec: CallSpec) -> Optional[ep.CallSpec]:
+def import_call_spec(call_spec: CallSpec) -> ep.CallSpec:
     # TODO(angelayi): spec
-    return None
+    return ep.CallSpec(in_spec=None, out_spec=None)
 
 
-def export_signature(sig: Optional[ep.ExportGraphSignature]) -> GraphSignature:
-    if sig is None:
-        return GraphSignature(
-            inputs_to_parameters={},
-            inputs_to_buffers={},
-            user_inputs=[],
-            user_outputs=[],
-            buffers_to_mutate={},
-            backward_signature=None,
-        )
-
+def export_signature(sig: ep.ExportGraphSignature) -> GraphSignature:
     if bw_sig := sig.backward_signature:
         backward_signature = BackwardSignature(
             gradients_to_parameters=bw_sig.gradients_to_parameters,
@@ -263,10 +251,7 @@ def import_signature(sig: GraphSignature) -> ep.ExportGraphSignature:
     )
 
 
-def export_state_dict(state_dict: Optional[Dict[str, Any]]) -> bytes:
-    if state_dict is None:
-        return bytes("", encoding="utf8")
-
+def export_state_dict(state_dict: Dict[str, Any]) -> bytes:
     buffer = io.BytesIO()
     state_dict = dict(state_dict)
     for name in state_dict:
@@ -753,7 +738,8 @@ def serialize(exported_program: ep.ExportedProgram) -> Tuple[GraphModule, bytes]
 def deserialize(serialized_graph_module: GraphModule, state_dict: bytes) -> ep.ExportedProgram:
     return Deserializer().deserialize(serialized_graph_module, state_dict)
 
-###################################################################################################################
+
+###############################################################################
 
 
 def convert_fake_tensor_to_tensor_meta(
