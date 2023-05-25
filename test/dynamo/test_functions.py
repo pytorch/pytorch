@@ -808,6 +808,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return tmp
 
     @make_test
+    def test_not_list(a):
+        return not [a + 1]
+
+    @make_test
     def test_islice_chain(a, b):
         tmp1 = [a + 1, a + 2]
         tmp2 = [a + 3, a + 4]
