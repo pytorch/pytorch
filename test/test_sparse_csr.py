@@ -1,7 +1,6 @@
 # Owner(s): ["module: sparse"]
 
 import torch
-import sys
 import random
 import itertools
 import unittest
