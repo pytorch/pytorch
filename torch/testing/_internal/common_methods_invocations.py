@@ -17459,6 +17459,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestInductorOpInfo', 'test_comprehensive'),
             # randomness
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
             # lambda impl
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -17470,6 +17471,8 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
     ),
     UnaryUfuncInfo(
         "nn.functional.softplus",
