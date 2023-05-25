@@ -11,7 +11,6 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
-#include <ATen/ops/_resize_output.h>
 #endif
 
 namespace at { namespace native {
@@ -155,7 +154,7 @@ const Tensor& resize_as_(
 }
 
 
-void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
+static void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   storage->set_nbytes(std::move(size_bytes));
 }

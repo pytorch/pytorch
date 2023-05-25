@@ -1977,6 +1977,8 @@ class MutationLayout(Layout):
             None,  # type: ignore[arg-type]
         )
         self.target = target
+        name = self.get_buffer().get_name()
+        V.graph.mark_buffer_mutated(name)
 
     @Layout.stride.getter
     def stride(self):
@@ -1985,7 +1987,7 @@ class MutationLayout(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def real_layout(self):
+    def get_buffer(self) -> "Buffer":
         def unwrap_views(target):
             if isinstance(target, MutationLayout):
                 return unwrap_views(target.target)
@@ -1995,12 +1997,16 @@ class MutationLayout(Layout):
                 return unwrap_views(target.data)
             return target
 
-        return unwrap_views(self.target).layout
+        result = unwrap_views(self.target)
+        assert isinstance(result, Buffer), "MutationLayout must refer to a buffer"
+        return result
+
+    def real_layout(self):
+        return self.get_buffer().layout
 
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
-        V.graph.realize_users_of(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -3651,7 +3657,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.require_stride_order(other, req_stride_order)
-        V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,

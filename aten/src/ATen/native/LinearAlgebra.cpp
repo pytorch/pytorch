@@ -623,7 +623,7 @@ Tensor linalg_matrix_power_impl(
       // Clone input to include result in the autograd graph
       out = self.clone(at::MemoryFormat::Contiguous);
     }
-    return out.copy_(at::eye(self.size(-2), self.options()));
+    return out.copy_(at::eye_symint(self.sym_size(-2), self.options()));
   }
   if (n == 1) {
     return _out.has_value() ? out.copy_(self)
@@ -1893,7 +1893,7 @@ The behavior depends on the dimensionality of the Tensors as follows:
 - Otherwise, we return bmm, after broadcasting and folding the batched dimensions if
   there's more than one
 */
-static Tensor _matmul_impl(
+Tensor _matmul_impl(
     Tensor& out,
     const Tensor& tensor1,
     const Tensor& tensor2) {
