@@ -385,10 +385,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 pg,
             )
         local_size = [4, 4]
+        # single-proc test
         global_size = local_size
-
-        # ok this test is single proc. what a joke
-        # global_size[0] *= self.world_size
 
         inputs = torch.ones(local_size, device=self.device)
         outputs = torch.empty(global_size, device=self.device)
@@ -412,6 +410,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 group=pg,
             )
         local_size = [4, 4]
+        # single-proc test
         global_size = local_size
 
         inputs = torch.ones(local_size, device=self.device)
