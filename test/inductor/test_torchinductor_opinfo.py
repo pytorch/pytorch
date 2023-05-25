@@ -255,8 +255,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {b8, f16, f32, f64, i32, i64},
     "fft.rfftn": {b8, f16, f32, f64, i32, i64},
-    # AssertionError: Scalars are not close!
-    "empty_strided": {b8, i32, i64, f16, f32, f64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},
@@ -334,8 +332,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # AssertionError: Scalars are not close!
-    "empty_strided": {b8, i32, i64, f16, f32, f64},
     # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
     # linalg._svd's return value has different strides on CUDA vs CPU which causes this
     # In test_meta.py there is a mechanism to skipping strides checks for some ops
@@ -471,6 +467,7 @@ inductor_override_kwargs = {
     "empty_permuted": {"assert_equal": False},
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
+    "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
