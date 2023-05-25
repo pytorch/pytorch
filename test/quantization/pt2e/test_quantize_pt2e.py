@@ -18,6 +18,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     OperatorConfig,
     QNNPackQuantizer,
     Quantizer,
+    QuantizationSpec,
 )
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
@@ -71,13 +72,34 @@ class TestQuantizePT2E(QuantizationTestCase):
                         assert isinstance(weight, Node)
                         bias = node.args[2]
                         assert isinstance(bias, Node)
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_weight_observer,
+                        )
+                        bias_qspec = QuantizationSpec(
+                            dtype=torch.float32,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
-                                input_act: observer.default_observer,
-                                weight: observer.default_weight_observer,
-                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                                bias: bias_qspec,
                             },
-                            output_qspec=observer.default_observer,
+                            output_qspec=act_qspec,
                             _annotated=True,
                         )
 
@@ -140,13 +162,34 @@ class TestQuantizePT2E(QuantizationTestCase):
                         assert isinstance(weight, Node)
                         bias = node.args[2]
                         assert isinstance(bias, Node)
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_weight_observer,
+                        )
+                        bias_qspec = QuantizationSpec(
+                            dtype=torch.float32,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
-                                input_act: observer.default_observer,
-                                weight: observer.default_weight_observer,
-                                bias: observer.PlaceholderObserver.with_args(dtype=torch.float),
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                                bias: bias_qspec,
                             },
-                            output_qspec=observer.default_observer,
+                            output_qspec=act_qspec,
                             _annotated=True,
                         )
                     if (
@@ -160,12 +203,12 @@ class TestQuantizePT2E(QuantizationTestCase):
                         assert isinstance(input_act, Node)
                         maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
-                                input_act: observer.default_observer,
+                                input_act: act_qspec,
                             },
                             _annotated=True,
                         )
                         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                            output_qspec=observer.default_observer,
+                            output_qspec=act_qspec,
                             _input_output_share_observers=True,
                             _annotated=True,
                         )

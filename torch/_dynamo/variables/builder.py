@@ -373,7 +373,10 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
-                    result, type(value), value.default_factory, guards=guards
+                    result,
+                    type(value),
+                    self._wrap(value.default_factory),
+                    guards=guards,
                 )
             else:
                 result = ConstDictVariable(result, type(value), guards=guards)
@@ -511,12 +514,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.cuda.streams.Stream):
-            return CUDAStreamVariable(
-                None,
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            unimplemented("CUDAStreamVariable does not currently work soundly.")
+            # return CUDAStreamVariable(
+            #     None,
+            #     value,
+            #     source=self.source,
+            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
+            # )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):

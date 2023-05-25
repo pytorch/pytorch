@@ -8,7 +8,7 @@
 
 namespace torch::jit::tensorexpr {
 
-static std::string blockDtypeCppString(const Dtype& dtype) {
+std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "1";
