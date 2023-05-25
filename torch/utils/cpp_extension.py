@@ -16,7 +16,10 @@ import torch
 import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
-from .hipify import hipify_python
+try:
+    from .hipify import hipify_python # type: ignore[import]
+except ModuleNotFoundError:
+    hipify_python = None # type: ignore[assignment]
 from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 

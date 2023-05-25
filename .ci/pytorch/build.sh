@@ -31,9 +31,6 @@ cmake --version
 echo "Environment variables:"
 env
 
-# install hipify_torch repo
-pip install third_party/hipify_torch
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
   nvcc --version
@@ -149,6 +146,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   # hipify sources
+  pip install third_party/hipify_torch
   python tools/amd_build/build_amd.py
 fi
 
