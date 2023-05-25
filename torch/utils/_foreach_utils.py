@@ -15,7 +15,7 @@ class SupportForeachDeviceType(object):
     _default_device_type = "cuda"
 
     @staticmethod
-    def add_device_type(device: str = "cuda"):
+    def set_device_type(device: str = "cuda"):
         """
         Add the default device type for foreach support.
 
