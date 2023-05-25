@@ -247,24 +247,30 @@ def make_export_graph_module(
 
     gm = fx.GraphModule(root, graph, class_name)
 
-    input_tracker = 0
-
-    # group by input id
-    input_shape_constraints_by_tensor_id = defaultdict(list)
-    for constraint in input_shape_constraints:
-        input_shape_constraints_by_tensor_id[constraint["t_id"]].append((constraint["dim"], constraint["min"], constraint["max"]))
-
-    input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
+    tensor_id_to_input_names = defaultdict(list)
     input_name_to_example_inputs: Dict[str, Any] = {}
     if example_inputs is not None:
         input_tracker = 0
         for node in gm.graph.nodes:
             if node.op == "placeholder":
                 example_input = example_inputs[input_tracker]
-                if id(example_input) in input_shape_constraints_by_tensor_id:
-                    input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
+                example_input_id = id(example_input)
+                tensor_id_to_input_names[example_input_id].append(node.name)
                 input_name_to_example_inputs[node.name] = example_input
                 input_tracker += 1
+
+    input_shape_constraints_by_src_name = defaultdict(lambda: {"range": [], "equality": []})
+    for constraint in input_shape_constraints:
+        for name in tensor_id_to_input_names[constraint["t_id"]]:
+            input_shape_constraints_by_src_name[name]["range"].append(
+                (constraint["dim"], constraint["min"], constraint["max"])
+            )
+        if constraint["shared"] is not None:
+            for name in tensor_id_to_input_names[constraint["shared"]["t_id"]]:
+                for other_name in tensor_id_to_input_names[constraint["t_id"]]:
+                    input_shape_constraints_by_src_name[name]["equality"].append(
+                        (constraint["shared"]["dim"], other_name, constraint["dim"])
+                    )
 
     meta = ExportMetadata(
         in_spec=in_spec,

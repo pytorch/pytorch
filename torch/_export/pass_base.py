@@ -147,6 +147,7 @@ class ExportPassBase(PassBase):
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
+            self._processing_placeholders = True
 
         def placeholder(
             self,
@@ -214,7 +215,9 @@ class ExportPassBase(PassBase):
             raise ExportPassBaseError("call_method is not supported.")
 
         def run_node(self, n: torch.fx.Node) -> Argument:
-            self.node = n
+            if self._processing_placeholders and n.op != "placeholder":
+                self._processing_placeholders = False
+                self.callback.postprocess_placeholders()
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 
@@ -293,6 +296,9 @@ class ExportPassBase(PassBase):
         arg_proxy.node.meta = meta.data
         self.tracer.set_metadata(arg_proxy.node, arg)
         return ProxyValue(arg, arg_proxy)
+
+    def postprocess_placeholders(self):
+        pass
 
     def call_operator(
         self,

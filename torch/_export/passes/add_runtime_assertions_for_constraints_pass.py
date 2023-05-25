@@ -1,9 +1,10 @@
-from collections import defaultdict, namedtuple
-from functools import partial
-from typing import Dict, List, Tuple, Optional
-
 import math
 import operator
+from collections import defaultdict, namedtuple
+from dataclasses import dataclass
+from functools import partial
+from typing import Any, Dict, List, Optional, Tuple
+
 import sympy
 
 import torch
@@ -18,7 +19,19 @@ from torch.fx.passes.infra.pass_base import PassResult
 __all__ = ["AddRuntimeAssertionsForConstraintsPass"]
 
 
-ConstraintSpec = namedtuple("ConstraintSpec", ["constraint_dim", "min_val", "max_val"])
+@dataclass
+class ConstraintSpec:
+    constraint_dim: int
+
+@dataclass
+class RangeConstraintSpec(ConstraintSpec):
+    min_val: int
+    max_val: int
+
+@dataclass
+class EqualityConstraintSpec(ConstraintSpec):
+    other_name: str
+    other_dim: int
 
 # Convert simple sympy Integers into concrete int to
 # insert into graph
@@ -37,34 +50,46 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.current_gm: Optional[torch.fx.GraphModule] = None
 
     def _process_shape_constraints(self, constraints) -> Dict[str, List[ConstraintSpec]]:
-        constraints_name_to_constraint: Dict[str, List[ConstraintSpec]] = defaultdict(
-            list
+        input_name_to_dim_constraints = defaultdict(
+            lambda: {"range": defaultdict(list), "equality": defaultdict(list)}
         )
-
-        constraint_name_to_dim: Dict[str, Dict[int, List[Tuple[int, int]]]] = defaultdict(
-            lambda: defaultdict(list)
-        )
-
-        for name in constraints:
-            for dim, min_val, max_val in constraints[name]:
-                min_max = (_convert_to_int(min_val), _convert_to_int(max_val))
-                constraint_name_to_dim[name][dim].append(min_max)
-
-        # Merge the constraints into a single list of constraints
-        for name, dim_constraints in constraint_name_to_dim.items():
-            for dim, constraints in dim_constraints.items():
-                min_vals = [x[0] for x in constraints]
-                max_vals = [x[1] for x in constraints]
-                min_val = sorted(min_vals, reverse=True)[0]
-                max_val = sorted(max_vals, reverse=False)[0]
-
-                assert min_val <= max_val
-
-                constraints_name_to_constraint[name].append(
-                    ConstraintSpec(constraint_dim=dim, min_val=min_val, max_val=max_val)
+        for name, shape_constraints in constraints.items():
+            for dim, min_val, max_val in shape_constraints["range"]:
+                input_name_to_dim_constraints[name]["range"][dim].append(
+                    (_convert_to_int(min_val), _convert_to_int(max_val))
+                )
+            for dim, other_name, other_dim in shape_constraints["equality"]:
+                input_name_to_dim_constraints[name]["equality"][dim].append(
+                    (other_name, other_dim)
                 )
 
-        return constraints_name_to_constraint
+        # Merge the constraints into a single list of constraints
+        input_name_to_constraints = defaultdict(list)
+        for name, dim_constraints in input_name_to_dim_constraints.items():
+            for dim, range_constraints in dim_constraints["range"].items():
+                if range_constraints:
+                    min_vals, max_vals = zip(*range_constraints)
+                    min_val = sorted(min_vals, reverse=True)[0]
+                    max_val = sorted(max_vals, reverse=False)[0]
+                    assert min_val <= max_val
+                    input_name_to_constraints[name].append(
+                        RangeConstraintSpec(
+                            constraint_dim=dim,
+                            min_val=min_val,
+                            max_val=max_val,
+                        )
+                    )
+            for dim, eq_constraints in dim_constraints["equality"].items():
+                for other_name, other_dim in eq_constraints:
+                    input_name_to_constraints[name].append(
+                        EqualityConstraintSpec(
+                            constraint_dim=dim,
+                            other_name=other_name,
+                            other_dim=other_dim,
+                        )
+                    )
+
+        return input_name_to_constraints
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         self.current_gm = graph_module
@@ -72,6 +97,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self.constraints = self._process_shape_constraints(get_export_meta(self.current_gm).input_shape_constraints)
         self.input_name_to_example_inputs = get_export_meta(self.current_gm).input_name_to_example_inputs
         self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
+        self.input_name_to_args = {}
         return super().call(graph_module)
 
     def _insert_specialized_shapes_assert(self, arg, dims, name, current_inp):
@@ -111,54 +137,78 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         arg = super().placeholder(name, arg, meta)
         if name not in self.input_name_to_example_inputs:
             return arg
-        current_inp = self.input_name_to_example_inputs[name]
+        self.input_name_to_args[name] = arg
+        return arg
+
+    def postprocess_placeholders(self):
         assert self.current_gm is not None
-        all_dims = set(range(current_inp.dim()))
+        equality_constraints = []
+        for name, arg in self.input_name_to_args.items():
+            current_inp = self.input_name_to_example_inputs[name]
+            all_dims = set(range(current_inp.dim()))
 
-        # If no dynamism is specified, we assume all dimensions are specialized
-        if name not in self.constraints:
-            self._insert_specialized_shapes_assert(arg, all_dims, name, current_inp)
-            return arg
+            # If no dynamism is specified, we assume all dimensions are specialized
+            if name not in self.constraints:
+                self._insert_specialized_shapes_assert(arg, all_dims, name, current_inp)
+                return arg
 
-        constraints = self.constraints[name]
+            constraints = self.constraints[name]
 
-        constrained_dims = set()
-        # Add runtime asserts for user specified constraints for each
-        # individual dimensions (e.g not the relational constraints like
-        # x[1] == x[0])
-        for constraint in constraints:
-            constrained_dims.add(constraint.constraint_dim)
-            dim = super().call_operator(
+            constrained_dims = set()
+            # Add runtime asserts for user-specified range constraints for each
+            # individual dimension. Equality constraints like x[1] == x[0] are
+            # handled later.
+            for constraint in constraints:
+                constrained_dims.add(constraint.constraint_dim)
+                dim = super().call_operator(
+                    torch.ops.aten.sym_size,
+                    (arg, constraint.constraint_dim),
+                    {},
+                    NodeMetadata({}),
+                )
+                if isinstance(constraint, RangeConstraintSpec):
+                    assert_msg = (
+                        f"Input {name}'s dimension #{constraint.constraint_dim} size is "
+                        f"outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
+                    )
+                    # TODO (tmanlaibaatar) we are making an assumption that graph generated for
+                    # input dim N >=2 generalizes to N < 2. Ideally we should check that:
+                    # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
+                    # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
+                    # Above can be achieved via a seperate pass.
+                    self._assert_range_constraint(dim, constraint.min_val, constraint.max_val, assert_msg, low_threshold=2)
+                else:
+                    assert isinstance(constraint, EqualityConstraintSpec)
+                    equality_constraints.append((constraint, name, dim))
+
+            specialized_dims = all_dims - constrained_dims
+            # Make all non-constrained dims to be static
+            self._insert_specialized_shapes_assert(arg, specialized_dims, name, current_inp)
+
+        for constraint, name, dim in equality_constraints:
+            # Add runtime asserts for user-specified equality constraints.
+            other_arg = self.input_name_to_args[constraint.other_name]
+            other_dim = super().call_operator(
                 torch.ops.aten.sym_size,
-                (arg, constraint.constraint_dim),
+                (other_arg, constraint.other_dim),
                 {},
                 NodeMetadata({}),
             )
             assert_msg = (
                 f"Input {name}'s dimension #{constraint.constraint_dim} size is "
-                f"outside of specified dynamic range [{constraint.min_val}, {constraint.max_val}]"
+                f"not equal to input {constraint.other_name}'s dimension #{constraint.other_dim}"
             )
-            # TODO (tmanlaibaatar) we are making an assumption that graph generated for
-            # input dim N >=2 generalizes to N < 2. Ideally we should check that:
-            # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
-            # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
-            # Above can be achieved via a seperate pass.
-            self._assert_constraint(dim, constraint.min_val, constraint.max_val, assert_msg, low_threshold=2)
+            self._assert_equality_constraint(dim, other_dim, assert_msg)
 
-        specialized_dims = all_dims - constrained_dims
-        # Make all non-constrained dims to be static
-        self._insert_specialized_shapes_assert(arg, specialized_dims, name, current_inp)
-
-        # TODO Add relational constraints
-        return arg
-
-
-    def _assert_constraint(self, proxy, lower, upper, assert_msg, low_threshold=2):
+    def _assert_range_constraint(self, proxy, lower, upper, assert_msg, low_threshold=2):
         if lower > low_threshold:
             self._insert_assert_async(operator.ge, proxy, lower, assert_msg)
 
         if upper < math.inf:
             self._insert_assert_async(operator.le, proxy, upper, assert_msg)
+
+    def _assert_equality_constraint(self, proxy1, proxy2, assert_msg):
+        self._insert_assert_async(operator.eq, proxy1, proxy2, assert_msg)
 
     def _insert_assert_async(self, operator, l, r, assert_msg):
         cmp = super().call_operator(operator, (l, r), {}, NodeMetadata({}))
