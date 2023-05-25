@@ -3524,7 +3524,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_sampled_addmm(self, device, dtype, block_size):
         from functools import partial
-        from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr, tile_to_blocksize
+        from torch.sparse._triton_ops import sampled_addmm, broadcast_batch_dims_bsr
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
