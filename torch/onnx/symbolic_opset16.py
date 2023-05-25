@@ -151,12 +151,13 @@ def scatter_reduce(
 
     # if self_rank == 0:  # assert (index_rank == 0 and rank_src == 0)
     self_rank_is_zero = g.op(
-        "Equal", self_rank, g.op("Constant", value_t=torch.tensor([0]))
+        "Equal", self_rank, g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
     )
     if_op, (if_context, else_context), _ = jit_utils.add_op_with_blocks(
         g, "If", self_rank_is_zero, n_blocks=2, outputs=3
     )
-    neg_1 = if_context.op("Constant", value_t=torch.tensor([-1]))
+    neg_1 = if_context.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
+
     self_reshape = if_context.op("Reshape", self, neg_1)
     utils._add_output_to_block(if_context.block, self_reshape)
     index_reshape = if_context.op("Reshape", index, neg_1)

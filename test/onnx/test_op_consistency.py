@@ -63,8 +63,8 @@ TESTED_OPS: frozenset[str] = frozenset(
         "logical_not",
         "nn.functional.scaled_dot_product_attention",
         "repeat",
-        "scatter_add",
-        "scatter_reduce",
+        # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "sqrt",
         "stft",
         "t",

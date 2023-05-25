@@ -218,7 +218,7 @@ Tensor _upsample_nearest_exact2d_quantized_cpu(
   return _upsample_nearest2d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(input, osize, scale_h, scale_w);
 }
 
-static Tensor upsample_nearest2d_quantized_cpu(
+Tensor upsample_nearest2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -228,7 +228,7 @@ static Tensor upsample_nearest2d_quantized_cpu(
   return upsample_nearest2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
-static Tensor _upsample_nearest_exact2d_quantized_cpu(
+Tensor _upsample_nearest_exact2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
