@@ -107,11 +107,8 @@ class OptimizedModule(torch.nn.Module):
         Arguments:
         - mod: The original nn.Module object to be wrapped and optimized.
         - dynamo_ctx: The context for optimizing the forward method.
-
-        Note:
-        - This class wraps the original nn.Module object and later patches its forward method
-          to an optimized self.forward method.
         """
+
         super().__init__()
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
@@ -124,6 +121,7 @@ class OptimizedModule(torch.nn.Module):
         Note:
         - This method sets up the forward method based on the type of the original module.
         """
+
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
             inspect.getsourcefile(self._orig_mod.forward)
         ):
@@ -142,6 +140,7 @@ class OptimizedModule(torch.nn.Module):
         Returns:
         - The state dictionary of the OptimizedModule, excluding the 'forward' and '__call__' attributes.
         """
+
         state = dict(self.__dict__)
         state.pop("forward", None)
         state.pop("__call__", None)
@@ -157,6 +156,7 @@ class OptimizedModule(torch.nn.Module):
         Note:
         - After setting the state, the OptimizedModule is re-initialized.
         """
+
         self.__dict__ = state
         self._initialize()
 
@@ -174,6 +174,7 @@ class OptimizedModule(torch.nn.Module):
         - This method is called when an attribute is not found in the OptimizedModule itself.
         - The '_orig_mod' attribute can be accessed directly using the '_orig_mod' name.
         """
+
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
@@ -193,6 +194,7 @@ class OptimizedModule(torch.nn.Module):
         - This method is used when the original module has a lazy initialization hook.
         - It runs the pre-hooks for lazy module initialization before invoking the forward method.
         """
+
         if hasattr(self._orig_mod, "_initialize_hook"):
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
