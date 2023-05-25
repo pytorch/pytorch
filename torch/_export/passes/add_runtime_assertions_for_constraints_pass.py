@@ -153,7 +153,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             # If no dynamism is specified, we assume all dimensions are specialized
             if name not in self.constraints:
                 self._insert_specialized_shapes_assert(arg, all_dims, name, current_inp)
-                return arg
+                continue
 
             constraints = self.constraints[name]
 
