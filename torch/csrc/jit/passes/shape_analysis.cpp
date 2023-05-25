@@ -50,7 +50,7 @@ bool mergeTypes(
   return changed;
 }
 
-static void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
+void applyTypes(ArrayRef<Value*> src, ArrayRef<Value*> dst) {
   AT_ASSERT(src.size() == dst.size());
   for (const auto i : c10::irange(src.size())) {
     dst[i]->setType(src[i]->type());

@@ -15,7 +15,7 @@
 namespace torch {
 namespace jit {
 
-static c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
+c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
   }

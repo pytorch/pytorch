@@ -106,6 +106,12 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "index_put",
+        # "new_empty",  non-deterministic
+        # "new_empty_strided",  non-deterministic
+        "new_full",
+        "new_ones",
+        "new_zeros",
         "nn.functional.adaptive_avg_pool1d",
         "nn.functional.adaptive_avg_pool2d",
         "nn.functional.adaptive_avg_pool3d",
@@ -118,6 +124,8 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.nll_loss",
+        # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "unflatten",
     ]
 )
@@ -183,8 +191,18 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("ReduceMin", "int16"),
     ),
     xfail(
-        "any", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        "any", dtypes=(torch.uint8, torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("Any")
+    ),
+    xfail(
+        "arange",
+        dtypes=(torch.uint8, torch.int8),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
+    ),
+    xfail(
+        "arange",
+        dtypes=(torch.int16, torch.int32),
+        reason="AssertionError: The values for attribute 'shape' do not match",
     ),
     xfail(
         "argmax",
@@ -310,16 +328,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "cumsum", dtypes=(torch.int32,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Cumsum", "int32 has type issue.")
     ),
-    xfail(
-        "nn.functional.conv1d",
-        dtypes=(torch.int64,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
-    ),
-    xfail(
-        "nn.functional.conv2d",
-        dtypes=(torch.int64,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int64"),
-    ),
     skip(
         "cos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Cos")
@@ -389,6 +397,31 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16"),
     ),
     xfail(
+        "index_put",
+        dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
+    ),
+    xfail(
+        "index_put",
+        dtypes=(torch.uint8, torch.int8, torch.int16,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
+    ),
+    xfail(
+        "new_full",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_full", "ORT 1.15 will support"),
+    ),
+    xfail(
+        "new_ones",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_ones", "ORT 1.15 will support"),
+    ),
+    xfail(
+        "new_zeros",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_zeros", "ORT 1.15 will support"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool1d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
     ),
@@ -399,6 +432,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.adaptive_avg_pool3d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+    ),
+    xfail(
+        "nn.functional.conv1d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv1d", "int64"),
+    ),
+    xfail(
+        "nn.functional.conv2d",
+        dtypes=(torch.int64,),
+        reason=onnx_test_common.reason_onnx_does_not_support("Conv2d", "int64"),
     ),
     xfail(
         "nn.functional.dropout",
@@ -425,11 +468,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     skip(
-        "all",
-        matcher=lambda sample: not (len(sample.kwargs) == 0),
-        reason="Need dispatcher: this Aten overload only support one tensor as input by design",
-    ),
-    skip(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
@@ -440,11 +478,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Op (ReduceMax) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
     ),
     skip(
-        "arange",
-        matcher=lambda sample: len(sample.args) != 1,
-        reason="arange_start overload takes two arguments (input, start)",
-    ),
-    skip(
         "cat",
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
@@ -453,6 +486,14 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "div",
         matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
         reason="rounding_mode is not yet supported",
+    ),
+    xfail(
+        "index_put",
+        matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
+        and (sample.kwargs.get("accumulate") is False),
+        reason=onnx_test_common.reason_dynamo_does_not_support(
+            "https://github.com/pytorch/pytorch/issues/101150"
+        ),
     ),
     xfail(
         "nn.functional.celu",
@@ -473,6 +514,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.cross_entropy",
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
+    ),
+    xfail(
+        "nn.functional.nll_loss",
+        matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
+        reason=onnx_test_common.reason_onnx_script_does_not_support(
+            "string in reduction kwarg: https://github.com/microsoft/onnxscript/issues/726"
+        ),
     ),
     xfail(
         "unflatten",
