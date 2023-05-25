@@ -1774,6 +1774,47 @@ class TestSDPA(NNTestCase):
                 with warning_context:
                     torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
+    def test_mem_eff_backwards_determinism(self, device):
+        # Need big seq_len to ensure that num_splits > 1
+        dtype = torch.float32
+        batch_size, seq_len, n_heads, head_dim = 1, 1024, 8, 64
+        query = torch.rand(batch_size, n_heads, seq_len, head_dim,
+                           device=device, dtype=dtype, requires_grad=True)
+        key = torch.rand(batch_size, n_heads, seq_len, head_dim, device=device,
+                         dtype=dtype, requires_grad=True)
+        value = torch.rand(batch_size, n_heads, seq_len, head_dim,
+                           device=device, dtype=dtype, requires_grad=True)
+
+        with sdp_kernel(enable_mem_efficient=True, enable_math=False, enable_flash=False):
+            # Run once to establish baseline
+            out = F.scaled_dot_product_attention(query, key, value)
+            upward_grad = torch.rand_like(out)
+            out.backward(upward_grad)
+            intial_query_grad = query.grad
+
+            # Re-run the op with the same upward grad and check that the backward is
+            # not deterministic
+            query.grad = None
+            out = F.scaled_dot_product_attention(query, key, value)
+            out.backward(upward_grad)
+            self.assertNotEqual(intial_query_grad, query.grad, atol=0.0, rtol=0.0)
+
+        with use_deterministic_algorithims(True, warn_only=False):
+            query.grad = None
+            out = F.scaled_dot_product_attention(query, key, value)
+            upward_grad = torch.rand_like(out)
+            out.backward(upward_grad)
+            intial_query_grad = query.grad
+
+            # Re-run the op with the same upward grad and check that the backward is
+            # deterministic now that we have enforced it
+            query.grad = None
+            out = F.scaled_dot_product_attention(query, key, value)
+            out.backward(upward_grad)
+            self.assertEqual(intial_query_grad, query.grad, atol=0.0, rtol=0.0)
+
     # verified passing successfully on H100
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support SDPA")
