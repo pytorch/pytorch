@@ -920,26 +920,36 @@ class TestForeach(TestCase):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
 
-        # note(crcrpar): These patterns are to skip "sample"s that are incompatible with some
-        # in-place foreach functions' forward path, not forward mode AD.
-        # Raising / xfailing them would rather lose coverage since `sample_inputs` yields
-        # different Scalars and ScalarLists.
-        patterns_to_tolerate = "|".join([
-            _BOOL_SUB_ERR_MSG,
-            # Some non-unary in-place ops with scalar/scalarlist would error out if there's non float ones.
-            "can't be cast to the desired",
-            "clamp is not supported for complex types",
-            "Found dtype Double but expected ComplexDouble",
-        ])
+        # note(crcrpar): The combinations below are failing in its forward path,
+        # which is before forward-mode AD happens
+        def check_sample_eligibility(op, sample, dtype):
+            if (
+                op.name == "_foreach_sub"
+                and (
+                    (isinstance(sample.args[0], list) and any(isinstance(a, bool) for a in sample.args[0]))
+                    or isinstance(sample.args[0], bool)
+                )
+            ):
+                return False, _BOOL_SUB_ERR_MSG
+            sample_has_complex = sample.args and ((
+                isinstance(sample.args[0], list)
+                and any(isinstance(a, complex) for a in sample.args[0])
+            ) or (
+                isinstance(sample.args[0], complex)
+            ))
+            if dtype == torch.float64 and sample_has_complex:
+                if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
+                    return False, "result type ComplexDouble can't be cast to the desired output type Double"
+                if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
+                    return False, "clamp is not supported for complex types"
+                if op.name == "_foreach_pow":
+                    return False, "Found dtype Double but expected ComplexDouble"
 
-        # this pattern goes to the slow path implementation, needs to update the op db?
-        if dtype == torch.complex128 and op.inplace_variant == torch._foreach_abs_:
-            self.skipTest("In-place abs is not supported for complex tensors.")
+            return True, ""
 
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
         ):
-
             # Call `clone` to avoid inplace modifications likewise
             # `torch.testing._internal.common_utils.TestGradients._get_safe_inplace`
             def inplace_func(*tensorlist):
@@ -947,7 +957,19 @@ class TestForeach(TestCase):
                 op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
                 return tensorlist
 
-            try:
+            working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
+            print(f"{sample.args}, {working_sample = }, {err_msg_pattern = }")
+            if not working_sample:
+                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
+                    gradcheck(
+                        inplace_func,
+                        sample.input,
+                        raise_exception=True,
+                        check_forward_ad=True,
+                        check_backward_ad=False,
+                        check_batched_grad=False,
+                    )
+            else:
                 gradcheck(
                     inplace_func,
                     sample.input,
@@ -956,9 +978,6 @@ class TestForeach(TestCase):
                     check_backward_ad=False,
                     check_batched_grad=False,
                 )
-            except Exception as e:
-                if not re.findall(patterns_to_tolerate, str(e)):
-                    raise e
 
 
 instantiate_device_type_tests(TestForeach, globals())
