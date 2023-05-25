@@ -299,6 +299,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.silu_backward,
             aten.sinc,
             aten.slice_backward,
+            aten.smooth_l1_loss,
             aten.smooth_l1_loss_backward,
             aten.soft_margin_loss,
             aten.soft_margin_loss_backward,
