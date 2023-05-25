@@ -279,7 +279,7 @@ void reflection_pad2d_out_template(
   int dim_w = 2;
   int nbatch = 1;
 
-  at::native::padding::check_valid_input<2>(input, padding);
+  at::native::padding::check_valid_input<2>(input_, padding);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);
