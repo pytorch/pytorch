@@ -1064,6 +1064,9 @@ class SubgraphTracer(fx.Tracer):
                     continue
                 if arg.node.name in self.input_name_to_proxy:
                     continue
+                if "saved_tensor_marked" in arg.node.meta:
+                    continue
+
                 self.lift_tracked_freevar_to_input(arg)
 
         rv = super().create_proxy(
@@ -1110,6 +1113,18 @@ class SubgraphTracer(fx.Tracer):
     # Note: we did not override erase_node since
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
+        if len(node.users) > 0:
+            user_graph_nodes: List[torch.fx.Node] = []
+            for user in node.users.keys():
+                # For the case where user.graph == self.graph, that is a real bug and will raise
+                # properly.
+                if user.graph != self.graph:
+                    # This is a nested graph, which needs to be deleted.
+                    # If we do not do this, we will raise on attempting to remove this.
+                    # As we only get here during restoration cleanup, this is sound.
+                    user_graph_nodes.extend(reversed(list(user.graph.nodes)))
+            for other_graph_node in user_graph_nodes:
+                other_graph_node.graph.erase_node(other_graph_node)
         self.graph.erase_node(node)
         self.input_name_to_proxy.pop(node.name, None)
 

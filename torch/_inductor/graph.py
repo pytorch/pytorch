@@ -174,8 +174,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.num_static_inputs = num_static_inputs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
-        self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
@@ -230,38 +228,6 @@ class GraphLowering(torch.fx.Interpreter):
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
-
-    def random_seed_buffer(self, device: torch.device):
-        """
-        Return a device-unique 1-element tensor storing our RNG seed.
-        This will get initialized at the start of each graph in
-        `wrapper.py`.
-
-        Note this is only used by cuda backends.  The CPU backend handles
-        RNG seeds as a sizevar.
-        """
-        name = f"seed_{device.type}_{device.index}"
-        if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
-            self.randomness_seeds.append(name)
-
-        return ir.RandSeedBuffer(
-            name=name,
-            layout=ir.FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[],
-                stride=[],
-            ),
-        )
-
-    def increment_randomness_offset(self, numel):
-        """
-        A global counter of how many random numbers we have handed out so far.
-        """
-        offset = self.randomness_offset
-        self.randomness_offset = offset + numel
-        return offset
 
     @dynamo_timed
     def run(self, *args):
