@@ -8,7 +8,12 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
-from .exported_program import CallSpec, ConstraintExpr, ExportedProgram
+from .exported_program import (
+    CallSpec,
+    ConstraintExpr,
+    ExportedProgram,
+    ExportGraphSignature,
+)
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
@@ -163,10 +168,25 @@ def export(
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
     )
+
+    # TODO(tugsuu): Fill out signature/state_dict
+    graph_signature = ExportGraphSignature(
+        parameters=[],
+        buffers=[],
+        user_inputs=[],
+        user_outputs=[],
+        inputs_to_parameters={},
+        inputs_to_buffers={},
+        buffers_to_mutate={},
+        backward_signature=None,
+    )
+
     exported_program = ExportedProgram(
         gm,
         gm.graph,
-        call_spec=CallSpec(in_spec, out_spec),
+        graph_signature,
+        CallSpec(in_spec, out_spec),
+        {},
     )
     _set_constraints(
         exported_program,
