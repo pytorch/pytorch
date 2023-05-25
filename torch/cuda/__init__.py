@@ -10,6 +10,8 @@ It is lazily initialized, so you can always import it, and use
 
 import contextlib
 import os
+import sys
+import importlib
 import torch
 from torch.types import Device
 import traceback
@@ -1153,10 +1155,7 @@ class _WrappedTritonKernel(object):
 
 
 def _register_triton_kernels():
-    import sys
-    import importlib
-
-    if sys.executable == "torch_deploy":
+    if torch._running_with_deploy():
         return
 
     @_WrappedTritonKernel

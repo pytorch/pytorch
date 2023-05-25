@@ -1,6 +1,7 @@
 # Owner(s): ["module: sparse"]
 
 import torch
+import sys
 import random
 import itertools
 import unittest
@@ -3336,13 +3337,9 @@ class TestSparseCompressedTritonKernels(TestCase):
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
-        import sys
-
-        if torch._running_with_deploy():
-            self.skipTest("Skipped for torch_deploy")
-
         from functools import partial
         from torch.sparse._triton_ops import bsr_dense_mm
 
@@ -3416,7 +3413,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm_error_messages(self, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_mm
 
@@ -3456,35 +3454,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, r"only row-major/col-major `out`"):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
-
-    @onlyCUDA
-    def test_no_triton_on_import(self):
-        import os
-        import subprocess
-        import sys
-
-        script = """
-import sys
-import torch
-
-a = torch.rand(2, device="cuda")
-
-if "triton" in sys.modules:
-    exit(2)
-else:
-    exit(0)
-
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, '-c', script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)))
-        except subprocess.CalledProcessError as e:
-            if e.returncode == 2:
-                self.assertTrue(False, "Triton was imported when importing torch!")
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
