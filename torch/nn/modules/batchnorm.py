@@ -729,9 +729,9 @@ class SyncBatchNorm(_BatchNorm):
         need_sync = (bn_training and self.training and
                      torch.distributed.is_available() and torch.distributed.is_initialized())
         if need_sync:
-            # currently only GPU input is supported
-            if not input.is_cuda:
-                raise ValueError("SyncBatchNorm expected input tensor to be on GPU")
+            # currently only GPU and specific custom device input is supported
+            if (not input.is_cuda) and (input.device.type is not torch._C._get_privateuse1_backend_name):
+                raise ValueError("SyncBatchNorm expected input tensor to be on GPU or specific custom device")
 
             process_group = torch.distributed.group.WORLD
             if self.process_group:
