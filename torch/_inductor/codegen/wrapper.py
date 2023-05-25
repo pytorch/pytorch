@@ -450,7 +450,6 @@ class WrapperCodeGen(CodeGen):
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
-                print("line", self.lines[i])
                 if isinstance(self.lines[i], MemoryPlanningLine):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
