@@ -177,7 +177,7 @@ class AllocateLine(MemoryPlanningLine):
     node: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        if self.node.get_name() in V.graph.removed_buffers:
+        if self.node.get_name() in V.graph.removed_buffers or self.node.get_name() in V.graph.removed_inplace_buffers:
             return NullLine(self.wrapper)
 
         # try to reuse a recently freed buffer
@@ -202,7 +202,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
 
     def plan(self, state: MemoryPlanningState):
         assert not self.is_reused
-        if self.node.get_name() in V.graph.removed_buffers:
+        if self.node.get_name() in V.graph.removed_buffers or self.node.get_name() in V.graph.removed_inplace_buffers:
             return NullLine(self.wrapper)
         state.push(buffer_reuse_key(self.node), self)
         return self
@@ -221,6 +221,8 @@ class ReuseLine(MemoryPlanningLine):
     def plan(self, state: MemoryPlanningState):
         assert self.node.get_name() not in V.graph.removed_buffers
         assert self.reused_as.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_inplace_buffers:
+            return NullLine(self.wrapper)
         return self
 
     def codegen(self, code: IndentedBuffer):
@@ -448,6 +450,7 @@ class WrapperCodeGen(CodeGen):
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
             for i in range(len(self.lines)):
+                print("line", self.lines[i])
                 if isinstance(self.lines[i], MemoryPlanningLine):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
@@ -736,7 +739,7 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_allocation(self, buffer):
         name = buffer.get_name()
-        if name in V.graph.removed_buffers or name in self.allocated:
+        if name in V.graph.removed_buffers or name in self.allocated or name in V.graph.removed_inplace_buffers:
             return
         self.allocated.add(name)
         if isinstance(
@@ -787,6 +790,7 @@ class WrapperCodeGen(CodeGen):
         name = buffer.get_name()
         if (
             name in V.graph.removed_buffers
+            or name in V.graph.removed_inplace_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in self.freed

@@ -480,6 +480,8 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
             precompile_args.append(
@@ -506,6 +508,8 @@ class KernelArgs:
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             for other in inplaced.other_names:
                 if other in V.graph.inplaced_to_remove:
                     continue
