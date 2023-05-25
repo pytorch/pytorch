@@ -18,6 +18,7 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
+from .dicts import DefaultDictVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -621,6 +622,18 @@ class SkipFilesVariable(VariableTracker):
                 tx,
                 collections.OrderedDict,
                 None if len(args) == 0 else args[0],
+                **options,
+            )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
                 **options,
             )
         # Fold through the functions(e.g, collections.namedtuple)

@@ -1,10 +1,6 @@
 #include <ATen/native/sparse/ValidateCompressedIndicesCommon.h>
 #include <ATen/native/cpu/Loops.h>
 
-#ifdef AT_PER_OPERATOR_HEADERS
-#include <ATen/ops/_validate_compressed_sparse_indices_native.h>
-#endif
-
 namespace at::native {
 
 namespace {
