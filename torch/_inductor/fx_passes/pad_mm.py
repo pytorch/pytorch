@@ -149,6 +149,40 @@ def pad_addmm(
         ]
 
 
+def get_flops(dtype):
+    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
+    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    if dtype in (torch.float16, torch.bfloat16):
+        return get_max_tensorcore_tflops(dtype)
+
+    if torch.backends.cuda.matmul.allow_tf32:
+        return get_max_tensorcore_tflops(torch.float32)
+    else:
+        return get_max_simd_tflops(torch.float32)
+
+
+def is_mm_compute_bound(M, K, N, dtype):
+    from triton.testing import get_dram_gbps
+
+    arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
+
+    # Fails with AMD
+    try:
+        machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
+    except Exception as e:
+        return True
+
+    # dram_gbps might be underestimating bandwidth because of cache.
+    # if we estimate machine balance too low we might miss some speedups,
+    # if we extimate too high there will be unnecessary compilation time increase.
+    # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
+    # 80% of reads are in cache and cache is 4x faster than dram_gbps
+    machine_balance = machine_balance * 0.5
+
+    return arithmetic_intensity > machine_balance
+
+
 def should_pad_bench(mat1, mat2, op, input=None):
     if not utils.has_triton():
         return False
@@ -160,17 +194,28 @@ def should_pad_bench(mat1, mat2, op, input=None):
 
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
-            m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
-            k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-            n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
+            m = mat1.shape[0]
+            k = mat1.shape[1]
+            n = mat2.shape[1]
+
+            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
+            n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         elif op is torch.ops.aten.bmm:
-            m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-            k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
-            n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
+            m = mat1.shape[1]
+            k = mat2.shape[2]
+            n = mat2.shape[2]
+
+            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
+            n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
             return False
 
         if m_padded_length == k_padded_length == n_padded_length == 0:
+            return False
+
+        if not is_mm_compute_bound(m, k, n, mat1.dtype):
             return False
 
         mat1 = torch.randn_like(mat1)
