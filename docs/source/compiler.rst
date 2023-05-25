@@ -15,6 +15,8 @@ torch.compiler
     :undoc-members:
     :show-inheritance:
 
+    :noindex:
+
 .. rubric:: Functions
 
 .. autofunction:: torch.compiler.compile
