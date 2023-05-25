@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.7", "11.8", "12.1"]
 
 
-ROCM_ARCHES = ["5.3", "5.4.2"]
+ROCM_ARCHES = ["5.4.2", "5.5"]
 
 
 CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
