@@ -43,6 +43,7 @@ docs/cpp/source/api
 docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/generated/
+docs/source/compile/generated/
 log
 usage_log.txt
 test-reports/
