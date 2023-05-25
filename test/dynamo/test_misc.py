@@ -48,7 +48,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 TEST_CUDA = torch.cuda.is_available()
@@ -5227,6 +5227,8 @@ def fn():
 
     def test_guards_cse_pass_single(self):
         if not self._has_ast_unparse():
+            if IS_FBCODE:
+                raise RuntimeError("Needs astunparse or Python-3.9+")
             raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
