@@ -468,33 +468,50 @@ def gen_foreach_derivativeinfo(
     for fw_derivative in ref_diff_info.forward_derivatives:
         var_names = list(fw_derivative.var_names)
         var_types = list(fw_derivative.var_types)
-        # required_inputs_fw_grad = list(fw_derivative.required_inputs_fw_grad)
-        # required_inputs_primal = list(fw_derivative.required_inputs_primal)
+        required_inputs_fw_grad = list(fw_derivative.required_inputs_fw_grad)
+        required_inputs_primal = list(fw_derivative.required_inputs_primal)
         modified_formula = fw_derivative.formula.replace("result", "result[i]")
         for ref_input in ref_diff_info.all_saved_inputs:
             ref_input_jit_name = ref_input.expr.split(".")[0]
             mapped_name = map_refarg2foreacharg[ref_input_jit_name]
             mapped_type = map_name2arg[mapped_name].type
-            if isinstance(mapped_type, ListType) and not mapped_type.is_tensor_like():
-                mapped_expr = mapped_name + "[i]"
-            else:
-                mapped_expr = mapped_name
-            new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_expr)
-            modified_formula = modified_formula.replace(
-                cast(str, ref_input.nctype.name), new_expr
-            )
 
+            mapped_expr = mapped_name
+            # Modify reference forward formula
+            if isinstance(mapped_type, ListType) and not mapped_type.is_tensor_like():
+                # ScalarList
+                mapped_expr += "[i]"
+                new_expr = ref_input.expr.replace(ref_input_jit_name, mapped_expr)
+                modified_formula = modified_formula.replace(
+                    cast(str, ref_input.nctype.name), new_expr
+                )
+            elif mapped_type.is_tensor_like() and isinstance(mapped_type, ListType):
+                # TensorList
+                for suffix in ("_p", "_t"):
+                    expr_in_q = ref_input_jit_name + suffix
+                    if expr_in_q in modified_formula:
+                        modified_formula = modified_formula.replace(ref_input_jit_name + suffix, mapped_name + suffix)
+            else:
+                pass
+
+            # hmm, rusty...
             for i, name in enumerate(var_names):
                 if ref_input_jit_name == name:
                     var_names[i] = mapped_name
                     var_types[i] = mapped_type
+            for i, name in enumerate(required_inputs_fw_grad):
+                if ref_input_jit_name == name:
+                    required_inputs_fw_grad[i] = mapped_name
+            for i, name in enumerate(required_inputs_primal):
+                if ref_input_jit_name == name:
+                    required_inputs_primal[i] = mapped_name
         forward_derivatives.append(
             ForwardDerivative(
                 formula=modified_formula,
                 var_names=tuple(var_names),
                 var_types=tuple(var_types),
-                required_inputs_fw_grad=fw_derivative.required_inputs_fw_grad,
-                required_inputs_primal=fw_derivative.required_inputs_primal,
+                required_inputs_fw_grad=tuple(required_inputs_fw_grad),
+                required_inputs_primal=tuple(required_inputs_primal),
                 required_original_self_value=fw_derivative.required_original_self_value,
                 is_reusing_outplace_formula=fw_derivative.is_reusing_outplace_formula,
             )
@@ -525,12 +542,21 @@ def gen_foreach_derivativeinfo(
     #         result_new_fw_grad_opts[i] = at::lerp(self_t, end_t, weight);
     #                                                       ^
     if str(foreach_function.func.name) in {
-        "_foreach_clamp_max.List",
-        "_foreach_clamp_min.List",
+        "_foreach_clamp_max.Scalar",
+        "_foreach_clamp_min.Scalar",
+        # "_foreach_clamp_min.List",
         "_foreach_norm.Scalar",
         "_foreach_lerp.List",
-        "_foreach_lerp.Scalar",
+        "_foreach_lerp.Scalar",  # end_t
+        # "_foreach_lerp.Scalar",
+        "_foreach_div.Scalar",
+        "_foreach_mul.Scalar",  # other
     }:
+        print(
+            f"$ {str(foreach_function.func.name) = }, {str(ref_diff_info.func.func.name) = }, "
+            f"\n  {ref_diff_info.forward_derivatives = }"
+            f"\n  {forward_derivatives = }"
+        )
         forward_derivatives.clear()
     return (
         DifferentiabilityInfo(
