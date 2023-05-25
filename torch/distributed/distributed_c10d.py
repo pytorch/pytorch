@@ -1125,10 +1125,7 @@ def init_process_group(
         # these barriers may be unnecessary, as proved by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
         # added which, when set to 0, will disable these barriers.
-        if backend == "fake":
-            # Fake process group doesn't need barrier
-            pass
-        elif backend == Backend.MPI:
+        if backend == Backend.MPI:
             # MPI backend doesn't use store.
             barrier()
         else:
