@@ -1164,6 +1164,22 @@ class CommonTemplate:
             (torch.randn(4, 2, 4, 4),),
         )
 
+    def test_views7(self):
+        def forward(x, y):
+            return x.view(torch.int32), y.view(torch.float32)
+
+        x = torch.rand(2, 3)
+        y = torch.randn(2, 3)
+        print(forward(x, y))
+
+        self.common(
+            forward,
+            (
+                make_tensor(3, device="cuda", dtype=torch.float32),
+                make_tensor(3, device="cuda", dtype=torch.int32),
+            ),
+        )
+
     def test_relu(self):
         def fn(a, b):
             return (torch.relu(a), torch.relu(a + b) / 10)

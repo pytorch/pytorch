@@ -471,6 +471,29 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+def _get_type_bits(dtype):
+    if dtype.is_floating_point:
+        return torch.finfo(dtype).bits
+    else:
+        return torch.iinfo(dtype).bits
+
+
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+    if x.get_dtype() == dtype:
+        return x
+
+    if _get_type_bits(x.get_dtype()) != _get_type_bits(dtype):
+        raise NotImplementedError(
+            "bitcast to different bitwidth type is not supported yet."
+        )
+
+    def _to_dtype_bitcast(x):
+        return ops.to_dtype_bitcast(x, dtype)
+
+    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+
+
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
