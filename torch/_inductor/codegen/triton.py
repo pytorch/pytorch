@@ -80,7 +80,12 @@ def config_of(args):
             if isinstance(x.expr, (int, sympy.Integer)):
                 # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
                 # _maybe_evaluate_static...
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
+                if x.name.startswith("load_seed_offset"):
+                    return False
+                else:
+                    return V.graph.sizevars.statically_known_multiple_of(
+                        x.expr, ALIGNMENT
+                    )
             else:
                 return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
@@ -359,7 +364,9 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def load_seed(name, offset):
         var = V.kernel.args.input(name)
-        return f"tl.load({var} + {offset})"
+        return (
+            f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
+        )
 
     @staticmethod
     def rsqrt(x):
