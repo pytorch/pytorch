@@ -1054,22 +1054,16 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
         "The callback must have signature IValue(Future&) or "
         "std::tuple<IValue, std::vector<Storage>>(Future&)");
 #endif
-    auto childFut = createInstance(std::move(type));
+    auto childFut = createInstance(::std::move(type));
     addCallback([childFut,
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
-        guts::if_constexpr<std::is_convertible<
-            typename c10::invoke_result_t<T &&, Future&>,
-            IValueWithStorages>::value>(
-            [&](auto identity) {
-              IValue value;
-              std::vector<WeakStorage> storages;
-              std::tie(value, storages) = identity(cb)(parentFut);
-              childFut->markCompleted(std::move(value), std::move(storages));
-            },
-            [&](auto identity) {
-              childFut->markCompleted(identity(cb)(parentFut));
-            });
+        if constexpr (::std::is_convertible_v<typename c10::invoke_result_t<T &&, Future&>, IValueWithStorages>) {
+          auto [ivalue, storages] = cb(parentFut);
+          childFut->markCompleted(::std::move(ivalue), ::std::move(storages));
+        } else {
+          childFut->markCompleted(cb(parentFut));
+        }
       } catch (std::exception&) {
         childFut->setError(std::current_exception());
       }
@@ -1628,7 +1622,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
   TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
-      const ivalue::EnumHolder& v);
+      const EnumHolder& v);
 
   TORCH_API const std::string qualifiedClassName() const;
 
