@@ -736,8 +736,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         # Optional supports None inputs
         self.run_test(model, (x,))
-        # TODO: AssertionError: Tensor-likes are not close!
-        # This might be the first arg x is skipped.
+        # NOTE: default value is not supported on ONNX, so torch and ONNX has
+        # different behavior
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
             self.run_test(model, (), {"y": y}, input_names=["y"])
 
