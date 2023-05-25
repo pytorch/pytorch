@@ -1009,6 +1009,7 @@ class CUDAGraphNode:
                 StorageWeakRefWrapper(elem)
                 for i, elem in enumerate(inputs)
                 if i not in self.wrapped_function.static_input_idxs
+                and elem.data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
