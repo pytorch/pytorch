@@ -723,15 +723,32 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        arg_len: int,
+        flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
+        example_fake_inputs: List[torch.Tensor],
     ):
         super().__init__(m)
-        self.new_args = [
-            super(FlattenInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-            for i in range(0, arg_len)
-        ]
+
+        matched_input_elements_to_fake = {
+            val: example_fake_inputs[ix]
+            for ix, val in enumerate(matched_input_elements_positions)
+        }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
+
+        self.new_args = []
+        for i in range(0, len(flat_args)):
+            arg = super(FlattenInputOutputSignature, self).placeholder(
+                f"arg{i}", (), {}
+            )
+            if i in matched_input_elements_to_fake:
+                arg.node.meta["val"] = matched_input_elements_to_fake[i]
+            else:
+                # Fill node.mata["val"] with faketensor from the input,
+                # if it's not found in matched_input_elements_positions
+                if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+            self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
 
@@ -1018,9 +1035,10 @@ def export(
 
     new_graph = FlattenInputOutputSignature(
         graph,
-        len(flat_args),
+        flat_args,
         matched_input_elements_positions,
         matched_output_elements_positions,
+        example_fake_inputs,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1126,9 +1144,6 @@ def export(
     )
 
     new_graph.recompile()
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
-
     return (new_graph, out_guards)
 
 
