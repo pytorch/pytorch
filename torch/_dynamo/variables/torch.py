@@ -811,6 +811,11 @@ def speculate_subgraph(
                 )
 
     except torch._dynamo.exc.Unsupported as ex:
+        log.warning(
+            "TorchDynamo tracing of HigherOrderOperator did not go well. "
+            "Falling back to eager behavior. This can result in a slowdown."
+        )
+        log.exception(ex)
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise
@@ -1212,7 +1217,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             p_args = (
                 body_node,
                 *(arg.as_proxy() for arg in args[1:]),
-                *(arg for arg in body_lifted_freevars),
+                *(arg for arg in body_lifted_freevars.keys()),
             )
             example_value = pytree.tree_map_only(
                 torch.fx.Proxy,
@@ -1255,7 +1260,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             post_guards = tx.output.guards
             if body_lifted_freevars:
-                for freevar in body_lifted_freevars:
+                for freevar in body_lifted_freevars.keys():
                     if "saved_tensor_marked" not in freevar.node.meta:
                         unimplemented("NYI - freevars in autograd function.")
 
@@ -1280,7 +1285,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             p_args = (
                 *(arg.as_proxy() for arg in args),
-                *(arg for arg in body_lifted_freevars),
+                *(arg for arg in body_lifted_freevars.keys()),
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r

@@ -1771,7 +1771,10 @@ class DimConstraints:
                 if arg in args_index:
                     groups[args_index[arg]].append(dc)
                 else:
-                    raise ValueError(f"Cannot find param `{arg}` in {signature}")
+                    # This can happen, e.g., with decorators that change the signature.
+                    # In that case, we drop the constraint. Seems hard to do better. :/
+                    # TODO(avik) Maybe warn that `arg` in not in `signature`?
+                    continue
             sorted_groups = []
             for idx, dcs in sorted(groups.items()):
                 _, arg = idx

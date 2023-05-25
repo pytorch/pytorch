@@ -2119,9 +2119,14 @@ def _unsafe_index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1235
 # and
 # https://github.com/pytorch/torchdynamo/issues/1863
-@register_lowering([aten.index_put])
+@register_lowering(aten.index_put)
 def index_put(x, indices, values, accumulate=False):
     return index_put_(clone(x), indices, values, accumulate)
+
+
+@register_lowering(aten._unsafe_index_put)
+def _unsafe_index_put(x, indices, values, accumulate=False):
+    return index_put_impl_(clone(x), indices, values, accumulate, check=False)
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -2139,6 +2144,10 @@ def index_put_fallback(self, indices, values, accumulate):
 
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
+    return index_put_impl_(self, indices, values, accumulate, check=True)
+
+
+def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
@@ -2204,7 +2213,9 @@ def index_put_(self, indices, values, accumulate=False):
     def output_indexer(index):
         assert len(index) == len(expected_vals_size)
         new_index = [
-            ops.indirect_indexing(loader(index[start_offset:end_offset]), size)
+            ops.indirect_indexing(
+                loader(index[start_offset:end_offset]), size, check=check
+            )
             for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*index[:start_offset], *new_index, *index[end_offset:]]
