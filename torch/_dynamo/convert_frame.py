@@ -223,7 +223,6 @@ class FrameConverterAssert:
         self._torchdynamo_orig_callable = compiler_fn
         reset_graph_break_dup_checker()
 
-        
 
     def convert_frame_assert(
         compiler_fn: CompilerFn,
@@ -364,7 +363,7 @@ class FrameConverterAssert:
 
 
     def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
-        return self._convert_frame_assert(frame, cache_size, hooks, frame_state)
+        return FrameConverterAssert.convert_frame_assert(self.compiler_fn, self.one_graph, self.export, self.export_constraints)(frame, cache_size, hooks, frame_state)
 
 def convert_frame_assert(compiler_fn: CompilerFn, one_graph: bool = True, export: bool = False, export_constraints=None):
     """Fully convert a frame into an FX graph"""
