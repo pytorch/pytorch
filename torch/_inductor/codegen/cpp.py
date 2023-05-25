@@ -216,46 +216,58 @@ class CppPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        if div != 1:
+            div = self.paren(self.doprint(div))
+            if expr.is_integer:
+                x = f"at::native::div_floor_integer({x}, {div})"
+            else:
+                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} / {div})"
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"std::floor({x} / {div})"
+        if expr.is_integer:
+            return f"at::native::div_floor_integer({x}, {div})"
+        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"std::floor({self._print(expr.args[0])})"
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
         if exp == 0.5:
-            return f"std::sqrt({base})"
+            r = f"std::sqrt({base})"
+            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            r = "*".join([self.paren(base)] * exp)
         elif exp < 0:
-            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
-            return "1"
+            r = "1.0"
+
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
         if expr.q == 1:
-            return f"{expr.p}"
-        return f"{expr.p}.0/{expr.q}.0"
+            r = f"{expr.p}"
+        else:
+            r = f"{expr.p}.0/{expr.q}.0"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"std::ceil({self._print(expr.args[0])})"
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
 
 cexpr = CppPrinter().doprint
@@ -1289,7 +1301,7 @@ class CppVecKernel(CppKernel):
             if dtype in [torch.bfloat16]:
                 tmpbufsize += " * 2"
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1333,7 +1345,7 @@ class CppVecKernel(CppKernel):
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1470,7 +1482,7 @@ class CppTile2DKernel(CppVecKernel):
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
+        return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
         return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
@@ -2023,7 +2035,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def indirect_indexing(index_var, size, check=True):
-                return sympy.Symbol(str(index_var))
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
