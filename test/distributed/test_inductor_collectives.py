@@ -5,7 +5,6 @@ from unittest.mock import patch
 import torch
 from torch._C import FileCheck
 # for some reason importing functional collectives after dynamo breaks collectives handling!
-# import torch.distributed
 import torch.distributed._functional_collectives as _functional_collectives
 import torch._dynamo
 import torch._dynamo.test_case
