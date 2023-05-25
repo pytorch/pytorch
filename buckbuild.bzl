@@ -1394,6 +1394,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
+            ":jit_module_saving",
             ":torch",
             ":torch_mobile_deserialize_common",  # for torch/csrc/api/src/serialize/input-archive.cpp
         ],
