@@ -96,7 +96,7 @@ class OptimizedModule(torch.nn.Module):
     Compilation occurs the first time `forward()` is called
 
     Note:
-    - The OptimizedModule and original module share `state_dict`
+    - The OptimizedModule and original module share `state_dict` so you can run `torch.save(opt_model.state_dict())`
 
     """
 
@@ -107,6 +107,7 @@ class OptimizedModule(torch.nn.Module):
         Arguments:
         - mod: The original nn.Module object to be wrapped and optimized.
         - dynamo_ctx: The context for optimizing the forward method.
+
         """
 
         super().__init__()
@@ -120,6 +121,7 @@ class OptimizedModule(torch.nn.Module):
 
         Note:
         - This method sets up the forward method based on the type of the original module.
+
         """
 
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
@@ -139,6 +141,7 @@ class OptimizedModule(torch.nn.Module):
 
         Returns:
         - The state dictionary of the OptimizedModule, excluding the 'forward' and '__call__' attributes.
+
         """
 
         state = dict(self.__dict__)
@@ -155,6 +158,7 @@ class OptimizedModule(torch.nn.Module):
 
         Note:
         - After setting the state, the OptimizedModule is re-initialized.
+
         """
 
         self.__dict__ = state
@@ -173,6 +177,7 @@ class OptimizedModule(torch.nn.Module):
         Note:
         - This method is called when an attribute is not found in the OptimizedModule itself.
         - The '_orig_mod' attribute can be accessed directly using the '_orig_mod' name.
+
         """
 
         if name == "_orig_mod":
