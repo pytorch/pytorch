@@ -842,9 +842,7 @@ def run_subtests(
     subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
-        subtest_kwargs = {
-            kwarg: value for kwarg, value in zip(subtest_config_keys, values)
-        }
+        subtest_kwargs = dict(zip(subtest_config_keys, values))
         with cls_inst.subTest(**subtest_kwargs):
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
         dist.barrier()
