@@ -151,7 +151,7 @@ class ForeachKernel(Kernel):
                 call_args[i] = call_args[i] + ".item()"
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
-                name, call_args, V.graph.scheduler.current_device.index
+                name, call_args, device_index=V.graph.scheduler.current_device.index
             )
         else:
             # TODO: refactor generate_kernel_call
