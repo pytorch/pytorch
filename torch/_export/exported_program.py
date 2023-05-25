@@ -290,7 +290,7 @@ def _get_submodule(
 
 
 def get_control_flow_submodules(
-    graph_module: Union[ExportedProgram, torch.fx.GraphModule],
+    graph_module: torch.fx.GraphModule,
 ) -> List[Tuple[str, torch.fx.GraphModule, torch.fx.Node]]:
     """
     Returns a list of submodules used for control flow operations
@@ -299,9 +299,6 @@ def get_control_flow_submodules(
     tuple of (name of the submodule that's stored in the graph module, the
     submodule itself, and the fx node that uses this submodule).
     """
-    if isinstance(graph_module, ExportedProgram):
-        graph_module = graph_module.graph_module
-
     control_flow_submodules = []
     for node in graph_module.graph.nodes:
         if node.op != "call_function":
