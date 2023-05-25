@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import skipIfRocm
 import torch
 from torch import Tensor
 import functools
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, SM90OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -596,7 +596,7 @@ class TestOperators(TestCase):
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
         decorate('nn.functional.scaled_dot_product_attention', device_type="cuda",
-                 decorator=expectedFailureIf(not (torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0)))),
+                 decorator=expectedFailureIf(not SM90OrLater)),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
