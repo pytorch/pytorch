@@ -52,7 +52,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
-perf_hint_log = logging.getLogger(__name__ + ".perf_hints")
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 

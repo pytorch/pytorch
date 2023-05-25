@@ -48,7 +48,7 @@ from .common import (
 )
 
 log = logging.getLogger(__name__)
-perf_hint_log = logging.getLogger(__name__ + "perf_hint")
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
@@ -2181,8 +2181,8 @@ class TritonScheduling:
                     tiling = (a0, ir.FloorDiv(a1, b1), b1)
                     ranked_tilings = [tiling] + ranked_tilings
                     break  # only 1 choice for now
-        
-        if ranked_tilings.size() > 1:
+
+        if len(ranked_tilings) > 1:
             perf_hint_log.warning("possibly bad tiling: %s", ranked_tilings)
 
         for tiled_groups in ranked_tilings:
