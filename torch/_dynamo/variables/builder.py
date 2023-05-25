@@ -440,6 +440,19 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
+        elif value in {torch.distributed.distributed_c10d.all_gather_into_tensor}:
+            import torch.distributed._functional_collectives.all_gather_tensor_inplace as traceable_allgather
+            import torch.distributed.distributed_c10d.all_gather_into_tensor as legacy_allgather
+
+            # TODO assert that async_op is false, and, possibly some other limitations
+            # current remapping is very brittle, in regards to handling args at call time
+            # and seriously.. can't import properly, and also getting line-too-long linter
+            traceable_collective_remaps = {legacy_allgather: traceable_allgather}
+            return UserFunctionVariable(
+                traceable_collective_remaps[value],
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,

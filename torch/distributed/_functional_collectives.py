@@ -517,3 +517,15 @@ if not torch._running_with_deploy():
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
+
+# We allow torchdynamo to convert calls from legacy inplace APIs into traceable APIs
+# via a pseudo-inplace version (like a decomp) that uses the functional collective
+# and a copy.
+def all_gather_tensor_inplace(
+    self: torch.Tensor,
+    out: torch.Tensor,
+    group: RANK_TYPES,
+    tag: str = "",
+    gather_dim: int = 0
+):
+    return out.copy_(all_gather_tensor(self, gather_dim, group, tag))
