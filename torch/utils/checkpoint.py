@@ -15,7 +15,8 @@ from typing import (
     Tuple,
 )
 from weakref import ReferenceType
-from torch.testing._internal.logging_tensor import LoggingTensorMode
+from torch.testing._internal.logging_tensor import LoggingTensorMode, capture_logs
+import platform
 
 import torch
 
@@ -831,19 +832,17 @@ because you passed `debug=True` to `torch.utils.checkpoint.checkpoint()`.
 Scroll all the way down for guidance on how to navigate these logs.
 
 +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-|        1. Stack traces of the operators that ran in the original forward
+|        1. Stack traces of the operators that ran in the original forward     |
 +------------------------------------------------------------------------------+
 
 {forward_traces}
-
 +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-|        2. Stack traces of the operators that ran during recomputation
+|        2. Stack traces of the operators that ran during recomputation        |
 +------------------------------------------------------------------------------+
 
 {recompute_traces}
-
 +~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~+
-|      3. Traces of the operators in the original forward and recomputation
+|       3. Log of operators in the original forward and recomputation          |
 +------------------------------------------------------------------------------+
 (Scroll up to correlate stack traces with each operation listed below. This
  helps identify their source in the code.)
@@ -853,9 +852,11 @@ IMPORTANT: Differences in "detach" calls between the original forward and the
            mechanism and can be ignored.
 
 Operations executed during the original forward:
+
 {forward_ops}
 
 Operations executed during recomputation:
+
 {recompute_ops}
 
 +------------------------------------------------------------------------------+
@@ -876,30 +877,69 @@ Operations executed during recomputation:
     Each operator's stack trace is printed in their execution order.
 
  Note that the logs can be quite long. Here's how they are structured:
+ (Tip: you can Ctrl-f for these headers)
 
- 1. Original Forward Operator Stack Traces
- 2. Recomputation Operator Stack Traces
- 3. Operations in Original Forward and Recomputation
- 4. Error message                                       <--- You are here
+ 1. Stack traces of the operators that ran in the original forward
+ 2. Stack traces of the operators that ran during recomputation
+ 3. Log of operators in the original forward and recomputation
+ 4. Error message                                             <--- You are here
 --------------------------------------------------------------------------------
 """
 
-def _get_debug_context_and_cb() -> Tuple[Optional[Dict[str, Any]], Optional[Callable]]:
-    logging_mode_fwd = LoggingTensorMode(collect_logs=True)
-    logging_mode_recompute = LoggingTensorMode(collect_logs=True)
+class CheckpointError(Exception):
+    pass
+
+
+def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[CheckpointError], None]]:
+    # This function returns the context_fn and error_cb to be used by the
+    # checkpointing mechanism. error_cb is invoked when an error is detected
+    # during unpack.
+
+    # record_context_cpp is not support on non-linux non-x86_64 platforms
+    cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
+
+    class CaptureLogs:
+        def __init__(self):
+            self.logs = None
+            self.tbs = None
+
+        def get_context_manager(self):
+            @contextlib.contextmanager
+            def logging_mode():
+                with LoggingTensorMode(), \
+                     capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
+                    self.logs, self.tbs = logs_and_tb
+                    yield logs_and_tb
+            return logging_mode()
+
+    capture_logs_fwd = CaptureLogs()
+    capture_logs_recompute = CaptureLogs()
 
     def unpack_error_cb(e: CheckpointError):
+        # TODO: Test and fix cpp_tb
+        def get_str_tb(label, capture_logs):
+            out = ""
+            total_len = len(capture_logs.logs)
+            for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs)):
+                out += f"{log}   ({i + 1} of {total_len} in {label})\n\n"
+                # HACK: hardcoding the number of frames to skip, can we
+                #       do better?
+                out += "\n".join([f"{line['filename']}:{line['line']}:{line['name']}" for line in tb[6:]])
+                out += "\n\n"
+            return out
+        assert capture_logs_fwd.logs is not None
+        assert capture_logs_recompute.logs is not None
         raise CheckpointError(
             _checkpoint_error_template.format(
-                forward_traces=logging_mode_fwd.str_traces(),
-                recompute_traces=logging_mode_fwd.str_traces(),
-                forward_ops=logging_mode_fwd.str_logs(),
-                recompute_ops=logging_mode_recompute.str_logs(),
+                forward_traces=get_str_tb("original", capture_logs_fwd),
+                recompute_traces=get_str_tb("recompute", capture_logs_recompute),
+                forward_ops="\n".join(capture_logs_fwd.logs),
+                recompute_ops="\n".join(capture_logs_recompute.logs)
             )
         ) from e
 
     def context_fn():
-        return logging_mode_fwd, logging_mode_recompute
+        return capture_logs_fwd.get_context_manager(), capture_logs_recompute.get_context_manager()
 
     return context_fn, unpack_error_cb
 
@@ -915,9 +955,6 @@ _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
     "default": _default_meta_extractor,
     "none": lambda _: None,
 }
-
-class CheckpointError(Exception):
-    pass
 
 # See Rule 5
 class _StopRecomputationError(Exception):
@@ -993,10 +1030,6 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                         weakref.ref(frame), gid
                     ), torch.autograd.enable_grad():
                         frame.recompute_fn(*args)
-                        if frame.early_stop:
-                            raise AssertionError(
-                                "if early stop is enabled, we don't expect to reach here"
-                            )
                 except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
@@ -1037,7 +1070,7 @@ def _checkpoint_without_reentrant(
     *args,
     **kwargs
 ):
-    """Checkpointining without re-entrant autograd
+    """Checkpointing without reentrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
