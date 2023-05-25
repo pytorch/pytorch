@@ -214,6 +214,9 @@ class TestDeserialize(TestCase):
             self.assertTrue(torch.allclose(orig, loaded))
 
     def test_multi_return(self) -> None:
+        """
+        Test multiple return from a single node (ex. layer_norm has 2 outputs)
+        """
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()

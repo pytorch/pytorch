@@ -15,23 +15,24 @@ class _Union:
 
     @classmethod
     def fields(cls):
-        fields_name = [(f.name, str, field(default=f.name)) for f in fields(cls)]
-        return make_dataclass("FieldDataClass", fields_name)()
+        field_name = [(f.name, str, field(default=f.name)) for f in fields(cls)]
+        return make_dataclass("FieldDataClass", field_name)()
 
     def __post_init__(self):
         assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
 
     @property
     def value(self):
-        val = [getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None]
-        assert len(val) == 1
-        return val[0]
+        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)
+        assert val is not None
+        return val
 
     @property
     def type(self):
-        val_type = [f.name for f in fields(self) if getattr(self, f.name) is not None]
-        assert len(val_type) == 1
-        return val_type[0]
+        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)
+        assert val_type is not None
+        return val_type
+
 
 class ScalarType(Enum):
     UNKNOWN = 0

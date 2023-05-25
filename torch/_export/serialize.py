@@ -193,8 +193,8 @@ def import_operator(serialized_target, op_version):
     target = torch.ops
     for name in serialized_target.name.split("."):
         if not hasattr(target, name):
-            log.warning(f"Could not find operator {target.name}. Returning target as string.")  # noqa: G004
-            return target.name
+            log.warning(f"Could not find operator {serialized_target}. Returning target as string.")  # noqa: G004
+            return serialized_target
         else:
             target = getattr(target, name)
     return target
