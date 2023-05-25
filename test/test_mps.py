@@ -7346,6 +7346,15 @@ class TestNLLLoss(TestCaseMPS):
         x = net1(x)
         torch.mps.profiler.stop()
 
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
+
     # Test random_, random_.to and random_.from
     def test_random(self):
         def helper(shape, low, high, dtype=torch.int32):
