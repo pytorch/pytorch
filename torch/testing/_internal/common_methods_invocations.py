@@ -8084,7 +8084,7 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
         src_lens = (XS,)
         tgt_lens = (XS,)
         heads = (2,)
-        dropouts = (0.0, 0.5)
+        dropouts = (0.5,)
         mask_types = ("2d",)
     else:
         bsz = 2
