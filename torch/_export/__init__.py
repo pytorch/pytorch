@@ -7,7 +7,7 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
-from . import graph_module
+from .exported_program import CallSpec, ExportedProgram
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
@@ -88,7 +88,7 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
-) -> graph_module.ExportedProgram:
+) -> ExportedProgram:
     """
     Export a single entry point or a free function.
     """
@@ -118,10 +118,10 @@ def export(
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
     )
-    exported_program = graph_module.ExportedProgram(
+    exported_program = ExportedProgram(
         gm,
         gm.graph,
-        call_spec=graph_module.CallSpec(in_spec, out_spec),
+        call_spec=CallSpec(in_spec, out_spec),
         example_inputs=flat_args,
     )
     return exported_program
