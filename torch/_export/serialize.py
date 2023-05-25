@@ -20,7 +20,6 @@ from .serde.schema import (   # type: ignore[attr-defined]
     MemoryFormat,
     NamedArgument,
     Node,
-    Operator,
     ScalarType,
     SymInt,
     SymIntArgument,
@@ -173,25 +172,20 @@ def import_metadata(metadata) -> Dict[str, str]:
     return ret
 
 
-def export_operator(target, version) -> Operator:
+def export_operator(target) -> str:
     if isinstance(target, str):
-        return Operator(name=target, version=version)
+        return target
     elif target in _SYM_INT_OPS:
-        return Operator(name=f"{target.__module__}.{target.__name__}", version=version)
+        return f"{target.__module__}.{target.__name__}"
     elif isinstance(target, torch._ops.HigherOrderOperator):
-        return Operator(name=target.__name__, version=version)
+        return target.__name__
     else:
-        return Operator(name=str(target), version=version)
+        return str(target)
 
 
-def import_operator(serialized_target, op_version):
-    if serialized_target.version != op_version:
-        raise SerializeError(
-            f"Target {serialized_target.name} had op version {serialized_target.version} "
-            f"but the existing op version is now {op_version}"
-        )
+def import_operator(serialized_target: str):
     target = torch.ops
-    for name in serialized_target.name.split("."):
+    for name in serialized_target.split("."):
         if not hasattr(target, name):
             log.warning(f"Could not find operator {serialized_target}. Returning target as string.")  # noqa: G004
             return serialized_target
@@ -280,13 +274,13 @@ def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
 
 
 class Serializer:
-    def __init__(self, op_version: int = 0):
+    def __init__(self, opset_version: int = 0):
         self.inputs: List[Argument] = []
         self.outputs: List[Argument] = []
         self.nodes: List[Node] = []
         self.tensor_values: Dict[str, TensorValue] = {}
         self.sym_int_values: Dict[str, SymInt] = {}
-        self.op_version: int = op_version
+        self.opset_version: int = opset_version
 
     def handle_placeholder(self, node: torch.fx.Node):
         assert node.op == "placeholder"
@@ -314,7 +308,7 @@ class Serializer:
             # Hack for torch.no_grad support. In the long run this should become
             # a higher order op but this is fine for now. See [NOTE: nograd support]
             ex_node = Node(
-                target=export_operator("torch.set_grad_enabled", self.op_version),
+                target=export_operator("torch.set_grad_enabled"),
                 inputs=[NamedArgument(name="arg", arg=self.export_input(node.args[0]))],
                 outputs=[],
                 metadata=export_metadata(node),
@@ -323,14 +317,14 @@ class Serializer:
             assert len(node.kwargs) == 0
             meta_val = node.meta["val"]
             ex_node = Node(
-                target=export_operator(node.target, self.op_version),
+                target=export_operator(node.target),
                 inputs=self.export_sym_int_op_inputs(node.args),
                 outputs=[Argument.create(as_sym_int=self.export_sym_int_output(node.name, meta_val))],
                 metadata=export_metadata(node),
             )
         elif isinstance(node.target, torch._ops.OpOverload):
             ex_node = Node(
-                target=export_operator(node.target, self.op_version),
+                target=export_operator(node.target),
                 inputs=self.export_inputs(node.target, node.args, node.kwargs),
                 outputs=self.export_outputs(node),
                 # TODO: create a new tensor_values here, meta might have faketensor info
@@ -546,6 +540,7 @@ class Serializer:
                 graph=graph,
                 signature=export_signature(exported_program.graph_signature),
                 call_spec=export_call_spec(exported_program.call_spec),
+                opset_version=self.opset_version
             ),
             export_state_dict(exported_program.state_dict),
         )
@@ -577,7 +572,7 @@ class Deserializer:
 
         # Nodes: convert to call_function nodes.
         for serialized_node in serialized_graph.nodes:
-            if serialized_node.target.name == "torch.set_grad_enabled":
+            if serialized_node.target == "torch.set_grad_enabled":
                 # Hack for torch.no_grad support. In the long run this should become
                 # a higher order op but this is fine for now. See [NOTE: nograd support]
                 fx_node = graph.call_function(
@@ -587,7 +582,7 @@ class Deserializer:
                 fx_node.meta.update(import_metadata(serialized_node.metadata))
                 continue
 
-            target = import_operator(serialized_node.target, self.op_version)
+            target = import_operator(serialized_node.target)
 
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values

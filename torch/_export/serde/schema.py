@@ -131,14 +131,8 @@ class NamedArgument:
 
 
 @dataclass
-class Operator:
-    name: str
-    version: Optional[int]
-
-
-@dataclass
 class Node:
-    target: Operator
+    target: str
     inputs: List[NamedArgument]
     outputs: List[Argument]
     metadata: Dict[str, str]
@@ -186,3 +180,5 @@ class GraphModule:
     graph: Graph
     signature: GraphSignature
     call_spec: CallSpec
+    # TODO(angelayi): Make this some dict mapping namespace to version later
+    opset_version: int
