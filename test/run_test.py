@@ -949,8 +949,6 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
         rerun_options = ["-x", "--reruns=2"]
-        if IS_CI:
-            rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
@@ -958,7 +956,9 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        pytest_args.extend(
+            ["-p", "no:xdist", "--use-pytest", f"--sc={stepcurrent_key}"]
+        )
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
