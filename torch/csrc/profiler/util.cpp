@@ -228,7 +228,7 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-static std::vector<std::vector<int64_t>> flattenList(
+std::vector<std::vector<int64_t>> flattenList(
     c10::List<c10::IValue> list,
     std::string fn_name) {
   std::vector<std::vector<int64_t>> tensor_dims;
