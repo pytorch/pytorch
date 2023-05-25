@@ -50,6 +50,7 @@ else:
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = logging.getLogger(__name__ + ".perf_hints")
 ALIGNMENT = 16
 
 
@@ -350,16 +351,16 @@ def compile_fx_inner(
                     return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
-                developer_warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    developer_warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
