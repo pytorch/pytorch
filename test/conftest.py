@@ -256,7 +256,7 @@ def pytest_collection_modifyitems(items: List[Any]):
         if test_class not in disabled_tests or test_name not in disabled_tests[test_class]:
             continue
 
-        cpy = copy.copy(items[0])
+        cpy = copy.copy(item)
         cpy._initrequest()
 
         filtered_items.append(cpy)
