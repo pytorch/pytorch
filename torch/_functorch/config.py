@@ -28,7 +28,7 @@ debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
-cse = True
+cse = False
 
 # Restricts the amount of computation AOTAutograd can do.
 max_dist_from_bw = 3
