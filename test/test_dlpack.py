@@ -153,7 +153,7 @@ class TestTorchDlPack(TestCase):
         # default stream to wait due to inserted syncs
         torch.cuda.default_stream().synchronize()
         x = torch.zeros(1, device=device)
-        torch.cuda._sleep(2**20)
+        torch.cuda._sleep(2**22)
         self.assertTrue(torch.cuda.default_stream().query())
         d = x.__dlpack__(1)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
