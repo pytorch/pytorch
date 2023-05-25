@@ -209,6 +209,12 @@ class TorchVariable(VariableTracker):
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
+        elif self.value is torch.func.grad:
+            return TorchHigherOrderOperatorVariable(
+                self.value,
+                source=self.source,
+                value_args_kwargs={"args": args, "kwargs": kwargs},
+            )
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
@@ -822,10 +828,17 @@ def speculate_subgraph(
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(self, value, source: Optional[Source] = None, **kwargs):
+    def __init__(
+        self,
+        value,
+        source: Optional[Source] = None,
+        value_args_kwargs: Optional[Dict] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
+        self.value_args_kwargs = value_args_kwargs
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1289,6 +1302,77 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
+        elif self.value is torch.func.grad:
+            checkpoint = tx.copy_graphstate()
+            graph_checkpoint = tx.output.graph
+            grad_args = self.value_args_kwargs["args"]
+            grad_kwargs = self.value_args_kwargs["kwargs"]
+            # first vmap arg is function
+            fn = grad_args[0] if len(grad_args) >= 1 else grad_kwargs["func"]
+            print(len(grad_args))
+            argnums = (
+                grad_args[1]
+                if len(grad_args) >= 2
+                else grad_kwargs.get("argnums", None)
+            )
+            has_aux = (
+                grad_args[2]
+                if len(grad_args) >= 3
+                else grad_kwargs.get("has_aux", None)
+            )
+
+            body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+                tx,
+                fn,
+                args,
+                graph_checkpoint,
+                checkpoint,
+            )
+
+            body_name = add_subgraph(
+                "grad_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+            body_node = make_attr(body_name)
+            grad_proxy_args = (
+                body_node,
+                *(arg.as_proxy() for arg in grad_args[1:]),
+            )
+            if has_aux is not None and has_aux.value:
+                # Has aux
+                # NOTE: Currently speculate subgraph allows body_r to be
+                # Tensor or Tuple/List of Tensor.
+                # Since `grad` expects output with has_aux
+                # to be (output, aux), only valid aux currently is
+                # (output, some_tensor)
+                body_r_proxy = body_r.as_proxy()
+                output = body_r_proxy[0].node.meta["example_value"]
+                aux = body_r_proxy[1].node.meta["example_value"]
+                r = (output, aux)
+            else:
+                r = body_r.as_proxy().node.meta["example_value"]
+            grad_proxy_kwargs = {k: v.as_proxy() for k, v in grad_kwargs.items()}
+            example_value = r
+            # grad_proxy corresponds to `grad_proxy = grad(fn, *grad_args, **grad_kwargs)`
+            grad_proxy = tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(grad_proxy_args),
+                kwargs=grad_proxy_kwargs,
+                name="grad_proxy",
+            )
+
+            grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
+                body_lifted_freevars
+            )
+            grad_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
+
+            # proxy corresponds to `call = grad_proxy(*grad_fn_args, **grad_fn_kwargs)`
+            proxy = grad_proxy(*grad_fn_args, **grad_fn_kwargs)
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=proxy,
+                example_value=example_value,
+            )
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 

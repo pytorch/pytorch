@@ -621,6 +621,162 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+    def test_grad(self):
+        counters.clear()
+
+        def f(x):
+            def fn(x):
+                return x.sin().sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_freevar_tensor(self):
+        counters.clear()
+        y = torch.randn(3, 3)
+
+        def f(x):
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_freevar_python_scalar(self):
+        counters.clear()
+        y = 3
+
+        def f(x):
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_freevar_inner_tensor(self):
+        counters.clear()
+
+        def f(x):
+            y = torch.randn(
+                3,
+            )
+
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_freevar_inner_scalar(self):
+        counters.clear()
+
+        def f(x):
+            y = 3.14
+
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_has_aux(self):
+        counters.clear()
+
+        def f(x):
+            y = 3.14
+
+            def fn(x):
+                return ((x.sin() + y).sum(), x.cos())
+
+            return torch.func.grad(fn, has_aux=True)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_two_tensor_has_aux(self):
+        counters.clear()
+
+        def f(x, y):
+            def fn(x, y):
+                return ((x.sin() + y).sum(), x.cos())
+
+            return torch.func.grad(fn, has_aux=True)(x, y)
+
+        y = torch.randn(3, 3, 3)
+        x = torch.randn(3, 3, 3)
+        actual = f(x, y)
+        expected = torch.compile(f)(x, y)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    # def test_grad_two_tensor_all_grad(self):
+    #     counters.clear()
+
+    #     def f(x, y):
+    #         def fn(x, y):
+    #             return ((x.sin() + y).sum(), x.cos())
+
+    #         return torch.func.grad(fn, argnums=(0, 1))(x, y)
+
+    #     y = torch.randn(3, 3, 3)
+    #     x = torch.randn(3, 3, 3)
+    #     actual = f(x, y)
+    #     expected = torch.compile(f)(x, y)
+
+    #     self.assertEqual(actual, expected)
+    #     self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+    def test_grad_over_grad(self):
+        counters.clear()
+
+        def f(x):
+            def fn(x):
+                return x.sin().sum()
+
+            return torch.func.grad(lambda x: torch.func.grad(fn)(x).sum())(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = f(x)
+        expected = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):

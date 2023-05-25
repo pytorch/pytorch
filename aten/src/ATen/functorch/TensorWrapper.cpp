@@ -38,19 +38,27 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
 }
 
 void TensorWrapper::refreshMetadata() {
-  auto dim = value_.dim();
-  auto sizes = value_.sizes();
-  auto strides = value_.strides();
-  storage_offset_ = value_.storage_offset();
-  sizes_and_strides_.resize(value_.dim());
-  for (int64_t i = 0; i < dim; i++) {
-    sizes_and_strides_.size_at_unchecked(i) = sizes[i];
-    sizes_and_strides_.stride_at_unchecked(i) = strides[i];
+  // update size, strides and storage_offset
+  if (value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    // for tensor with symbolic size and strides
+    set_sizes_and_strides(
+        value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
+  } else {
+    // for tensor with regular size and strides
+    auto dim = value_.dim();
+    auto sizes = value_.sizes();
+    auto strides = value_.strides();
+    storage_offset_ = value_.storage_offset();
+    sizes_and_strides_.resize(value_.dim());
+    for (int64_t i = 0; i < dim; i++) {
+      sizes_and_strides_.size_at_unchecked(i) = sizes[i];
+      sizes_and_strides_.stride_at_unchecked(i) = strides[i];
+    }
   }
 
-  refresh_numel();
-  refresh_contiguous();
-}
+    refresh_numel();
+    refresh_contiguous();
+  }
 
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
