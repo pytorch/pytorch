@@ -1303,27 +1303,35 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
         elif self.value is torch.func.grad:
+            # [NOTE] Here we are modelling the following
+            #
+            #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
+            #   grad_output = grad_fn(x)
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
             grad_args = self.value_args_kwargs["args"]
             grad_kwargs = self.value_args_kwargs["kwargs"]
-            # first vmap arg is function
-            fn = grad_args[0] if len(grad_args) >= 1 else grad_kwargs["func"]
-            print(len(grad_args))
-            argnums = (
+            # first arg of `grad` is function
+            func = grad_args[0] if len(grad_args) >= 1 else grad_kwargs["func"]
+
+            # second arg of `grad` is argnums
+            argnums: Optional[ConstantVariable] = (
                 grad_args[1]
                 if len(grad_args) >= 2
                 else grad_kwargs.get("argnums", None)
             )
-            has_aux = (
+
+            # third arg of `grad` is argnums
+            has_aux: Optional[ConstantVariable] = (
                 grad_args[2]
                 if len(grad_args) >= 3
                 else grad_kwargs.get("has_aux", None)
             )
 
+            # Trace through the `func`
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
-                fn,
+                func,
                 args,
                 graph_checkpoint,
                 checkpoint,
@@ -1337,23 +1345,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 body_node,
                 *(arg.as_proxy() for arg in grad_args[1:]),
             )
-            if has_aux is not None and has_aux.value:
-                # Has aux
-                # NOTE: Currently speculate subgraph allows body_r to be
-                # Tensor or Tuple/List of Tensor.
-                # Since `grad` expects output with has_aux
-                # to be (output, aux), only valid aux currently is
-                # (output, some_tensor)
-                body_r_proxy = body_r.as_proxy()
-                output = body_r_proxy[0].node.meta["example_value"]
-                aux = body_r_proxy[1].node.meta["example_value"]
-                r = (output, aux)
-            else:
-                r = body_r.as_proxy().node.meta["example_value"]
+
             grad_proxy_kwargs = {k: v.as_proxy() for k, v in grad_kwargs.items()}
-            example_value = r
-            # grad_proxy corresponds to `grad_proxy = grad(fn, *grad_args, **grad_kwargs)`
-            grad_proxy = tx.output.create_proxy(
+
+            # Model `grad_fn = grad(fn, *grad_args, **grad_kwargs)`
+            grad_fn = tx.output.create_proxy(
                 "call_function",
                 self.value,
                 args=tuple(grad_proxy_args),
@@ -1361,18 +1357,44 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 name="grad_proxy",
             )
 
+            # Pass lifted freevars to the call to `grad_fn`
             grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
                 body_lifted_freevars
             )
             grad_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
 
-            # proxy corresponds to `call = grad_proxy(*grad_fn_args, **grad_fn_kwargs)`
-            proxy = grad_proxy(*grad_fn_args, **grad_fn_kwargs)
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=proxy,
-                example_value=example_value,
-            )
+            # Call grad_fn with inputs.
+            grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
+
+            # NOTE: example_value should match the output of calling the
+            # `grad_fn(*grad_fn_args, **grad_fn_kwargs)`
+            # Output of grad_fn is
+            # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
+            # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
+            example_value = args[0].as_proxy().node.meta["example_value"]
+            if argnums is not None:
+                if isinstance(argnums.value, int):
+                    example_value = (
+                        args[argnums.value].as_proxy().node.meta["example_value"]
+                    )
+                else:
+                    example_value = tuple(
+                        args[idx].as_proxy().node.meta["example_value"]
+                        for idx in argnums.value
+                    )
+
+            if has_aux is not None and has_aux.value:
+                # case : has_aux = True
+                # NOTE: Currently speculate subgraph allows body_r to be
+                # Tensor or Tuple/List of Tensor.
+                # Since `grad` expects output with has_aux
+                # to be (output, aux), only valid output currently is
+                # (output, some_tensor)
+                body_r_proxy = body_r.as_proxy()
+                aux = body_r_proxy[1].node.meta["example_value"]
+                example_value = (example_value, aux)
+
+            return wrap_fx_proxy(tx=tx, proxy=grad_output, example_value=example_value)
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
