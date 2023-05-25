@@ -1,4 +1,5 @@
 import functools
+import logging
 from enum import auto, Enum
 from typing import (
     Any,
@@ -13,6 +14,7 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,7 +40,6 @@ from torch.distributed.fsdp.flat_param import (
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
 from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
-
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
@@ -735,6 +736,13 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # This can help debug certain cases where hooks don't fire under activation checkpoint,
+    # for example.
+    print("RV ...checking debug level..")
+    if dist.get_debug_level() == dist.DebugLevel.INFO:
+        param_module_names = list(handle.param_module_names())
+        print(f"RV: {param_module_names}")
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(

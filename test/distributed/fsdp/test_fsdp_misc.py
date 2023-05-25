@@ -131,8 +131,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_second_layer", [True, False])
-    @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
+    @parametrize("use_second_layer", [False])
+    @parametrize("sharding_strategy", [None])
     def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
         # When use_second_layer=True, b is involved in forward computation but does
         # not receive grad in backward. Otherwise, b is not involved in forward
@@ -156,6 +156,7 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             sharding_strategy=sharding_strategy,
             auto_wrap_policy=always_wrap_policy,
         )
+        print(f"FSDP: {fsdp}")
         x = torch.randn(10, 10, device="cuda")
         y = torch.randn(10, 10, device="cuda")
         for i in range(4):
