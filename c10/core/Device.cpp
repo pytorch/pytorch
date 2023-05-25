@@ -1,10 +1,12 @@
 #include <c10/core/Device.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <exception>
+#include <ostream>
 #include <string>
 #include <vector>
 

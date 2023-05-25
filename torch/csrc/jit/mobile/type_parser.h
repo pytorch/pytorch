@@ -2,7 +2,6 @@
 
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/jit_type.h>
-#include <unordered_set>
 
 namespace c10 {
 

@@ -1,14 +1,13 @@
 #include <c10/core/TensorImpl.h>
 
-#include <c10/core/CopyBytes.h>
+#include <c10/core/Backend.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 #include <utility>
@@ -73,7 +72,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  pyobj_slot_.destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -580,7 +581,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.maybe_destroy_pyobj();
+  pyobj_slot_.destroy_pyobj_if_needed();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY

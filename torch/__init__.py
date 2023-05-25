@@ -1400,7 +1400,14 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-from torch import backends as backends
+import torch.backends.cpu
+import torch.backends.cuda
+import torch.backends.mps
+import torch.backends.cudnn
+import torch.backends.mkl
+import torch.backends.mkldnn
+import torch.backends.openmp
+import torch.backends.quantized
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1502,8 +1509,7 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            from torch._inductor import list_mode_options
-            self.apply_options(list_mode_options(mode))
+            self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1690,8 +1696,6 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 
-# Register MPS specific decomps
-torch.backends.mps._init()
 
 from . import _logging
 _logging._init_logs()

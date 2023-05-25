@@ -36,6 +36,9 @@ ALL_DYNAMIC_XFAILS = {
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
     ],
+    "SubGraphTests": [
+        "test_enumerate_not_break_graph",
+    ],
 }
 
 XFAIL_HITS = 0

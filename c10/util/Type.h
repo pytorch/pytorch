@@ -3,9 +3,7 @@
 
 #include <cstddef>
 #include <string>
-#ifdef __GXX_RTTI
 #include <typeinfo>
-#endif // __GXX_RTTI
 
 #include <c10/macros/Macros.h>
 

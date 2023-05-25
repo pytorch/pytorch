@@ -4,7 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
@@ -17,6 +17,7 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
+struct SafePyObject;
 } // namespace c10
 
 namespace torch {
@@ -127,8 +128,8 @@ struct C10_API PyInterpreterVTable {
   virtual std::string name() const = 0;
 
   // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-  virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
+  // See NOTE [PyInterpreter::decref takes an `is_tensor` arg]
+  virtual void decref(PyObject* pyobj, bool is_tensor) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this

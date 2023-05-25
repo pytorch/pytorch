@@ -342,24 +342,22 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset):
+    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def randn(seed, offset):
+    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
         offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
+    # TODO: work out how to use randint4x
     @staticmethod
-    def randint64(seed, offset, low, high):
+    def randint(
+        seed, offset, _
+    ):  # _ here to keep the contract identical to CPU randint op
         offset = f"({offset}).to(tl.uint32)"
-        return f"triton_helpers.randint64({seed}, {offset}, {low}, {high})"
-
-    @staticmethod
-    def load_seed(name, offset):
-        var = V.kernel.args.input(name)
-        return f"tl.load({var} + {offset})"
+        return f"tl.randint({seed}, {offset}).to(tl.int32)"
 
     @staticmethod
     def rsqrt(x):
@@ -1318,8 +1316,10 @@ class TritonKernel(Kernel):
                 {accumulator_index} = tl.where({cond}, {accumulator_index}_next, {accumulator_index})
                 """
                 )
+                idx_dtype = self.index_dtype
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
+                updated = value
                 if reduction_type == "min":
                     updated = f"triton_helpers.minimum({accumulator}, {value})"
                 elif reduction_type == "max":
@@ -1681,34 +1681,45 @@ class TritonKernel(Kernel):
         grid = []
         # TODO(jansel): if there are constants, we shouldn't bother passing them as args
         for tree in self.range_trees:
+            assignment = False
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
-                expr = tree.numel
+                expr = pexpr(tree.numel)
             else:
-                # We can get symbolic expressions here, like s0*64
-                # It is fine to have them here, but we need to handle them correctly as their own type
-                # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
-                # scalars as well.
-                # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
-                # constant now, need type info. I agree, this needs type info, and while this is not true type info
-                # it suffices as a type hint for the purposes of producing the correct code for this type.
-                expr = SymbolicCallArg(f"{name}_{tree.prefix}numel")
+                assignment = True
+                expr = f"{name}_{tree.prefix}numel"
                 # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
                 # The real fix here is to revisit our cross language calling convention.
                 code.writeline(
                     f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
                 )
-
             if tree.prefix != "r" or self.inside_reduction:
-                call_args.append(expr)
+                if assignment:
+                    # We can get symbolic expressions here, like s0*64
+                    # It is fine to have them here, but we need to handle them correctly as their own type
+                    # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+                    # scalars as well.
+                    # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+                    # constant now, need type info. I agree, this needs type info, and while this is not true type info
+                    # it suffices as a type hint for the purposes of producing the correct code for this type.
+                    call_args.append(SymbolicCallArg(expr))
+                else:
+                    call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
-        code.generate_kernel_call(
-            name,
-            call_args,
-            grid,
-            V.graph.scheduler.current_device.index,
-        )
+        if V.graph.cpp_wrapper:
+            V.graph.wrapper_code.generate_kernel_call(
+                name, call_args, V.graph.scheduler.current_device.index
+            )
+        else:
+            # TODO: refactor generate_kernel_call
+            call_args_str = ", ".join(str(item) for item in call_args)
+            stream_name = code.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
+            code.writeline(
+                f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
+            )
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)

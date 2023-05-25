@@ -19,7 +19,6 @@ from dataclasses import dataclass
 import weakref
 import operator
 from torch.utils._stats import count
-import logging
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
@@ -37,9 +36,6 @@ from torch.utils.weak import WeakTensorKeyDictionary
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
 prim = torch.ops.prim
-
-log = logging.getLogger(__name__)
-not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
@@ -256,18 +252,12 @@ def inside_mode(proxy_mode):
         proxy_mode.is_inside_mode = old
 
 def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
-    unrecognized_types = []
-
     def can_handle_tensor(x):
-        r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
-        if not r:
-            unrecognized_types.append(type(x))
-        return r
+        return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:

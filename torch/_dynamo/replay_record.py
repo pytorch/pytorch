@@ -80,8 +80,7 @@ class ExecutionRecorder:
             self.name_to_modrec[mod.__name__].accessed_attrs[name] = self._add_mod(val)
             return
 
-        if mod.__name__ in self.name_to_modrec:
-            self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
+        self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
 
     def get_record(self):
         return ExecutionRecord(

@@ -3,18 +3,19 @@ from __future__ import annotations
 import copy
 import functools
 import operator
-from typing import Callable, Dict, List, Optional, Set, Any
+from typing import Callable, Dict, List, Optional, Set
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 
 from torch.ao.quantization._pt2e.quantizer.utils import (
-    get_act_qspec,
-    get_weight_qspec,
-    get_bias_qspec,
+    get_act_obs_or_fq_ctr,
+    get_bias_obs_or_fq_ctr,
+    get_weight_obs_or_fq_ctr,
 )
 
+from torch.ao.quantization.observer import PlaceholderObserver
 from torch.fx import Node
 
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
@@ -29,17 +30,6 @@ from .quantizer import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
 )
-from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
-from torch.ao.quantization.observer import (
-    HistogramObserver,
-    MinMaxObserver,
-    PerChannelMinMaxObserver,
-    MovingAverageMinMaxObserver,
-    MovingAveragePerChannelMinMaxObserver,
-    PlaceholderObserver,
-)
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-
 
 __all__ = [
     "QNNPackQuantizer",
@@ -135,32 +125,16 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
 ):
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = \
-        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
-
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
         qscheme=torch.per_tensor_affine,
         is_dynamic=False,
-        observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(eps=2**-12),
     )
     qscheme = (
         torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
-    weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = MinMaxObserver
-    if is_qat:
-        weight_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
-    elif is_per_channel:
-        weight_observer_or_fake_quant_ctr = PerChannelMinMaxObserver
-
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
-    if is_qat:
-        if qscheme == torch.per_tensor_symmetric:
-            extra_args["observer"] = MovingAverageMinMaxObserver
-        else:
-            extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-127,
@@ -168,14 +142,8 @@ def get_symmetric_quantization_config(
         qscheme=qscheme,
         ch_axis=0,
         is_dynamic=False,
-        observer_or_fake_quant_ctr=weight_observer_or_fake_quant_ctr.with_args(**extra_args),
     )
-
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = PlaceholderObserver
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float,
-        observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = QuantizationSpec(dtype=torch.float)
     quantization_config = QuantizationConfig(
         act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
     )
@@ -184,6 +152,11 @@ def get_symmetric_quantization_config(
 
 def get_supported_config_and_operators() -> List[OperatorConfig]:
     return get_supported_symmetric_config_and_operators()
+
+
+def _get_default_obs_or_fq_ctr():
+    return PlaceholderObserver.with_args(dtype=torch.float)
+
 
 def _is_annotated(nodes: List[Node]):
     """
@@ -248,20 +221,18 @@ class QNNPackQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         global_config = self.global_config
-        # _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
-        # TODO: validate that global_config is supported
-        self.annotate_symmetric_config(model, global_config)
+        _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
 
         return model
 
-    # @register_annotator(
-    #     [
-    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
-    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
-    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
-    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
-    #     ]
-    # )
+    @register_annotator(
+        [
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
+            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
+            get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
+        ]
+    )
     def annotate_symmetric_config(
         self, model: torch.fx.GraphModule, config: QuantizationConfig
     ) -> torch.fx.GraphModule:
@@ -329,15 +300,15 @@ class QNNPackQuantizer(Quantizer):
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
 
         weight = conv_node.args[1]
         assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
 
         bias = conv_node.args[2]
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -348,7 +319,7 @@ class QNNPackQuantizer(Quantizer):
             _annotated=True
         )
         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -402,15 +373,15 @@ class QNNPackQuantizer(Quantizer):
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
 
         weight = conv_node.args[1]
         assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
 
         bias = conv_node.args[2]
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
@@ -423,7 +394,7 @@ class QNNPackQuantizer(Quantizer):
             _annotated=True
         )
         relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -449,22 +420,22 @@ class QNNPackQuantizer(Quantizer):
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
 
         weight = conv_node.args[1]
         assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
 
         bias = conv_node.args[2]
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True
         )
         relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),  # type: ignore[arg-type]
             _annotated=True
         )
 
@@ -484,19 +455,19 @@ class QNNPackQuantizer(Quantizer):
         input_qspec_map = {}
         input_act = conv_node.args[0]
         assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
+        input_qspec_map[input_act] = get_act_obs_or_fq_ctr(quantization_config)
 
         weight = conv_node.args[1]
         assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
+        input_qspec_map[weight] = get_weight_obs_or_fq_ctr(quantization_config)
 
         bias = conv_node.args[2]
         if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
+            input_qspec_map[bias] = get_bias_obs_or_fq_ctr(quantization_config)
 
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
-            output_qspec=get_act_qspec(quantization_config),
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
             _annotated=True
         )
 
@@ -506,9 +477,6 @@ class QNNPackQuantizer(Quantizer):
         module_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
         )
-        act_qspec = get_act_qspec(quantization_config)
-        weight_qspec = get_weight_qspec(quantization_config)
-        bias_qspec = get_bias_qspec(quantization_config)
         for module_or_fn_type, partitions in module_partitions.items():
             if module_or_fn_type == torch.nn.Linear:
                 for p in partitions:
@@ -538,14 +506,20 @@ class QNNPackQuantizer(Quantizer):
                         _annotate_input_qspec_map(
                             act_use_node,
                             act_node,
-                            act_qspec,
+                            get_act_obs_or_fq_ctr(quantization_config),
                         )
                     if bias_node and _is_annotated([bias_node]) is False:
-                        _annotate_output_qspec(bias_node, bias_qspec)
+                        _annotate_output_qspec(
+                            bias_node, get_bias_obs_or_fq_ctr(quantization_config)
+                        )
                     if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                        _annotate_output_qspec(weight_node, weight_qspec)
+                        _annotate_output_qspec(
+                            weight_node, get_weight_obs_or_fq_ctr(quantization_config)
+                        )
                     if _is_annotated([output_node]) is False:
-                        _annotate_output_qspec(output_node, act_qspec)
+                        _annotate_output_qspec(
+                            output_node, get_act_obs_or_fq_ctr(quantization_config)
+                        )
                     nodes_to_mark_annotated = list(p.nodes)
                     _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
@@ -573,16 +547,14 @@ class QNNPackQuantizer(Quantizer):
 
         input_act = maxpool_node.args[0]
         assert isinstance(input_act, Node)
-
-        act_qspec = get_act_qspec(quantization_config)
         maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
-                input_act: act_qspec,
+                input_act: get_act_obs_or_fq_ctr(quantization_config)
             },
             _annotated=True,
         )
         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
             _input_output_share_observers=True,
             _annotated=True,
         )
@@ -604,13 +576,11 @@ class QNNPackQuantizer(Quantizer):
 
         input_act = io_obs_sharing_node.args[0]
         assert isinstance(input_act, Node)
-
-        act_qspec = get_act_qspec(quantization_config)
         io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
-                input_act: act_qspec,
+                input_act: get_act_obs_or_fq_ctr(quantization_config)
             },
-            output_qspec=act_qspec,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
             _input_output_share_observers=True,
             _annotated=True,
         )
@@ -658,23 +628,21 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([relu_node, add_node]):
             return
 
-        act_qspec = get_act_qspec(quantization_config)
-
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = act_qspec
+            input_qspec_map[input_act0] = get_act_obs_or_fq_ctr(quantization_config)
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = act_qspec
+            input_qspec_map[input_act1] = get_act_obs_or_fq_ctr(quantization_config)
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
         )
         relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
             _annotated=True,
         )
 
@@ -690,20 +658,18 @@ class QNNPackQuantizer(Quantizer):
         if _is_annotated([add_node]):
             return
 
-        act_qspec = get_act_qspec(quantization_config)
-
         input_qspec_map = {}
         input_act0 = add_node.args[0]
         if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = act_qspec
+            input_qspec_map[input_act0] = get_act_obs_or_fq_ctr(quantization_config)
 
         input_act1 = add_node.args[1]
         if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = act_qspec
+            input_qspec_map[input_act1] = get_act_obs_or_fq_ctr(quantization_config)
 
         add_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
-            output_qspec=act_qspec,
+            output_qspec=get_act_obs_or_fq_ctr(quantization_config),
             _annotated=True,
         )
 
