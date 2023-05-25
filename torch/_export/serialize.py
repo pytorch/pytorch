@@ -541,24 +541,9 @@ class Serializer:
             outputs=self.outputs,
         )
 
-        # TODO(angelayi): I forgot where this belongs
-        buffers = {}
-        parameters = {}
-        for name, buffer in exported_program.graph_module.named_buffers():
-            buffers[name] = export_tensor_meta(buffer)
-        for name, parameter in exported_program.graph_module.named_parameters():
-            parameters[name] = export_tensor_meta(parameter)
-
-
-        # TODO(angelayi): Graph Module metadata?
-        metadata: Dict[str, str] = {}
-
         return (
             GraphModule(
                 graph=graph,
-                buffers=buffers,
-                parameters=parameters,
-                metadata=metadata,
                 signature=export_signature(exported_program.graph_signature),
                 call_spec=export_call_spec(exported_program.call_spec),
             ),

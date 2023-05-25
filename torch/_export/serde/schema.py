@@ -184,8 +184,5 @@ class CallSpec:
 @dataclass
 class GraphModule:
     graph: Graph
-    buffers: Dict[str, TensorMeta]
-    parameters: Dict[str, TensorMeta]
-    metadata: Dict[str, str]
     signature: GraphSignature
     call_spec: CallSpec
