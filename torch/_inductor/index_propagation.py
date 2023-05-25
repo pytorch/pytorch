@@ -104,7 +104,7 @@ class SymPyOps:
     def floordiv(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
-            return NotImplementedError
+            return NotImplemented
 
         return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
 
@@ -112,7 +112,7 @@ class SymPyOps:
     def remainder(x, y):
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
-            return NotImplementedError
+            return NotImplemented
 
         result_expr = ir.ModularIndexing(x.expr, sympy.Integer(1), y.expr)
         return TypedExpr(result_expr, result_type)
