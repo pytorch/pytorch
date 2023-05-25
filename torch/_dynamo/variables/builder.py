@@ -440,7 +440,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
-        elif value in {
+        elif inspect.isfunction(value) and value in {
             torch.distributed.distributed_c10d.all_gather_into_tensor,
             torch.distributed.distributed_c10d.reduce_scatter_tensor,
         }:
