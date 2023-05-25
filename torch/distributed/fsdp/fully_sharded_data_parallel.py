@@ -385,11 +385,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
-        ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+        ignored_states: Union[
+            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+        ] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
+        _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
         # Add module annotations for Dynamo support (see function for details)
