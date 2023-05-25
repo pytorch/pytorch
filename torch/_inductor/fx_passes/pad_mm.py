@@ -170,7 +170,7 @@ def is_mm_compute_bound(M, K, N, dtype):
     # Fails with AMD
     try:
         machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
-    except Exception as e:
+    except Exception:
         return True
 
     # dram_gbps might be underestimating bandwidth because of cache.
@@ -181,6 +181,37 @@ def is_mm_compute_bound(M, K, N, dtype):
     machine_balance = machine_balance * 0.5
 
     return arithmetic_intensity > machine_balance
+
+
+@functools.lru_cache(None)
+def get_pad_cache():
+    return torch._inductor.codecache.LocalCache()
+
+
+def get_cached_should_pad(key):
+    return get_pad_cache().lookup(key)
+
+
+def set_cached_should_pad(key, value):
+    return get_pad_cache().set_value(key, value=value)
+
+
+def should_pad_bench_key(mat1, mat2, op, input=None):
+    def tensor_key(t):
+        return (t.shape, t.stride(), t.dtype)
+
+    tf32_key = (
+        None if mat1.dtype != torch.float32 else torch.backends.cuda.matmul.allow_tf32
+    )
+    key = (
+        tensor_key(mat1),
+        tensor_key(mat2),
+        op,
+        input if input is None else tensor_key(input),
+        tf32_key,
+    )
+
+    return str(key)
 
 
 def should_pad_bench(mat1, mat2, op, input=None):
@@ -218,10 +249,16 @@ def should_pad_bench(mat1, mat2, op, input=None):
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
             return False
 
+        # We don't want to look up the cache for cases that are trivially false
+        # since it does file io
+        key = should_pad_bench_key(mat1, mat2, op, input)
+
+        cached_pad = get_cached_should_pad(key)
+        if cached_pad is not None:
+            return cached_pad
+
         mat1 = torch.randn_like(mat1)
         mat2 = torch.randn_like(mat2)
-        warmup = 5
-        rep = 100
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2),
@@ -274,7 +311,10 @@ def should_pad_bench(mat1, mat2, op, input=None):
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
-        return ori_time > pad_time * 1.1
+        should_pad = ori_time > pad_time * 1.1
+        set_cached_should_pad(key, should_pad)
+
+        return should_pad
 
 
 def mm_pattern(mat1, mat2):
