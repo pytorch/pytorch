@@ -220,7 +220,7 @@ def pytest_report_teststatus(report, config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_collection_modifyitems(items: List[Any]):
+def pytest_collection_modifyitems(items: List[Any]) -> None:
     """
     This hook is used when rerunning disabled tests to get rid of all skipped tests
     instead of running and skipping them N times. This avoids flooding the console
@@ -235,16 +235,16 @@ def pytest_collection_modifyitems(items: List[Any]):
 
     # This environment has already been set by run_test before it calls pytest
     disabled_tests_file = os.getenv("DISABLED_TESTS_FILE", "")
-    if disabled_tests_file and os.path.exists(disabled_tests_file):
-        with open(disabled_tests_file) as fp:
-            for disabled_test in json.load(fp):
-                m = disabled_regex.match(disabled_test)
-                if m:
-                    test_name = m["test_name"]
-                    test_class = m["test_class"]
-                    disabled_tests[test_class].add(test_name)
-    else:
+    if not disabled_tests_file or not os.path.exists(disabled_tests_file):
         return
+
+    with open(disabled_tests_file) as fp:
+        for disabled_test in json.load(fp):
+            m = disabled_regex.match(disabled_test)
+            if m:
+                test_name = m["test_name"]
+                test_class = m["test_class"]
+                disabled_tests[test_class].add(test_name)
 
     # When rerunning disabled test, ignore all test cases that are not disabled
     filtered_items = []

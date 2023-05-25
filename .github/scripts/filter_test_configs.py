@@ -388,7 +388,7 @@ def main() -> None:
 
     # DEBUG: TO BE REVERTED
     # if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-    # we don't want to run the mem leack check or disabled tests on normal
+    # we don't want to run the mem leak check or disabled tests on normal
     # periodically scheduled jobs, only the ones at this time
     filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
