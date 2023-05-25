@@ -8552,6 +8552,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
+        skips=(
+            # note(crcrpar): excluding cdouble from dtypes above might be better.
+            # Guard for `error: "In-place abs is not supported for complex tensors."`
+            DecorateInfo(
+                unittest.expectedFailure,
+                'TestForeach',
+                'test_inplace_forward_mode_AD',
+                dtypes=(torch.complex128,),
+            ),
+        ),
     ),
 
     ForeachFuncInfo(
