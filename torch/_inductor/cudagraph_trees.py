@@ -1064,7 +1064,7 @@ class CUDAGraphNode:
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
             )
-            # also treat empty storages as static outputs because we do need to manage their lifetime
+            # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
             is_empty_storage = o.data_ptr() == 0
             if ref and ref() is not None or is_empty_storage:
