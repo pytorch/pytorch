@@ -1611,21 +1611,22 @@ class CPUReproTests(TestCase):
             permute = torch.ops.aten.permute.default(view, [0, 2, 1])
             return (bmm, permute)
 
-        inps = [
-            rand_strided(
-                (1024, 32, 128), (4096, 1, 32), device="cpu", dtype=torch.float32
-            ),
-            rand_strided(
-                (64, 128, 16, 32),
-                (65536, 512, 32, 1),
-                device="cpu",
-                dtype=torch.float32,
-            ),
-        ]
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("cpp_fused_permute_1" not in code)
-        self.assertEqual(fn_opt(*inps), fn(*inps))
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                rand_strided(
+                    (1024, 32, 128), (4096, 1, 32), device="cpu", dtype=torch.float32
+                ),
+                rand_strided(
+                    (64, 128, 16, 32),
+                    (65536, 512, 32, 1),
+                    device="cpu",
+                    dtype=torch.float32,
+                ),
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":
