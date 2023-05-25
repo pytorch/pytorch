@@ -113,9 +113,7 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
-    pattern: str,
-    **axes_lengths: int,
+    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]], pattern: str, **axes_lengths: int
 ) -> torch.Tensor:
     r"""A native implementation of `einops.rearrange`, a reader-friendly smart element reordering for multidimensional
     tensors. This operation includes functionality of transpose (axes permutation), reshape (view), squeeze, unsqueeze,

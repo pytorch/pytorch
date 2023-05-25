@@ -161,12 +161,12 @@ def parse_pattern(pattern: str, axes_lengths: Mapping[str, int]) -> Tuple[Parsed
 
     Args:
         pattern (str): the `einops`-style rearrangement pattern
-        axes_lengths (int): any additional length specifications for dimensions
+        axes_lengths (Mapping[str, int]): any additional length specifications for dimensions
 
     Returns:
        Tuple[ParsedExpression, ParsedExpression]: a tuple containing the left-hand side and right-hand side expressions
     """
-    # validation taken largely from einops.einops._prepare_transformation_recipe
+    # adapted from einops.einops._prepare_transformation_recipe
     # https://github.com/arogozhnikov/einops/blob/230ac1526c1f42c9e1f7373912c7f8047496df11/einops/einops.py
     try:
         left_str, right_str = pattern.split("->")
@@ -195,16 +195,19 @@ def validate_rearrange_expressions(
     Args:
         left (ParsedExpression): left-hand side expression
         right (ParsedExpression): right-hand side expression
-        axes_lengths (int): any additional length specifications for dimensions
+        axes_lengths (Mapping[str, int]): any additional length specifications for dimensions
     """
     for length in axes_lengths.values():
         if type(length) is not int:
             raise TypeError("Axis lengths must be integers")
-    difference = set.symmetric_difference(left.identifiers, right.identifiers)
+
     if left.has_non_unitary_anonymous_axes or right.has_non_unitary_anonymous_axes:
         raise ValueError("Non-unitary anonymous axes are not supported in rearrange (exception is length 1)")
+
+    difference = set.symmetric_difference(left.identifiers, right.identifiers)
     if len(difference) > 0:
         raise ValueError(f"Identifiers only on one side of expression (should be on both): {difference}")
+
     unmatched_axes = axes_lengths.keys() - left.identifiers
     if len(unmatched_axes) > 0:
         raise ValueError(f"Identifiers not found in expression: {unmatched_axes}")
