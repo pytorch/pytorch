@@ -9,7 +9,7 @@ from torchgen import dest
 from torchgen.api.types import DispatcherSignature  # isort:skip
 from torchgen.context import method_with_native_function
 from torchgen.executorch.model import ETKernelIndex
-from torchgen.model import BackendIndex, DispatchKey, NativeFunction, Variant
+from torchgen.model import DispatchKey, NativeFunction, Variant
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, Target
 

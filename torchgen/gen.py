@@ -1469,6 +1469,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
         )
     return declarations
 
+
 # Return native function declarations grouped by their namespaces.
 def get_native_function_declarations(
     *,
@@ -1486,9 +1487,14 @@ def get_native_function_declarations(
     :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
     """
 
-
-    ns_grouped_kernels = get_ns_grouped_kernels(grouped_native_functions=grouped_native_functions, backend_indices=backend_indices, native_function_decl_gen=native_function_decl_gen)
-    return get_native_function_declarations_from_ns_grouped_kernels(ns_grouped_kernels=ns_grouped_kernels)
+    ns_grouped_kernels = get_ns_grouped_kernels(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+        native_function_decl_gen=native_function_decl_gen,
+    )
+    return get_native_function_declarations_from_ns_grouped_kernels(
+        ns_grouped_kernels=ns_grouped_kernels
+    )
 
 
 def get_kernel_namespace(

@@ -11,7 +11,7 @@ import yaml
 from torchgen import dest
 from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
-from torchgen.context import method_with_native_function, with_native_function_and_index
+from torchgen.context import method_with_native_function
 from torchgen.executorch.api import et_cpp
 from torchgen.executorch.api.custom_ops import (
     ComputeNativeFunctionStub,
@@ -27,13 +27,12 @@ from torchgen.gen import (
     get_native_function_schema_registrations,
     LineLoader,
     parse_native_yaml,
-    ParsedYaml,
 )
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
+    DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
-    is_cuda_dispatch_key,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
@@ -239,7 +238,6 @@ def gen_unboxing(
     )
 
 
-@with_native_function_and_index
 def compute_native_function_declaration(
     g: Union[NativeFunctionsGroup, NativeFunction], kernel_index: ETKernelIndex
 ) -> List[str]:
@@ -249,12 +247,17 @@ def compute_native_function_declaration(
     if metadata_list is None:
         return []
     prefix = "TORCH_API"
+
     # for kernels in lean mode, we declare two versions, one with context and one without.
     # In the end we will cleanup the unused one.
-    def gen_decl(metadata: BackendMetadata, include_context: bool):
+    def gen_decl(metadata: BackendMetadata, include_context: bool) -> str:
         return f"{prefix} {sig.decl(name=metadata.kernel, include_context=include_context)};"
 
-    return [gen_decl(metadata, include_context) for include_context in [False, True] for metadata in metadata_list]
+    return [
+        gen_decl(metadata, include_context)
+        for include_context in [False, True]
+        for metadata in metadata_list
+    ]
 
 
 def gen_functions_declarations(
@@ -317,10 +320,13 @@ def get_ns_grouped_kernels(
     native_functions: Sequence[NativeFunction],
     kernel_index: ETKernelIndex,
     native_function_decl_gen: Callable[
-        [Union[NativeFunctionsGroup, NativeFunction], Union[BackendIndex, ETKernelIndex]], List[str]
-    ] = dest.compute_native_function_declaration,
+        [
+            Union[NativeFunctionsGroup, NativeFunction],
+            ETKernelIndex,
+        ],
+        List[str],
+    ],
 ) -> Dict[str, List[str]]:
-    dispatch_key = DispatchKey.CPU
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
     for f in native_functions:
         native_function_namespaces = set()
@@ -396,8 +402,8 @@ def gen_headers(
             lambda: {
                 "nativeFunctions_declarations": get_native_function_declarations(
                     grouped_native_functions=native_functions,
-                    backend_indices=backend_index,
-                    native_function_decl_gen=dest.compute_native_function_declaration
+                    backend_indices=backend_indices,
+                    native_function_decl_gen=dest.compute_native_function_declaration,
                 ),
             },
         )
@@ -646,11 +652,13 @@ def parse_yaml_files(
         )
 
         combined_functions = translated_functions + custom_ops_functions
-        combined_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(translated_backend_indices).grow(custom_ops_backend_indices)
-        custom_ops_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(custom_ops_backend_indices)
-        combined_yaml = ETParsedYaml(
-            combined_functions, combined_kernel_index
+        combined_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(
+            translated_backend_indices
+        ).grow(custom_ops_backend_indices)
+        custom_ops_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(
+            custom_ops_backend_indices
         )
+        combined_yaml = ETParsedYaml(combined_functions, combined_kernel_index)
         custom_ops_parsed_yaml = ETParsedYaml(
             custom_ops_functions, custom_ops_kernel_index
         )
