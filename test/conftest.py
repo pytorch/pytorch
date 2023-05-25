@@ -262,7 +262,8 @@ def pytest_collection_modifyitems(items: List[Any]):
         filtered_items.append(cpy)
 
     items.clear()
-    items = filtered_items
+    # NB: Need to edit items directly here to have the list reflected back to pytest
+    items.extend(filtered_items)
 
 
 class StepcurrentPlugin:
