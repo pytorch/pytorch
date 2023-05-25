@@ -26,7 +26,7 @@ namespace native {
 DEFINE_DISPATCH(qsigmoid_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
-static Tensor qnnpack_sigmoid(
+Tensor qnnpack_sigmoid(
     Tensor input, double output_scale, int64_t output_zero_point) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
   TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
