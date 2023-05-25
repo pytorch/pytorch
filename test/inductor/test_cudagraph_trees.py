@@ -714,7 +714,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 node = self.curr_node()
                 self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
-
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
