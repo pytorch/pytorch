@@ -16,7 +16,7 @@ pip_install \
   onnx==1.14.0
 
 pip_install \
-  onnxruntime==1.14.0 \
+  onnxruntime==1.15.0 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
