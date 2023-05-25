@@ -1775,7 +1775,7 @@ class TestSDPA(NNTestCase):
                     torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Platform does not support fused SDPA")
     def test_mem_eff_backwards_determinism(self, device):
         # Need big seq_len to ensure that num_splits > 1
         dtype = torch.float32
