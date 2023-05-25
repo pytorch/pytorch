@@ -534,6 +534,8 @@ class KernelArgs:
     def live_output_buffers(self):
         live_outs = set()
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
             if outer in self.inplace_buffers or inner == "REMOVED":
