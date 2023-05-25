@@ -773,42 +773,33 @@ def speculate_subgraph(
             output = f.call_function(tx, args, {})
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
-            # TODO: support pytree output
+            # TODO: support non single Tensor output
             # We check always_restore because we dont use the output or side effects of always_restore code,
             # like bwd.
+            if not isinstance(output, TensorVariable) and not always_restore:
+                unimplemented(
+                    "HigherOrderOperator with body with non single Tensor output"
+                )
+
             if always_restore:
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
-            else:
-                if not isinstance(
-                    output, (TensorVariable, ListVariable, TupleVariable)
-                ):
-                    unimplemented("HigherOrderOperator with body with pytree output")
 
-                if isinstance(output, (ListVariable, TupleVariable)):
-                    if any(
-                        not isinstance(var, TensorVariable)
-                        for var in output.unpack_var_sequence(tx)
-                    ):
-                        unimplemented(
-                            "HigherOrderOperator body's output must consist of tensors only"
-                        )
+            tx.output.guards.update(output.guards)
+            tx.output.create_node(
+                "output",
+                "output",
+                (tracer.create_arg((output.as_proxy(),))),
+                {},
+            )
+            graph = tx.output.graph
+            lifted_freevars = tracer.lifted_freevars
 
-                tx.output.guards.update(output.guards)
-                tx.output.create_node(
-                    "output",
-                    "output",
-                    (tracer.create_arg((output.as_proxy(),))),
-                    {},
-                )
-                graph = tx.output.graph
-                lifted_freevars = tracer.lifted_freevars
-
-                return (
-                    output,
-                    graph,
-                    lifted_freevars,
-                )
+            return (
+                output,
+                graph,
+                lifted_freevars,
+            )
 
     except torch._dynamo.exc.Unsupported as ex:
         tx.output.graph = graph_checkpoint
@@ -1214,11 +1205,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 *(arg.as_proxy() for arg in args[1:]),
                 *(arg for arg in body_lifted_freevars),
             )
-            example_value = pytree.tree_map_only(
-                torch.fx.Proxy,
-                lambda a: a.node.meta["example_value"],
-                body_r.as_proxy(),
-            )
+            r = body_r.as_proxy().node.meta["example_value"]
+            example_value = r
         elif self.value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",

@@ -223,7 +223,6 @@ exclusions = {
     "aot_graphs",
     "recompiles",
     "ddp_graphs",
-    "not_implemented",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

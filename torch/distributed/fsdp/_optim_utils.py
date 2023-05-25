@@ -22,7 +22,6 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _FSDPState,
@@ -204,10 +203,7 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            assert (
-                fsdp_state.compute_device is not None
-            ), "compute_device has not been initialized"
-            if value.device.type != fsdp_state.compute_device.type:
+            if not value.is_cuda:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
             # has the same shape as the sharded flat parameter
@@ -326,7 +322,7 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = _get_pg_default_device(group)
+    device = torch.device("cuda")
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
@@ -340,7 +336,9 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
+        tensor = torch.zeros(
+            state.shape, dtype=state.dtype, device=torch.device("cuda")
+        )
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -373,7 +371,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -987,7 +985,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
         for param_name, param in _named_parameters_with_duplicates(
             module, recurse=False
         ):
-            if not isinstance(param, FlatParameter):
+            if type(param) is not FlatParameter:
                 continue
             fqn = clean_tensor_name(prefix + param_name)
             flat_param_to_fqn[param] = fqn
@@ -1108,7 +1106,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
-    device = _get_pg_default_device(group)
+    device = torch.device("cuda", torch.cuda.current_device())
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
     if num_missing.item() > 0:

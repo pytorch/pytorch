@@ -2521,21 +2521,21 @@
   device_guard: False
 
 # decomposes to eye.m
-- func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.m(SymInt n, SymInt m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.out(SymInt n, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
-- func: eye.m_out(SymInt n, SymInt m, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
@@ -3565,7 +3565,6 @@
   structured: True
   dispatch:
     CPU, CUDA: aminmax_out
-    MPS: aminmax_out_mps
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
@@ -3662,11 +3661,6 @@
     QuantizedCPU: quantized_max_pool2d
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
-
-- func: quantized_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
-  dispatch:
-    QuantizedCPU: quantized_max_pool3d
-  autogen: quantized_max_pool3d.out
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 

@@ -1,7 +1,5 @@
 #include <torch/optim/schedulers/reduce_on_plateau_scheduler.h>
 
-#include <iomanip>
-
 namespace torch {
 namespace optim {
 

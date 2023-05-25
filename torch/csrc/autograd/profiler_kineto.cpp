@@ -551,13 +551,10 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           .needsInputs(registration_state_ptr->config().report_input_shapes)
           .scopes(scopes);
 
-  if constexpr (use_global_callback) {
-    registration_state_ptr->setCallbackHandle(
-        at::addGlobalCallback(recordFunctionCallback));
-  } else {
-    registration_state_ptr->setCallbackHandle(
-        at::addThreadLocalCallback(recordFunctionCallback));
-  }
+  auto handle = c10::guts::if_constexpr<use_global_callback>(
+      [&] { return at::addGlobalCallback(recordFunctionCallback); },
+      [&] { return at::addThreadLocalCallback(recordFunctionCallback); });
+  registration_state_ptr->setCallbackHandle(handle);
 }
 
 } // namespace

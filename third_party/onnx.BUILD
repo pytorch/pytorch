@@ -77,7 +77,6 @@ cc_library(
         "onnx/common/*.h",
         "onnx/defs/*.h",
         "onnx/defs/math/*.h",
-        "onnx/defs/controlflow/*.h",
         "onnx/defs/reduction/*.h",
         "onnx/defs/tensor/*.h",
         "onnx/shape_inference/*.h",

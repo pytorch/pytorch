@@ -2,7 +2,7 @@ from functools import partial
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
+from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
@@ -268,7 +268,8 @@ def map_func(f, num_mapped, *args):
     unwrapped_args = _unwrap_all_tensors_from_functional(pos_args, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
 
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
+    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
+    try:
         functional_map_fn = functionalize(f, remove=mode)
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
@@ -285,6 +286,8 @@ def map_func(f, num_mapped, *args):
 
         map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=0)
+    finally:
+        del guard
 
 @map_impl.py_impl(torch._C._functorch.TransformType.Functionalize)
 def map_functionalize(interpreter, f, num_mapped, *args):

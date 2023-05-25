@@ -25,23 +25,27 @@ def _all_gather_sharded_tensor(
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
-    pg_device = distributed_c10d._get_pg_default_device(pg)
+    cuda_device = torch.device("cuda", torch.cuda.current_device())
     if shards:
         local_tensor = shards[0].tensor.flatten()
-        if local_tensor.device.type != pg_device.type:
-            local_tensor = local_tensor.to(pg_device)
+        if not local_tensor.is_cuda:
+            move_to_cpu = torch.ones(1, device=cuda_device)
+            local_tensor = local_tensor.cuda()
+        else:
+            move_to_cpu = torch.zeros(1, device=cuda_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
     else:
         local_tensor = torch.zeros(
-            chunk_size, dtype=sharded_tensor.dtype, device=pg_device
+            chunk_size, dtype=sharded_tensor.dtype, device=cuda_device
         )
+        move_to_cpu = torch.zeros(1, device=cuda_device)
 
     tensor = torch.empty(
         chunk_size * world_size,
         dtype=local_tensor.dtype,
-        device=pg_device,
+        device=cuda_device,
     )
     dist._all_gather_base(tensor, local_tensor, group=pg)
 
@@ -60,15 +64,10 @@ def _gather_state_dict(
     for key, tensor in state_dict.items():
         if isinstance(tensor, ShardedTensor):
             output_tensor = _all_gather_sharded_tensor(tensor, pg)
-            local_shard_device = (
-                tensor.local_shards()[0].tensor.device
-                if tensor.local_shards()
-                else torch.device("cpu")
-            )
-            if output_tensor.device != local_shard_device:
-                tensor = output_tensor.to(local_shard_device)
-            else:
+            if tensor.local_shards() and tensor.local_shards()[0].tensor.is_cuda:
                 tensor = output_tensor
+            else:
+                tensor = output_tensor.cpu()
         new_state_dict[key] = tensor
     return new_state_dict
 
@@ -100,10 +99,8 @@ def _create_chunk_sharded_tensor(
     )[:-1]
     offsets = [0] * (len(chunk_sizes[0]) - 1)
     chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
-    device_type = distributed_c10d._get_pg_default_device(pg).type
     placements = [
-        f"rank:{r}/{device_type}:{r % num_devices_per_node}"
-        for r in range(len(chunk_sizes))
+        f"rank:{r}/cuda:{r % num_devices_per_node}" for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
     shard_metadata = [

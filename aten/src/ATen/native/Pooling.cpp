@@ -23,7 +23,6 @@
 #include <ATen/ops/mkldnn_max_pool2d.h>
 #include <ATen/ops/mkldnn_max_pool3d.h>
 #include <ATen/ops/quantized_max_pool2d.h>
-#include <ATen/ops/quantized_max_pool3d.h>
 #endif
 
 #include <tuple>
@@ -160,10 +159,6 @@ Tensor max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  if (self.is_quantized()) {
-    return at::quantized_max_pool3d(self, kernel_size, stride, padding,
-                                    dilation, ceil_mode);
-  }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);

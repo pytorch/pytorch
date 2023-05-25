@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
+def _unsqueeze_to_dim(x: Tensor, dim: int):
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
@@ -998,9 +998,7 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train and p != 0:
-        if p == 1:
-            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
+    if train:
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)

@@ -3,7 +3,9 @@
 #include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
+#include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace c10 {

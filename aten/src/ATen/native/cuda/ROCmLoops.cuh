@@ -71,11 +71,11 @@ struct uses_non_c10_complex {
         || std::is_same<thrust::complex<float>, type>::value
         || std::is_same<thrust::complex<double>, type>::value;
 
-    if constexpr (non_c10_complex) {
+    return c10::guts::if_constexpr<non_c10_complex>([]() {
       return true;
-    } else {
+    }, /* else */ []() {
       return uses_non_c10_complex<func_t, nargs - 1>::check();
-    }
+    });
   }
 };
 

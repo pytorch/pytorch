@@ -1,17 +1,30 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
+#include <complex>
 #include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
+#ifdef __GXX_RTTI
+#include <typeinfo>
+#endif
+
+#include <exception>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/IdWrapper.h>
+#include <c10/util/Type.h>
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>

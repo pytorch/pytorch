@@ -1,8 +1,13 @@
 #pragma once
 
-#include <c10/util/flat_hash_map.h>
+#include <algorithm>
+#include <deque>
 #include <memory>
-#include <vector>
+#include <mutex>
+
+#include <c10/util/Exception.h>
+#include <c10/util/SmallVector.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace c10 {
 

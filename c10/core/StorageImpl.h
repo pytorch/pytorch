@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
 
@@ -203,14 +204,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   bool received_cuda() {
     return received_cuda_;
-  }
-
-  impl::PyObjectSlot* pyobj_slot() {
-    return &pyobj_slot_;
-  }
-
-  const impl::PyObjectSlot* pyobj_slot() const {
-    return &pyobj_slot_;
   }
 
  private:

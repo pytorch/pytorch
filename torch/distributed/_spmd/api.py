@@ -418,7 +418,7 @@ def _compile(
             args,
         )
 
-    with _enable_compile(), torch.autograd.detect_anomaly(check_nan=False):
+    with _enable_compile():
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
         # Remove this when the following issue is addressed.
