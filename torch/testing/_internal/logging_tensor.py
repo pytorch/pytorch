@@ -88,11 +88,14 @@ class LoggingTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         rs = func(*args, **kwargs)
-        logging.getLogger("LoggingTensor").info(torch.overrides.resolve_name(func), args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
 class LoggingTensorReentrant(LoggingTensor):
     context = torch.overrides.enable_reentrant_dispatch
+
+def _maybe_repr(a):
+    return a if isinstance(a, str) else repr(a)
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
@@ -137,8 +140,8 @@ class LoggingTensorHandler(logging.Handler):
     def emit(self, record):
         fmt_args = ", ".join(
             itertools.chain(
-                (tree_map(self._fmt, a) for a in record.args[0]),
-                (f"{k}={tree_map(self._fmt, v)}" for k, v in record.args[1].items()),
+                (_maybe_repr(tree_map(self._fmt, a)) for a in record.args[0]),
+                (f"{k}={_maybe_repr(tree_map(self._fmt, v))}" for k, v in record.args[1].items()),
             )
         )
         fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), record.args[2])
@@ -147,7 +150,7 @@ class LoggingTensorHandler(logging.Handler):
             self.tracebacks_list.append(record.traceback)
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
+    logging.getLogger("LoggingTensor").info("input", (name,), {}, var)
 
 class GatherTraceback(logging.Filter):
     def __init__(self, python=True, script=True, cpp=False):
