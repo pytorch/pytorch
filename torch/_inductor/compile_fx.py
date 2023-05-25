@@ -151,9 +151,7 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
 def count_bytes_inner(gm, example_inputs, static_input_idxs=range(0), **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    graph = GraphLowering(
-        gm, shape_env=shape_env, num_static_inputs=len(static_input_idxs)
-    )
+    graph = GraphLowering(gm, shape_env=shape_env, static_input_idxs=static_input_idxs)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem = graph.count_bytes()
@@ -273,7 +271,7 @@ def compile_fx_inner(
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
-            num_static_inputs=len(static_input_idxs),
+            static_input_idxs=static_input_idxs,
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
