@@ -513,9 +513,7 @@ def run_test(
             )
             stepcurrent_key = f"{test_file}_{test_module.shard - 1}"
 
-    # Do not use verbose when running in RERUN_DISABLED_TESTS mode as it x50 the console
-    # log size
-    if options.verbose and not RERUN_DISABLED_TESTS:
+    if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
@@ -953,13 +951,9 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         rerun_options = ["-x", "--reruns=2"]
 
     pytest_args = [
+        "-vv",
         "-rfEX",
     ]
-    if not RERUN_DISABLED_TESTS:
-        # Do not use verbose when running in RERUN_DISABLED_TESTS mode as it x50 the console
-        # log size
-        pytest_args.append("-vv")
-
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(
