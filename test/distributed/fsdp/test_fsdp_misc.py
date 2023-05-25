@@ -55,6 +55,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+
 class TestFSDPMiscMultiProcess(FSDPTest):
     @property
     def world_size(self):
@@ -290,7 +291,6 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         fsdp_model(*inp).sum().backward()
 
 
-
 class TestFSDPMiscMultiThread(FSDPTestMultiThread):
     @property
     def world_size(self):
@@ -328,7 +328,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         # as well, but this is blocked by
         # https://github.com/pytorch/pytorch/issues/83107 and
         # https://github.com/pytorch/pytorch/issues/83129
-
 
     @skip_if_lt_x_gpu(2)
     def test_device_id_auto_wrap(self):
@@ -403,7 +402,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         for handle in traversal_utils._get_fsdp_handles(fsdp_model):
             self.assertEqual(handle.flat_param.device, cpu_device)
 
-
     @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):
         """Tests that specifying a ``device_id`` argument to FSDP for a GPU
@@ -477,7 +475,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         )
         with context:
             FSDP(no_params, device_id=0)
-
 
     @skip_if_lt_x_gpu(2)
     def test_cpu_init_with_sync_module_states(self):

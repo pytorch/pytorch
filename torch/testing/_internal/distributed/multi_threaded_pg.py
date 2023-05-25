@@ -108,16 +108,6 @@ class AllGather:
                 dest_tensor.copy_(src_tensor)
 
 
-class AllGatherBase:
-    def work(self, data):
-        for src_rank in range(len(data)):
-            output_tensor = data[src_rank][0]
-            assert isinstance(output_tensor, torch.Tensor)
-            # get input_tensor from each rank and copy it into the right place
-            # in output_tensor
-            cat_tensor = torch.cat([data[rank][1].to(output_tensor.device) for rank in range(len(data))])
-            output_tensor.copy_(cat_tensor)
-
 class Scatter:
     def __init__(self, src):
         self.src = src
@@ -344,12 +334,6 @@ class ProcessLocalGroup(dist.ProcessGroup):
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
         coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
-        ProcessLocalGroup._end_coll(coll, self)
-        return res
-
-    def _allgather_base(self, output_tensor, input_tensor):
-        coll = ProcessLocalGroup._start_coll(AllGatherBase(), self)
-        res = coll.join(self._rank, (output_tensor, input_tensor))
         ProcessLocalGroup._end_coll(coll, self)
         return res
 

@@ -26,7 +26,11 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS, MultiThreadedTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    MultiThreadedTestCase,
+    TEST_SKIPS,
+)
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -835,9 +839,7 @@ def run_subtests(
     # Convert the config mapping to a list to have a fixed order
     subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
     subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-    subtest_config_values: List[List[Any]] = [
-        item[1] for item in subtest_config_items
-    ]
+    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
         subtest_kwargs = {
@@ -859,6 +861,7 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
 
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
+
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):

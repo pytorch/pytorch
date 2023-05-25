@@ -936,7 +936,7 @@ def col2im(
         [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
     )
     idx = (None, None, indices_row, indices_col)
-    output = aten.index_put(output, idx, input, accumulate=True)
+    output = aten._unsafe_index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
@@ -972,7 +972,8 @@ def unfold_backward(
     # It could potentially be fused into one call to scatter_reduce,
     # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    return torch.index_add(grad_input, dim, idx, grad)
+    index = (None,) * dim + (idx,)
+    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -998,7 +999,9 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train:
+    if train and p != 0:
+        if p == 1:
+            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -1099,7 +1102,7 @@ def embedding_dense_backward(
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = counts.index_put([indices], ones, accumulate=True)
+        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
@@ -1108,7 +1111,9 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
+    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
+        result_dtype
+    )
 
 
 def prod(x: List[int]):
@@ -2780,9 +2785,7 @@ def upsample_bilinear2d(
         if align_corners:
             h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
-            h_scale_factor = (
-                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
-            )
+            h_scale_factor = 1.0 / scales_h if scales_h is not None else in_h / out_h
     else:
         h_scale_factor = 0.0
 
@@ -2790,9 +2793,7 @@ def upsample_bilinear2d(
         if align_corners:
             w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
-            w_scale_factor = (
-                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
-            )
+            w_scale_factor = 1.0 / scales_w if scales_w is not None else in_w / out_w
     else:
         w_scale_factor = 0.0
 

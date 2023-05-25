@@ -6,9 +6,10 @@
 import contextlib
 import functools
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type, Sequence
+from typing import Any, Callable, cast, Dict, Generator, Optional, Set, Tuple, Type
 
 import torch.nn as nn
+from torch.nn.modules.batchnorm import _BatchNorm
 
 __all__ = [
     "always_wrap_policy",
@@ -138,16 +139,22 @@ def transformer_auto_wrap_policy(
     return _module_wrap_policy(module, recurse, nonwrapped_numel, transformer_layer_cls)
 
 
-def _wrap_module_cls_individually(
-    module: nn.Module, module_classes: Sequence[type], recurse: bool, *args, **kwargs
-):
+def _wrap_batchnorm_individually(
+    module: nn.Module,
+    recurse: bool,
+    *args,
+    **kwargs,
+) -> bool:
+    """
+    A policy that wraps ``BatchNorm`` instances in their own FSDP instance.
+    """
     if recurse:
         # always recurse
         return True
     else:
-        # if not recursing, decide whether we should wrap based on whether the type of module
-        # is in `module_classes`.
-        return isinstance(module, tuple(module_classes))
+        # if not recursing, decide whether we should wrap based on whether it is a
+        # BN layer or not.
+        return isinstance(module, _BatchNorm)
 
 
 def _or_policy(
@@ -160,12 +167,7 @@ def _or_policy(
     A policy that wraps ``module`` if any policy in the passed in iterable of
     ``policies`` returns ``True``.
     """
-    return any(
-        policy(
-            module=module, recurse=recurse, nonwrapped_numel=nonwrapped_numel
-        )
-        for policy in policies
-    )
+    return any(policy(module, recurse, nonwrapped_numel) for policy in policies)
 
 
 def size_based_auto_wrap_policy(
