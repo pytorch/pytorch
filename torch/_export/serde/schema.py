@@ -172,9 +172,13 @@ class GraphSignature:
     user_inputs: List[str]
     user_outputs: List[str]
     buffers_to_mutate: Dict[str, str]
+    backward_signature: Optional[BackwardSignature]
+
+
+@dataclass
+class CallSpec:
     in_spec: str
     out_spec: str
-    backward_signature: Optional[BackwardSignature]
 
 
 @dataclass
@@ -184,3 +188,4 @@ class GraphModule:
     parameters: Dict[str, TensorMeta]
     metadata: Dict[str, str]
     signature: GraphSignature
+    call_spec: CallSpec

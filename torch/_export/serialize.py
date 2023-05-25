@@ -1,4 +1,3 @@
-import copy
 import io
 import logging
 import operator
@@ -8,9 +7,11 @@ import torch
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+import torch._export.exported_program as ep
 from .serde.schema import (   # type: ignore[attr-defined]
     Argument,
     BackwardSignature,
+    CallSpec,
     Device,
     Graph,
     GraphModule,
@@ -199,27 +200,19 @@ def import_operator(serialized_target, op_version):
     return target
 
 
-def export_pytree(spec: pytree.TreeSpec) -> str:
+def export_call_spec(call_spec: Optional[ep.CallSpec]) -> CallSpec:
+    if call_spec is None:
+        return CallSpec(in_spec="", out_spec="")
     # TODO(angelayi): spec
-    # assert isinstance(spec, pytree.TreeSpec), type(spec)
-    # dummy_leaves = [0] * spec.num_leaves
-    # tree = torch.utils._pytree.tree_unflatten(dummy_leaves, spec)
-    # _, tree = ex_pytree.tree_flatten(tree)
-    # return tree.to_str()
-    return ""
+    return CallSpec(in_spec="", out_spec="")
 
 
-def import_pytree(spec: str) -> pytree.TreeSpec:
+def import_call_spec(call_spec: CallSpec) -> Optional[ep.CallSpec]:
     # TODO(angelayi): spec
-    # tree_spec = ex_pytree.from_str(spec)
-    # dummy_leaves = [torch.tensor(0)] * tree_spec.num_leaves()
-    # tree = ex_pytree.tree_unflatten(dummy_leaves, tree_spec)
-    # _, py_spec = pytree.tree_flatten(tree)
-    # return py_spec
-    return pytree.LeafSpec()
+    return None
 
 
-def export_signature(sig) -> GraphSignature:
+def export_signature(sig: Optional[ep.GraphSignature]) -> GraphSignature:
     if sig is None:
         return GraphSignature(
             inputs_to_parameters={},
@@ -227,8 +220,6 @@ def export_signature(sig) -> GraphSignature:
             user_inputs=[],
             user_outputs=[],
             buffers_to_mutate={},
-            in_spec="",
-            out_spec="",
             backward_signature=None,
         )
 
@@ -247,38 +238,35 @@ def export_signature(sig) -> GraphSignature:
         user_inputs=sig.user_inputs,
         user_outputs=sig.user_outputs,
         buffers_to_mutate=sig.buffers_to_mutate,
-        in_spec=export_pytree(sig.in_spec),
-        out_spec=export_pytree(sig.out_spec),
         backward_signature=backward_signature,
     )
     return graph_signature
 
 
-def import_signature(sig: GraphSignature):
-    # TODO(angelayi): When we figure out graph signature
-    # backward_signature = None
-    # if bw_sig := sig.backwardSignature:
-    #     backward_signature = PyBackwardSignature(
-    #         gradients_to_parameters=dict(bw_sig.gradientsToParameters),
-    #         gradients_to_user_inputs=dict(bw_sig.gradientsToUserInputs),
-    #         loss_output=bw_sig.lossOutput,
-    #     )
-    # return PyGraphSignature(
-    #     parameters=list(sig.inputsToParameters.values()),
-    #     buffers=list(sig.inputsToBuffers.values()),
-    #     user_inputs=list(sig.userInputs),
-    #     user_outputs=list(sig.userOutputs),
-    #     inputs_to_buffers=dict(sig.inputsToBuffers),
-    #     inputs_to_parameters=dict(sig.inputsToParameters),
-    #     buffers_to_mutate=dict(sig.buffersToMutate),
-    #     in_spec=import_pytree(sig.inSpec),
-    #     out_spec=import_pytree(sig.outSpec),
-    #     backward_signature=backward_signature,
-    # )
-    pass
+def import_signature(sig: GraphSignature) -> ep.GraphSignature:
+    backward_signature = None
+    if bw_sig := sig.backward_signature:
+        backward_signature = ep.BackwardSignature(
+            gradients_to_parameters=dict(bw_sig.gradients_to_parameters),
+            gradients_to_user_inputs=dict(bw_sig.gradients_to_user_inputs),
+            loss_output=bw_sig.loss_output,
+        )
+    return ep.GraphSignature(
+        parameters=list(sig.inputs_to_parameters.values()),
+        buffers=list(sig.inputs_to_buffers.values()),
+        user_inputs=list(sig.user_inputs),
+        user_outputs=list(sig.user_outputs),
+        inputs_to_buffers=dict(sig.inputs_to_buffers),
+        inputs_to_parameters=dict(sig.inputs_to_parameters),
+        buffers_to_mutate=dict(sig.buffers_to_mutate),
+        backward_signature=backward_signature,
+    )
 
 
-def export_state_dict(state_dict) -> bytes:
+def export_state_dict(state_dict: Optional[Dict[str, Any]]) -> bytes:
+    if state_dict is None:
+        return bytes("", encoding="utf8")
+
     buffer = io.BytesIO()
     state_dict = dict(state_dict)
     for name in state_dict:
@@ -294,6 +282,8 @@ def export_state_dict(state_dict) -> bytes:
 
 
 def import_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
+    if len(serialized) == 0:
+        return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     return torch.load(buffer)
@@ -549,8 +539,8 @@ class Serializer:
 
             return [Argument.create(as_tensor=arg) for arg in arg_list]
 
-    def serialize(self, graph_module) -> Tuple[GraphModule, bytes]:
-        for node in graph_module.graph.nodes:
+    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[GraphModule, bytes]:
+        for node in exported_program.graph.nodes:
             try:
                 self.node = node
                 getattr(self, f"handle_{node.op}")(node)
@@ -566,11 +556,12 @@ class Serializer:
             outputs=self.outputs,
         )
 
+        # TODO(angelayi): I forgot where this belongs
         buffers = {}
         parameters = {}
-        for name, buffer in graph_module.named_buffers():
+        for name, buffer in exported_program.graph_module.named_buffers():
             buffers[name] = export_tensor_meta(buffer)
-        for name, parameter in graph_module.named_parameters():
+        for name, parameter in exported_program.graph_module.named_parameters():
             parameters[name] = export_tensor_meta(parameter)
 
 
@@ -583,9 +574,10 @@ class Serializer:
                 buffers=buffers,
                 parameters=parameters,
                 metadata=metadata,
-                signature=export_signature(None),
+                signature=export_signature(exported_program.graph_signature),
+                call_spec=export_call_spec(exported_program.call_spec),
             ),
-            export_state_dict(graph_module.state_dict()),
+            export_state_dict(exported_program.state_dict),
         )
 
 
@@ -599,7 +591,7 @@ class Deserializer:
 
     def deserialize(
         self, serialized_graph_module: GraphModule, serialized_state_dict: bytes
-    ) -> torch.fx.GraphModule:
+    ) -> ep.ExportedProgram:
         graph = self.graph
         serialized_graph = serialized_graph_module.graph
 
@@ -652,9 +644,10 @@ class Deserializer:
         graph.output(tuple(outputs) if len(outputs) > 1 else outputs[0])
 
         sig = import_signature(serialized_graph_module.signature)
+        call_spec = import_call_spec(serialized_graph_module.call_spec)
         state_dict = import_state_dict(serialized_state_dict)
 
-        return torch.fx.GraphModule(state_dict, graph)
+        return ep.ExportedProgram(state_dict, graph, sig, call_spec, state_dict)
 
     def sync_serialized_node(self, name: str, fx_node: torch.fx.Node):
         self.serialized_name_to_node[name] = fx_node
@@ -753,26 +746,25 @@ class Deserializer:
         fx_node.meta["val"] = [self.serialized_name_to_meta[name] for name in output_names]
 
 
-def serialize(graph_module) -> Tuple[GraphModule, bytes]:
-    return Serializer().serialize(graph_module)
+def serialize(exported_program: ep.ExportedProgram) -> Tuple[GraphModule, bytes]:
+    return Serializer().serialize(exported_program)
 
 
-def deserialize(serialized_graph_module: GraphModule, state_dict: bytes) -> torch.fx.GraphModule:
+def deserialize(serialized_graph_module: GraphModule, state_dict: bytes) -> ep.ExportedProgram:
     return Deserializer().deserialize(serialized_graph_module, state_dict)
 
 ###################################################################################################################
 
 
 def convert_fake_tensor_to_tensor_meta(
-    gm: torch.fx.GraphModule
-) -> Tuple[torch.fx.GraphModule, Optional[ShapeEnv]]:
+    ep: ep.ExportedProgram
+) -> Tuple[ep.ExportedProgram, Optional[ShapeEnv]]:
     """
     Replace the faketensor metadata with the tensor metadata dataclass since we
     cannot serialize faketensors
     """
-    gm = copy.deepcopy(gm)
     shape_env = None
-    for node in gm.graph.nodes:
+    for node in ep.graph.nodes:
         def get_shape_env(val) -> Optional[ShapeEnv]:
             val_flat, _ = pytree.tree_flatten(val)
             curr_shape_env = None
@@ -800,17 +792,17 @@ def convert_fake_tensor_to_tensor_meta(
             )
             del node.meta["val"]
 
-    return gm, shape_env
+    return ep, shape_env
 
 
-def convert_tensor_meta_to_fake_tensor(gm: torch.fx.GraphModule, shape_env: ShapeEnv = None) -> torch.fx.GraphModule:
+def convert_tensor_meta_to_fake_tensor(ep: ep.ExportedProgram, shape_env: ShapeEnv = None) -> ep.ExportedProgram:
     """
     Replace (inplace) the tensor metadata with faketensor
     """
     fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
-    for node in gm.graph.nodes:
+    for node in ep.graph.nodes:
         if (val := node.meta.get("tensor_meta", None)) is not None:
             node.meta["val"] = pytree.tree_map_only(
                 TensorMeta, lambda v: import_tensor_meta(v, fake_tensor_mode), val
             )
-    return gm
+    return ep

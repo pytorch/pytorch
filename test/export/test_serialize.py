@@ -1,11 +1,11 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import pickle
 import unittest
 
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export
-from torch._export.graph_module import get_export_meta
 from torch._export.serialize import (
     convert_fake_tensor_to_tensor_meta,
     convert_tensor_meta_to_fake_tensor,
@@ -37,14 +37,13 @@ class TestSerialize(TestCase):
             return control_flow.cond(x.shape[0] < 10, true_fn, false_fn, [x])
 
         inputs = (torch.ones(3),)
-        mmep = export(f, inputs)
-        gm = mmep.find_method("forward")
+        ep = export(f, inputs)
 
         # Pickle the ExportGraphModule
-        pickled_gm = pickle.dumps(convert_fake_tensor_to_tensor_meta(gm)[0])
-        loaded_gm = convert_tensor_meta_to_fake_tensor(pickle.loads(pickled_gm))
+        pickled_ep = pickle.dumps(convert_fake_tensor_to_tensor_meta(copy.deepcopy(ep))[0])
+        loaded_ep = convert_tensor_meta_to_fake_tensor(pickle.loads(pickled_ep))
 
-        for node1, node2 in zip(loaded_gm.graph.nodes, gm.graph.nodes):
+        for node1, node2 in zip(loaded_ep.graph.nodes, ep.graph.nodes):
             val1 = node1.meta.get("val", None)
             val2 = node2.meta.get("val", None)
 
@@ -65,13 +64,11 @@ class TestSerialize(TestCase):
                 # For expressions like 's0 < 10' can only compare through string
                 self.assertEqual(str(val1), str(val2))
 
-        self.assertTrue(torch.allclose(loaded_gm(*inputs), gm(*inputs)))
+        self.assertTrue(torch.allclose(loaded_ep(*inputs), ep(*inputs)))
 
         # Check metadata
-        orig_meta = get_export_meta(gm)
-        new_meta = get_export_meta(loaded_gm)
-        self.assertEqual(orig_meta.in_spec, new_meta.in_spec)
-        self.assertEqual(orig_meta.out_spec, new_meta.out_spec)
+        self.assertEqual(ep.call_spec.in_spec, loaded_ep.call_spec.in_spec)
+        self.assertEqual(ep.call_spec.out_spec, loaded_ep.call_spec.out_spec)
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -94,7 +91,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-        ).module
+        )
 
         serialized, _ = serialize(exported_module)
         node = serialized.graph.nodes[0]
@@ -119,7 +116,7 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-        exported_module = export(MyModule(), (input,)).module
+        exported_module = export(MyModule(), (input,))
 
         serialized, _ = serialize(exported_module)
         node = serialized.graph.nodes[0]
@@ -162,7 +159,7 @@ class TestSerialize(TestCase):
         exported_module = export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
-        ).module
+        )
 
         serialized, _ = serialize(exported_module)
         node = serialized.graph.nodes[0]
@@ -187,7 +184,7 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-        exported_module = export(f, (x,)).module
+        exported_module = export(f, (x,))
         serialized, _ = serialize(exported_module)
 
         node = serialized.graph.nodes[1]
@@ -203,7 +200,7 @@ class TestSerialize(TestCase):
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
-        exported_module = export(fn, inputs, {}).module
+        exported_module = export(fn, inputs, {})
         serialized_struct, state_dict = serialize(exported_module)
         loaded_graph = deserialize(serialized_struct, state_dict)
 
