@@ -284,7 +284,11 @@ def make_export_graph_module(
         out_spec=out_spec,
         update_spec=0,
         mutation=mutation if mutation else [],
-        input_shape_constraints=input_shape_constraints_by_src_name,
+        input_shape_constraints={
+            # copy because pickle cannot handle defaultdict with lambda factory
+            name: constraints
+            for name, constraints in input_shape_constraints_by_src_name.items()
+        },
         inline_constraints=inline_constraints,
         input_name_to_example_inputs=input_name_to_example_inputs,
     )
