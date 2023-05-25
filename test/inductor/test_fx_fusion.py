@@ -154,5 +154,4 @@ class TestFxFusion(TestCase):
 
 
 if __name__ == "__main__":
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()

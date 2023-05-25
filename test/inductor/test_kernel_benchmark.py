@@ -105,5 +105,5 @@ class TestKernelBenchmark(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CUDA:
         run_tests()

@@ -246,5 +246,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-    if HAS_CPU or HAS_CUDA and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests("sympy")

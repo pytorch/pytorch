@@ -61,6 +61,6 @@ class SmokeTest(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if IS_LINUX and torch.cuda.is_available() and not TEST_WITH_ROCM:
+    if IS_LINUX and torch.cuda.is_available():
         if torch.cuda.get_device_properties(0).major > 5:
             run_tests()

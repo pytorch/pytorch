@@ -513,6 +513,4 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()

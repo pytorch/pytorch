@@ -327,5 +327,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()
