@@ -704,12 +704,13 @@ class Constraint(ConstraintTarget):
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
             "shared": (
-                None if self.shared is None
+                None
+                if self.shared is None
                 else {
                     "t_id": self.shared.t_id,
                     "dim": self.shared.dim,
                 }
-            )
+            ),
         }
 
     def __eq__(self, other):

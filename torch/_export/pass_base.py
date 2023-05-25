@@ -147,6 +147,8 @@ class ExportPassBase(PassBase):
             super().__init__(gm)
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
+            # state that keeps track of when placeholders are still being processed
+            # (note that placeholders are always processed before other nodes)
             self._processing_placeholders = True
 
         def placeholder(
@@ -215,6 +217,7 @@ class ExportPassBase(PassBase):
             raise ExportPassBaseError("call_method is not supported.")
 
         def run_node(self, n: torch.fx.Node) -> Argument:
+            self.node = n
             if self._processing_placeholders and n.op != "placeholder":
                 self._processing_placeholders = False
                 self.callback.postprocess_placeholders()
@@ -298,6 +301,9 @@ class ExportPassBase(PassBase):
         return ProxyValue(arg, arg_proxy)
 
     def postprocess_placeholders(self):
+        """
+        Hook to post-process placeholders before they are passed to FX nodes.
+        """
         pass
 
     def call_operator(

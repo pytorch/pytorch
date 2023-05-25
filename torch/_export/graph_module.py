@@ -38,6 +38,12 @@ ConstraintExpr = Union[sympy.Expr, SympyBoolean]
 
 
 @dataclasses.dataclass
+class ConstraintsContainer:
+    ranges: Any
+    equalities: Any
+
+
+@dataclasses.dataclass
 class ExportMetadata:
     """The fields in this class are what used to be extra data from ExportGraphModule."""
 
@@ -247,28 +253,29 @@ def make_export_graph_module(
 
     gm = fx.GraphModule(root, graph, class_name)
 
-    tensor_id_to_input_names = defaultdict(list)
+    tensor_id_to_input_names: Dict[int, List[str]] = defaultdict(list)
     input_name_to_example_inputs: Dict[str, Any] = {}
     if example_inputs is not None:
         input_tracker = 0
         for node in gm.graph.nodes:
             if node.op == "placeholder":
                 example_input = example_inputs[input_tracker]
-                example_input_id = id(example_input)
-                tensor_id_to_input_names[example_input_id].append(node.name)
+                tensor_id_to_input_names[id(example_input)].append(node.name)
                 input_name_to_example_inputs[node.name] = example_input
                 input_tracker += 1
 
-    input_shape_constraints_by_src_name = defaultdict(lambda: {"range": [], "equality": []})
+    input_shape_constraints_by_src_name: Dict[str, ConstraintsContainer] = defaultdict(
+        lambda: ConstraintsContainer([], [])
+    )
     for constraint in input_shape_constraints:
         for name in tensor_id_to_input_names[constraint["t_id"]]:
-            input_shape_constraints_by_src_name[name]["range"].append(
+            input_shape_constraints_by_src_name[name].ranges.append(
                 (constraint["dim"], constraint["min"], constraint["max"])
             )
         if constraint["shared"] is not None:
             for name in tensor_id_to_input_names[constraint["shared"]["t_id"]]:
                 for other_name in tensor_id_to_input_names[constraint["t_id"]]:
-                    input_shape_constraints_by_src_name[name]["equality"].append(
+                    input_shape_constraints_by_src_name[name].equalities.append(
                         (constraint["shared"]["dim"], other_name, constraint["dim"])
                     )
 
