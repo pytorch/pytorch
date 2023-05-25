@@ -376,6 +376,22 @@ class CPUReproTests(TestCase):
         a = torch.randn(1, 3)
         self.common(fn, (a,))
 
+    def test_index_propagation_issue_102065(self):
+        def fn(x):
+            _, num_patches, _ = x.shape
+            img_size = int(num_patches**0.5)
+            rel_indices = torch.zeros(1, num_patches, num_patches, 3)
+            ind = torch.arange(img_size).view(1, -1) - torch.arange(img_size).view(
+                -1, 1
+            )
+            indx = ind.repeat(img_size, img_size)
+            return indx**2
+
+        self.common(
+            fn,
+            (torch.randn(8, 8, 8),),
+        )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
