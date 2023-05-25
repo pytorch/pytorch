@@ -10,7 +10,6 @@ from sympy.logic.boolalg import Boolean as SympyBoolean
 import torch
 import torch.fx
 
-from torch.fx.experimental.symbolic_shapes import ValueRanges
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.pass_infra.node_metadata import NodeMetadata
 
@@ -38,7 +37,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self,
         input_shape_constraints: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]],
         input_name_to_example_inputs: Dict[str, Any],
-        inline_constraints: Dict[str, ValueRanges],
+        inline_constraints: Dict[str, Tuple[int, int]],
     ) -> None:
         super().__init__()
         self.constraints = self._process_shape_constraints(input_shape_constraints)
@@ -189,10 +188,11 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 messages = []
                 if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                     expr = val.node._expr
+                    # breakpoint()
                     if expr in self.inline_constraints:
                         constraint = self.inline_constraints[expr]
-                        lower = _convert_to_int(constraint.lower)
-                        upper = _convert_to_int(constraint.upper)
+                        lower = _convert_to_int(constraint[0])
+                        upper = _convert_to_int(constraint[1])
                         assert_msg = f" is outside of inline constraint [{lower}, {upper}]."
                         call_backs.append(partial(self._assert_constraint, lower=lower, upper=upper, low_threshold=-1))
                         messages.append(assert_msg)

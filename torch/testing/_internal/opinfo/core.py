@@ -2657,6 +2657,7 @@ class ForeachFuncInfo(OpInfo):
         sample_inputs_func=sample_inputs_foreach,
         supports_autograd=False,
         supports_scalar_self_arg=False,
+        supports_forward_ad=False,
         **kwargs,
     ):
         (
@@ -2683,6 +2684,7 @@ class ForeachFuncInfo(OpInfo):
             dtypesIfROCM=dtypesIfROCM,
             sample_inputs_func=sample_inputs_func,
             supports_autograd=supports_autograd,
+            supports_forward_ad=supports_forward_ad,
             **kwargs,
         )
         self.supports_scalar_self_arg = supports_scalar_self_arg
