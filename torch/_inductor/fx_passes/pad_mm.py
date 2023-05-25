@@ -167,7 +167,18 @@ def is_mm_compute_bound(M, K, N, dtype):
 
     arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
 
-    machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
+    # Fails with AMD
+    try:
+        machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
+    except Exception as e:
+        return True
+
+    # dram_gbps might be underestimating bandwidth because of cache.
+    # if we estimate machine balance too low we might miss some speedups,
+    # if we extimate too high there will be unnecessary compilation time increase.
+    # TODO - finetune coefficient here. As a reference point, Triton mm model assumes
+    # 80% of reads are in cache and cache is 4x faster than dram_gbps
+    machine_balance = machine_balance * 0.5
 
     return arithmetic_intensity > machine_balance
 
