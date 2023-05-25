@@ -394,11 +394,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Floor", "bool, int"),
     ),
     xfail(
-        "full_like",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + (torch.float16,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16"),
-    ),
-    xfail(
         "index_put",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
@@ -407,21 +402,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "index_put",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
-    ),
-    xfail(
-        "new_full",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_full", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_ones",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_ones", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_zeros",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_zeros", "ORT 1.15 will support"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",

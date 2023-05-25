@@ -489,7 +489,7 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   std::unordered_map<int64_t, int64_t> sym_map;
   for (const c10::ShapeSymbol& input_shape : input_shape_vector) {
     // input_shape.static_size() could be zero when torch.tensor([]) is used.
-    if (input_shape.is_static() and input_shape.static_size() != 0) {
+    if (input_shape.is_static() && input_shape.static_size() != 0) {
       if (shape_ratio >=
           std::numeric_limits<uint64_t>::max() / input_shape.static_size()) {
         TORCH_WARN(
