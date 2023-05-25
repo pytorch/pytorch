@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
 import platform
 import sys
 import math
