@@ -26,11 +26,27 @@ runs:
     - name: Clean up leftover processes on non-ephemeral Windows runner
       uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
+    # Cleaning up Windows workspace sometimes fails flakily with device or resource busy
+    # error, meaning one or more processes haven't stopped completely yet. So trying to
+    # retry this step several time similar to how checkout-pytorch GHA does
     - name: Cleanup workspace
       if: always()
-      shell: bash
+      uses: nick-fields/retry@v2.8.2
       env:
         EXTRA_DELETE_DIR: ${{ inputs.extra-delete-dir }}
-      run: |
-        [ ! -z "${EXTRA_DELETE_DIR}" ]  || rm -rf "${EXTRA_DELETE_DIR}"
-        rm -rf ./*
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 90
+        command: |
+          set +e
+          set -x
+
+          if [ -n "${EXTRA_DELETE_DIR}" ]; then
+            # It's ok to fail to clean up the extra directory on Windows as it only contains
+            # the build artifacts and doesn't take up much space, i.e. /c/5053411580/build-results
+            rm -rf "${EXTRA_DELETE_DIR}" || true
+          fi
+
+          rm -rf ./*
