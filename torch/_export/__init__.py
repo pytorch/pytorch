@@ -1,13 +1,14 @@
 import dataclasses
 import weakref
 from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+from collections import defaultdict
 
 import sympy
 
 import torch
 import torch._dynamo
 import torch.fx
-from .exported_program import CallSpec, ExportedProgram
+from .exported_program import CallSpec, ConstraintExpr, ExportedProgram
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 
@@ -18,7 +19,6 @@ from torch.fx.experimental.symbolic_shapes import (
     StrictMinMaxConstraint,
 )
 from torch._dynamo.exc import UserError, UserErrorType
-from torch._export.passes import AddRuntimeAssertionsForConstraintsPass
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
 
@@ -84,13 +84,58 @@ class ExportDynamoConfig:
 DECOMP_TABLE = core_aten_decompositions()
 
 
+def _set_constraints(
+    exported_program: ExportedProgram,
+    input_shape_constraints,
+    inline_constraints: Dict[str, Tuple[int, int]],
+    example_inputs: Any,
+):
+    # TODO(angelayi, avik): clean this up
+
+    exported_program.symbol_to_range = inline_constraints
+
+    # group by input id
+    input_shape_constraints_by_tensor_id = defaultdict(list)
+    for constraint in input_shape_constraints:
+        input_shape_constraints_by_tensor_id[constraint["t_id"]].append(
+            (constraint["dim"], constraint["min"], constraint["max"])
+        )
+
+    input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
+    input_name_to_example_inputs: Dict[str, Any] = {}
+    if example_inputs is not None:
+        input_tracker = 0
+        for node in exported_program.graph.nodes:
+            if node.op == "placeholder":
+                example_input = example_inputs[input_tracker]
+                if id(example_input) in input_shape_constraints_by_tensor_id:
+                    input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
+                input_name_to_example_inputs[node.name] = example_input
+                input_tracker += 1
+
+    exported_program._input_shape_constraints = input_shape_constraints_by_src_name
+    exported_program._input_name_to_example_inputs = input_name_to_example_inputs
+
+
 def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
 ) -> ExportedProgram:
     """
-    Export a single entry point or a free function.
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside and produce a ExportedProgram.
+
+    Args:
+        m: the `nn.Module` or callable to trace.
+
+        args: Tracing example inputs.
+
+        constraints: A list of constraints on the dynamic arguments specifying
+            their possible range of their shapes
+
+    Returns:
+        An ExportedProgram containing the traced method.
     """
     if constraints is None:
         constraints = []
@@ -122,6 +167,12 @@ def export(
         gm,
         gm.graph,
         call_spec=CallSpec(in_spec, out_spec),
-        example_inputs=flat_args,
     )
+    _set_constraints(
+        exported_program,
+        gm.meta.get("input_shape_constraints", []),
+        gm.meta.get("inline_constraints", []),
+        flat_args,
+    )
+
     return exported_program
