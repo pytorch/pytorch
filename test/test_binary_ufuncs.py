@@ -1846,7 +1846,7 @@ class TestBinaryUfuncs(TestCase):
                         self.assertEqual(actual_tensor.item(), expected)
                         self.assertEqual(actual_first_tensor, actual_tensor)
                         self.assertEqual(actual_second_tensor, actual_tensor)
-
+        
         _scalar_helper(operator.truediv, operator.truediv)
         _scalar_helper(operator.truediv, torch.true_divide)
         _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
