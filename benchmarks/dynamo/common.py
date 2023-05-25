@@ -1456,7 +1456,6 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
-
             is_same = True
             try:
                 if (
