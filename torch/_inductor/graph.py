@@ -145,7 +145,7 @@ class GraphLowering(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         shape_env=None,
-        num_static_inputs=None,
+        static_input_idxs=None,
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
@@ -171,7 +171,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
-        self.num_static_inputs = num_static_inputs
+        self.static_input_idxs = static_input_idxs
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
@@ -318,7 +318,7 @@ class GraphLowering(torch.fx.Interpreter):
         if (
             config.static_weight_shapes
             and (
-                len(self.graph_inputs) < self.num_static_inputs
+                len(self.graph_inputs) in self.static_input_idxs
                 or not dynamo_config.dynamic_shapes
             )
             and not example._has_symbolic_sizes_strides
