@@ -921,7 +921,10 @@ class TestForeach(TestCase):
             self.skipTest("forward AD not supported")
 
         # note(crcrpar): The combinations below are failing in its forward path,
-        # which is before forward-mode AD happens
+        # which is before forward-mode AD happens. This function gates the combinations where
+        # - subtraction with Scalar/ScalarList of boolean value:
+        # - combinations where the in-place op in questions tries to write out complex result
+        #   into float storage (= `self`)
         def check_sample_eligibility(op, sample, dtype):
             if (
                 op.name == "_foreach_sub"
@@ -931,13 +934,13 @@ class TestForeach(TestCase):
                 )
             ):
                 return False, _BOOL_SUB_ERR_MSG
-            sample_has_complex = sample.args and ((
+            rhs_arg_has_complex_number = sample.args and ((
                 isinstance(sample.args[0], list)
                 and any(isinstance(a, complex) for a in sample.args[0])
             ) or (
                 isinstance(sample.args[0], complex)
             ))
-            if dtype == torch.float64 and sample_has_complex:
+            if dtype == torch.float64 and rhs_arg_has_complex_number:
                 if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
                     return False, "result type ComplexDouble can't be cast to the desired output type Double"
                 if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
