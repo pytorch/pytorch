@@ -22,6 +22,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _FSDPState,
@@ -203,7 +204,10 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            if not value.is_cuda:
+            assert (
+                fsdp_state.compute_device is not None
+            ), "compute_device has not been initialized"
+            if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
             # has the same shape as the sharded flat parameter
@@ -322,7 +326,7 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = torch.device("cuda")
+    device = _get_pg_default_device(group)
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
@@ -336,9 +340,7 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(
-            state.shape, dtype=state.dtype, device=torch.device("cuda")
-        )
+        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -1106,7 +1108,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
-    device = torch.device("cuda", torch.cuda.current_device())
+    device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
     if num_missing.item() > 0:

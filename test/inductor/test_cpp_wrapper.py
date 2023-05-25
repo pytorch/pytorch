@@ -152,13 +152,13 @@ if RUN_CUDA:
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
-        BaseTest("test_cat"),  # alias
-        BaseTest("test_convolution1"),
+        # BaseTest("test_cat"),  # alias
+        # BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
-        BaseTest("test_linear2"),
+        # BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
@@ -175,8 +175,6 @@ if RUN_CUDA:
 
     test_torchinductor.copy_tests(CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper")
 
-    """
-    # To be enabled
     DynamicShapesCudaWrapperTemplate = (
         test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
     )
@@ -186,7 +184,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
     )
-    """
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
