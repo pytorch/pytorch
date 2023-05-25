@@ -1,24 +1,26 @@
 from collections import defaultdict, namedtuple
 from functools import partial
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Union
 
 import math
 import operator
 import sympy
+from sympy.logic.boolalg import Boolean as SympyBoolean
 
 import torch
 import torch.fx
 
-from torch._export.graph_module import get_export_meta
+from torch.fx.experimental.symbolic_shapes import ValueRanges
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.pass_infra.node_metadata import NodeMetadata
-from torch.fx.passes.infra.pass_base import PassResult
 
 
 __all__ = ["AddRuntimeAssertionsForConstraintsPass"]
 
 
+ConstraintExpr = Union[sympy.Expr, SympyBoolean]
 ConstraintSpec = namedtuple("ConstraintSpec", ["constraint_dim", "min_val", "max_val"])
+
 
 # Convert simple sympy Integers into concrete int to
 # insert into graph
@@ -32,9 +34,16 @@ def _convert_to_int(val):
     )
 
 class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        input_shape_constraints: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]],
+        input_name_to_example_inputs: Dict[str, Any],
+        inline_constraints: Dict[str, ValueRanges],
+    ) -> None:
         super().__init__()
-        self.current_gm: Optional[torch.fx.GraphModule] = None
+        self.constraints = self._process_shape_constraints(input_shape_constraints)
+        self.input_name_to_example_inputs = input_name_to_example_inputs
+        self.inline_constraints = inline_constraints
 
     def _process_shape_constraints(self, constraints) -> Dict[str, List[ConstraintSpec]]:
         constraints_name_to_constraint: Dict[str, List[ConstraintSpec]] = defaultdict(
@@ -65,14 +74,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 )
 
         return constraints_name_to_constraint
-
-    def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-        self.current_gm = graph_module
-        assert isinstance(self.current_gm, torch.fx.GraphModule)
-        self.constraints = self._process_shape_constraints(get_export_meta(self.current_gm).input_shape_constraints)
-        self.input_name_to_example_inputs = get_export_meta(self.current_gm).input_name_to_example_inputs
-        self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
-        return super().call(graph_module)
 
     def _insert_specialized_shapes_assert(self, arg, dims, name, current_inp):
         # we don't want to get shapes from meta as they will be symbolic
@@ -112,7 +113,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         if name not in self.input_name_to_example_inputs:
             return arg
         current_inp = self.input_name_to_example_inputs[name]
-        assert self.current_gm is not None
         all_dims = set(range(current_inp.dim()))
 
         # If no dynamism is specified, we assume all dimensions are specialized
