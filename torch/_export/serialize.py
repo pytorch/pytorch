@@ -153,7 +153,7 @@ def export_call_spec(call_spec: Optional[ep.CallSpec]) -> CallSpec:
     return CallSpec(in_spec="", out_spec="")
 
 
-def export_signature(sig: Optional[ep.GraphSignature]) -> GraphSignature:
+def export_signature(sig: Optional[ep.ExportGraphSignature]) -> GraphSignature:
     if sig is None:
         return GraphSignature(
             inputs_to_parameters={},

@@ -193,8 +193,17 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 }
                 compiled = inner_compile(gm, example_inputs, **kwargs_patched)
                 if detect_fake_mode(example_inputs):
+
+                    def materialize(x):
+                        if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                            # Need concrete value to run dynamic shapes and tune the result
+                            return x.node.hint
+                        else:
+                            # TODO: the defaked value may be problematic in some cases
+                            return defake(x)
+
                     with torch.utils._python_dispatch._disable_current_modes():
-                        inputs_real = [defake(t) for t in example_inputs]
+                        inputs_real = [materialize(t) for t in example_inputs]
                 else:
                     inputs_real = deepcopy(example_inputs)
 
