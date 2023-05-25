@@ -838,10 +838,10 @@ def gen_pyi(
             ],
             "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
-                "def _make_subclass({}) -> Tensor: ...".format(
+                "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
                     ", ".join(
                         [
-                            "cls",
+                            "cls: Type[S]",
                             "data: Tensor",
                             "require_grad: _bool = False",
                             "dispatch_strides: _bool = False",

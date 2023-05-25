@@ -21,6 +21,8 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
+    is_tensor_dim_sharded,
+    is_tensor_partial,
     normalize_dim,
     prod,
     register_op_strategy,
@@ -39,6 +41,8 @@ aten = torch.ops.aten
         aten.contiguous.default,
         aten.copy_.default,
         aten.detach.default,
+        aten.equal.default,
+        aten.is_same_size.default,
         aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
     ]
 )
@@ -78,7 +82,7 @@ def create_like_strategy(
     assert isinstance(select_strategy, OpStrategy)
     for arg_strategy in select_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if arg_spec.sums:
+        if is_tensor_partial(arg_spec):
             # if the arg_spec have partial, accept partial
             # in the input_specs but output replicate for
             # those corresponding mesh dims
@@ -99,86 +103,96 @@ def create_like_strategy(
     return create_like_strategy
 
 
-@register_prop_rule(aten._local_scalar_dense.default)
-def no_shard_prop_rule(op_schema: OpSchema) -> OutputSharding:
-    # some tensor ops should not support shard, i.e. local_scalar_dense
-    # shouldn't work for shard as it requires numel == 1
-    # by default prop the first arg spec
-    tensor_spec = op_schema.args_spec[0]
-    for placement in tensor_spec.placements:
-        if placement.is_shard():
-            return OutputSharding(
-                None,
-                failed_reason=f"Op does not support input placements "
-                f"with `Shard`, but found placements: "
-                f"{tensor_spec.placements}",
+@register_op_strategy(
+    [
+        aten.new_empty.default,
+        aten.new_full.default,
+        aten.new_ones.default,
+        aten.new_zeros.default,
+    ]
+)
+def new_factory_strategy(
+    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    # TODO: maybe we should generate all possible shardings intead of just stay
+    # replicated for new factory methods
+    replica_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+    return OpStrategy([PlacementStrategy(replica_spec)])
+
+
+@register_op_strategy(aten.bucketize.Tensor)
+def gen_bucketize_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    """
+    Just propagate input sharding, but expect replicated for boundaries input.
+    """
+    input_strategy = node_to_strategy[node.all_input_nodes[0]]
+    bucketize_strategy = OpStrategy([])
+    assert isinstance(input_strategy, OpStrategy)
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = DTensorSpec(mesh, arg_strategy.output_spec.placements)
+        replica_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+        bucketize_strategy.strategies.append(
+            PlacementStrategy(
+                output_spec=arg_spec, input_specs=(arg_spec, replica_spec)
             )
-    # otherwise default prop as None as it would not return
-    # a DTensor
-    return OutputSharding(None)
-
-
-def new_factory_rule(op_schema: OpSchema) -> OutputSharding:
-    # this op would benefit from backward sharding propagation!
-    # Since we cannot do that yet, just return replicated
-    input = op_schema.args_schema[0]
-    assert isinstance(input, DTensorSpec)
-
-    return OutputSharding(
-        output_spec=DTensorSpec(
-            mesh=input.mesh,
-            placements=[Replicate()] * input.mesh.ndim,
-            tensor_meta=input.tensor_meta,
         )
-    )
+
+    return bucketize_strategy
 
 
-@register_prop_rule([aten.equal.default, aten.is_same_size.default])
-def non_tensor_prop_rule(op_schema: OpSchema) -> OutputSharding:
-    # simply return None as it does not return DTensor
-    return OutputSharding(output_spec=None)
-
-
-new_factory_ops = [
-    aten.new_full.default,
-    aten.new_ones.default,
-    aten.new_zeros.default,
-]
-
-for op in new_factory_ops:
-    register_prop_rule(op)(new_factory_rule)
-
-
-@register_prop_rule(aten.bucketize.Tensor)
-def prop_bucketize(op_schema: OpSchema) -> OutputSharding:
+@register_op_strategy(aten.slice.Tensor)
+def gen_slice_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
     """
-    Point-wise on the first input (just propagate input sharding).
-    Expect replicated for second input.
+    forwards all shardings except the slice dimension.
     """
-    input_schema, boundaries = op_schema.args_schema
-    assert isinstance(input_schema, DTensorSpec)
-    assert isinstance(boundaries, DTensorSpec)
+    defaults = (None, 0, None, None, 1)
+    input_node, dim, start, end, step = node.args + defaults[len(node.args) :]
+    assert isinstance(input_node, Node)
+    input_val = input_node.meta["val"]
+    assert isinstance(dim, int)
+    if start is None:
+        start = 0
+    if end is None or end > input_val.shape[dim]:
+        end = input_val.shape[dim]
+    assert isinstance(start, int)
+    assert isinstance(end, int)
+    assert isinstance(step, int)
 
-    if all(isinstance(p, Replicate) for p in boundaries.placements):
-        return OutputSharding(output_spec=input_schema)
-    else:
-        return OutputSharding(
-            output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    func_schema=op_schema.func_schema,
-                    args_schema=(
-                        input_schema,
-                        DTensorSpec(
-                            mesh=boundaries.mesh,
-                            placements=[Replicate()] * len(boundaries.placements),
-                            tensor_meta=boundaries.tensor_meta,
-                        ),
-                    ),
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
-        )
+    # normalize args
+    slice_dim = normalize_dim(dim, input_val.ndim)
+    if start < 0:
+        start += input_val.shape[dim]
+    if end < 0:
+        end += input_val.shape[dim]
+
+    redundant_slice = start == 0 and end == input_val.shape[dim] and step == 1
+
+    input_strategy = node_to_strategy[input_node]
+    assert isinstance(input_strategy, OpStrategy)
+    slice_strategy = OpStrategy([])
+
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
+            # only add the strategy if the slice dim is not sharded
+            out_spec = DTensorSpec(mesh, arg_spec.placements)
+            slice_strategy.strategies.append(PlacementStrategy(output_spec=out_spec))
+    if not slice_strategy.strategies:
+        # if all strategies are filtered out, unsharding all specs on slice dim
+        # of the input strategy, and use that as the op strategy
+        for arg_strategy in input_strategy.strategies:
+            arg_spec = arg_strategy.output_spec
+            unshard_spec = DTensorSpec(
+                mesh, unshard_tensor_dim(arg_spec.placements, dim=slice_dim)
+            )
+            slice_strategy.strategies.append(
+                PlacementStrategy(output_spec=unshard_spec)
+            )
+    return slice_strategy
 
 
 def unshard_tensor_dim(
@@ -203,85 +217,10 @@ def replicate_tensor_dim(
     )
 
 
-def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
-    """Return True if tensor dim is sharded"""
-    return (dim < spec.ndim) and spec.dim_map[dim] >= 0
-
-
-def is_tensor_partial(spec: DTensorSpec) -> bool:
-    return any(p.is_partial() for p in spec.placements)
-
-
-def _prop_all_but_dim(op_schema: OpSchema, dim: int) -> OutputSharding:
-    """
-    Considering an op that takes its input as first argument, forwards all shardings
-    except for the given dimension.
-    """
-    input_spec = op_schema.args_schema[0]
-    assert isinstance(input_spec, DTensorSpec)
-
-    output_placements = unshard_tensor_dim(input_spec.placements, dim=dim)
-    output_spec = DTensorSpec(
-        mesh=input_spec.mesh,
-        placements=output_placements,
-    )
-
-    if input_spec.placements == output_placements:
-        out = OutputSharding(output_spec=output_spec)
-    else:
-        suggested_input_spec = DTensorSpec(
-            mesh=input_spec.mesh,
-            placements=output_placements,
-            tensor_meta=input_spec.tensor_meta,
-        )
-        out = OutputSharding(
-            output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    func_schema=op_schema.func_schema,
-                    args_schema=(suggested_input_spec,) + op_schema.args_schema[1:],
-                    kwargs_schema=op_schema.kwargs_schema,
-                ),
-            ],
-        )
-    return out
-
-
-@register_prop_rule(aten.slice.Tensor)
-def prop_slice(op_schema: OpSchema) -> OutputSharding:
-    """NOTE: can be further optimized (right now it replicates before slicing on a sharded dimension)"""
-    defaults = (None, 0, None, None, 1)
-    input_spec, dim, start, end, step = (
-        op_schema.args_schema + defaults[len(op_schema.args_schema) :]
-    )
-    assert isinstance(input_spec, DTensorSpec)
-    assert isinstance(dim, int)
-    assert start is None or isinstance(start, int)
-    assert end is None or isinstance(end, int)
-    assert isinstance(step, int)
-
-    # normalize arguments
-    if dim < 0:
-        dim += input_spec.ndim
-    if start is None:
-        start = 0
-    if step is None:
-        step = 1
-    if end is None or end > input_spec.shape[dim]:
-        end = input_spec.shape[dim]
-    if start < 0:
-        start += input_spec.shape[dim]
-    if end < 0:
-        end += input_spec.shape[dim]
-
-    if start == 0 and end == input_spec.shape[dim] and step == 1:
-        return OutputSharding(output_spec=input_spec)
-
-    return _prop_all_but_dim(op_schema, dim=dim)
-
-
-@register_prop_rule(aten.slice_scatter.default)
-def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
+@register_op_strategy(aten.slice_scatter.default)
+def gen_slice_scatter_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
     # 3. numer of elements in src in dim need to match the slice size.
@@ -290,60 +229,47 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
     #   where our best bet for now is to make them replicated as a fall-back.
     #   TODO: Ideally we'd like to make sure the output is re-sharded afterwards to keep input sharding.
 
-    defaults = (None, None, 0, None, None, 1)
-    input, src, dim, start, end, step = (
-        op_schema.args_schema + defaults[len(op_schema.args_schema) :]
-    )
-    assert isinstance(input, DTensorSpec)
-    assert isinstance(src, DTensorSpec)
-    assert isinstance(dim, int)
+    input_node = cast(Node, node.args[0])
+    input_ndim = input_node.meta["val"].ndim
+    slice_dim = cast(int, node.args[2]) if len(node.args) > 2 else 0
+    slice_dim = normalize_dim(slice_dim, input_ndim)
+    input_strategy = node_to_strategy[input_node]
+    assert isinstance(input_strategy, OpStrategy)
 
-    if dim < 0:
-        dim += input.ndim
-
-    # first, we keep the input sharding, except for the input dimension
-    # also, we cannot allow partial sum anymore.
-    input_suggestion = tuple(
-        Replicate()
-        if isinstance(p, _Partial) or (isinstance(p, Shard) and p.dim == dim)
-        else p
-        for p in input.placements
-    )
-
-    if input_suggestion == tuple(input.placements) and src.placements == tuple(
-        input.placements
-    ):
-        # if our sharding is correct, the output sharding will be the same as the input.
-        return OutputSharding(
-            output_spec=DTensorSpec(
-                mesh=input.mesh,
-                placements=input.placements,
+    slice_scatter_strategy = OpStrategy([])
+    # by default follow the input strategy for both input and src
+    for arg_strategy in input_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if not (
+            is_tensor_dim_sharded(arg_spec, dim=slice_dim)
+            or is_tensor_partial(arg_spec)
+        ):
+            # only add the strategy if the slice_scatter dim is not sharded or partial
+            slice_scatter_strategy.strategies.append(
+                PlacementStrategy(output_spec=arg_spec)
             )
-        )
-    else:
-        # otherwise, return the suggestion.
-        return OutputSharding(
-            output_spec=None,
-            schema_suggestions=[
-                OpSchema(
-                    func_schema=op_schema.func_schema,
-                    args_schema=(
-                        DTensorSpec(
-                            mesh=input.mesh,
-                            placements=input_suggestion,
-                            tensor_meta=input.tensor_meta,
-                        ),
-                        DTensorSpec(
-                            mesh=src.mesh,
-                            placements=input_suggestion,
-                            tensor_meta=src.tensor_meta,
-                        ),
-                    )
-                    + op_schema.args_schema[2:],
-                    kwargs_schema=op_schema.kwargs_schema,
-                )
-            ],
-        )
+
+    if not slice_scatter_strategy.strategies:
+        # if all strategies are filtered out, replicating all specs on slice_scatter dim
+        # of the input strategy, and use that as the op strategy
+        for arg_strategy in input_strategy.strategies:
+            arg_spec = arg_strategy.output_spec
+            replicate_spec = DTensorSpec(
+                mesh, replicate_tensor_dim(arg_spec.placements, dim=slice_dim)
+            )
+            slice_scatter_strategy.strategies.append(
+                PlacementStrategy(output_spec=replicate_spec)
+            )
+    return slice_scatter_strategy
+
+
+@register_op_strategy(aten._local_scalar_dense.default)
+def replica_only_strategy(
+    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    """Only allow replication on the input/ouput"""
+    replicate_spec = DTensorSpec(mesh, [Replicate()] * mesh.ndim)
+    return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
 @register_prop_rule(aten.index_select.default)
@@ -634,25 +560,6 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
                 placements=non_empty_specs[0].placements,
             ),
         )
-
-
-def _update_schema_suggestion_for_cat(
-    output_sharding: OutputSharding,
-    op_schema: OpSchema,
-) -> OutputSharding:
-    assert output_sharding.schema_suggestions is not None
-    suggestion_specs = output_sharding.schema_suggestions[0].args_spec
-
-    args_schema = (suggestion_specs,) + op_schema.args_schema[1:]
-
-    output_sharding.schema_suggestions = [
-        OpSchema(
-            func_schema=op_schema.func_schema,
-            args_schema=args_schema,
-            kwargs_schema=op_schema.kwargs_schema,
-        )
-    ]
-    return output_sharding
 
 
 @register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default])

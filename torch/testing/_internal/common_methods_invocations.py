@@ -1611,6 +1611,18 @@ def sample_inputs_new_fns(self, device, dtype, requires_grad, *, is_strided=Fals
         else:
             yield SampleInput(t, output_shape, **kwargs)
 
+def sample_inputs_empty_strided(op, device, dtype, requires_grad=False, **kwargs):
+
+    inputs = [
+        ((), (), {}),
+        ((S,), (4,), {'dtype': dtype, 'device': device}),
+        ((S, S), (2, 1), {'dtype': dtype, 'device': device}),
+        ((S, S, S), (2, 0, 1), {'dtype': dtype, 'device': device}),
+    ]
+
+    for shape, strides, kwargs in inputs:
+        yield SampleInput(shape, strides, requires_grad=requires_grad, **kwargs)
+
 def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
     # shape
     cases = (
@@ -8462,6 +8474,13 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
     ),
+
+    ForeachFuncInfo(
+        'zero',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
+        sample_inputs_func=foreach_inputs_sample_func(1, False, False),
+        supports_autograd=True,
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -10130,7 +10149,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -14053,7 +14072,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
-                   dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -14862,7 +14881,7 @@ op_db: List[OpInfo] = [
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_0',
                    ref=reference_polygamma if TEST_SCIPY else None,
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -15779,6 +15798,29 @@ op_db: List[OpInfo] = [
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
+    OpInfo('empty_strided',
+           op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.empty_strided, inp, *args, **kwargs),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.half),
+           supports_out=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_empty_strided,
+           skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestCompositeCompliance', 'test_operator'),
+               # Lazy tensor failures
+               DecorateInfo(unittest.skip("Expected: empty is not comparable"), 'TestLazyOpInfo'),
+           )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_empty,
@@ -16510,15 +16552,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),),
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_tril_triu,
@@ -18936,6 +18976,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.nn.functional.smooth_l1_loss",
+        torch_opinfo_name="nn.functional.smooth_l1_loss",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
@@ -20195,6 +20240,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.new_empty_strided",
         torch_opinfo_name="new_empty_strided",
+        supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
                          'TestCommon',
@@ -20215,6 +20261,32 @@ python_ref_db = [
                          'TestCommon',
                          'test_python_ref_executor'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.empty_strided",
+        torch_opinfo_name="empty_strided",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_torch_fallback'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_neg_conj_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestMathBits',
+                         'test_neg_view'),
+            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
 
         ),
     ),
