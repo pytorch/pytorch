@@ -961,7 +961,6 @@ class TestForeach(TestCase):
                 return tensorlist
 
             working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
-            print(f"{sample.args}, {working_sample = }, {err_msg_pattern = }")
             if not working_sample:
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
                     gradcheck(
