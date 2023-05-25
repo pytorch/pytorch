@@ -129,7 +129,8 @@ def reduce_graph_module(state_bytes: bytes) -> "ExportGraphModule":
     root = torch.nn.Module()
     root.__dict__ = body
 
-    gm = make_export_graph_module(root, graph)
+    gm = torch.fx.GraphModule(root, graph, class_name="ExportGraphModule")
+    gm.__class__ = type(type(gm).__name__, (ExportGraphModuleMixin, type(gm)), {})
 
     gm.recompile()
     return gm
@@ -193,55 +194,43 @@ class ExportGraphModuleMixin:
         return (reduce_graph_module, (pickled_state,))
 
 
-def make_export_graph_module(
-    root: Union[torch.nn.Module, Dict[str, Any]],
-    graph: torch.fx.Graph,
-    class_name: str = "ExportGraphModule",
-) -> torch.fx.GraphModule:
-    gm = torch.fx.GraphModule(root, graph, class_name=class_name)
-    gm.__class__ = type(type(gm).__name__, (ExportGraphModuleMixin, type(gm)), {})
-    return gm
-
-
 class ExportedProgram:
     def __init__(
         self,
         root: Union[torch.nn.Module, Dict[str, Any]],
         graph: torch.fx.Graph,
-        graph_signature: Optional[ExportGraphSignature] = None,
-        call_spec: Optional[CallSpec] = None,
-        state_dict: Optional[Dict[str, Any]] = None,
+        graph_signature: ExportGraphSignature,
+        call_spec: CallSpec,
+        state_dict: Dict[str, Any],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
-        graph_module = make_export_graph_module(root, graph)
-        self.graph_module: ExportGraphModule = graph_module
+        gm = torch.fx.GraphModule(root, graph, class_name="ExportGraphModule")
+        gm.__class__ = type(type(gm).__name__, (ExportGraphModuleMixin, type(gm)), {})
+        self.graph_module: ExportGraphModule = gm
 
-        self.graph_signature: Optional[ExportGraphSignature] = graph_signature
-        self.call_spec: Optional[CallSpec] = call_spec
-        self.state_dict: Optional[Dict[str, Any]] = state_dict
+        self.graph_signature: ExportGraphSignature = graph_signature
+        self.call_spec: CallSpec = call_spec
+        self.state_dict: Dict[str, Any] = state_dict
         self.symbol_to_range: Dict[str, Tuple[int, int]] = {}
         self._input_shape_constraints: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
         self._input_name_to_example_inputs: Dict[str, Any] = {}
 
     def __call__(self, *args: Any) -> Any:
-        in_spec = self.call_spec.in_spec if self.call_spec is not None else None
-        out_spec = self.call_spec.out_spec if self.call_spec is not None else None
-
-        if in_spec is not None:
+        if self.call_spec.in_spec is not None:
             try:
-                args = fx_pytree.tree_flatten_spec(args, in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(args, self.call_spec.in_spec)  # type: ignore[assignment]
             except Exception as e:
                 raise error.InternalError("The in_spec is not correctly maintained.") from e
 
         with torch.fx.traceback.preserve_node_meta(), torch.no_grad():
             res = torch.fx.Interpreter(self.graph_module).run(*args, enable_io_processing=False)
 
-        if out_spec is not None:
+        if self.call_spec.out_spec is not None:
             try:
-                mutation = self.graph_signature.buffers_to_mutate if self.graph_signature is not None else None
-                num_mutated = len(mutation) if mutation is not None else 0
-                res = pytree.tree_unflatten(res[num_mutated:], out_spec)
+                mutation = self.graph_signature.buffers_to_mutate
+                num_mutated = len(mutation)
+                res = pytree.tree_unflatten(res[num_mutated:], self.call_spec.out_spec)
                 return res
             except Exception as e:
                 raise error.InternalError("The out_spec is not correctly maintained.") from e
@@ -266,8 +255,14 @@ class ExportedProgram:
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
-        self.graph_module = transformed_gm
-        return self
+        transformed_ep = ExportedProgram(
+            transformed_gm,
+            transformed_gm.graph,
+            copy.deepcopy(self.graph_signature),
+            copy.deepcopy(self.call_spec),
+            self.state_dict,
+        )
+        return transformed_ep
 
     def add_runtime_assertions(self) -> "ExportedProgram":
         res = AddRuntimeAssertionsForConstraintsPass(
