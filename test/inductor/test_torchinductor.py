@@ -5178,7 +5178,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
         if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
@@ -5187,6 +5187,19 @@ class CommonTemplate:
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
+
+    def test_randint_kernel_count(self):
+        @torch._dynamo.optimize_assert("inductor")
+        def fn1():
+            random_tensor1 = torch.randint(10, [32], device=self.device)
+            random_tensor2 = torch.randint(10, [32], device=self.device)
+            random_tensor3 = torch.randint(10, [32], device=self.device)
+            return random_tensor1, random_tensor2, random_tensor3
+
+        _, source_codes = run_and_get_code(fn1)
+        if self.device == "cuda":
+            self.assertEqual(len(source_codes), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
     def test_roll(self):
         def fn(a):
