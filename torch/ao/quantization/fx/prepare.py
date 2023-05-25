@@ -1333,7 +1333,7 @@ def insert_observers_for_model(
     # if not, we'll reset the target_dtye_info to use the default (float Tensor)
 
     # reset the counters and set of processed_nodes
-    processed_nodes = set()
+    processed_nodes: Set[Node] = set()
     for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(

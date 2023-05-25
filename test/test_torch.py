@@ -350,6 +350,9 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0.pin_memory()
 
+        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
+            s0.resize_(10)
+
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
@@ -365,14 +368,6 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
-
-    @onlyCPU
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_storage_meta_ok(self, device, dtype):
-        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
-
-        # This is OK, it changes the meta storage size without allocating
-        s0.resize_(10)
 
     @onlyCUDA
     def test_module_share_memory(self):
@@ -2996,6 +2991,17 @@ else:
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
+
+    @onlyCPU
+    def test_bfloat16_neg_abs(self, device):
+        src = torch.randn(256)
+        src[0] = torch.nan
+        src[1] = -torch.nan
+        src[2] = torch.inf
+        src[3] = -torch.inf
+        src_bf16 = src.bfloat16()
+        self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
+        self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
     @onlyCPU
     def test_bfloat16_float_copy(self, device):
