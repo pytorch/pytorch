@@ -5,7 +5,6 @@ import warnings
 import sympy
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-from collections import defaultdict
 
 from sympy.logic.boolalg import Boolean as SympyBoolean
 
@@ -38,6 +37,7 @@ LeafValue = Union[
 
 ConstraintExpr = Union[sympy.Expr, SympyBoolean]
 
+
 # Information to maintain user calling/returning specs
 @dataclasses.dataclass
 class CallSpec:
@@ -47,14 +47,14 @@ class CallSpec:
 
 # Extra information for joint graphs
 @dataclasses.dataclass
-class BackwardSignature:
+class ExportBackwardSignature:
     gradients_to_parameters: Dict[str, str]
     gradients_to_user_inputs: Dict[str, str]
     loss_output: str
 
 
 @dataclasses.dataclass
-class GraphSignature:
+class ExportGraphSignature:
     parameters: List[str]
     buffers: List[str]
 
@@ -65,7 +65,7 @@ class GraphSignature:
 
     buffers_to_mutate: Dict[str, str]
 
-    backward_signature: Optional[BackwardSignature]
+    backward_signature: Optional[ExportBackwardSignature]
 
 
 # We specialize this class so that the graph module pickles differently than how
@@ -208,58 +208,23 @@ class ExportedProgram:
         self,
         root: Union[torch.nn.Module, Dict[str, Any]],
         graph: torch.fx.Graph,
-        graph_signature: Optional[GraphSignature] = None,
+        graph_signature: Optional[ExportGraphSignature] = None,
         call_spec: Optional[CallSpec] = None,
         state_dict: Optional[Dict[str, Any]] = None,
-        example_inputs: Any = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         graph_module = make_export_graph_module(root, graph)
         self.graph_module: ExportGraphModule = graph_module
 
-        self.graph_signature: Optional[GraphSignature] = graph_signature
+        self.graph_signature: Optional[ExportGraphSignature] = graph_signature
         self.call_spec: Optional[CallSpec] = call_spec
         self.state_dict: Optional[Dict[str, Any]] = state_dict
-        self.symbol_to_range = {}
+        self.symbol_to_range: Dict[str, Tuple[int, int]] = {}
+        self._input_shape_constraints: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
+        self._input_name_to_example_inputs: Dict[str, Any] = {}
 
-        input_shape_constraints = (
-            root.meta.get("input_shape_constraints", [])
-            if isinstance(root, torch.fx.GraphModule)
-            else []
-        )
-        self.symbol_to_range = (
-            root.meta.get("inline_constraints", {})
-            if isinstance(root, torch.fx.GraphModule)
-            else {}
-        )
-
-        # group by input id
-        input_shape_constraints_by_tensor_id = defaultdict(list)
-        for constraint in input_shape_constraints:
-            input_shape_constraints_by_tensor_id[constraint["t_id"]].append(
-                (constraint["dim"], constraint["min"], constraint["max"])
-            )
-
-        input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
-        input_name_to_example_inputs: Dict[str, Any] = {}
-        if example_inputs is not None:
-            input_tracker = 0
-            for node in graph_module.graph.nodes:
-                if node.op == "placeholder":
-                    example_input = example_inputs[input_tracker]
-                    if id(example_input) in input_shape_constraints_by_tensor_id:
-                        input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
-                    input_name_to_example_inputs[node.name] = example_input
-                    input_tracker += 1
-
-        self._input_shape_constraints = input_shape_constraints_by_src_name
-        self._input_name_to_example_inputs = input_name_to_example_inputs
-
-    def __call__(self, *args: Any):
-        return self.forward(*args)
-
-    def forward(self, *args: Any) -> Any:
+    def __call__(self, *args: Any) -> Any:
         in_spec = self.call_spec.in_spec if self.call_spec is not None else None
         out_spec = self.call_spec.out_spec if self.call_spec is not None else None
 
