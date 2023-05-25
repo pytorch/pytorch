@@ -148,7 +148,7 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
 
 
 @DebugContext.wrap
-def count_bytes_inner(gm, example_inputs, static_input_idxs=range(0), **kwargs):
+def count_bytes_inner(gm, example_inputs, static_input_idxs=(), **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
 
     graph = GraphLowering(gm, shape_env=shape_env, static_input_idxs=static_input_idxs)
@@ -217,7 +217,7 @@ def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs=None,
-    static_input_idxs=range(0),
+    static_input_idxs=(),
     is_backward=False,
     graph_id=None,
     cpp_wrapper=False,
