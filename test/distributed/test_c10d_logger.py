@@ -5,13 +5,13 @@ import logging
 import os
 import re
 import sys
+import time
 from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
 
-from torch.distributed.c10d_error_logger import _get_or_create_logger
-from torch.distributed.distributed_c10d import exception_handler
+from torch.distributed.c10d_logger import _c10d_logger, _exception_logger, _time_logger
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -89,31 +89,30 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             torch.cuda.set_device(self.rank)
 
     def test_get_or_create_logger(self):
-        logger = _get_or_create_logger()
-        self.assertIsNotNone(logger)
-        self.assertEqual(1, len(logger.handlers))
-        self.assertIsInstance(logger.handlers[0], logging.NullHandler)
+        self.assertIsNotNone(_c10d_logger)
+        self.assertEqual(1, len(_c10d_logger.handlers))
+        self.assertIsInstance(_c10d_logger.handlers[0], logging.NullHandler)
 
-    @exception_handler
-    def failed_broadcast_raise_exception(self):
+    @_exception_logger
+    def _failed_broadcast_raise_exception(self):
         tensor = torch.arange(2, dtype=torch.int64)
         dist.broadcast(tensor, self.world_size + 1)
 
-    @exception_handler
-    def failed_broadcast_not_raise_exception(self):
+    @_exception_logger
+    def _failed_broadcast_not_raise_exception(self):
         try:
             tensor = torch.arange(2, dtype=torch.int64)
             dist.broadcast(tensor, self.world_size + 1)
-        except Exception as exception:
+        except Exception:
             pass
 
     @with_comms
-    def test_exception_handler_with_dist(self) -> None:
-        with self.assertRaises(Exception) as exception:
-            self.failed_broadcast_raise_exception()
+    def test_exception_logger(self) -> None:
+        with self.assertRaises(Exception):
+            self._failed_broadcast_raise_exception()
 
-        with self.assertLogs(dist._c10d_error_logger, level="DEBUG") as captured:
-            self.failed_broadcast_not_raise_exception()
+        with self.assertLogs(_c10d_logger, level="DEBUG") as captured:
+            self._failed_broadcast_not_raise_exception()
             error_msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
@@ -136,6 +135,41 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
             self.assertIn("local_rank", error_msg_dict.keys())
             self.assertIn(str(dist.get_rank()), error_msg_dict["local_rank"])
+
+    @_time_logger
+    def _dummy_sleep(self):
+        time.sleep(5)
+
+    @with_comms
+    def test_time_logger(self) -> None:
+        with self.assertLogs(_c10d_logger, level="DEBUG") as captured:
+            self._dummy_sleep()
+            msg_dict = json.loads(
+                re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
+            )
+            self.assertEqual(len(msg_dict), 7)
+
+            self.assertIn("func_name", msg_dict.keys())
+            self.assertEqual("_dummy_sleep", msg_dict["func_name"])
+
+            self.assertIn("args", msg_dict.keys())
+
+            self.assertIn("backend", msg_dict.keys())
+            self.assertEqual("nccl", msg_dict["backend"])
+
+            self.assertIn("world_size", msg_dict.keys())
+            self.assertEqual(str(self.world_size), msg_dict["world_size"])
+
+            self.assertIn("global_rank", msg_dict.keys())
+            self.assertIn(str(dist.get_rank()), msg_dict["global_rank"])
+
+            # In this test case, local_rank = global_rank, since we don't have multiple processes on one node.
+            self.assertIn("local_rank", msg_dict.keys())
+            self.assertIn(str(dist.get_rank()), msg_dict["local_rank"])
+
+            self.assertIn("time_spent", msg_dict.keys())
+            time_ns = re.findall(r'\d+', msg_dict["time_spent"])[0]
+            self.assertLess(5, float(time_ns))
 
 
 if __name__ == "__main__":
