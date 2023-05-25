@@ -1796,10 +1796,15 @@ class TestSDPA(NNTestCase):
 
             # Re-run the op with the same upward grad and check that the backward is
             # not deterministic
-            query.grad = None
-            out = F.scaled_dot_product_attention(query, key, value)
-            out.backward(upward_grad)
-            self.assertNotEqual(intial_query_grad, query.grad, atol=0.0, rtol=0.0)
+            diff_anwser_once = False
+            for _ in range(100):
+                query.grad = None
+                out = F.scaled_dot_product_attention(query, key, value)
+                out.backward(upward_grad)
+                if not torch.equal(intial_query_grad, query.grad):
+                    diff_anwser_once = True
+                    break
+            self.assertTrue(diff_anwser_once)
 
         with use_deterministic_algorithims(True, warn_only=False):
             query.grad = None
@@ -1810,10 +1815,15 @@ class TestSDPA(NNTestCase):
 
             # Re-run the op with the same upward grad and check that the backward is
             # deterministic now that we have enforced it
-            query.grad = None
-            out = F.scaled_dot_product_attention(query, key, value)
-            out.backward(upward_grad)
-            self.assertEqual(intial_query_grad, query.grad, atol=0.0, rtol=0.0)
+            diff_anwser_once = False
+            for _ in range(100):
+                query.grad = None
+                out = F.scaled_dot_product_attention(query, key, value)
+                out.backward(upward_grad)
+                if not torch.equal(intial_query_grad, query.grad):
+                    diff_anwser_once = True
+                    break
+            self.assertFalse(diff_anwser_once)
 
     # verified passing successfully on H100
     @onlyCUDA
