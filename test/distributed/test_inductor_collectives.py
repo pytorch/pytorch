@@ -380,10 +380,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         def func(inp, out, *, pg):
             torch.distributed.all_gather_into_tensor(
-            out,
-            inp,
-            pg,
-        )
+                out,
+                inp,
+                pg,
+            )
         local_size = [4, 4]
         global_size = local_size
 
@@ -399,10 +399,33 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
         assert counter.frame_count == 1
 
-        # should test more precisely, but the 3 is supposed to be (all_reduce, wait)
+        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    def test_dynamo_rewrite_dist_reduce_scatter(self):
+
+        def func(inp, out, *, pg):
+            torch.distributed.reduce_scatter_tensor(
+                out,
+                inp,
+                group=pg,
+            )
+        local_size = [4, 4]
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+
+        # should test more precisely, but the 3 is supposed to be (reduce_scatter, wait, copy_)
+        assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
 

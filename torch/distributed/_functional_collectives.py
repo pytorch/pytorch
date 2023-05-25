@@ -521,11 +521,27 @@ else:
 # We allow torchdynamo to convert calls from legacy inplace APIs into traceable APIs
 # via a pseudo-inplace version (like a decomp) that uses the functional collective
 # and a copy.
+#
+# These schemas intentionally match torch.distributed.distributed_c10d.* ops that we are trying to remap from
 def all_gather_tensor_inplace(
-    self: torch.Tensor,
-    out: torch.Tensor,
-    group: RANK_TYPES,
+    output: torch.Tensor,
+    input: torch.Tensor,
+    group,  # TODO add a type,
+    async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0
 ):
-    return out.copy_(all_gather_tensor(self, gather_dim, group, tag))
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+
+def reduce_scatter_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    op: str = "sum",  # TODO type is actually c10d ReduceOp. is this ok?
+    group=None,  # TODO add a type
+    async_op: bool = False,
+    scatter_dim: int = 0,
+    tag: str = "",
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
