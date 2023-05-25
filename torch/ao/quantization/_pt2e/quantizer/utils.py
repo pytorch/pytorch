@@ -2,7 +2,9 @@ import torch
 from torch.ao.quantization._pt2e.quantizer.quantizer import (
     QuantizationConfig,
     QuantizationSpec,
+    QuantizationAnnotation,
 )
+from torch.fx import Node
 
 def get_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -48,3 +50,16 @@ def get_bias_qspec(quantization_config: QuantizationConfig):
         quantization_spec.dtype == torch.float
     ), "Only float dtype for bias is supported for bias right now"
     return quantization_spec
+
+def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
+    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    if quantization_annotation.input_qspec_map is None:
+        quantization_annotation.input_qspec_map = {}
+    quantization_annotation.input_qspec_map[input_node] = qspec
+    node.meta["quantization_annotation"] = quantization_annotation
+
+
+def _annotate_output_qspec(node: Node, qspec):
+    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    quantization_annotation.output_qspec = qspec
+    node.meta["quantization_annotation"] = quantization_annotation
