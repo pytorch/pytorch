@@ -446,6 +446,8 @@ class KernelArgs:
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
