@@ -209,6 +209,13 @@ class _TorchDynamoContext:
         self.dynamic = dynamic
         patch_fn()
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def __enter__(self):
         if config.raise_on_ctx_manager_usage:
             raise RuntimeError(
