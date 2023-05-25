@@ -128,8 +128,6 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #endif
-  } else if (device_type == at::kMeta) {
-    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
