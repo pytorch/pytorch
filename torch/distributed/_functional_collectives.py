@@ -545,3 +545,19 @@ def reduce_scatter_tensor_inplace(
 ):
     assert not async_op, "Can't remap async version of inplace op to functional collective"
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
+from torch.distributed.distributed_c10d import (
+    all_gather_into_tensor as legacy_allgather,
+    reduce_scatter_tensor as legacy_reducescatter,
+)
+
+"""
+This dict should contain sets of functions that dynamo is allowed to remap.
+
+Functions in this set should accept the same args/kwargs 1:1 as their mapping.
+"""
+
+traceable_collective_remaps = {
+    legacy_allgather: all_gather_tensor_inplace,
+    legacy_reducescatter: reduce_scatter_tensor_inplace,
+}
