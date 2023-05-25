@@ -79,8 +79,6 @@ install_ubuntu() {
         fi
     fi
 
-    install_magma
-
     # Cleanup
     apt-get autoclean && apt-get clean
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -166,8 +164,6 @@ install_centos() {
         yum install -y ${MIOPENKERNELS}
       fi
   fi
-
-  install_magma
 
   # Cleanup
   yum clean all
