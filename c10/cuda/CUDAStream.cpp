@@ -11,6 +11,7 @@
 #include <mutex>
 #include <vector>
 
+#include <iostream>
 namespace c10 {
 namespace cuda {
 
@@ -22,9 +23,11 @@ static DeviceIndex num_gpus = -1;
 static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
-static constexpr int kStreamTypeBits = 4;
+static constexpr int kStreamTypeBits = 3;
 
-static int max_stream_priorities;
+// Note: lower numbers are higher priorities, zero is default priority
+static constexpr int kHighPriority = -1;
+static constexpr int kLowPriority = 0;
 
 // Non-default streams
 // Note: the number of CUDA devices is determined at run time,
@@ -40,29 +43,30 @@ static int max_stream_priorities;
 // crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
 // the destruction.
 static c10::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
-static std::atomic<uint32_t>
-    priority_counters[c10::cuda::max_compile_time_stream_priorities]
-                     [C10_COMPILE_TIME_MAX_GPUS];
-
-static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
-                           [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
+static std::atomic<uint32_t> high_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
+static cudaStream_t low_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
+                                        [kStreamsPerPool];
+static cudaStream_t high_priority_streams[C10_COMPILE_TIME_MAX_GPUS]
+                                         [kStreamsPerPool];
 
 // Note [StreamId assignment]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 54 bits --  -- 5 bits -----  -- 4 bits --     --1 bit --
-// zeros          stream id index  StreamIdType     Ext/native stream
-//                ignored for ext   ignored for ext
-// for external stream, StreamID is a cudaStream_t pointer
-// this means that last bit will always be 0
-// so when constructing StreamId for a native stream we set last bit to 1
-// to distinguish between native and external streams
+// -- 57 bits --  -- 5 bits -----  -- 3 bits --
+// zeros          stream id index  StreamIdType
 //
+// Where StreamIdType:
+//  000 = default stream or externally allocated if id[63:3] != 0
+//  001 = low priority stream
+//  010 = high priority stream
+//
+// This is not really for efficiency; it's just easier to write the code
+// to extract the index if we do this with bitmasks :)
 //
 // We are obligated to treat the stream ID 0 as the default stream, per the
-// invariant specified in c10::Stream, so this is one exception to
-// "last bit = 1 for native streams". However, all other numbers are entirely
+// invariant specified in c10::Stream.  However, all other numbers are entirely
 // an internal implementation detail, we reserve the right to renumber streams
 // however we like.
 //
@@ -75,41 +79,32 @@ static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
 //
 // Also, external managed stream pointers (cudaStream_t) can be directly stored
 // in the Id field so in this case, we need to check the stream alignment.
-
-class StreamIdType {
-  // StreamIdType encodes whether this stream is DEFAULT, EXTernal or
-  // for all other native streams, the stream priority (higher value is higher
-  // priority)
- private:
-  uint8_t stream_type;
-
- public:
-  static const uint8_t DEFAULT = 0x0;
-  static const uint8_t EXT = 0xF;
-
- public:
-  StreamIdType(const uint8_t _stream_type) : stream_type(_stream_type) {}
-
-  bool isExt() const {
-    return EXT == stream_type;
-  }
-
-  bool isDefault() const {
-    return DEFAULT == stream_type;
-  }
-
-  uint8_t getStreamType() const {
-    return stream_type;
-  }
+// The IdType uses an additional bit to match with the 64-bit address alignment
+// making easy to identify an external stream when its value (X & 7) > 0
+enum class StreamIdType : uint8_t {
+  DEFAULT = 0x0,
+  LOW = 0x1,
+  HIGH = 0x2,
+  EXT = 0x3,
 };
 
 std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
-  if (s.isDefault()) {
-    stream << "DEFAULT";
-  } else if (s.isExt()) {
-    stream << "EXT";
-  } else {
-    stream << "PRIORITY " << int(s.getStreamType());
+  switch (s) {
+    case StreamIdType::DEFAULT:
+      stream << "DEFAULT";
+      break;
+    case StreamIdType::LOW:
+      stream << "LOW";
+      break;
+    case StreamIdType::HIGH:
+      stream << "HIGH";
+      break;
+    case StreamIdType::EXT:
+      stream << "EXT";
+      break;
+    default:
+      stream << static_cast<uint8_t>(s);
+      break;
   }
   return stream;
 }
@@ -119,30 +114,24 @@ std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
 // see Note [Hazard when concatenating signed integers]
 
 static inline StreamIdType streamIdType(StreamId s) {
-  // Externally allocated streams have their id being the cudaStream_ptr
-  // so the last bit will be 0
-  if ((!(s & 1)) && s) {
-    return StreamIdType(StreamIdType::EXT);
-  }
-  // last bit is external/internal stream, the mask should start from second
-  // rightmost bit
   int mask_for_type = (1 << kStreamTypeBits) - 1;
-  auto val = (s >> 1) & mask_for_type;
-  TORCH_INTERNAL_ASSERT(val || !(s & 1), "invalid StreamId", s);
-  return StreamIdType(val);
+  if (s && ((s & mask_for_type) == 0)) {
+    // Externally allocated streams have their id being the cudaStream_ptr
+    // so the bits corresponding to the type will be 0 and will collide with
+    // the default stream.
+    return StreamIdType::EXT;
+  }
+  return static_cast<StreamIdType>(s & mask_for_type);
 }
 
 static inline size_t streamIdIndex(StreamId s) {
   return static_cast<size_t>(
-      (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
+      (s >> kStreamTypeBits) & ((1 << kStreamsPerPoolBits) - 1));
 }
 
 StreamId makeStreamId(StreamIdType st, size_t si) {
-  if (st.isDefault()) {
-    return static_cast<StreamId>(0);
-  }
-  return (static_cast<StreamId>(si) << (kStreamTypeBits + 1)) |
-      static_cast<StreamId>(st.getStreamType() << 1) | 1;
+  return (static_cast<StreamId>(si) << kStreamTypeBits) |
+      static_cast<StreamId>(st);
 }
 
 // Thread-local current streams
@@ -160,14 +149,6 @@ static void initGlobalStreamState() {
       "max number of gpus expected (",
       C10_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile.");
-  int leastPriority = -1, greatestPriority = -1;
-  C10_CUDA_CHECK(
-      cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
-  // greatestPriority is negative
-  auto range = leastPriority - greatestPriority + 1;
-  max_stream_priorities = range >= c10::cuda::max_compile_time_stream_priorities
-      ? c10::cuda::max_compile_time_stream_priorities
-      : range;
 }
 
 // Creates the low and high priority stream pools for the specified device
@@ -176,20 +157,27 @@ static void initDeviceStreamState(DeviceIndex device_index) {
   // Switches to the requested device so streams are properly associated
   // with it.
   CUDAGuard device_guard{device_index};
-  for (const auto i : c10::irange(kStreamsPerPool)) {
-    for (const auto p : c10::irange(max_stream_priorities)) {
-      auto& stream = streams[p][device_index][i];
-      auto pri = -p; // lower number is higher priority
 
-      C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
-      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
-        (*interp)->trace_gpu_stream_creation(
-            reinterpret_cast<uintptr_t>(stream));
-        priority_counters[p][device_index] = 0;
-      }
+  for (const auto i : c10::irange(kStreamsPerPool)) {
+    auto& lowpri_stream = low_priority_streams[device_index][i];
+    auto& hipri_stream = high_priority_streams[device_index][i];
+
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
+        &lowpri_stream, kDefaultFlags, kLowPriority));
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
+        &hipri_stream, kDefaultFlags, kHighPriority));
+
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(lowpri_stream));
+      (*interp)->trace_gpu_stream_creation(
+          reinterpret_cast<uintptr_t>(hipri_stream));
     }
   }
+
+  low_priority_counters[device_index] = 0;
+  high_priority_counters[device_index] = 0;
 }
 
 // Init front-end to ensure initialization only occurs once
@@ -237,60 +225,59 @@ cudaStream_t CUDAStream::stream() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
-  if (st.isDefault()) {
-    TORCH_INTERNAL_ASSERT(
-        si == 0,
-        "Unrecognized stream ",
-        stream_,
-        " (I think this should be the default stream, but I got a non-zero index ",
-        si,
-        ").",
-        " Did you manufacture the StreamId yourself?  Don't do that; use the",
-        " official API like c10::cuda::getStreamFromPool() to get a new stream.");
-    return nullptr;
-  } else if (st.isExt()) {
-    return reinterpret_cast<cudaStream_t>(stream_id);
-  } else {
-    auto streamType = st.getStreamType();
-    TORCH_INTERNAL_ASSERT(
-        streamType >= 1 && streamType <= max_stream_priorities,
-        "Unrecognized stream ",
-        stream_,
-        " (I didn't recognize the stream type, ",
-        streamType,
-        ")");
-    return streams[st.getStreamType() - 1][device_index][si];
+  switch (st) {
+    case StreamIdType::DEFAULT:
+      TORCH_INTERNAL_ASSERT(
+          si == 0,
+          "Unrecognized stream ",
+          stream_,
+          " (I think this should be the default stream, but I got a non-zero index ",
+          si,
+          ").",
+          " Did you manufacture the StreamId yourself?  Don't do that; use the",
+          " official API like c10::cuda::getStreamFromPool() to get a new stream.");
+      return nullptr;
+    case StreamIdType::LOW:
+      return low_priority_streams[device_index][si];
+    case StreamIdType::HIGH:
+      return high_priority_streams[device_index][si];
+    case StreamIdType::EXT:
+      return reinterpret_cast<cudaStream_t>(stream_id);
+    default:
+      TORCH_INTERNAL_ASSERT(
+          0,
+          "Unrecognized stream ",
+          stream_,
+          " (I didn't recognize the stream type, ",
+          st,
+          ")");
   }
 }
 
 // Returns a stream from the requested pool
 // Note: when called the first time on a device, this will create the
 // stream pools for that device.
-CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
+CUDAStream getStreamFromPool(
+    const bool isHighPriority,
+    DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
     c10::cuda::SetTargetDevice();
   }
-  TORCH_CHECK(
-      priority <= 0,
-      "Expected cuda stream priority to be less than or equal to 0, got ",
-      priority);
   check_gpu(device_index);
+
   // Initializes the stream pools (once)
   c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
-  auto pri_idx = -priority;
-  pri_idx =
-      std::min(pri_idx, max_stream_priorities - 1); // pri_idx is zero-based
-  const auto idx = get_idx(priority_counters[pri_idx][device_index]);
-  StreamIdType id_type = StreamIdType(pri_idx + 1);
-  return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
-}
 
-CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
-  int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
-  return getStreamFromPool(priority, device);
+  if (isHighPriority) {
+    const auto idx = get_idx(high_priority_counters[device_index]);
+    return CUDAStreamForId(device_index, makeStreamId(StreamIdType::HIGH, idx));
+  }
+
+  const auto idx = get_idx(low_priority_counters[device_index]);
+  return CUDAStreamForId(device_index, makeStreamId(StreamIdType::LOW, idx));
 }
 
 CUDAStream getStreamFromExternal(

@@ -57,13 +57,15 @@ static PyObject* THCPStream_pynew(
     TORCH_CHECK(
         priority == 0, "Priority was explicitly set for a external stream")
   }
+
   at::cuda::CUDAStream stream = (stream_id || device_index || device_type)
       ? at::cuda::CUDAStream::unpack3(
             stream_id, device_index, static_cast<c10::DeviceType>(device_type))
       : stream_ptr
       ? at::cuda::getStreamFromExternal(
             reinterpret_cast<cudaStream_t>(stream_ptr), current_device)
-      : at::cuda::getStreamFromPool(priority);
+      : at::cuda::getStreamFromPool(
+            /* isHighPriority */ priority < 0 ? true : false);
 
   THCPStream* self = (THCPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
