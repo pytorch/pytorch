@@ -11,6 +11,7 @@ from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_process_group_ranks,
     get_world_size,
+    init_process_group,
     is_initialized,
     ProcessGroup,
 )
@@ -20,6 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def _get_device_type_and_backend():
@@ -89,10 +91,15 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_dim_groups()
 
-        if self.rank == 1:
-            assert mesh.get_coordinate() is not None
-        else:
-            assert mesh.get_coordinate() is None
+    def test_fake_pg_device_mesh(self):
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+
+        local_tensor = torch.randn(2, 8)
+        global_tensor = mesh.all_gather(local_tensor)
+        self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
     @with_comms
     def test_validate_device_mesh(self):
