@@ -1,4 +1,3 @@
-import copy
 from typing import Optional, Tuple
 
 import torch
@@ -6,6 +5,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from .serde.schema import Device, Layout, ScalarType, SymInt, TensorMeta  # type: ignore[attr-defined]
+from .graph_module import ExportedProgram
 
 
 __all__ = ["convert_fake_tensor_to_tensor_meta", "convert_tensor_meta_to_fake_tensor"]
@@ -71,15 +71,14 @@ def _extract_tensor_meta(result: torch.Tensor) -> TensorMeta:
 
 
 def convert_fake_tensor_to_tensor_meta(
-    gm: torch.fx.GraphModule
-) -> Tuple[torch.fx.GraphModule, Optional[ShapeEnv]]:
+    ep: ExportedProgram
+) -> Tuple[ExportedProgram, Optional[ShapeEnv]]:
     """
     Replace the faketensor metadata with the tensor metadata dataclass since we
     cannot serialize faketensors
     """
-    gm = copy.deepcopy(gm)
     shape_env = None
-    for node in gm.graph.nodes:
+    for node in ep.graph.nodes:
         def get_shape_env(val) -> Optional[ShapeEnv]:
             val_flat, _ = pytree.tree_flatten(val)
             curr_shape_env = None
@@ -107,15 +106,15 @@ def convert_fake_tensor_to_tensor_meta(
             )
             del node.meta["val"]
 
-    return gm, shape_env
+    return ep, shape_env
 
 
-def convert_tensor_meta_to_fake_tensor(gm: torch.fx.GraphModule, shape_env: ShapeEnv = None) -> torch.fx.GraphModule:
+def convert_tensor_meta_to_fake_tensor(ep: ExportedProgram, shape_env: ShapeEnv = None) -> ExportedProgram:
     """
     Replace (inplace) the tensor metadata with faketensor
     """
     fake_tensor_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=shape_env)
-    for node in gm.graph.nodes:
+    for node in ep.graph.nodes:
         if (val := node.meta.get("tensor_meta", None)) is not None:
 
             def _extract_faketensor(tensor_meta: TensorMeta):
@@ -134,4 +133,4 @@ def convert_tensor_meta_to_fake_tensor(gm: torch.fx.GraphModule, shape_env: Shap
             node.meta["val"] = pytree.tree_map_only(
                 TensorMeta, _extract_faketensor, val
             )
-    return gm
+    return ep
