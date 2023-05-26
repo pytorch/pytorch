@@ -1,3 +1,4 @@
+import collections
 import functools
 import operator
 from typing import Dict, List, Optional
@@ -208,6 +209,119 @@ class RangeVariable(BaseListVariable):
         return self.items[fields.index(name)].add_options(self)
 
 
+def call_common_append(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    assert not kwargs
+    (arg,) = args
+    new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
+    if arg.mutable_local is not None:
+        new_rec_contains.add(arg.mutable_local)
+    tx.replace_all(
+        self,
+        variable_class(
+            self.items + [arg],
+            recursively_contains=new_rec_contains,
+            regen_guards=False,
+            **options,
+        ),
+    )
+    return ConstantVariable(None)
+
+
+def call_common_extend(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    assert not kwargs
+    (arg,) = args
+    return tx.replace_all(
+        self,
+        variable_class(
+            list(self.items) + list(arg.unpack_var_sequence(tx)),
+            regen_guards=False,
+            **options,
+        ),
+    )
+
+
+def call_common_insert(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    assert not kwargs
+    idx, value = args
+    items = list(self.items)
+    items.insert(idx.as_python_constant(), value)
+    return tx.replace_all(
+        self,
+        variable_class(items, regen_guards=False, **options),
+    )
+
+
+def call_common_pop(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    assert not kwargs
+    items = list(self.items)
+    result = items.pop(*[a.as_python_constant() for a in args])
+    tx.replace_all(
+        self,
+        variable_class(items, regen_guards=False, **options),
+    )
+    return result
+
+
+def call_common_clear(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    assert not kwargs and not args
+    return tx.replace_all(
+        self,
+        variable_class([], regen_guards=False, **options),
+    )
+
+
+def call_common_copy(
+    variable_class,
+    self,
+    tx,
+    args: "List[VariableTracker]",
+    kwargs: "Dict[str, VariableTracker]",
+    options,
+) -> "VariableTracker":
+    # List copy() doesn't have args and kwargs
+    assert not kwargs
+    assert not args
+    items = list(self.items)
+    return variable_class(
+        items, regen_guards=False, mutable_local=MutableLocal(), **options
+    )
+
+
 class ListVariable(BaseListVariable):
     def python_type(self):
         return list
@@ -225,61 +339,20 @@ class ListVariable(BaseListVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "append" and self.mutable_local:
-            assert not kwargs
-            (arg,) = args
-            new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
-            if arg.mutable_local is not None:
-                new_rec_contains.add(arg.mutable_local)
-            tx.replace_all(
-                self,
-                ListVariable(
-                    self.items + [arg],
-                    recursively_contains=new_rec_contains,
-                    regen_guards=False,
-                    **options,
-                ),
-            )
-            return ConstantVariable(None)
+            return call_common_append(ListVariable, self, tx, args, kwargs, options)
         elif (
             name == "extend"
             and self.mutable_local
             and args
             and args[0].has_unpack_var_sequence(tx)
         ):
-            assert not kwargs
-            (arg,) = args
-            return tx.replace_all(
-                self,
-                ListVariable(
-                    list(self.items) + list(arg.unpack_var_sequence(tx)),
-                    regen_guards=False,
-                    **options,
-                ),
-            )
+            return call_common_extend(ListVariable, self, tx, args, kwargs, options)
         elif name == "insert" and self.mutable_local:
-            assert not kwargs
-            idx, value = args
-            items = list(self.items)
-            items.insert(idx.as_python_constant(), value)
-            return tx.replace_all(
-                self,
-                ListVariable(items, regen_guards=False, **options),
-            )
+            return call_common_insert(ListVariable, self, tx, args, kwargs, options)
         elif name == "pop" and self.mutable_local:
-            assert not kwargs
-            items = list(self.items)
-            result = items.pop(*[a.as_python_constant() for a in args])
-            tx.replace_all(
-                self,
-                ListVariable(items, regen_guards=False, **options),
-            )
-            return result
+            return call_common_pop(ListVariable, self, tx, args, kwargs, options)
         elif name == "clear" and self.mutable_local:
-            assert not kwargs and not args
-            return tx.replace_all(
-                self,
-                ListVariable([], regen_guards=False, **options),
-            )
+            return call_common_clear(ListVariable, self, tx, args, kwargs, options)
         elif (
             name == "__setitem__"
             and self.mutable_local
@@ -296,13 +369,84 @@ class ListVariable(BaseListVariable):
             result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
         elif name == "copy":
-            # List copy() doesn't have args and kwargs
+            return call_common_clear(ListVariable, self, tx, args, kwargs, options)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class DequeVariable(BaseListVariable):
+    def python_type(self):
+        return collections.deque
+
+    def reconstruct(self, codegen):
+        assert "deque" not in codegen.tx.f_globals
+        codegen.append_output(
+            codegen.create_load_python_module(collections.deque, True)
+        )
+        codegen.foreach(self.items)
+        return create_call_function(len(self.items), False)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "append" and self.mutable_local:
+            return call_common_append(DequeVariable, self, tx, args, kwargs, options)
+        elif (
+            name == "extend"
+            and self.mutable_local
+            and args
+            and args[0].has_unpack_var_sequence(tx)
+        ):
+            return call_common_extend(DequeVariable, self, tx, args, kwargs, options)
+        elif name == "insert" and self.mutable_local:
+            return call_common_insert(DequeVariable, self, tx, args, kwargs, options)
+        elif name == "pop" and self.mutable_local:
+            return call_common_pop(DequeVariable, self, tx, args, kwargs, options)
+        elif name == "clear" and self.mutable_local:
+            return call_common_clear(DequeVariable, self, tx, args, kwargs, options)
+        elif (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
             assert not kwargs
-            assert not args
-            items = list(self.items)
-            return ListVariable(
-                items, regen_guards=False, mutable_local=MutableLocal(), **options
+            key, value = args
+            assert key.is_python_constant() and isinstance(
+                key.as_python_constant(), int
             )
+            items = list(self.items)
+            items[key.as_python_constant()] = value
+            result = DequeVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        elif name == "copy":
+            return call_common_copy(DequeVariable, self, tx, args, kwargs, options)
+        elif name == "extendleft" and self.mutable_local:
+            assert not kwargs
+            (arg,) = args
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    list(arg.unpack_var_sequence(tx)) + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
+        elif name == "popleft" and self.mutable_local:
+            assert not args
+            assert not kwargs
+            items = collections.deque(self.items)
+            result = items.popleft()
+            tx.replace_all(
+                self,
+                DequeVariable(list(items), regen_guards=False, **options),
+            )
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 

@@ -533,6 +533,17 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         return []
 
 
+def _traceable_collective_remaps():
+    # We can't rely on importing from distributed, since its not always built
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import (
+            traceable_collective_remaps,
+        )
+
+        return traceable_collective_remaps
+    return {}
+
+
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
@@ -553,19 +564,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
     @staticmethod
     def can_rewrite(variable):
-        from torch.distributed._functional_collectives import (
-            traceable_collective_remaps,
+        return (
+            inspect.isfunction(variable) and variable in _traceable_collective_remaps()
         )
-
-        return inspect.isfunction(variable) and variable in traceable_collective_remaps
 
     @staticmethod
     def rewrite(fn):
-        from torch.distributed._functional_collectives import (
-            traceable_collective_remaps,
-        )
-
-        return traceable_collective_remaps[fn]
+        return _traceable_collective_remaps()[fn]
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
