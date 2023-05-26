@@ -2149,7 +2149,7 @@ class TritonScheduling:
             # do perf hint here if stride-1 dim is not being reduced
             if perf_hint_log.level <= logging.WARNING:
                 for node in EnableReduction.filter(node_schedule):
-                    if cls.candidate_tilings(node) is not empty:
+                    if len(cls.candidate_tilings(node)) > 0:
                         perf_hint_log.warning("reduction over non-contiguous dims")
                         break
             return (numel, reduction_numel)
