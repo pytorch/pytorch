@@ -1950,7 +1950,6 @@ def emit_body(
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
 
-            # if not is_inplace_foreach:
             if not is_foreach:
                 fw_grad_opt_definition = f"{opt_res_grad_type} {'_'.join(res)}_new_fw_grad_opt = c10::nullopt;"
                 # View ops create fw_grad that already is a view of the base's fw_grad so just use that
