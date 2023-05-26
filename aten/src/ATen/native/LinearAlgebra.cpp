@@ -489,7 +489,7 @@ Tensor linalg_pinv(
   Tensor atol, rtol;
   std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.pinv");
 
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
     Tensor U, S, V;
