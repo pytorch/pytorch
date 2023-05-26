@@ -14,8 +14,6 @@ Existing APIs
 Section 1 - Summary Table
 =========================
 
-.. _section-1-summary-table:
-
 .. csv-table:: TorchDynamo APIs to control fine-grained tracing
    :header: "API", "Description", "When to use?"
    :widths: auto
@@ -29,8 +27,6 @@ Section 1 - Summary Table
 
 Section 2 - torch._dynamo.disable
 =================================
-
-.. _section-2-torch-_dynamo-disable:
 
 **tl;dr** - Disables PT2 stack on the decorated function frame and all the function frames recursively invoked from the decorated function frame.
 
@@ -50,8 +46,6 @@ You can also use the non-decorator syntax if you don’t want to change the sour
 Section 3 - torch._dynamo.disallow_in_graph
 ===========================================
 
-.. _section-3-torch-_dynamo-disallow_in_graph:
-
 **tl;dr** - Disallows an operator (not the function) to be present in the TorchDynamo extracted graph. Note that this is suitable for operators (and not general functions as in the case of `_dynamo.disable`).
 
 **Usecase** - Suppose you compile your model with PT2. TorchDynamo is able to extract a graph, but then you see the downstream compiler failing (like the meta kernel is missing, or some autograd dispatch key is set incorrectly etc) for a particular operator. Then you can mark that operator as `disallow_in_graph`, and TorchDynamo will cause a graph break and run that operator on eager.
@@ -63,8 +57,6 @@ The catch is that you will have to find the corresponding Dynamo level operator 
 
 Section 4 - torch._dynamo.disallow_in_graph
 ===========================================
-
-.. _section-4-torch-_dynamo-disallow_in_graph:
 
 **Usecase** - This is useful when the relevant function frame has some known hard-to-support TorchDynamo feature (like hooks and autograd.Function) and you are confident that downstream PT2 components like AOTAutograd can safely trace through the decorated function. When a function is decorated with `allow_in_graph`, TorchDynamo treats it as a black-box and puts it as-is in the generated graph.
 
@@ -84,8 +76,6 @@ For example, `_dynamo.disallow_in_graph` will not work for aten operators becaus
 
 Section 6 - FAQ
 ===============
-
-.. _section-6-faq:
 
 **FAQ - How do I graph break on a function?**
 
