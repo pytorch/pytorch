@@ -5,7 +5,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from .serde.schema import Device, Layout, ScalarType, SymInt, TensorMeta  # type: ignore[attr-defined]
-from .graph_module import ExportedProgram
+from .exported_program import ExportedProgram
 
 
 __all__ = ["convert_fake_tensor_to_tensor_meta", "convert_tensor_meta_to_fake_tensor"]
