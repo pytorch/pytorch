@@ -4057,7 +4057,7 @@ minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
 register_pointwise(aten.neg)
-register_pointwise_numeric(aten.reciprocal)
+reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
@@ -4109,6 +4109,11 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add)
+register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_sqrt, sqrt)
+register_foreach_pointwise(aten._foreach_maximum.List, maximum)
+register_foreach_pointwise(aten._foreach_reciprocal.List, reciprocal)
 
 
 def register_inplace(aten_op, outplace_op):
