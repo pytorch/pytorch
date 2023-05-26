@@ -134,5 +134,14 @@ class TestRearrange(TestCase):
         expected = x.squeeze()
         torch.testing.assert_close(actual, expected)
 
+    def test_0_dim_tensor(self) -> None:
+        x = expected = torch.tensor(1)
+        actual = rearrange(x, '->')
+        torch.testing.assert_close(actual, expected)
+
+        actual = rearrange(x, '... -> ...')
+        torch.testing.assert_close(actual, expected)
+
+
 if __name__ == '__main__':
     run_tests()

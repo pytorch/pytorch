@@ -45,6 +45,10 @@ def _create_rearrange_callable(
     n_anon_dims = sum(not dim for dim in left.composition)
     n_dims = n_named_dims + n_ellipsis_dims + n_anon_dims
 
+    if n_dims == 0:
+        # an identity rearrangement on a 0-dimension tensor
+        return lambda tensor: tensor
+
     first_class_dims: Tuple[Dim, ...] = (dims(n_dims),) if n_dims == 1 else dims(n_dims)
     identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
     anon_axes: List[AnonymousAxis] = []
