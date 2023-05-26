@@ -535,3 +535,30 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
 
     def as_python_constant(self):
         return self.value
+    
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if (
+            name == "rank"
+            and len(args) == 0
+            and not kwargs
+        ):
+            # options = VariableTracker.propagate(self, args, kwargs.values())
+            # options["mutable_local"] = MutableLocal()
+            # subs_as_vars: List[VariableTracker] = list()
+            # for sub in self.value.__subclasses__():
+            #     source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
+            #     subs_as_vars.append(
+            #         variables.UserDefinedClassVariable(sub, source=source)
+            #     )
+
+            # return variables.ListVariable(subs_as_vars, **options)
+            breakpoint()
+            print(name)
+
+        return super().call_method(tx, name, args, kwargs)
