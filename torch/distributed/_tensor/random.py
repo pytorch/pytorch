@@ -11,6 +11,16 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
+strict_mode_is_on = False
+
+class DTensorEquivalentRandomOps():
+    def __enter__(self):
+        strict_mode_is_on = True
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        strict_mode_is_on = False
+
+
 def set_rng_state(device_mesh: DeviceMesh, seed: int, offset: int) -> None:
     """Sets the random number generator state of the specified device mesh.
 

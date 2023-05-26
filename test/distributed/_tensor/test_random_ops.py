@@ -10,6 +10,7 @@ from torch.distributed._tensor._utils import compute_local_offset
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
+    DTensorEquivalentRandomOps,
     get_rng_state,
     is_rng_supported_mesh,
     manual_seed,
@@ -272,6 +273,36 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     self.assertEqual(local_tensor_gathered[slice_idx], local_tensor)
                 else:
                     self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_strict_mode(self):
+        local_size = [4, 4]
+        d_size = [4, 1]
+        placements = [Shard(1)]
+
+        with (
+            DeviceMesh(self.device_type, torch.arange(self.world_size)) as device_mesh,
+            DTensorEquivalentRandomOps(),
+        ):
+            device = device_mesh.device_type
+
+            # local tensor
+            torch.cuda.manual_seed(1234)
+            local_tensor = torch.empty(*local_size, device=device)
+            local_tensor.uniform_()
+
+            # dtensor
+            manual_seed(1234, device_mesh)
+            dtensor = DTensor.from_local(
+                torch.empty(*d_size, device=device),
+                device_mesh,
+                placements,
+            )
+            dtensor.uniform_()
+            dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+
+            self.assertEqual(local_tensor, dtensor.to_local())
 
 
 if __name__ == "__main__":
