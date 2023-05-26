@@ -104,6 +104,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_itertools_chain(a, b):
+        v = a
+        for x in itertools.chain([a, b], [1, 2]):
+            v = v + x
+        return v
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
@@ -597,11 +604,43 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
-    def test_default_dict(self):
-        dd = collections.defaultdict(dict)
+    def _test_default_dict_helper(self, factory):
+        dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
+            dd["a"] = x + 1
+            dd[param] = 123
+            dd["c"] = x * 2
+            return dd["b"], dd
+
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
+
+    def test_default_dict(self):
+        self._test_default_dict_helper(dict)
+
+    def test_default_dict_lambda(self):
+        self._test_default_dict_helper(lambda: dict())
+
+    def test_default_dict_closure(self):
+        def factory():
+            return dict()
+
+        self._test_default_dict_helper(factory)
+
+    def test_default_dict_constr(self):
+        param = torch.nn.Parameter(torch.ones([2, 2]))
+
+        def fn(x):
+            dd = collections.defaultdict(lambda: dict())
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -774,6 +813,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp.clear()
         tmp.append(a + b)
         return tmp
+
+    @make_test
+    def test_not_list(a):
+        return not [a + 1]
 
     @make_test
     def test_islice_chain(a, b):
