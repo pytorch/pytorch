@@ -25,7 +25,6 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
     get_kernel_metadata,
-    instance_descriptor,
     next_power_of_2,
     sympy_product,
     sympy_subs,
@@ -44,57 +43,11 @@ from .common import (
     OpOverrides,
     PythonPrinter,
     SizeArg,
-    TensorArg,
 )
+from .triton_utils import config_of, signature_of
 
 log = logging.getLogger(__name__)
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
-
-
-def signature_of(arg):
-    from triton.runtime.jit import JITFunction
-
-    if isinstance(arg, TensorArg):
-        tye = JITFunction._type_of(arg.dtype)
-        if V.graph.is_unspec_arg(arg.buffer):
-            # had unwrapped 0d tensor as scalar
-            new_tye = tye.lstrip("*")
-            if new_tye in ["fp16", "bf16"]:
-                return "fp32"
-            else:
-                return new_tye
-        else:
-            return tye
-    if isinstance(arg, SizeArg):
-        return JITFunction._key_of(V.graph.sizevars.size_hint(arg.expr))
-    raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
-
-
-def config_of(args):
-    from ..compile_fx import ALIGNMENT
-
-    def is_aligned(x):
-        if isinstance(x, TensorArg):
-            return x.buffer not in V.graph.unaligned_buffers
-        if isinstance(x, SizeArg):
-            if isinstance(x.expr, (int, sympy.Integer)):
-                # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
-                # _maybe_evaluate_static...
-                if x.name.startswith("load_seed_offset"):
-                    return False
-                else:
-                    return V.graph.sizevars.statically_known_multiple_of(
-                        x.expr, ALIGNMENT
-                    )
-            else:
-                return False
-        raise NotImplementedError(f"unhandled {type(x)}: {x}")
-
-    if config.triton.divisible_by_16:
-        divisible_by_16 = [i for i, arg in enumerate(args) if is_aligned(arg)]
-    else:
-        divisible_by_16 = []
-    return instance_descriptor(tuple(divisible_by_16), ())
 
 
 class TritonPrinter(PythonPrinter):
@@ -1734,6 +1687,16 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
+            node2, scheduler.ForeachKernelSchedulerNode
+        ):
+            return node1.can_fuse(node2)
+
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
+            node2, scheduler.ForeachKernelSchedulerNode
+        ):
+            return False
+
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
 
@@ -1791,11 +1754,7 @@ class TritonScheduling:
     can_fuse_vertical = can_fuse
     can_fuse_horizontal = can_fuse
 
-    def codegen_nodes(self, nodes):
-        """
-        Given a set of pre-fused nodes, generate a Triton kernel.
-        """
-        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+    def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule = []
         current_loop_writes = set()
         is_current_reductions = set()
@@ -1867,8 +1826,19 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
+        return node_schedule
+
+    def codegen_nodes(self, nodes):
+        """
+        Given a set of pre-fused nodes, generate a Triton kernel.
+        """
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+
         if schedule_log.isEnabledFor(logging.DEBUG):
             schedule_log.debug("Schedule:\n %s", node_schedule)
+
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
@@ -1938,7 +1908,7 @@ class TritonScheduling:
             return "tl.int32"
         return "tl.int64"
 
-    def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
+    def get_kernel_args(self, node_schedule, numel, reduction_numel):
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
             filter(
@@ -1963,28 +1933,21 @@ class TritonScheduling:
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        with TritonKernel(
+        return tiled_groups, reduction_hint_val, mutations, index_dtype
+
+    def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
+        tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+            node_schedule, numel, reduction_numel
+        )
+
+        kernel = TritonKernel(
             *tiled_groups,
             reduction_hint=reduction_hint_val,
             mutations=mutations,
             index_dtype=index_dtype,
-        ) as kernel:
-            stack = contextlib.ExitStack()
-            for node in node_schedule:
-                if node not in (EnableReduction, DisableReduction):
-                    node.mark_run()
-            for node in node_schedule:
-                if node is DisableReduction:
-                    stack.enter_context(kernel.disable_reduction())
-                elif node is EnableReduction:
-                    stack.close()
-                else:
-                    # TODO - mostly works but needs a couple fixes
-                    if not dynamo_config.dynamic_shapes:
-                        # TODO - use split ranges ?
-                        indexing_dtype_strength_reduction(node._body)
-                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
-                    node.codegen(index_vars)
+        )
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
@@ -2012,6 +1975,25 @@ class TritonScheduling:
                     )
 
         self.scheduler.free_buffers()
+
+    def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
+        with kernel:
+            stack = contextlib.ExitStack()
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
+            for node in node_schedule:
+                if node is DisableReduction:
+                    stack.enter_context(kernel.disable_reduction())
+                elif node is EnableReduction:
+                    stack.close()
+                else:
+                    # TODO - mostly works but needs a couple fixes
+                    if not dynamo_config.dynamic_shapes:
+                        # TODO - use split ranges ?
+                        indexing_dtype_strength_reduction(node._body)
+                    index_vars = kernel.split_and_set_ranges(node.get_ranges())
+                    node.codegen(index_vars)
 
     def define_kernel(self, src_code, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -2072,6 +2054,42 @@ class TritonScheduling:
 
     def codegen_sync(self):
         V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+
+    def codegen_foreach(self, foreach_node):
+        from .triton_foreach import ForeachKernel
+
+        for node_group in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes()
+        ):
+            fused_node_lists = [node.get_nodes() for node in node_group]
+            kernel = ForeachKernel()
+
+            for nodes in fused_node_lists:
+                _, (numel, rnumel) = max(
+                    nodes, key=lambda x: int(x.is_reduction())
+                ).group
+                node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+                (
+                    tiled_groups,
+                    reduction_hint_val,
+                    mutations,
+                    index_dtype,
+                ) = self.get_kernel_args(node_schedule, numel, rnumel)
+                self.codegen_node_schedule_with_kernel(
+                    node_schedule,
+                    kernel.create_sub_kernel(
+                        *tiled_groups,
+                        reduction_hint=reduction_hint_val,
+                        mutations=mutations,
+                        index_dtype=index_dtype,
+                    ),
+                )
+
+            src_code = kernel.codegen_kernel()
+            kernel_name = self.define_kernel(src_code, [foreach_node])
+            kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+
+        self.scheduler.free_buffers()
 
     @staticmethod
     @functools.lru_cache(32)

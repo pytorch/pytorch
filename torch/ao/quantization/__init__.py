@@ -12,6 +12,10 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
+from typing import Union
+
+ObserverOrFakeQuantizer = Union[ObserverBase, FakeQuantizeBase]
+ObserverOrFakeQuantizer.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -129,6 +133,7 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
+    "ObserverOrFakeQuantizer",
 ]
 
 def default_eval_fn(model, calib_data):
