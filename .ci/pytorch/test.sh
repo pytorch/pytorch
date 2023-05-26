@@ -112,6 +112,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+  pip install third_party/hipify_torch
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
