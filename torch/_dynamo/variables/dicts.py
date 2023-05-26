@@ -10,7 +10,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
@@ -244,6 +244,13 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
+    @staticmethod
+    def is_supported_arg(arg):
+        if isinstance(arg, variables.BuiltinVariable):
+            return arg.fn in [list, tuple, dict]
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+
     def call_method(
         self,
         tx,
@@ -251,8 +258,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
@@ -267,18 +272,7 @@ class DefaultDictVariable(ConstDictVariable):
                     if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
-                    if self.default_factory is list:
-                        default_var = ListVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is tuple:
-                        default_var = TupleVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is dict:
-                        default_var = ConstDictVariable(
-                            {}, dict, mutable_local=MutableLocal()
-                        )
-                    else:
-                        unimplemented(
-                            f"defaultdict with default_factory = {self.default_factory}"
-                        )
+                    default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
