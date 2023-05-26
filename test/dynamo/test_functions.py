@@ -104,6 +104,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_itertools_chain(a, b):
+        v = a
+        for x in itertools.chain([a, b], [1, 2]):
+            v = v + x
+        return v
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
@@ -806,6 +813,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp.clear()
         tmp.append(a + b)
         return tmp
+
+    @make_test
+    def test_not_list(a):
+        return not [a + 1]
 
     @make_test
     def test_islice_chain(a, b):
