@@ -8,7 +8,7 @@ import sympy
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar, SymTypes
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, utils, variables
 from ..bytecode_transformation import create_call_function, Instruction
@@ -133,8 +133,14 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
+        if not free_symbols(value):
+            # this is a fully static shape, and the keys on props here inform specialization.
+            # We have to cast to int here, because these might get accessed as ConstantVariable, which has
+            # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
+            # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
+            # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
+            # I'd like to keep it around for now.
+            props["size"] = tuple([int(s) for s in value.size()])
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
@@ -147,6 +153,10 @@ class TensorVariable(VariableTracker):
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
+
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         result = None
         options = VariableTracker.propagate(self)
@@ -256,6 +266,9 @@ class TensorVariable(VariableTracker):
             idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
 
+    def _strict_mode_banned_ops(self):
+        return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
+
     def call_method(
         self,
         tx,
@@ -263,6 +276,9 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
@@ -270,14 +286,6 @@ class TensorVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
-
-            if "dim" in kwargs:
-                dim = kwargs.pop("dim")
-                constant_result = constant_result.getitem_const(dim)
-
-        elif name == "size" and self.size is not None:
-            sizes = [variables.ConstantVariable(x) for x in self.size]
-            constant_result = SizeVariable(sizes, **options)
 
             if "dim" in kwargs:
                 dim = kwargs.pop("dim")
@@ -293,6 +301,14 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "size" and self.size is not None:
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            constant_result = SizeVariable(sizes, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
         elif name in ("numel", "nelement") and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:

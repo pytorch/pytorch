@@ -169,13 +169,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
+        self.removed_inplace_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
+        self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
-        self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
@@ -231,38 +231,6 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    def random_seed_buffer(self, device: torch.device):
-        """
-        Return a device-unique 1-element tensor storing our RNG seed.
-        This will get initialized at the start of each graph in
-        `wrapper.py`.
-
-        Note this is only used by cuda backends.  The CPU backend handles
-        RNG seeds as a sizevar.
-        """
-        name = f"seed_{device.type}_{device.index}"
-        if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
-            self.randomness_seeds.append(name)
-
-        return ir.RandSeedBuffer(
-            name=name,
-            layout=ir.FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[],
-                stride=[],
-            ),
-        )
-
-    def increment_randomness_offset(self, numel):
-        """
-        A global counter of how many random numbers we have handed out so far.
-        """
-        offset = self.randomness_offset
-        self.randomness_offset = offset + numel
-        return offset
-
     @dynamo_timed
     def run(self, *args):
         return super().run(*args)
@@ -276,6 +244,11 @@ class GraphLowering(torch.fx.Interpreter):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        return name
+
+    def register_list(self, buffer_names: List[str]):
+        name = "list_" + "_".join(buffer_names)
+        self.lists[name] = buffer_names
         return name
 
     def realize_users_of(self, name: str):
