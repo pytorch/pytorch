@@ -212,7 +212,6 @@ def _init_inter_node_process_group(
         # every rank always needs to call dist.new_group
         grp = dist.new_group(ranks=ranks_for_inter_group, backend=sharding_backend)
         if local_rank == my_local_rank:
-            print(f"{local_rank} created process group for {ranks_for_inter_group}")
             inter_node_pg = grp
 
     assert (
