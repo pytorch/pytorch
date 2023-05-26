@@ -7,7 +7,6 @@ import types
 from typing import Dict, List
 
 import torch._C
-from torch._dynamo.variables.constant import ConstantVariable
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
@@ -679,11 +678,10 @@ class SkipFilesVariable(VariableTracker):
             and not kwargs
             and len(args) == 2
             and args[0].has_unpack_var_sequence(tx)
+            and args[1].is_python_constant()
         ):
             iterable = args[0].unpack_var_sequence(tx)
-            r = args[1]
-            assert isinstance(r, ConstantVariable) and isinstance(r.value, int)
-            r = r.value
+            r = args[1].as_python_constant()
 
             items = []
             for item in itertools.combinations(iterable, r):
