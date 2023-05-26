@@ -278,10 +278,10 @@ class QNNPackQuantizer(Quantizer):
             self._annotate_conv2d_bn(model, config)
         self._annotate_conv2d_relu(model, config)
         self._annotate_conv2d(model, config)
+        self._annotate_maxpool2d(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
-            self._annotate_maxpool2d(node, config)
             self._annotate_add_relu(node, config)
             self._annotate_add(node, config)
             self._annotate_hardtanh(node, config)
@@ -540,43 +540,37 @@ class QNNPackQuantizer(Quantizer):
                     nodes_to_mark_annotated = list(p.nodes)
                     _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
-    # TODO: move to `_pt2e/_propagate_annotation.py` after we have
-    # decided on the how we want to use pattern matching for annotation
     def _annotate_maxpool2d(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        if (
-            node.op != "call_function"
-            or node.target != operator.getitem
-            or node.args[1] != 0
-        ):
-            return
-        getitem_node = node
-        maxpool_node = getitem_node.args[0]
-        assert isinstance(maxpool_node, Node)
-        if (
-            maxpool_node.op != "call_function"
-            or maxpool_node.target != torch.ops.aten.max_pool2d_with_indices.default
-        ):
-            return
-        if _is_annotated([getitem_node, maxpool_node]):
-            return
-
-        input_act = maxpool_node.args[0]
-        assert isinstance(input_act, Node)
-
-        act_qspec = get_act_qspec(quantization_config)
-        maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map={
-                input_act: act_qspec,
-            },
-            _annotated=True,
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.MaxPool2d, torch.nn.functional.max_pool2d]
         )
-        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
-            _input_output_share_observers=True,
-            _annotated=True,
-        )
+        maxpool_partitions = list(itertools.chain(*module_partitions.values()))
+        for maxpool_partition in maxpool_partitions:
+            output_node = maxpool_partition.output_nodes[0]
+            maxpool_node = None
+            for n in maxpool_partition.nodes:
+                if n.target == torch.ops.aten.max_pool2d_with_indices.default:
+                    maxpool_node = n
+            if _is_annotated([output_node, maxpool_node]):
+                continue
+
+            input_act = maxpool_node.args[0]
+            assert isinstance(input_act, Node)
+
+            act_qspec = get_act_qspec(quantization_config)
+            maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map={
+                    input_act: act_qspec,
+                },
+                _annotated=True,
+            )
+            output_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _input_output_share_observers=True,
+                _annotated=True,
+            )
 
     def _annotate_input_out_obs_sharing_op(
         self,
