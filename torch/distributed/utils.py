@@ -42,9 +42,7 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
     return tuple(flat_args), tuple(kwarg_keys)
 
 
-def _unpack_kwargs(
-    flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
-) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -56,17 +54,17 @@ def _unpack_kwargs(
     return args, kwargs
 
 
-T = TypeVar("T", torch.Tensor, PackedSequence)
 S = TypeVar("S", dict, list, tuple)
-
-
-@overload
-def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
-    ...
+T = TypeVar("T", torch.Tensor, PackedSequence)
 
 
 @overload
 def _recursive_to(inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> List[S]:
+    ...
+
+
+@overload
+def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
     ...
 
 
@@ -225,7 +223,8 @@ def _apply_to_tensors(fn, container):
 def _to_kwargs(
     inputs: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]],
-    target_device: torch.device, use_side_stream_for_tensor_copies: bool
+    target_device: torch.device,
+    use_side_stream_for_tensor_copies: bool,
 ) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
     moved_inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
