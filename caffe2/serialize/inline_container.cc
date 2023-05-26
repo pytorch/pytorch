@@ -148,6 +148,9 @@ void PyTorchStreamReader::init() {
         static_cast<const char*>(serialization_id_ptr.get()),
         serialization_id_size);
   }
+  c10::LogAPIUsageMetadata(
+      "pytorch.stream.reader.metadata",
+      {{"serialization_id", serialization_id_}});
 
   // version check
   at::DataPtr version_ptr;
@@ -604,6 +607,9 @@ void PyTorchStreamWriter::writeSerializationId() {
         kSerializationIdRecordName,
         serialization_id_.c_str(),
         serialization_id_.size());
+    c10::LogAPIUsageMetadata(
+      "pytorch.stream.writer.metadata",
+      {{"serialization_id", serialization_id_}});
   }
 }
 
