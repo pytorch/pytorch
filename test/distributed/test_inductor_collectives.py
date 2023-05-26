@@ -371,7 +371,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, pg=GroupMember.WORLD)
         self.assertEqual(counter.frame_count, 1)
 
-        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
+        # should test more precisely, but the 2 is supposed to be (all_gather, wait)
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
@@ -425,7 +425,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
-
     def test_dynamo_graphbreaks_unsupported_async_op(self):
 
         def func(inp, out, *, pg):
@@ -450,7 +449,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 0
         assert counter.op_count == 0
         assert same(outputs, correct_outputs)
-
 
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
