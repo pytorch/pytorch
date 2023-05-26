@@ -456,13 +456,14 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
         for line in code.split("\n"):
             stmt = None
             # Find indexing expressions
-            if "tl.load" in line or "tl.store" in line:
-                stmt = line.split("=")[-1]
             if ".load(" in line:
                 stmt = line.split(".load")[-1]
-            if ".store(" in line:
+            elif "tl.store" in line:
                 stmt = line.split(".store")[-1]
-            if "[" in line:
+                stmt = ",".join(stmt.split(",")[:-2]) # Remove store value and mask
+            elif ".store" in line:
+                stmt = line.split(".store")[-1]
+            elif "[" in line:
                 stmt = line.split("[")[-1].split("]")[0]
 
             if stmt is None:
@@ -471,7 +472,7 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
             # indirect indexing involves a `tmp` variable
             test_case.assertTrue(
                 "tmp" not in stmt,
-                msg=f"Found indirect indexing in code:\n{code}",
+                msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
             )
 
     return result
@@ -720,7 +721,7 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i // n]
 
-        x = torch.randn(8, device="cuda")
+        x = torch.randn(8, device=self.device)
         repeat_interleave_opt = torch._dynamo.optimize("inductor")(
             repeat_interleave
         )
@@ -736,7 +737,7 @@ class CommonTemplate:
             i = torch.arange(x.shape[0] * n, device=x.device)
             return x[i % x.shape[0]]
 
-        x = torch.randn(8, device="cuda")
+        x = torch.randn(8, device=self.device)
         repeat_opt = torch._dynamo.optimize("inductor")(repeat)
 
         # this should be collapsed to direct indexing
@@ -751,7 +752,7 @@ class CommonTemplate:
             return x[idx], idx
 
         flip_opt = torch._dynamo.optimize("inductor")(flip)
-        x = torch.randn(8, device="cuda")
+        x = torch.randn(8, device=self.device)
 
         expect = flip(x)
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
