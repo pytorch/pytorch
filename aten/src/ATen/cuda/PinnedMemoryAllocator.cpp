@@ -5,6 +5,7 @@
 #include <c10/core/Storage.h>
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
+#include <iostream>
 
 namespace at::native {
 
@@ -15,6 +16,7 @@ bool is_pinned_cuda(const Tensor& self, c10::optional<Device> device) {
 }
 
 Tensor _pin_memory_cuda(const Tensor& self, c10::optional<Device> device) {
+  std::cout << "11 self.is_nested(): " << self.is_nested() << std::endl;
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
   auto* allocator = at::cuda::getPinnedMemoryAllocator();
   auto storage = Storage(

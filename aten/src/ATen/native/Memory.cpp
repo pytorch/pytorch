@@ -12,6 +12,9 @@
 #include <ATen/ops/pin_memory_native.h>
 #endif
 
+#include <ATen/native/nested/NestedTensorUtils.h>
+#include <iostream>
+
 namespace at {
 namespace native {
 
@@ -29,10 +32,17 @@ bool is_pinned_default(const Tensor& self, c10::optional<Device> device) {
 }
 
 Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
+  std::cout << "00 self.is_nested(): " << self.is_nested() << std::endl;
   // Kind of mad that I have to do two dynamic dispatches here, pretty
   // annoying
   if (self.is_pinned(device)) {
     return self;
+  }
+  if (self.is_nested()) {
+    auto* nt_input = get_nested_tensor_impl(self);
+    TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+    const auto& input_buffer = nt_input->get_buffer();
+    return wrap_buffer(_pin_memory(input_buffer, device), nt_input->get_nested_sizes());
   }
   return at::_pin_memory(self, device);
 }
