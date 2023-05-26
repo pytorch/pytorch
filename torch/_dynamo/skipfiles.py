@@ -121,6 +121,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.

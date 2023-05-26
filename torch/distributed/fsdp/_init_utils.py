@@ -245,12 +245,21 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+    ignored_states: Union[
+        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+    ] = None,
 ) -> _FSDPState:
     assert (
-        ignored_modules is None or ignored_parameters is None
-    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
-        Please either pass `ignored_modules` or `ignored_parameters`."
+        ignored_modules is None or ignored_states is None
+    ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
+        Please either pass `ignored_modules` or `ignored_states`."
+    ignored_parameters = None
+    if ignored_states:
+        ignored_states_set = set(ignored_states)
+        if isinstance(next(iter(ignored_states), None), torch.nn.Parameter):
+            ignored_parameters = ignored_states_set
+        else:
+            ignored_modules = ignored_states_set
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,
@@ -659,7 +668,7 @@ def _get_ignored_modules(
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
-        if isinstance(module, fsdp_file.FullyShardedDataParallel):
+        if _get_module_fsdp_state(module):
             # TODO: We may relax this by taking the FSDP instance's wrapped
             # module to provide more flexibility to the user.
             raise ValueError("`ignored_modules` should not include FSDP modules")
@@ -716,12 +725,12 @@ def _get_ignored_params(
         }
         all_ignored_params.update(params_in_ignored_parameters)
 
-        # Include nested FSDP modules' ignored parameters
-        for submodule in root_module.modules():
-            optional_fsdp_state = _get_module_fsdp_state(submodule)
-            if optional_fsdp_state is not None:
-                assert hasattr(optional_fsdp_state, "_ignored_params")
-                all_ignored_params.update(optional_fsdp_state._ignored_params)
+    # Always include nested FSDP modules' ignored parameters
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_params")
+            all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
 

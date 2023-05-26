@@ -108,7 +108,7 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
-    def test_conv2d_unary(self):
+    def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
