@@ -5,7 +5,7 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
                         _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, SupportForeachDeviceType
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, SupportForeachDevices
 
 __all__ = ['Adam', 'adam']
 
@@ -37,15 +37,15 @@ class Adam(Optimizer):
                 raise RuntimeError("`fused` does not support `differentiable`")
             self._step_supports_amp_scaling = True
             # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Suppor AMP with FP16/BF16 model params which would need
+            # Support AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
             if not all(
-                p.device.type == SupportForeachDeviceType._default_device_type and
+                p.device.type in SupportForeachDevices.get_device_types() and
                 torch.is_floating_point(p) for pg in self.param_groups for p in pg['params']
             ):
                 raise RuntimeError("`fused=True` requires all the params to be "
-                                   f"{SupportForeachDeviceType._default_device_type}, floating point Tensor")
+                                   f"{SupportForeachDevices.get_device_types()}, floating point Tensor")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 

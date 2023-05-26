@@ -5,34 +5,60 @@ import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
-__all__ = ["SupportForeachDeviceType"]
+__all__ = ["SupportForeachDevices"]
 
-class SupportForeachDeviceType(object):
+class SupportForeachDevices(object):
     r"""
     A class that manages the default device type for foreach support,
-    default is 'cuda'.
+    default is List['cuda'].
     """
-    _default_device_type = "cuda"
+    _default_device_types = ["cuda"]
 
     @staticmethod
-    def set_device_type(device: str = "cuda"):
+    def add_device_type(device: str = "cuda"):
         """
-        Add the default device type for foreach support.
+        Add the device type to the default value list for foreach support.
 
         Args:
-            device (str): The device type to be set as default. Default is 'cuda'.
+            device (str): The device type to add to the default value list. Default is 'cuda'.
         """
-        SupportForeachDeviceType._default_device_type = device
+        if device not in SupportForeachDevices._default_device_types:
+            SupportForeachDevices._default_device_types.append(device)
 
     @staticmethod
-    def get_device_type() -> str:
+    def remove_device_type(device: str = "cuda"):
         """
-        Get the current default device type for foreach support.
+        Remove the default device type for foreach support.
+
+        Args:
+            device (str): The device type to remove from the default value list. Default is 'cuda'.
+        """
+        if device in SupportForeachDevices._default_device_types:
+            SupportForeachDevices._default_device_types.remove(device)
+
+    @staticmethod
+    def get_device_types() -> List[str]:
+        """
+        Get the current default device types that supports foreach operators.
 
         Returns:
-            str: The current default device type.
+            List[str]: Get list of current default device type.
         """
-        return SupportForeachDeviceType._default_device_type
+        return SupportForeachDevices._default_device_types
+
+    @staticmethod
+    def get_device_types_and(device: str) -> List[str]:
+        """
+        Get the device types that supports foreach operators (current default devices and input device together).
+
+        Returns:
+            List[str]: Get list of the device type.
+        """
+        if device in SupportForeachDevices._default_device_types:
+            return SupportForeachDevices._default_device_types
+        else:
+            return SupportForeachDevices._default_device_types + [device,]
+
 # This util function splits tensors into groups by device and dtype, which is useful before sending
 # tensors off to a foreach implementation, which requires tensors to be on one device and dtype.
 # If tensorlistlist contains more than one tensorlist, the following assumptions are made BUT NOT verified:
@@ -64,6 +90,6 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
     return per_device_and_dtype_tensors
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
-    if (device.type != "cpu" and device.type != SupportForeachDeviceType._default_device_type) or torch.jit.is_scripting():
+    if device.type not in SupportForeachDevices.get_device_types_and("cpu") or torch.jit.is_scripting():
         return False
     return all(t is None or type(t) == torch.Tensor for t in tensors)

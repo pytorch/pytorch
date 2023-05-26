@@ -10,7 +10,7 @@ from typing import Callable, Dict, List, Tuple
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
-from torch.utils._foreach_utils import SupportForeachDeviceType
+from torch.utils._foreach_utils import SupportForeachDevices
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -70,12 +70,12 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
         return False, False
     fused = use_fused and all(
         p is None or (type(p) in _foreach_supported_types and
-                      p.device.type == SupportForeachDeviceType._default_device_type and
+                      p.device.type in SupportForeachDevices.get_device_types() and
                       torch.is_floating_point(p)) for p in params
     )
     foreach = not fused and all(
         p is None or (type(p) in _foreach_supported_types and
-                      p.device.type == SupportForeachDeviceType._default_device_type) for p in params
+                      p.device.type in SupportForeachDevices.get_device_types()) for p in params
     )
     return fused, foreach
 
