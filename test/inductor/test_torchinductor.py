@@ -449,6 +449,34 @@ def check_model_cuda(
         )
 
 
+def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
+    result, source_codes = run_and_get_code(func, *args, **kwargs)
+
+    for code in source_codes:
+        for line in code.split("\n"):
+            stmt = None
+            # Find indexing expressions
+            if "tl.load" in line or "tl.store" in line:
+                stmt = line.split("=")[-1]
+            if ".load(" in line:
+                stmt = line.split(".load")[-1]
+            if ".store(" in line:
+                stmt = line.split(".store")[-1]
+            if "[" in line:
+                stmt = line.split("[")[-1].split("]")[0]
+
+            if stmt is None:
+                continue
+
+            # indirect indexing involves a `tmp` variable
+            test_case.assertTrue(
+                "tmp" not in stmt,
+                msg=f"Found indirect indexing in code:\n{code}",
+            )
+
+    return result
+
+
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -673,6 +701,61 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count,
             1 if self.device == "cuda" else 3,
         )
+
+    def test_index_propagation(self):
+        def flip(x):
+            i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[i]
+
+        x = torch.randn(8, device=self.device)
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
+
+    def test_index_propagation_floordiv(self):
+        def repeat_interleave(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
+            i = torch.arange(x.shape[0] * n, device=x.device)
+            return x[i // n]
+
+        x = torch.randn(8, device="cuda")
+        repeat_interleave_opt = torch._dynamo.optimize("inductor")(
+            repeat_interleave
+        )
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(self, repeat_interleave_opt, x, 3)
+        expect = torch.repeat_interleave(x, 3)
+        self.assertEqual(expect, actual)
+        self.assertEqual(actual, repeat_interleave(x, 3))
+
+    def test_index_propagation_remainder(self):
+        def repeat(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
+            i = torch.arange(x.shape[0] * n, device=x.device)
+            return x[i % x.shape[0]]
+
+        x = torch.randn(8, device="cuda")
+        repeat_opt = torch._dynamo.optimize("inductor")(repeat)
+
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(self, repeat_opt, x, 3)
+        expect = x.repeat(3)
+        self.assertEqual(expect, actual)
+        self.assertEqual(actual, repeat(x, 3))
+
+    def test_computed_buffer_inlining(self):
+        def flip(x):
+            idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[idx], idx
+
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+        x = torch.randn(8, device="cuda")
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
 
     def test_sum1(self):
         def fn(a, b):
@@ -6418,88 +6501,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
-
-        def _assert_no_indirect_indexing(self, code):
-            # If `tmp` appears in the index calculation, this is an indirect load
-            load_lines = [line for line in code.split("\n") if "tl.load" in line]
-            for line in load_lines:
-                load_stmt = line.split("=")[-1]
-                self.assertTrue(
-                    "tmp" not in load_stmt,
-                    msg=f"Found indirect indexing in code:\n{code}",
-                )
-
-        def test_index_propagation(self):
-            def flip(x):
-                i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
-                return x[i]
-
-            x = torch.randn(8, device="cuda")
-            flip_opt = torch._dynamo.optimize("inductor")(flip)
-
-            # this should be collapsed to direct indexing
-            code = run_and_get_triton_code(flip_opt, x)
-            self._assert_no_indirect_indexing(code)
-
-            self.assertEqual(flip_opt(x), flip(x))
-
-        def test_index_propagation_floordiv(self):
-            def repeat_interleave(x, n):
-                # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
-                i = torch.arange(x.shape[0] * n, device=x.device)
-                return x[i // n]
-
-            x = torch.randn(8, device="cuda")
-            repeat_interleave_opt = torch._dynamo.optimize("inductor")(
-                repeat_interleave
-            )
-            # this should be collapsed to direct indexing
-            code = run_and_get_triton_code(repeat_interleave_opt, x, 3)
-            self._assert_no_indirect_indexing(code)
-
-            expect = torch.repeat_interleave(x, 3)
-            actual = repeat_interleave_opt(x, 3)
-            self.assertEqual(expect, actual)
-            self.assertEqual(actual, repeat_interleave(x, 3))
-
-        def test_index_propagation_remainder(self):
-            def repeat(x, n):
-                # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
-                i = torch.arange(x.shape[0] * n, device=x.device)
-                return x[i % x.shape[0]]
-
-            x = torch.randn(8, device="cuda")
-            repeat_opt = torch._dynamo.optimize("inductor")(repeat)
-
-            # this should be collapsed to direct indexing
-            code = run_and_get_triton_code(repeat_opt, x, 3)
-            self._assert_no_indirect_indexing(code)
-
-            expect = x.repeat(3)
-            actual = repeat_opt(x, 3)
-            self.assertEqual(expect, actual)
-            self.assertEqual(actual, repeat(x, 3))
-
-        def test_computed_buffer_inlining(self):
-            def flip(x):
-                idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
-                return x[idx], idx
-
-            flip_opt = torch._dynamo.optimize("inductor")(flip)
-            x = torch.randn(8, device="cuda")
-            code = run_and_get_triton_code(flip_opt, x)
-
-            expect = {
-                # First kernel filling the index tensor
-                "    tmp0 = 7 + ((-1)*x0)",
-                # Second kernel performing the flip, with index computation inlined
-                "    tmp0 = tl.load(in_ptr0 + (7 + ((-1)*x0)), xmask)",
-            }
-
-            lines = set(code.split("\n"))
-            self.assertTrue(
-                expect.issubset(lines), msg=f"Expected lines not found in code:\n{code}"
-            )
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
