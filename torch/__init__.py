@@ -1400,14 +1400,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-import torch.backends.cpu
-import torch.backends.cuda
-import torch.backends.mps
-import torch.backends.cudnn
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
+from torch import backends as backends
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1496,6 +1489,10 @@ class _TorchCompileInductorWrapper:
                 options or ()
             ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
+        # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+        if self.config.get("triton.cudagraphs", False):
+            os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
                 self.config == other.config and
@@ -1505,7 +1502,8 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            self.apply_options(torch._inductor.list_mode_options(mode))
+            from torch._inductor import list_mode_options
+            self.apply_options(list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1692,6 +1690,8 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 
+# Register MPS specific decomps
+torch.backends.mps._init()
 
 from . import _logging
 _logging._init_logs()

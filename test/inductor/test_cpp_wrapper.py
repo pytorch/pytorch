@@ -16,11 +16,19 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
-        from . import test_cpu_repro, test_mkldnn_pattern_matcher, test_torchinductor
+        from . import (
+            test_cpu_repro,
+            test_foreach,
+            test_mkldnn_pattern_matcher,
+            test_torchinductor,
+            test_torchinductor_dynamic_shapes,
+        )
     except ImportError:
         import test_cpu_repro
+        import test_foreach
         import test_mkldnn_pattern_matcher
         import test_torchinductor
+        import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -43,7 +51,15 @@ class TestCppWrapper(TorchTestCase):
     device = "cpu"
 
 
+class DynamicShapesCppWrapperCpuTests(TorchTestCase):
+    device = "cpu"
+
+
 class TestCudaWrapper(TorchTestCase):
+    device = "cuda"
+
+
+class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
     device = "cuda"
 
 
@@ -66,7 +82,7 @@ def make_test_case(name, device, tests, condition=True):
     fn.__name__ = test_name
     if condition:
         setattr(
-            CppWrapperTemplate if device != "cuda" else CudaWrapperTemplate,
+            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
             test_name,
             fn,
         )
@@ -115,6 +131,16 @@ if RUN_CPU:
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
 
+    DynamicShapesCppWrapperTemplate = (
+        test_torchinductor_dynamic_shapes.make_dynamic_cls(CppWrapperTemplate)
+    )
+
+    test_torchinductor.copy_tests(
+        DynamicShapesCppWrapperTemplate,
+        DynamicShapesCppWrapperCpuTests,
+        "cpp_wrapper",
+    )
+
 if RUN_CUDA:
 
     class BaseTest(NamedTuple):
@@ -134,7 +160,7 @@ if RUN_CUDA:
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
-        BaseTest("test_linear2"),
+        # BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
@@ -146,11 +172,25 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest(
+            "test_foreach_cpp_wrapper",
+            device=None,
+            tests=test_foreach.ForeachTests(),
+        ),  # test foreach
     ]:
         make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper")
 
+    DynamicShapesCudaWrapperTemplate = (
+        test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
+    )
+
+    test_torchinductor.copy_tests(
+        DynamicShapesCudaWrapperTemplate,
+        DynamicShapesCudaWrapperCudaTests,
+        "cuda_wrapper",
+    )
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

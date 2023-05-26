@@ -8,7 +8,7 @@ import re
 import types
 import warnings
 
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator, opset18  # type: ignore[import]
@@ -21,7 +21,7 @@ from torch._subclasses import fake_tensor
 from torch.onnx import _type_utils
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.exporter import ResolvedExportOptions
-from torch.onnx._internal.fx import diagnostics, function_dispatcher, op_validation
+from torch.onnx._internal.fx import diagnostics, op_validation
 from torch.utils import _pytree
 
 
@@ -131,7 +131,10 @@ def _retrieve_or_adapt_input_to_graph_set(
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
         with evaluator.default_as(tracer):
-            return opset18.Concat(*sequence_mixed_elements, axis=0)
+            output = opset18.Concat(*sequence_mixed_elements, axis=0)
+        output.dtype = torch.int64
+        output.shape = [len(sequence_mixed_elements)]
+        return output
     elif isinstance(onnx_tensor, (tuple, list)) and all(
         isinstance(node, torch.fx.Node) for node in onnx_tensor
     ):
@@ -179,7 +182,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
 
 
 @_beartype.beartype
-def _fill_tensor_meta(
+def _fill_tensor_shape_type(
     onnxscript_values: Union[
         graph_building.TorchScriptTensor, Tuple[graph_building.TorchScriptTensor, ...]
     ],
@@ -194,17 +197,11 @@ def _fill_tensor_meta(
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
-    # NOTE(titaiwang): Type of expected_values is showing what we support right now.
-    # Currently, we only expect FakeTensor and SymInt in the graph.
-
-    # aten::sym_size output is a int, not a tensor, which stands
-    # for the size of one dim. We treat it as 0-D tensor.
-    if isinstance(expected_values, (torch.SymInt, torch.SymFloat)):
-        return
-
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
+        # ex: aten::split - in onnx_dtype: seq(tensor)
+        # onnxscript_values is a single tensor, but expected_values is a list of tensors.
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
@@ -212,12 +209,21 @@ def _fill_tensor_meta(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # We set node output sizes to be dynamic to continue the model conversion,
-        # and inputs are also set to be dynamic in add_input().
-        onnxscript_value.shape = tuple(
-            [dim if isinstance(dim, int) else None for dim in expected_value.size()]
-        )
-        onnxscript_value.dtype = expected_value.dtype
+        # aten::sym_size output is a int, not a tensor, which stands
+        # for the size of one dim. We treat it as 0-D tensor.
+        # TODO(titaiwang): set shape?
+        if isinstance(expected_value, torch.SymInt):
+            onnxscript_value.dtype = torch.int64
+        elif isinstance(expected_value, torch.SymFloat):
+            onnxscript_value.dtype = torch.float32
+        else:
+            # We set node output sizes to be dynamic to continue the model conversion,
+            # and inputs are also set to be dynamic in add_input().
+            onnxscript_value.shape = tuple(
+                [dim if isinstance(dim, int) else None for dim in expected_value.size()]
+            )
+            onnxscript_value.dtype = expected_value.dtype
+        # naming
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
@@ -271,7 +277,12 @@ def _wrap_fx_args_as_onnxscript_args(
         ],
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
-) -> Tuple[tuple, dict]:
+) -> Tuple[
+    Sequence[
+        Optional[Union[graph_building.TorchScriptTensor, str, int, float, bool, list]]
+    ],
+    Dict[str, _type_utils.Argument],
+]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     onnxscript_args = tuple(
@@ -356,15 +367,23 @@ def _export_fx_node_to_onnxscript(
             fx_name_to_onnxscript_value[node.name] = output
             return
 
-        symbolic_fn = function_dispatcher.get_symbolic_function(
-            diagnostic_context, node
-        )
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         complete_args, complete_kwargs = _fill_in_default_kwargs(node)
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             complete_args, complete_kwargs, fx_name_to_onnxscript_value, tracer
         )
+
+        # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
+        # function signature in OpSchema, and find the best matched overload.
+        # TODO(titaiwang): diagnostic rules.
+        symbolic_fn = options.onnx_dispatcher.dispatch(
+            node=node,
+            onnx_args=onnx_args,
+            onnx_kwargs=onnx_kwargs,
+            diagnostic_context=diagnostic_context,
+        )
+
         with evaluator.default_as(tracer):
             output: Union[  # type: ignore[no-redef]
                 graph_building.TorchScriptTensor,
@@ -374,7 +393,7 @@ def _export_fx_node_to_onnxscript(
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
         # Assign type and shape from fx graph.
-        _fill_tensor_meta(output, node.name, node.meta["val"])
+        _fill_tensor_shape_type(output, node.name, node.meta["val"])
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(output, (graph_building.TorchScriptTensor, tuple)), type(

@@ -96,6 +96,7 @@ class TestCase(TorchTestCase):
             config.patch(
                 {
                     "debug": True,
+                    "debug_index_asserts": True,
                     "cpp.min_chunk_size": 1,
                     "triton.autotune_pointwise": False,  # too slow
                     "implicit_fallbacks": False,
@@ -1808,36 +1809,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_linear_buffer_reuse(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(16, 16)
-                self.tanh = torch.nn.Tanh()
-                self.linear2 = torch.nn.Linear(16, 16)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.tanh(x)
-                x = self.linear2(x)
-                return x
-
-        mod = M().eval()
-        v = torch.randn(1, 16)
-
-        with torch.no_grad():
-
-            def compile_fx_wrapper(model_, example_inputs_):
-                return compile_fx(model_, example_inputs_)
-
-            def run(*ex, **kwargs):
-                return mod(*ex, **kwargs)
-
-            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
-            self.assertFalse("= as_strided(" in code)
-            self.assertEqual(run(*v), mod(*v))
-
     def test_aliased_buffer_reuse(self):
         def fn(x, y):
             x = 2 * x
@@ -2059,6 +2030,9 @@ class CommonTemplate:
 
     @requires_multigpu()
     def test_multi_gpu_device(self):
+        # TODO: https://github.com/pytorch/pytorch/issues/92627
+        x = torch.rand([4], device="cuda")
+
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
             r = r.to("cuda:1")
@@ -2375,6 +2349,19 @@ class CommonTemplate:
             (torch.randn([1, 1, 6, 7]),),
         )
 
+    # From https://github.com/pytorch/pytorch/issues/93384
+    def test_max_pool2d8(self):
+        # dialtion is not 1, use fallback
+        def fn(x):
+            return aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2])
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn([2, 2, 3, 6]),),
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -2454,6 +2441,18 @@ class CommonTemplate:
             (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_avg_pool2d8(self):
+        # https://github.com/pytorch/pytorch/issues/100987
+        def fn(x):
+            return aten.avg_pool2d(
+                x, kernel_size=3, stride=2, padding=1, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn(1, 3, 6, 6),),
+        )
 
     def test_alexnet_prefix(self):
         def forward(arg6, arg7, arg16):
@@ -4953,6 +4952,34 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    # From https://github.com/pytorch/pytorch/issues/93384
+    def test_max_pool2d_with_indices_backward6(self):
+        # dilation is not 1. Should fallback
+        def fn(a, b, c):
+            return aten.max_pool2d_with_indices_backward(
+                a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        x = torch.randn([2, 2, 3, 6])
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            [3, 2],
+            [2, 1],
+            [1, 1],
+            [1, 2],
+            False,
+        )
+        self.common(
+            fn,
+            [
+                torch.randn_like(result),
+                x,
+                indices,
+            ],
+        )
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5154,7 +5181,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
         if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
@@ -5163,6 +5190,19 @@ class CommonTemplate:
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
+
+    def test_randint_kernel_count(self):
+        @torch._dynamo.optimize_assert("inductor")
+        def fn1():
+            random_tensor1 = torch.randint(10, [32], device=self.device)
+            random_tensor2 = torch.randint(10, [32], device=self.device)
+            random_tensor3 = torch.randint(10, [32], device=self.device)
+            return random_tensor1, random_tensor2, random_tensor3
+
+        _, source_codes = run_and_get_code(fn1)
+        if self.device == "cuda":
+            self.assertEqual(len(source_codes), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
     def test_roll(self):
         def fn(a):
@@ -5786,18 +5826,6 @@ class CommonTemplate:
             [x],
         )
 
-    @config.patch(inplace_buffers=True)
-    def test_in_out_buffer(self):
-        def fn(x, y):
-            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
-            return z
-
-        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("in_out_ptr" in code)
-        self.assertEqual(fn_opt(*inps), fn(*inps))
-
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
@@ -6141,6 +6169,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_uint(self):
+        def fn(z):
+            x = torch.tensor(5, device=z.device, dtype=torch.uint8)
+            y = torch.neg(x)
+            return x < y
+
+        self.common(fn, (torch.randn(26),))
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -6330,6 +6366,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        # Disable constant propagation, so we isolate value range analysis
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6356,6 +6394,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
+        # Disable constant propagation, so we isolate value range analysis
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6381,6 +6421,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        # Disable index propagation, so the indirect indexing isn't optimized away
+        @patch.object(config, "constant_and_index_propagation", False)
         def test_computed_indirect_mask(self):
             def fn(x, n):
                 tmp = torch.arange(n, device=x.device)
@@ -6392,6 +6434,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
+
+        def test_index_propagation(self):
+            def flip(x):
+                i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+                return x[i]
+
+            x = torch.randn(8, device="cuda")
+            flip_opt = torch._dynamo.optimize("inductor")(flip)
+            code = run_and_get_triton_code(flip_opt, x)
+
+            # this should be collapsed to direct indexing, so the index
+            # calculation shouldn't contain a `tmp` variable
+            load_line = [line for line in code.split("\n") if "tl.load" in line]
+            self.assertEqual(len(load_line), 1)
+            load_stmt = load_line[0].split("=")[-1]
+            self.assertTrue(
+                "tmp" not in load_stmt,
+                msg=f"Found indirect indexing in code:\n{code}",
+            )
+
+            self.assertEqual(flip_opt(x), flip(x))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
@@ -6485,7 +6548,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             for fn, ndims, dyn_shape in itertools.product(fns, (2, 3), (True, False)):
                 proc = subprocess.Popen(
-                    [sys.executable, test_path, fn, str(ndims), str(dyn_shape)],
+                    [
+                        sys.executable,
+                        test_path,
+                        fn,
+                        str(ndims),
+                        str(dyn_shape),
+                        "False",
+                    ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
@@ -6495,8 +6565,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "index out of bounds" in err.decode("utf-8")
                         for err in stderr.splitlines()
                     ),
-                    f"{fn}, {ndims}, {dyn_shape}",
+                    f"{fn}, {ndims}, {dyn_shape}, False",
                 )
+            proc = subprocess.Popen(
+                [sys.executable, test_path, "first_arg", "2", "False", "True"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            stderr = proc.communicate()[1]
+            self.assertTrue(
+                any(
+                    "index out of bounds" in err.decode("utf-8")
+                    for err in stderr.splitlines()
+                ),
+                "first_arg 2 False True",
+            )
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):
