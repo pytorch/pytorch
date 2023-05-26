@@ -604,7 +604,7 @@ def run_test(
     )
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
-    with open(log_path, "w") as f:
+    with open(log_path, "w", encoding="utf8") as f:
         ret_code = retry_shell(
             command,
             test_directory,
@@ -920,7 +920,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, "rb"))
     test = str(test)
     n = 100
-    with open(file_path, "r") as f:
+    with open(file_path, "r", encoding="utf8") as f:
         print_to_stderr("")
         if failed:
             if n < num_lines:
