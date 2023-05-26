@@ -1,5 +1,5 @@
 import itertools
-from typing import Any, Dict, List, OrderedDict, Set
+from typing import Any, List, OrderedDict, Set
 
 import torch
 
@@ -46,7 +46,7 @@ def _get_matching_types(partition_type):
 
 
 def _valid_type_sequence(partition_types: List[Any]):
-    partition_types_set = set()
+    partition_types_set = set()  # type: ignore[var-annotated]
     for partition_type in partition_types:
         matching_types = _get_matching_types(partition_type)
         matching_types_set = set(matching_types)
@@ -76,6 +76,6 @@ def find_sequential_partitions(
     fusion_candidates = itertools.product(*typed_partitions_list)
     fused_partitions = []
     for candidate in fusion_candidates:
-        if _partitions_sequential(candidate):
+        if _partitions_sequential(candidate):  # type: ignore[arg-type]
             fused_partitions.append(candidate)
     return fused_partitions

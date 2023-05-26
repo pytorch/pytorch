@@ -137,6 +137,9 @@ try:
 except ImportError:
     pass
 
+# To be moved to compiler side later
+from quantization.pt2e.test_quantize_pt2e import TestGraphUtils  # noqa: F401
+
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401
 
