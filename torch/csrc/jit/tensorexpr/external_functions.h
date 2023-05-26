@@ -10,7 +10,6 @@
   _(nnc_aten_conv2d)                    \
   _(nnc_aten_conv1d)                    \
   _(nnc_aten_conv1d_out)                \
-  _(nnc_aten_embedding)                 \
   _(nnc_aten_matmul)                    \
   _(nnc_aten_mv)                        \
   _(nnc_aten_mm)                        \
