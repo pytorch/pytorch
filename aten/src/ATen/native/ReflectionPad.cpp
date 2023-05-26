@@ -267,10 +267,8 @@ void reflection_pad2d_backward_out_template(
   int dim_w = 2;
   int dim_h = 1;
   int dim_plane = 0;
-  int64_t nbatch = 1;
 
   if (input.ndimension() == 4) {
-    nbatch = input.size(0);
     dim_w++;
     dim_h++;
     dim_plane++;
