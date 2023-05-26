@@ -522,12 +522,13 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
 
     For convenience and proper guarding, we construct a variable type.
 
-    TODO: implement+test common/safe methods such as get_rank
     TODO: make it possible to use ProcessGroupVariable as input to simple functions
           like _expand_group without dynamo complaining about making a proxy for it.
           It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
           torch library functions are dealing with tensor-like types and would have proxies
           for their args.
+    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
+          or just graph-break whenever one of our special cases is not hit?
     """
 
     def __init__(self, value, **kwargs):
@@ -535,3 +536,26 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "rank":
+            return variables.ConstantVariable(self.value.rank())
+        if name == "size":
+            return variables.ConstantVariable(self.value.size())
+
+        # TODO should this just raise unimplemented?
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name in ["rank", "size"]:
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
+        # TODO should this just raise unimplemented?
+        return super().var_getattr(tx, name)

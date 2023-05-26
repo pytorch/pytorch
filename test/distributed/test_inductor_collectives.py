@@ -425,7 +425,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
-
     def test_dynamo_graphbreaks_unsupported_async_op(self):
 
         def func(inp, out, *, pg):
@@ -449,6 +448,23 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         func(inputs, correct_outputs, pg=GroupMember.WORLD)
         assert counter.frame_count == 0
         assert counter.op_count == 0
+        assert same(outputs, correct_outputs)
+
+
+    def test_dynamo_pg_var(self):
+        def func(inp, *, pg):
+            x = pg.rank() + 1 % pg.size()
+            return inp + x
+
+        local_size = [4, 4]
+        inputs = torch.ones(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        outputs = compiled(inputs, pg=GroupMember.WORLD)
+        correct_outputs = func(inputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+        assert counter.op_count == 1
         assert same(outputs, correct_outputs)
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
