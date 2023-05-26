@@ -13,6 +13,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
+from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
@@ -518,11 +519,14 @@ class TorchVariable(VariableTracker):
             inspect.isfunction(self.value)
             and self.value in constant_processgroup_functions
         ):
-            # We will guard on the processgroup input (TODO)
-            # desugar it at trace-time into ranks by directly calling util
+            # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+            # ID_MATCH based on how it was constructed.
+
+            # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            return ConstantVariable(self.value(args[0].value))
+            assert isinstance(args[0], ProcessGroupVariable)
+            return ConstantVariable(self.value(args[0].as_python_constant()))
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
