@@ -148,10 +148,10 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
 
 
 @DebugContext.wrap
-def count_bytes_inner(gm, example_inputs, static_input_idxs=(), **kwargs):
+def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     shape_env = _shape_env_from_inputs(example_inputs)
 
-    graph = GraphLowering(gm, shape_env=shape_env, static_input_idxs=static_input_idxs)
+    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem = graph.count_bytes()
@@ -217,7 +217,7 @@ def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     cudagraphs=None,
-    static_input_idxs=(),
+    num_fixed=0,
     is_backward=False,
     graph_id=None,
     cpp_wrapper=False,
@@ -271,7 +271,7 @@ def compile_fx_inner(
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
-            static_input_idxs=static_input_idxs,
+            num_static_inputs=num_fixed,
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
@@ -315,7 +315,7 @@ def compile_fx_inner(
             compiled_fn = cudagraphify(
                 compiled_fn,
                 example_inputs,
-                static_input_idxs=static_input_idxs,
+                static_input_idxs=range(num_fixed),
                 device_index=next(iter(graph.device_idxs)),
                 stack_traces=stack_traces,
                 is_backward=is_backward,
@@ -355,7 +355,7 @@ def compile_fx_inner(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
-    result = align_inputs(compiled_fn, example_inputs, static_input_idxs)
+    result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
     _step_logger()(
         logging.INFO,
         "torchinductor done compiling "
@@ -556,15 +556,10 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     return run
 
 
-def get_static_input_idxs_for_bw(fx_g: torch.fx.GraphModule):
-    # This function returns the range of ids pointing to the location of parameters in the bwd graph
-    # The input signature for the bwd pass from AOT Autograd is
-    #   (*saved_tensors, *tangents)
-    # When functionalization of rng ops is turned on, we have two more inputs
-    #   (seed, offset, *saved_tensors, *tangents)
-
-    num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
-    start = num_rng_seed_offset_inputs
+def count_tangents(fx_g: torch.fx.GraphModule):
+    """
+    Infers which inputs are static for a backwards graph
+    """
 
     def is_saved_tensor(x):
         return (
@@ -575,34 +570,14 @@ def get_static_input_idxs_for_bw(fx_g: torch.fx.GraphModule):
 
     arg_count = 0
     static_arg_idxs = []
-    end = start
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
             if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
-                end = arg_count + 1
             arg_count += 1
 
-    out = range(start, end)
-    assert static_arg_idxs == list(out)
-    return out
-
-
-def get_static_input_idxs_for_fw(num_primary_inputs: int, num_aot_graph_inputs: int):
-    # This function returns the range of ids pointing to the location of parameters in the fwd pass
-    # The input signature for the fwd pass from AOT Autograd is
-    #   (*parameters, *primary_inputs)
-    # When functionalization of rng ops is turned on, we have two more inputs
-    #   (seed, offset, *parameters, *primary_inputs)
-    #
-    # args:
-    #       num_primary_inputs: Number of primary inputs, given by TorchDynamo
-    #       num_aot_graph_inputs: Total number of aot_graph inputs
-
-    num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
-    start = num_rng_seed_offset_inputs
-    end = num_aot_graph_inputs - num_primary_inputs
-    return range(start, end)
+    assert static_arg_idxs == list(range(len(static_arg_idxs)))
+    return len(static_arg_idxs)
 
 
 def compile_fx_aot(
@@ -702,13 +677,12 @@ def compile_fx(
             # partition_fn won't be called
             joint_graph_passes(model)
 
-        static_input_idxs = get_static_input_idxs_for_fw(
-            num_example_inputs, len(example_inputs)
-        )
+        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
+        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
         return inner_compile(
             model,
             example_inputs,
-            static_input_idxs=static_input_idxs,
+            num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
             is_inference=is_inference,
@@ -732,11 +706,11 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
-            static_input_idxs = get_static_input_idxs_for_bw(model)
+            fixed = count_tangents(model)
             return inner_compile(
                 model,
                 example_inputs,
-                static_input_idxs=static_input_idxs,
+                num_fixed=fixed,
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=graph_id,

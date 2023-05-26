@@ -1023,7 +1023,7 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            static_input_idxs=(),
+            num_static_inputs=0,
         )
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
@@ -1117,7 +1117,7 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            static_input_idxs=(),
+            num_static_inputs=0,
         )
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
