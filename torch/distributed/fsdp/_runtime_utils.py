@@ -17,6 +17,8 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torch.distributed import get_world_size, ProcessGroup
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
@@ -202,16 +204,10 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
-# QQ: this utils should probably not sit here.
-# Where should this live?
-from torch.distributed import ProcessGroup, get_world_size
-from torch.distributed._tensor import DeviceMesh
 def _init_device_mesh(
     pg: ProcessGroup,
 ) -> DeviceMesh:
     world_size = get_world_size(pg)
-    # device_type of DeviceMesh currently supports cpu and cuda.
-    # QQ: Should we be inferrring device_type from compute_device?
     device_mesh = DeviceMesh("cuda", torch.arange(world_size))
     return device_mesh
 
@@ -275,7 +271,6 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
         fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
-        # QQ: Not sure how to add a test for this. Any suggestion?
         fsdp_state._device_mesh = root_state._device_mesh
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
