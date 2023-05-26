@@ -7,7 +7,7 @@ import sympy
 import torch
 import torch._dynamo
 import torch.fx
-from .graph_module import (
+from .exported_program import (
     CallSpec,
     ExportedProgram,
     ExportGraphSignature,
