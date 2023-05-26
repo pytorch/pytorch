@@ -12,25 +12,14 @@ def get_aten_target(node):
     return node.target
 
 
-rand_ops = [aten.dropout, aten._fused_dropout, aten._standard_gamma,
-            aten.bernoulli, aten.multinomial, aten.native_dropout,
-            aten.normal, aten.poisson, aten.binomial, aten.rrelu,
-            aten.rand_like, aten.rand, aten.randint, aten.randn, aten.randperm]
-
-
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph, recomputable_ops):
     new_graph = fx.Graph()
     env = {}  # map from node in the old graph to node in the new graph
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
     for n in fx_g.nodes:
-        # The placeholder, output, and get_attr nodes are copied to the new grpah without change
-        # do not CSE away random operations
-        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
-            new_node = new_graph.node_copy(n, lambda x: env[x])
-            env[n] = new_node
-        else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
+        if get_aten_target(n) in recomputable_ops:
             # substitute args and kwargs memebrs to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
             def substitute(arg_list):
@@ -63,7 +52,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             if not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node
                 token_map[hash_val] = token
-
+        else:
+            new_node = new_graph.node_copy(n, lambda x: env[x])
+            env[n] = new_node
     return new_graph
 
 
