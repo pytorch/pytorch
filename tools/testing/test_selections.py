@@ -1,3 +1,4 @@
+import heapq
 import json
 import math
 import os
@@ -195,6 +196,60 @@ def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
     return valid_tests
 
 
+class PoolTimes:
+    def __init__(self, num_procs):
+        self.pool_times = [0.0 for _ in range(num_procs)]
+
+    def next_test_start_time(self):
+        return self.pool_times[0]
+
+    def schedule_test(self, test):
+        # pool_times[0] is always the thread with the least amount of time scheduled
+        heapq.heappushpop(self.pool_times, self.pool_times[0] + test.get_time())
+
+
+def _get_scheduled_prioritized_tests(
+    tests: List[ShardedTest],
+    prioritized_tests: Set[str],
+    num_procs: int = NUM_PROCS,  # make this customizable for testing
+) -> Tuple[List[ShardedTest], List[ShardedTest]]:
+    bring_to_front = []
+    the_rest = []
+
+    # As we iterate through the tests, we keep track of the total time for the
+    # regular tests. The tests will be run in num_procs parallel pools, so we
+    # do the math assuming the each test is allocated to the least busy pool.
+    # This isn't an exact match (since other factors could affect what test gets
+    # scheduled on which thread pool) but it's a good approximation.
+
+    # Track how long the tests scheduled so far are expected to take. Used to calculate time savings
+    prioritized_pool = PoolTimes(num_procs)
+    default_pool = PoolTimes(num_procs)
+
+    # How much sooner did we run prioritized tests compared to a naive ordering
+    time_savings_sec = 0.0
+
+    for test in tests:
+        if test.name in prioritized_tests:
+            bring_to_front.append(test)
+            # Calculate approx time saved by reordering
+            # Time savings = When this would have been scheduled - When it'll actually be scheduled
+            time_savings_sec = (
+                default_pool.next_test_start_time()
+                - prioritized_pool.next_test_start_time()
+            )
+
+            # "schedule" this test on the prioritized pool to get time savings for future prioritized tests
+            prioritized_pool.schedule_test(test)
+        else:
+            the_rest.append(test)
+
+        # always schedule on the default pool to get know what the unprioritized timeline would've looked like
+        default_pool.schedule_test(test)
+
+    return (bring_to_front, the_rest, time_savings_sec)
+
+
 def get_reordered_tests(
     tests: List[ShardedTest],
 ) -> Tuple[List[ShardedTest], List[ShardedTest]]:
@@ -225,21 +280,9 @@ def get_reordered_tests(
     )
     prioritized_tests |= pri_test
 
-    bring_to_front = []
-    the_rest = []
-
-    test_time_for_regular_tests_so_far = 0.0
-    # how much sooner did we run prioritized tests compared to a naive ordering
-    time_savings_sec = 0.0
-
-    for test in tests:
-        if test.name in prioritized_tests:
-            bring_to_front.append(test)
-            # Calculate approx time saved by reordering
-            time_savings_sec = test_time_for_regular_tests_so_far
-        else:
-            the_rest.append(test)
-            test_time_for_regular_tests_so_far += test.get_time()
+    bring_to_front, the_rest, time_savings_sec = _get_scheduled_prioritized_tests(
+        tests, prioritized_tests, NUM_PROCS
+    )
 
     if len(tests) != len(bring_to_front) + len(the_rest):
         print(

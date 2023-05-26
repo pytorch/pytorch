@@ -14,6 +14,7 @@ try:
     sys.path.append(str(REPO_ROOT))
     from tools.testing.test_selections import (
         _get_previously_failing_tests,
+        _get_scheduled_prioritized_tests,
         calculate_shards,
         get_reordered_tests,
         ShardedTest,
@@ -411,6 +412,74 @@ class TestParsePrevTests(unittest.TestCase):
 
         self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
         self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
+
+    def test_compute_prioritization_time_savings_with_multiple_threads(self):
+        tests = [
+            ShardedTest(name="test1", shard=1, num_shards=2, time=7.0),
+            ShardedTest(name="test2", shard=1, num_shards=2, time=5.0),
+            ShardedTest(name="test3", shard=1, num_shards=2, time=4.0),
+            ShardedTest(name="test4", shard=1, num_shards=2, time=3.0),
+            ShardedTest(name="test5", shard=1, num_shards=2, time=2.0),
+            ShardedTest(name="test6", shard=1, num_shards=2, time=1.0),
+            # ShardedTest(name="test7", shard=1, num_shards=2, time=3.0),
+            # ShardedTest(name="test8", shard=1, num_shards=2, time=5.0),
+            # ShardedTest(name="test9", shard=1, num_shards=2, time=3.0),
+        ]
+
+        prioritized_tests = ("test4", "test5", "test8")
+        expected_time_savings = 9.0
+
+        _, _, time_savings = _get_scheduled_prioritized_tests(
+            tests, prioritized_tests, num_procs=2
+        )
+        self.assertEqual(
+            time_savings, expected_time_savings, "Received an unexpected time savings"
+        )
+        pass
+
+    def test_compute_prioritization_time_savings_with_multiple_threads_and_many_prioritized_tests(
+        self,
+    ):
+        tests = [
+            ShardedTest(name="test1", shard=1, num_shards=2, time=4.0),
+            ShardedTest(name="test2", shard=1, num_shards=2, time=3.0),
+            ShardedTest(name="test3", shard=1, num_shards=2, time=2.0),
+            ShardedTest(name="test4", shard=1, num_shards=2, time=3.0),
+            ShardedTest(name="test5", shard=1, num_shards=2, time=4.0),
+            ShardedTest(name="test6", shard=1, num_shards=2, time=3.0),
+            ShardedTest(name="test7", shard=1, num_shards=2, time=5.0),
+        ]
+        prioritized_tests = ("test3", "test4", "test7")
+
+        # Drawing out the math here since this is the most complicated example
+
+        # Logic for original execution assuming 2 procs
+        # Test  | Proc 1 | Proc 2
+        # test1 |   4    |
+        # test2 |        |   3
+        # test3 |        |   2
+        # test4 |   3    |
+        # test5 |        |   4
+        # test6 |   3    |
+        # test7 |        |   5   <- starts at time 9 ( 3 + 2 + 4)
+
+        # Logic for new execution's prioritized pool:
+        # Test  | Proc 1 | Proc 2
+        # test3 |   2    |
+        # test4 |        |   3
+        # test7 |   5    |       <- now starts at time 2
+
+        # Time savings = 9 - 2 = 7
+
+        expected_time_savings = 7.0
+
+        _, _, time_savings = _get_scheduled_prioritized_tests(
+            tests, prioritized_tests, num_procs=2
+        )
+        self.assertEqual(
+            time_savings, expected_time_savings, "Received an unexpected time savings"
+        )
+        pass
 
 
 if __name__ == "__main__":
