@@ -19,7 +19,7 @@ rand_ops = [aten.dropout, aten._fused_dropout, aten._standard_gamma,
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph, unrecomputable_ops):
     new_graph = fx.Graph()
     env = {}  # map from node in the old graph to node in the new graph
     hash_env = {}  # map from hash to a node in the new graph
@@ -27,7 +27,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new grpah without change
         # do not CSE away random operations
-        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
+        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops or get_aten_target(n) in unrecomputable_ops:
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
