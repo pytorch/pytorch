@@ -89,8 +89,12 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
 
 
 def _is_primal(node):
-    return node.op == "placeholder" and "tangents" not in node.target and not _is_bwd_seed_offset(node)
-
+    return (
+        node.op == "placeholder"
+        and "tangents" not in node.target
+        and not _is_bwd_seed_offset(node)
+        and not _is_fwd_seed_offset(node)
+    )
 
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
@@ -98,6 +102,9 @@ def _is_tangent(node):
 
 def _is_bwd_seed_offset(node):
     return node.op == "placeholder" and ("bwd_seed" in node.target or "bwd_base_offset" in node.target)
+
+def _is_fwd_seed_offset(node):
+    return node.op == "placeholder" and ("fwd_seed" in node.target or "fwd_base_offset" in node.target)
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
@@ -111,14 +118,20 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
 
     # Construct the forward module
     # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
-    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
+    fwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes
+    )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        bwd_seed_offset_inputs + saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs
     )
 
     # This is to filter out saved values that don't actually end up being used by the backwards pass
@@ -176,10 +189,15 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
+    fwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes
+    )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        bwd_seed_offset_inputs + saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs
     )
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
@@ -214,8 +232,10 @@ def default_partition(
         Returns the generated forward and backward Fx graph modules.
     """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    inputs = primal_inputs + fwd_seed_offset_inputs
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+    forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
     saved_sym_nodes = []
@@ -397,9 +417,11 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+        fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+        inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
         required_bw_nodes.update(o for o in bwd_outputs if o is not None)
-        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
@@ -542,7 +564,7 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
             continue
 
-        if _is_primal(node):
+        if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
         # If a node can't be recomputed (too expensive or involves randomness),
