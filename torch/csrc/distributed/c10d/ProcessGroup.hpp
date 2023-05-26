@@ -55,14 +55,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   struct TORCH_API Options : torch::CustomClassHolder {
     explicit Options(
         std::string backend,
-        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout)
-        : timeout(timeout), backend(std::move(backend)) {}
+        std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        bool init_barrier = true)
+        : timeout(timeout), backend(std::move(backend)), init_barrier(init_barrier) {}
     ~Options() override = default;
 
     std::chrono::milliseconds timeout;
 
     // backend name
     const std::string backend;
+
+    // Whether to barrier during process group initialization.
+    bool init_barrier;
   };
 
   enum BackendType {

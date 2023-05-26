@@ -1116,7 +1116,11 @@ def init_process_group(
     _backend = _world.pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
-    if _is_barrier_after_init() == 1:
+    # environ override the pg option for init barrier
+    if _is_barrier_after_init() == 0:
+        default_pg.options._init_barrier = False
+
+    if default_pg.options._init_barrier:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.
@@ -1192,6 +1196,7 @@ def _new_process_group_helper(
     prefix_store = PrefixStore(f"{group_name}/", store)
     base_pg_options = ProcessGroup.Options(backend=str(backend))
     base_pg_options._timeout = timeout
+    base_pg_options._init_barrier = pg_options._init_barrier if pg_options else True
     pg: ProcessGroup = ProcessGroup(prefix_store, group_rank, group_size, base_pg_options)
     backend_config = BackendConfig(backend)
     for device, backend_str in backend_config.get_device_backend_map().items():
@@ -3896,7 +3901,11 @@ def _new_group_with_tag(
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
-    if _is_barrier_after_init() == 1:
+    # environ override the pg option for init barrier
+    if _is_barrier_after_init() == 0:
+        pg.options._init_barrier = False
+
+    if pg.options._init_barrier:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.

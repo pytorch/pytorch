@@ -1676,14 +1676,18 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def(
               py::init([](const std::string& backend,
-                          const std::chrono::milliseconds& timeout) {
+                          const std::chrono::milliseconds& timeout,
+                          bool init_barrier) {
                 return c10::make_intrusive<::c10d::ProcessGroup::Options>(
-                    backend, timeout);
+                    backend, timeout, init_barrier);
               }),
               py::arg("backend"),
               py::arg("timeout") = kProcessGroupDefaultTimeout,
+              py::arg("init_barrier") = true,
               py::call_guard<py::gil_scoped_release>())
           .def_readonly("backend", &::c10d::ProcessGroup::Options::backend)
+          .def_readwrite(
+              "_init_barrier", &::c10d::ProcessGroup::Options::init_barrier)
           .def_readwrite("_timeout", &::c10d::ProcessGroup::Options::timeout);
 
 #ifndef _WIN32

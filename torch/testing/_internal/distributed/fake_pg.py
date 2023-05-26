@@ -1,4 +1,3 @@
-import os
 
 import torch.distributed as dist
 
@@ -7,6 +6,7 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     BarrierOptions,
+    ProcessGroup,
     ReduceScatterOptions
 )
 from torch.futures import Future
@@ -29,8 +29,8 @@ class FakeProcessGroup(dist.ProcessGroup):
     for every collective. It should be used as a convinient tool when playing
     with distributed but don't care about the actual data.
     """
-    def __init__(self, rank, world_size):
-        super().__init__(rank, world_size)
+    def __init__(self, prefix_store, rank, world_size, pg_options):
+        super().__init__(prefix_store, rank, world_size, pg_options)
         self._rank = rank
         self._world_size = world_size
 
@@ -70,7 +70,9 @@ class FakeStore(dist.Store):
 def _create_fake_pg(prefix_store, rank, world_size, timeout):
     # disable barrier after init for fake pg, as it does not
     # need to sync with other processes/threads
-    os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
-    return FakeProcessGroup(rank, world_size)
+    fake_pg_options = ProcessGroup.Options(backend="fake")
+    fake_pg_options._init_barrier = False
+
+    return FakeProcessGroup(prefix_store, rank, world_size, fake_pg_options)
 
 dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])

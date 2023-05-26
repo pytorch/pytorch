@@ -26,6 +26,18 @@ class TestFakePG(TestCase):
         super().tearDown()
         dist.destroy_process_group()
 
+    def test_fake_pg_init(self):
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=1, world_size=4, store=store
+        )
+        self.assertEqual(dist.get_rank(), 1)
+        self.assertEqual(dist.get_world_size(), 4)
+
+        new_pg = dist.new_group(ranks=[1, 3])
+        self.assertEqual(dist.get_rank(new_pg), 0)
+        self.assertEqual(dist.get_world_size(new_pg), 2)
+
     def test_all_reduce(self):
         store = FakeStore()
         dist.init_process_group(
