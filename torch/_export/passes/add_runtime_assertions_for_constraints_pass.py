@@ -1,9 +1,9 @@
 import math
 import operator
-from collections import defaultdict, namedtuple
+from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import sympy
 
