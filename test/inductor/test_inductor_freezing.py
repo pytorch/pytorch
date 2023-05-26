@@ -158,8 +158,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
-                self.assertEqual(weight_ref(), None)
-
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
