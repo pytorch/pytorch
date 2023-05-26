@@ -90,6 +90,8 @@ def allow_in_graph(fn):
     - The function assumes that `fn` is a callable. If it is not, an assertion error is raised.
     """
 
+    return torch._dynamo.allow_in_graph(fn)
+
 
 def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
