@@ -35,14 +35,25 @@ def _create_rearrange_callable(
     left, right = parse_pattern(pattern, axes_lengths)
     validate_rearrange_expressions(left, right, axes_lengths)
 
+    n_anon_dims = sum(not dim for dim in left.composition)
     if left.has_ellipsis:
         n_ellipsis_dims = tensor_ndim - (len(left.composition) - 1)
         n_named_dims = len(left.identifiers) - 1
+
+        if (pattern_ndim := n_anon_dims + n_named_dims) > tensor_ndim:
+            raise ValueError(
+                f"Number of dimensions in pattern ({pattern_ndim}) must be less than or equal to the number of "
+                f"dimensions in the tensor ({tensor_ndim})"
+            )
     else:
         n_ellipsis_dims = 0
         n_named_dims = len(left.identifiers)
 
-    n_anon_dims = sum(not dim for dim in left.composition)
+        if (pattern_ndim := len(left.composition)) != tensor_ndim:
+            raise ValueError(
+                f"Number of dimensions in pattern ({pattern_ndim}) must be equal to the number of dimensions in "
+                f"the tensor ({tensor_ndim})"
+            )
     n_dims = n_named_dims + n_ellipsis_dims + n_anon_dims
 
     if n_dims == 0:

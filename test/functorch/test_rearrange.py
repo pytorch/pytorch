@@ -142,6 +142,19 @@ class TestRearrange(TestCase):
         actual = rearrange(x, '... -> ...')
         torch.testing.assert_close(actual, expected)
 
+    def test_dimension_mismatch_no_ellipsis(self) -> None:
+        x = torch.randn((1, 2, 3))
+        with self.assertRaises(ValueError):
+            rearrange(x, "a b -> b a")
+
+        with self.assertRaises(ValueError):
+            rearrange(x, "a b c d -> c d b a")
+
+    def test_dimension_mismatch_with_ellipsis(self) -> None:
+        x = torch.tensor(1)
+        with self.assertRaises(ValueError):
+            rearrange(x, "a ... -> ... a")
+
 
 if __name__ == '__main__':
     run_tests()
