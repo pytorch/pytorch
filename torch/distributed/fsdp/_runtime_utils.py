@@ -209,7 +209,7 @@ def _init_device_mesh(
 ) -> Optional[DeviceMesh]:
     # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
     # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
-    #       what DeviceMesh initilization currently would not work for:
+    #       what 1D DeviceMesh currently would not work for:
     #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
     if get_world_size(pg) != get_world_size():
         return None
