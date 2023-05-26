@@ -432,7 +432,6 @@ class GradScaler:
             found_infs = [found_inf.to(device=_scale.device, non_blocking=True)
                           for state in self._per_optimizer_states.values()
                           for found_inf in state["found_inf_per_device"].values()]
-
             assert len(found_infs) > 0, "No inf checks were recorded prior to update."
 
             found_inf_combined = found_infs[0]
