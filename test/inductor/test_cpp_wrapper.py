@@ -74,7 +74,7 @@ test_failures_cpp_wrapper = {
     ),
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
-    ),    
+    ),
 }
 
 
@@ -141,7 +141,7 @@ if RUN_CPU:
                 ["op_convolution_pointwise_binary_.call"],
                 ["op_convolution_pointwise_binary.call"],
             ],
-        ),        
+        ),
         BaseTest(
             "test_conv2d_unary",
             "cpu",

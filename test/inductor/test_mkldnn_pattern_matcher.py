@@ -345,7 +345,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 0, 0)
 
-    def test_conv2d_binary_inplace_fusion_pass(
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
     ):
         class Model(torch.nn.Module):
@@ -372,7 +372,7 @@ class TestPaternMatcher(TestCase):
 
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
         self, include_ops=None, exclude_ops=None
     ):
         # Written buffer is graph input, we can't fuse inplace.
