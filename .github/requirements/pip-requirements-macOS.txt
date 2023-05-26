@@ -2,7 +2,7 @@ boto3==1.19.12
 hypothesis==6.56.4
 expecttest==0.1.3
 librosa>=0.6.2
-mpmath==1.2.1
+mpmath==1.3.0
 networkx==2.8.7
 # Use numba-0.49.1 or older on Intel Macs, but 0.56.0 on M1 machines, as older numba is not available
 numba==0.56.0; platform_machine == "arm64"
