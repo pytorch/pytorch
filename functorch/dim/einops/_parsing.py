@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Iterable, List, Mapping, Optional, Set, Tuple, Union
 
 _ellipsis: str = "…"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
 
@@ -211,3 +211,6 @@ def validate_rearrange_expressions(
     unmatched_axes = axes_lengths.keys() - left.identifiers
     if len(unmatched_axes) > 0:
         raise ValueError(f"Identifiers not found in expression: {unmatched_axes}")
+
+def comma_sepparate(iterable: Iterable[Any]) -> str:
+    return ", ".join(str(item) for item in iterable)
