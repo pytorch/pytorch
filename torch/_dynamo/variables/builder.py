@@ -72,11 +72,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import (
-    CollectiveFunctionRewriteVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .functions import UserFunctionVariable, UserMethodVariable
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -451,13 +447,6 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
-        elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            return CollectiveFunctionRewriteVariable(
-                CollectiveFunctionRewriteVariable.rewrite(value),
-                orig_fn=value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
