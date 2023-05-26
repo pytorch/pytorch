@@ -43,6 +43,7 @@ try:
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
+        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
@@ -1579,6 +1580,8 @@ def main():
     remaining_tests = selected_tests
     if IS_CI:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        log_time_savings(selected_tests, prioritized_tests)
+
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 

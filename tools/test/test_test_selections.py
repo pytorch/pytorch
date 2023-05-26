@@ -14,9 +14,9 @@ try:
     sys.path.append(str(REPO_ROOT))
     from tools.testing.test_selections import (
         _get_previously_failing_tests,
-        _get_scheduled_prioritized_tests,
         calculate_shards,
         get_reordered_tests,
+        log_time_savings,
         ShardedTest,
         THRESHOLD,
     )
@@ -345,6 +345,10 @@ def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     return file_object
 
 
+def never_serial(test_name: str) -> bool:
+    return False
+
+
 class TestParsePrevTests(unittest.TestCase):
     @mock.patch("pathlib.Path.exists", return_value=False)
     def test_cache_does_not_exist(self, mock_exists: Any) -> None:
@@ -422,12 +426,14 @@ class TestParsePrevTests(unittest.TestCase):
             ShardedTest(name="test5", shard=1, num_shards=2, time=2.0),
             ShardedTest(name="test6", shard=1, num_shards=2, time=1.0),
         ]
+        prioritized_tests = [
+            test for test in tests if test.name in ["test4", "test5", "test8"]
+        ]
 
-        prioritized_tests = ("test4", "test5", "test8")
         expected_time_savings = 9.0
 
-        _, _, time_savings = _get_scheduled_prioritized_tests(
-            tests, prioritized_tests, num_procs=2
+        time_savings = log_time_savings(
+            tests, prioritized_tests, is_serial_test_fn=never_serial, num_procs=2
         )
         self.assertEqual(
             time_savings, expected_time_savings, "Received an unexpected time savings"
@@ -446,7 +452,9 @@ class TestParsePrevTests(unittest.TestCase):
             ShardedTest(name="test6", shard=1, num_shards=2, time=3.0),
             ShardedTest(name="test7", shard=1, num_shards=2, time=5.0),
         ]
-        prioritized_tests = ("test3", "test4", "test7")
+        prioritized_tests = [
+            test for test in tests if test.name in ["test2", "test3", "test7"]
+        ]
 
         # Drawing out the math here since this is a complicated example
 
@@ -470,8 +478,32 @@ class TestParsePrevTests(unittest.TestCase):
 
         expected_time_savings = 7.0
 
-        _, _, time_savings = _get_scheduled_prioritized_tests(
-            tests, prioritized_tests, num_procs=2
+        time_savings = log_time_savings(
+            tests, prioritized_tests, is_serial_test_fn=never_serial, num_procs=2
+        )
+        self.assertEqual(
+            time_savings, expected_time_savings, "Received an unexpected time savings"
+        )
+        pass
+
+    def test_compute_prioritization_time_savings_with_serialized_test(self):
+        tests = [
+            ShardedTest(name="test1", shard=1, num_shards=2, time=7.0),
+            ShardedTest(name="test2", shard=1, num_shards=2, time=5.0),
+            ShardedTest(name="test3", shard=1, num_shards=2, time=4.0),
+            ShardedTest(name="test4", shard=1, num_shards=2, time=3.0),
+            ShardedTest(name="test5", shard=1, num_shards=2, time=2.0),
+            ShardedTest(name="test6", shard=1, num_shards=2, time=1.0),
+        ]
+        prioritized_tests = [test for test in tests if test.name in ["test3", "test6"]]
+
+        def serialized(test: str) -> bool:
+            return test in ["test4", "test6"]
+
+        expected_time_savings = 8.0
+
+        time_savings = log_time_savings(
+            tests, prioritized_tests, is_serial_test_fn=serialized, num_procs=2
         )
         self.assertEqual(
             time_savings, expected_time_savings, "Received an unexpected time savings"
