@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import warnings
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
 import yaml
@@ -40,10 +40,20 @@ VALID_TEST_CONFIG_LABELS = {
     }
 }
 
-# Supported modes when running periodically
-SUPPORTED_PERIODICAL_MODES = {
-    "mem_leak_check",
-    "rerun_disabled_tests",
+
+def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
+    if not job_name:
+        return False
+
+    return "cuda" in job_name or "rocm" in job_name
+
+
+# Supported modes when running periodically. Only applying the mode when
+# its lambda condition returns true
+SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
+    # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
+    "mem_leak_check": is_cuda_or_rocm_job,
+    "rerun_disabled_tests": lambda job_name: True,
 }
 
 # The link to the published list of disabled jobs
@@ -159,7 +169,9 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
-def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+def set_periodic_modes(
+    test_matrix: Dict[str, List[Any]], job_name: Optional[str]
+) -> Dict[str, List[Any]]:
     """
     Apply all periodic modes when running under a schedule
     """
@@ -168,7 +180,10 @@ def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]
     }
 
     for config in test_matrix.get("include", []):
-        for mode in SUPPORTED_PERIODICAL_MODES:
+        for mode, cond in SUPPORTED_PERIODICAL_MODES.items():
+            if not cond(job_name):
+                continue
+
             cfg = config.copy()
             cfg[mode] = mode
             scheduled_test_matrix["include"].append(cfg)
@@ -374,7 +389,7 @@ def main() -> None:
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
         # we don't want to run the mem leack check or disabled tests on normal
         # periodically scheduled jobs, only the ones at this time
-        filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
