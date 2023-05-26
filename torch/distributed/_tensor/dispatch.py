@@ -17,10 +17,10 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.random import (
-    _get_rng_offset,
+    _set_pre_op_rng_state,
+    _set_post_op_rng_state,
+    get_rng_state,
     is_rng_supported_mesh,
-    set_post_op_offset,
-    set_pre_op_offset,
 )
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
@@ -227,6 +227,10 @@ def _operator_dispatch(
             redistribute_with_schema=needs_redistribute,
         )
 
+        # run local op computation with potentially modified args/kwargs
+        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
+        local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
+
         aten = torch.ops.aten
         random_ops = [
             aten.native_dropout.default,
@@ -237,18 +241,19 @@ def _operator_dispatch(
         # for random ops, set RNG offset
         assert isinstance(mesh, DeviceMesh)
         if op_call in random_ops and is_rng_supported_mesh(mesh):
-            dtensor_arg = arg_list[0]
-            old_offset = _get_rng_offset(mesh)
-            set_pre_op_offset(dtensor_arg._spec)
-
-        # run local op computation with potentially modified args/kwargs
-        local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
-        local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-
-        # if op is a random op, adjust Philox RNG state to maintain synchronization
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            set_post_op_offset(dtensor_arg._spec, old_offset)
+            # TODO: use the new RNG primitive???
+            devices = [torch.cuda.current_device()]
+            with torch.random.fork_rng(devices):
+                dtensor_arg = arg_list[0]
+                # set up offset before op call
+                seed, offset = get_rng_state(mesh)
+                _set_pre_op_rng_state(dtensor_arg._spec, seed, offset)
+                # random op call
+                local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+                # update offset after op call
+                _set_post_op_rng_state(dtensor_arg._spec, seed, offset)
+        else:
+            local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:

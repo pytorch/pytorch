@@ -8,7 +8,7 @@ from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 aten = torch.ops.aten
-random_ops = [
+random_init_ops = [
     aten.normal_.default,
     aten.uniform_.default,
 ]
@@ -54,5 +54,5 @@ def dropout_rule(op_schema: OpSchema) -> OutputSharding:
         return OutputSharding([self_spec, self_spec])
 
 
-for op in random_ops:
+for op in random_init_ops:
     _register_non_deterministic_op(op)

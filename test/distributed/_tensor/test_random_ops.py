@@ -10,7 +10,6 @@ from torch.distributed._tensor._utils import compute_local_offset
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
-    _get_rng_offset,
     get_rng_state,
     is_rng_supported_mesh,
     manual_seed,
@@ -45,9 +44,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
-            # initialize rng state
-            manual_seed(1234, device_mesh)
-
             # create DTensor from Tensor
             _tensor = torch.empty(*input_size, device="cuda")
             dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
@@ -85,47 +81,68 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
-    def check_rng_state(self, seed: int, offset: int, device_mesh: DeviceMesh) -> None:
-        state = get_rng_state(device_mesh)
-        seed_int64 = state[-16:-8].view(torch.int64)
-        offset_int64 = state[-8:].view(torch.int64)
-        self.assertEqual(seed_int64, torch.tensor([seed]))
-        self.assertEqual(offset_int64, torch.tensor([offset]))
-
     @with_comms
     @skip_unless_torch_gpu
     def test_device_mesh_init(self):
+        # TODO: make this check a wrap around each test case
+        # use a random tensor to simply verify the default RNG state is unchanged.
+        size = [4, 4]
+        torch.cuda.manual_seed(0)
+        local_tensor_1 = torch.randn(size, device="cuda")
+        torch.cuda.manual_seed(0)
+
         # device mesh init should sync seed and store it as an attribute
-        # However, we have not figured out how we want to use the seed, so
-        # temporarily device_mesh._seed will just equal to each rank's
-        # `initial_seed()`.
-        torch.cuda.manual_seed(self.rank)
-        object_list = [torch.cuda.initial_seed()]
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        seed, offset = get_rng_state(device_mesh)
+
+        # verify the default RNG state is unchanged.
+        local_tensor_2 = torch.randn(size, device="cuda")
+        self.assertEqual(local_tensor_1, local_tensor_2)
+
+        # verify the device mesh attributes
+        object_list = [seed]
         broadcast_object_list(object_list)
         seed_from_rank_0 = int(object_list[0])
-
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        # TODO: sync seed once we figure out how we want to use the seed
-        if self.rank != 0:
-            with self.assertRaises(AssertionError):
-                self.assertEqual(seed_from_rank_0, device_mesh._seed)
+        self.assertEqual(seed_from_rank_0, seed)
+        self.assertEqual(0, offset)
 
     @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed(self):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # use a random tensor to simply verify the default RNG state is unchanged.
+        size = [4, 4]
+        torch.cuda.manual_seed(0)
+        local_tensor_1 = torch.randn(size, device="cuda")
+        torch.cuda.manual_seed(0)
+
         manual_seed(1234, device_mesh)
+        seed, offset = get_rng_state(device_mesh)
+
+        # verify the default RNG state is unchanged.
+        local_tensor_2 = torch.randn(size, device="cuda")
+        self.assertEqual(local_tensor_1, local_tensor_2)
+
+        # verify the device mesh attributes
+        self.assertEqual(1234, seed)
+        self.assertEqual(0, offset)
+
+        # manual_seed requires identical seed argument on all calling ranks
         with self.assertRaisesRegex(RuntimeError, "different seed values"):
             manual_seed(self.rank, device_mesh)
 
     @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_dropout_1d(self):
+        # use a random tensor to simply verify the default RNG state is unchanged.
+        torch.cuda.manual_seed(0)
+        local_tensor_1 = torch.randn([4, 4], device="cuda")
+        torch.cuda.manual_seed(0)
+
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 1]
 
-        # initialize rng state
-        manual_seed(1234, device_mesh)
         _tensor = torch.empty(*size, device="cuda")
         dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
 
@@ -153,6 +170,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
 
+        # verify the default RNG state is unchanged.
+        local_tensor_2 = torch.randn([4, 4], device="cuda")
+        self.assertEqual(local_tensor_1, local_tensor_2)
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_deterministic_uniform_2d(self):
@@ -161,9 +182,6 @@ class DistTensorRandomOpTest(DTensorTestBase):
         _local_tensor = torch.empty(
             *[self.world_size for _ in mesh.size()], device="cuda"
         )
-        # initialize rng state
-        manual_seed(1234, device_mesh)
-        self.check_rng_state(1234, 0, device_mesh)
 
         placements_list = [  # this list of placements should be enough to cover
             [Shard(0), Shard(1)],
@@ -233,16 +251,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             local_shard_comb = itertools.product(*local_shard_list_on_dim)
 
-            # get rng offset for checking correctness
-            global_size = dtensor.numel()
-            old_offset = _get_rng_offset(device_mesh)
-            post_op_offset = old_offset + global_size
-
             # random op call
             dtensor.uniform_(0, 1)
-
-            # check rng offset is correctly synchroized after performing the op
-            self.check_rng_state(1234, post_op_offset, device_mesh)
 
             # the local shard
             local_tensor = dtensor.to_local()

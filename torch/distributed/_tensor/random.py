@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
 import warnings
-from typing import List
+from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -11,12 +11,13 @@ from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
-def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
+def set_rng_state(device_mesh: DeviceMesh, seed: int, offset: int) -> None:
     """Sets the random number generator state of the specified device mesh.
 
     Args:
-        new_state (:class:`torch.ByteTensor`): The desired state.
         device_mesh (:class:`DeviceMesh`): The device mesh to set the RNG state.
+        seed (int): The desired RNG seed.
+        offset (int): The desired RNG offset.
 
     Returns:
         None
@@ -24,43 +25,44 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
     .. warning::
         Current implementation only supports a GPU device mesh.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `set_rng_state` will not set its GPU device's generator state.
-    """
-    assert isinstance(
-        device_mesh, DeviceMesh
-    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
-
-    if device_mesh.get_coordinate() is not None:
-        # the current rank is in mesh
-        if device_mesh.device_type == "cuda":
-            torch.cuda.set_rng_state(new_state)
-        else:
-            raise NotImplementedError(
-                f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
-            )
-
-
-def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
-    """Returns the random number generator state of the calling rank as a
-    :class:`torch.ByteTensor` object.
-
-    Args:
-        device_mesh (:class:`DeviceMesh`): The device mesh to return the RNG state of.
-
-    Returns:
-        A :class:`torch.ByteTensor` object that contains the random number generator state.
-
-    .. warning::
-        Current implementation only supports a GPU device mesh.
-        If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `get_rng_state` still returns its GPU device's generator state.
+        `set_rng_state` will still set ``device_mesh``'s generator state.
     """
     assert isinstance(
         device_mesh, DeviceMesh
     ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
 
     if device_mesh.device_type == "cuda":
-        return torch.cuda.get_rng_state()
+        # the current rank is in mesh
+        if device_mesh.device_type == "cuda":
+            device_mesh._seed = seed
+            device_mesh._offset = offset
+        else:
+            raise NotImplementedError(
+                f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
+            )
+
+
+def get_rng_state(device_mesh: DeviceMesh) -> Tuple[int, int]:
+    """Returns the random number generator state (seed and offset) of ``device_mesh`` as a
+    :class:`Tuple`.
+
+    Args:
+        device_mesh (:class:`DeviceMesh`): The device mesh to return the RNG state of.
+
+    Returns:
+        A :class:`Tuple` that contains the random number generator state (seed and offset).
+
+    .. warning::
+        Current implementation only supports a GPU device mesh.
+        If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
+        `get_rng_state` still returns ``device_mesh``'s generator state.
+    """
+    assert isinstance(
+        device_mesh, DeviceMesh
+    ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
+
+    if device_mesh.device_type == "cuda":
+        return device_mesh._seed, device_mesh._offset
     else:
         raise NotImplementedError(
             f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
@@ -68,7 +70,8 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
 
 
 def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
-    """Sets the seed for generating random numbers for the calling rank.
+    """Sets the seed for generating random numbers stored in ``device_mesh``
+    for the calling rank.
 
     Args:
         seed (int): The desired seed.
@@ -82,7 +85,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
         default `ProcessGroup` even if some ranks may not be a part of the `device_mesh`,
         with the same `seed` value.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `manual_seed` will not set its GPU device's generator seed.
+        `manual_seed` will do nothing.
         Current implementation only supports a GPU device mesh.
     """
     assert isinstance(
@@ -102,14 +105,15 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
         if device_mesh.device_type == "cuda":
-            torch.cuda.manual_seed(seed)
+            device_mesh._seed = seed
+            device_mesh._offset = 0
         else:
             raise NotImplementedError(
                 f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
             )
 
 
-def set_pre_op_offset(spec: DTensorSpec) -> None:
+def _set_pre_op_rng_state(spec: DTensorSpec, seed: int, offset: int) -> None:
     """Set the starting RNG offset for current device's local shard before actual
     op execution. The pre_op_offset value should start from the current RNG offset
     and increment by the size of local shard until it reaches the size of the whole
@@ -119,6 +123,8 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
     Args:
         spec (:class:`DTensorSpec`): the spec of the DTensor object on which
             we prepare the offset for running random ops.
+        seed (int): The RNG seed before calling op.
+        offset (int): The RNG offset before calling op.
 
     Returns:
         None
@@ -158,7 +164,6 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
     """
     dtensor_shape = spec.shape
     mesh = spec.mesh
-    dim_map = spec.dim_map
 
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
@@ -191,19 +196,16 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
 
     local_size = math.prod(local_size_on_rank_0)
 
-    # get current RNG offset
-    current_offset = _get_rng_offset(mesh)
-
     # pytorch: offset must be multiple of 4
     # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
     offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-    _set_rng_offset(current_offset + offset_incr, mesh)
+    _set_device_rng_state(mesh, seed, offset + offset_incr)
 
 
-def set_post_op_offset(spec: DTensorSpec, old_offset: int) -> None:
+def _set_post_op_rng_state(spec: DTensorSpec, seed: int, offset: int) -> None:
     """Sets the RNG to a synchronized state after running the local random op. Every
-    rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
-    the offset before calling `set_pre_op_offset` i.e. the offset before running DTensor
+    rank should set its RNG offset to `offset + DTensor.numel()` where offset is
+    the offset before calling `_set_pre_op_rng_state` i.e. the offset before running DTensor
     random ops.
 
     Args:
@@ -219,29 +221,30 @@ def set_post_op_offset(spec: DTensorSpec, old_offset: int) -> None:
     # pytorch: offset must be multiple of 4
     # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
     numel = (numel + 3) // 4 * 4
-    _set_rng_offset(old_offset + numel, mesh)
+    set_rng_state(mesh, seed, offset + numel)
 
 
-def _get_rng_offset(device_mesh: DeviceMesh) -> int:
+def _get_device_rng_state(device_mesh: DeviceMesh) -> Tuple[int, int]:
     """Returns the random number generator state offset for the calling rank.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh to return the offset.
 
     Returns:
-        The calling rank's random number generator offset as an `int`.
+        A :class:`Tuple` of GPU device's RNG seed and offset.
 
     .. warning::
         Current implementation only supports a GPU device mesh.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `_get_rng_offset` still returns its GPU device's RNG offset.
+        `_get_device_rng_state` still returns its GPU device's RNG offset.
     """
     if device_mesh.device_type == "cuda":
         # source: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         # last sizeof(int64_t) bytes are the offset
-        state = get_rng_state(device_mesh)
+        state = torch.cuda.get_rng_state()
+        seed = state[-16:-8].view(torch.int64)
         offset = state[-8:].view(torch.int64)
-        return int(offset[0].item())
+        return int(seed[0].item()), int(offset[0].item())
     else:
         raise NotImplementedError(
             f"DTensor randomness only supports cuda device type, "
@@ -249,12 +252,13 @@ def _get_rng_offset(device_mesh: DeviceMesh) -> int:
         )
 
 
-def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
+def _set_device_rng_state(device_mesh: DeviceMesh, seed:int, offset: int) -> None:
     """Sets the random number generator state offset for the calling rank.
 
     Args:
-        new_offset (int): The desired random number generator state offset.
-        device_mesh (:class:`DeviceMesh`): The device mesh to set the offset.
+        device_mesh (:class:`DeviceMesh`): The device mesh to set the RNG state.
+        seed (int): The desired random number generator seed.
+        offset (int): The desired random number generator offset.
 
     Returns:
         None
@@ -264,7 +268,7 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
         Different offset values can be passed in on different ranks so that each rank
         can generate different random numbers in following rand calls.
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
-        `_set_rng_offset` will not set its GPU device's generator offset.
+        `_set_device_rng_state` will not set its GPU device's generator offset.
     """
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
@@ -274,10 +278,12 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
             # first 200 * sizeof(4120) bytes in tensor are 0xFF
             # next sizeof(uint64_t) bytes are the random seed
             # last sizeof(int64_t) bytes are the offset
-            state = get_rng_state(device_mesh)
-            offset = state[-8:].view(torch.int64)
-            offset[0] = new_offset
-            set_rng_state(state, device_mesh)
+            state = torch.cuda.get_rng_state()
+            _seed = state[-16:-8].view(torch.int64)
+            _offset = state[-8:].view(torch.int64)
+            _seed[0] = seed
+            _offset[0] = offset
+            torch.cuda.set_rng_state(state)
         else:
             raise NotImplementedError(
                 f"DTensor randomness only supports cuda device type, "
