@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import functools
 
-import operator
 import itertools
 from typing import Callable, Dict, List, Optional, Set, Any
 
@@ -553,14 +552,14 @@ class QNNPackQuantizer(Quantizer):
             for n in maxpool_partition.nodes:
                 if n.target == torch.ops.aten.max_pool2d_with_indices.default:
                     maxpool_node = n
-            if _is_annotated([output_node, maxpool_node]):
+            if _is_annotated([output_node, maxpool_node]):  # type: ignore[list-item]
                 continue
 
-            input_act = maxpool_node.args[0]
+            input_act = maxpool_node.args[0]  # type: ignore[union-attr]
             assert isinstance(input_act, Node)
 
             act_qspec = get_act_qspec(quantization_config)
-            maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(  # type: ignore[union-attr]
                 input_qspec_map={
                     input_act: act_qspec,
                 },
