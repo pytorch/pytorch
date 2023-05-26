@@ -279,11 +279,11 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_conv2d_relu(model, config)
         self._annotate_conv2d(model, config)
         self._annotate_maxpool2d(model, config)
+        self._annotate_add_relu(model, config)
+        self._annotate_add(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
-            self._annotate_add_relu(node, config)
-            self._annotate_add(node, config)
             self._annotate_hardtanh(node, config)
             self._annotate_mean(node, config)
             self._annotate_adaptive_avg_pool2d(node, config)
@@ -625,72 +625,71 @@ class QNNPackQuantizer(Quantizer):
         )
 
     def _annotate_add_relu(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        if node.op != "call_function" or node.target not in [
-            torch.ops.aten.relu_.default,
-            torch.ops.aten.relu.default,
-        ]:
-            return
-        relu_node = node
-        add_node = relu_node.args[0]
-        assert isinstance(add_node, Node)
-        if add_node.op != "call_function" or add_node.target not in [
-            torch.ops.aten.add.Tensor,
-            torch.ops.aten.add_.Tensor,
-        ]:
-            return
-        if _is_annotated([relu_node, add_node]):
-            return
-
-        act_qspec = get_act_qspec(quantization_config)
-
-        input_qspec_map = {}
-        input_act0 = add_node.args[0]
-        if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = act_qspec
-
-        input_act1 = add_node.args[1]
-        if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = act_qspec
-
-        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            _annotated=True,
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.add, torch.nn.ReLU]
         )
-        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_qspec,
-            _annotated=True,
-        )
+        for fused_partition in fused_partitions:
+            add_partition, relu_partition = fused_partition
+            if len(relu_partition.output_nodes) > 1:
+                raise ValueError("Relu partition has more than one output node")
+            relu_node = relu_partition.output_nodes[0]
+            if len(add_partition.output_nodes) > 1:
+                raise ValueError("add partition has more than one output node")
+            add_node = add_partition.output_nodes[0]
+
+            if _is_annotated([relu_node, add_node]):
+               continue
+
+            act_qspec = get_act_qspec(quantization_config)
+
+            input_qspec_map = {}
+            input_act0 = add_node.args[0]
+            if isinstance(input_act0, Node):
+                input_qspec_map[input_act0] = act_qspec
+
+            input_act1 = add_node.args[1]
+            if isinstance(input_act1, Node):
+                input_qspec_map[input_act1] = act_qspec
+
+            add_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True,
+            )
+            relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
 
     def _annotate_add(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        add_node = node
-        if add_node.op != "call_function" or add_node.target not in [
-            torch.ops.aten.add.Tensor,
-            torch.ops.aten.add_.Tensor,
-        ]:
-            return
-        if _is_annotated([add_node]):
-            return
-
-        act_qspec = get_act_qspec(quantization_config)
-
-        input_qspec_map = {}
-        input_act0 = add_node.args[0]
-        if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = act_qspec
-
-        input_act1 = add_node.args[1]
-        if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = act_qspec
-
-        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            output_qspec=act_qspec,
-            _annotated=True,
+        add_partitions = get_source_partitions(
+            gm.graph, [operator.add, torch.add]
         )
+        add_partitions = list(itertools.chain(*add_partitions.values()))
+        for add_partition in add_partitions:
+            add_node = add_partition.output_nodes[0]
+            if _is_annotated([add_node]):
+                continue
+
+            act_qspec = get_act_qspec(quantization_config)
+
+            input_qspec_map = {}
+            input_act0 = add_node.args[0]
+            if isinstance(input_act0, Node):
+                input_qspec_map[input_act0] = act_qspec
+
+            input_act1 = add_node.args[1]
+            if isinstance(input_act1, Node):
+                input_qspec_map[input_act1] = act_qspec
+
+            add_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                output_qspec=act_qspec,
+                _annotated=True,
+            )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
