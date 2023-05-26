@@ -460,7 +460,7 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
                 stmt = line.split(".load")[-1]
             elif "tl.store" in line:
                 stmt = line.split(".store")[-1]
-                stmt = ",".join(stmt.split(",")[:-2]) # Remove store value and mask
+                stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
             elif ".store" in line:
                 stmt = line.split(".store")[-1]
             elif "[" in line:
@@ -722,9 +722,7 @@ class CommonTemplate:
             return x[i // n]
 
         x = torch.randn(8, device=self.device)
-        repeat_interleave_opt = torch._dynamo.optimize("inductor")(
-            repeat_interleave
-        )
+        repeat_interleave_opt = torch._dynamo.optimize("inductor")(repeat_interleave)
         # this should be collapsed to direct indexing
         actual = _run_and_assert_no_indirect_indexing(self, repeat_interleave_opt, x, 3)
         expect = torch.repeat_interleave(x, 3)
