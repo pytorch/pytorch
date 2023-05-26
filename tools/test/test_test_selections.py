@@ -421,9 +421,6 @@ class TestParsePrevTests(unittest.TestCase):
             ShardedTest(name="test4", shard=1, num_shards=2, time=3.0),
             ShardedTest(name="test5", shard=1, num_shards=2, time=2.0),
             ShardedTest(name="test6", shard=1, num_shards=2, time=1.0),
-            # ShardedTest(name="test7", shard=1, num_shards=2, time=3.0),
-            # ShardedTest(name="test8", shard=1, num_shards=2, time=5.0),
-            # ShardedTest(name="test9", shard=1, num_shards=2, time=3.0),
         ]
 
         prioritized_tests = ("test4", "test5", "test8")
@@ -451,7 +448,7 @@ class TestParsePrevTests(unittest.TestCase):
         ]
         prioritized_tests = ("test3", "test4", "test7")
 
-        # Drawing out the math here since this is the most complicated example
+        # Drawing out the math here since this is a complicated example
 
         # Logic for original execution assuming 2 procs
         # Test  | Proc 1 | Proc 2
