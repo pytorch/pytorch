@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 import warnings
+from collections import defaultdict
 from collections.abc import Iterable
 from typing import List, Optional, Tuple
 
@@ -56,6 +57,7 @@ aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
+foreach_ops = set()
 
 
 def add_needs_realized_inputs(fn):
@@ -156,6 +158,81 @@ def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KI
     return dtype
 
 
+def get_overloads(aten_fn):
+    if not isinstance(aten_fn, (list, tuple)):
+        aten_fn = [aten_fn]
+    else:
+        aten_fn = list(aten_fn)
+
+    for fn in list(aten_fn):
+        if isinstance(fn, torch._ops.OpOverloadPacket):
+            for overload in fn.overloads():
+                other_fn = getattr(fn, overload)
+                if other_fn not in lowerings:
+                    aten_fn.append(other_fn)
+
+    return aten_fn
+
+
+def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
+    indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
+    if (type_promotion_kind or convert_input_to_bool) and indices:
+        if convert_input_to_bool:
+            dtype = torch.bool
+        else:
+            # FIXME that's a crude approximation for promoting args
+            promoting_args = [
+                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+            ]
+            dtype = get_promoted_dtype(
+                *promoting_args, type_promotion_kind=type_promotion_kind
+            )
+        # sometimes args are an immutable list so we can't mutate them
+        new_args = []
+        for i in range(len(args)):
+            if i in indices:
+                new_args.append(to_dtype(args[i], dtype))
+            elif isinstance(args[i], ir.Constant):
+                new_args.append(
+                    ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
+                )
+            else:
+                new_args.append(args[i])
+        args = new_args
+    if broadcast and indices:
+        for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
+            args[i] = x
+        for i in range(len(args)):
+            if isinstance(args[i], ir.Constant):
+                args[i] = ExpandView.create(args[i], list(args[indices[0]].get_size()))
+
+    return args
+
+
+def _register_foreach_lowering(aten_fn, decomp_fn):
+    """
+    Add a foreach lowering to lowerings dict.
+
+    Arguments:
+        aten_fn: torch.ops.aten.* fn we are lowering
+        decomp_fn: alternate implementation on our IR
+        broadcast: True to apply broadcasting to tensor inputs
+        type_promotion_kind: kind of type promotion applied to tensor inputs, `None` means no type promotion
+        convert_input_to_bool: some logical ops require inputs are converted to bool
+    """
+
+    @functools.wraps(decomp_fn)
+    def wrapped(*args, **kwargs):
+        assert len(args) == 2
+        out = decomp_fn(*args, **kwargs)
+        validate_ir(out)
+        return out
+
+    aten_fns = get_overloads(aten_fn)
+    lowerings.update({fn: wrapped for fn in aten_fns})
+    return wrapped
+
+
 def _register_lowering(
     aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
 ):
@@ -178,8 +255,6 @@ def _register_lowering(
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             unpacked = True
             args = args[0]
-        # Only look at args that are Tensors
-        indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
 
         # explicitly assert for "out=" ops for better error messages
         assert not any(
@@ -190,56 +265,19 @@ def _register_lowering(
             fn in fallbacks for fn in aten_fn
         )
 
-        if (type_promotion_kind or convert_input_to_bool) and indices:
-            if convert_input_to_bool:
-                dtype = torch.bool
-            else:
-                # FIXME that's a crude approximation for promoting args
-                promoting_args = [
-                    a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
-                ]
-                dtype = get_promoted_dtype(
-                    *promoting_args, type_promotion_kind=type_promotion_kind
-                )
-            # sometimes args are an immutable list so we can't mutate them
-            new_args = []
-            for i in range(len(args)):
-                if i in indices:
-                    new_args.append(to_dtype(args[i], dtype))
-                elif isinstance(args[i], ir.Constant):
-                    new_args.append(
-                        ir.Constant(args[i].value, dtype, args[indices[0]].get_device())
-                    )
-                else:
-                    new_args.append(args[i])
-            args = new_args
+        args = transform_args(
+            args, broadcast, type_promotion_kind, convert_input_to_bool
+        )
+
         if unpacked:
             args = [args]
-        if broadcast and indices:
-            for i, x in zip(indices, broadcast_tensors(*[args[i] for i in indices])):
-                args[i] = x
-            for i in range(len(args)):
-                if isinstance(args[i], ir.Constant):
-                    args[i] = ExpandView.create(
-                        args[i], list(args[indices[0]].get_size())
-                    )
 
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
 
         return out
 
-    if not isinstance(aten_fn, (list, tuple)):
-        aten_fn = [aten_fn]
-    else:
-        aten_fn = list(aten_fn)
-
-    for fn in list(aten_fn):
-        if isinstance(fn, torch._ops.OpOverloadPacket):
-            for overload in fn.overloads():
-                other_fn = getattr(fn, overload)
-                if other_fn not in lowerings:
-                    aten_fn.append(other_fn)
+    aten_fn = get_overloads(aten_fn)
 
     lowerings.update({fn: wrapped for fn in aten_fn})
     return wrapped
@@ -375,6 +413,52 @@ def make_pointwise(
     return inner
 
 
+def make_foreach_pointwise(aten_fn, pw_fn):
+    def inner(*inputs: List[List[TensorBox]], alpha=1):
+        def is_dynamic(t):
+            return any(x.free_symbols for x in t.data.get_size())
+
+        # group by device, whether any of the inputs are dynamic, and whether their types match
+        # (proxy for type promotion)
+        # Note: we'll fallback on type promotion until
+        # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
+        # is in the pytorch triton version
+        def group_args(tensor_pairs):
+            out = defaultdict(list)
+            for i, (l, r) in enumerate(tensor_pairs):
+                assert l.get_device() == r.get_device()
+                use_foreach = not (
+                    is_dynamic(l)
+                    or is_dynamic(r)
+                    or l.data.get_dtype() != r.data.get_dtype()
+                )
+                out[(l.get_device(), use_foreach)].append((i, l, r))
+            return out
+
+        groups = group_args(zip(*inputs))
+        outputs = [None] * len(inputs[0])
+        for (device, use_foreach), group in groups.items():
+            buffer_list = []
+            for output_ind, left, right in group:
+                if device.type == "cuda" and use_foreach:
+                    left.realize()
+                    right.realize()
+
+                output = pw_fn(left, right, alpha=alpha)
+                outputs[output_ind] = output
+
+                if device.type == "cuda" and use_foreach:
+                    buffer_list.append(output.realize())
+
+            if buffer_list:
+                V.graph.register_list(buffer_list)
+
+        assert all(x is not None for x in outputs)
+        return outputs
+
+    return inner
+
+
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:
@@ -442,6 +526,15 @@ def register_pointwise(
             type_promotion_kind=None,
             convert_input_to_bool=convert_input_to_bool,
         )(fn)
+    return fn
+
+
+def register_foreach_pointwise(
+    aten_fn,
+    pointwise_lowering_fn,
+):
+    fn = make_foreach_pointwise(aten_fn, pointwise_lowering_fn)
+    fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
 
@@ -4014,6 +4107,8 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
+
+register_foreach_pointwise(aten._foreach_add.List, add)
 
 
 def register_inplace(aten_op, outplace_op):
