@@ -702,6 +702,11 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)
+        elif self.value is collections.deque and not kwargs and len(args) == 1:
+            items = args[0].items
+            return variables.lists.DequeVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
