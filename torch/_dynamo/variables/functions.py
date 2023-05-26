@@ -574,5 +574,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         if kwargs.get("async_op", False):
-            unimplemented(f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}")
+            unimplemented(
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+            )
         return super().call_function(tx, args, kwargs)

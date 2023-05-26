@@ -510,3 +510,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(
             key, self
         )
+
+
+class ProcessGroupVariable(UserDefinedObjectVariable):
+    """
+    We don't want a ProcessGroup object to end up in our output graph.
+
+    But it's common for dynamo to intercept a PG that is then used to get info like
+    rank() or world_size(), as well as passed to utility functions in distributed_c10d
+    which desugar it into plain types like a ranklist and tag.
+
+    For convenience and proper guarding, we construct a variable type.
+
+    TODO: implement+test common/safe methods such as get_rank
+    TODO: make it possible to use ProcessGroupVariable as input to simple functions
+          like _expand_group without dynamo complaining about making a proxy for it.
+          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
+          torch library functions are dealing with tensor-like types and would have proxies
+          for their args.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def as_python_constant(self):
+        return self.value

@@ -111,7 +111,11 @@ from .torch import (
     TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    ProcessGroupVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -573,6 +577,12 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif istype(value, torch._C._distributed_c10d.ProcessGroup):
+            return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
