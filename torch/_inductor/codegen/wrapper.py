@@ -897,6 +897,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
+            self.wrapper_call.splice(
+                """
+                c10::optional<at::Scalar> optional_scalar;
+                c10::optional<c10::string_view> optional_string;
+                torch::List<c10::optional<at::Scalar>> optional_list;
+                """
+            )
+
     def generate(self):
         self.write_wrapper_decl()
         return super().generate()
