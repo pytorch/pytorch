@@ -219,7 +219,9 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            assert self.reused_as.get_name() in V.graph.removed_buffers
+            return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 

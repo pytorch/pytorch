@@ -25,7 +25,7 @@ import torch._dynamo
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
-from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
+from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -6041,7 +6041,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.int64,
                 torch.int64,
                 "argmin",
                 get_index,
@@ -6054,7 +6054,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.bool,
                 torch.bool,
                 "any",
                 get_index,
@@ -6087,7 +6087,7 @@ class CommonTemplate:
                 bitwise_not,
             ),
         )
-        _data_type_propagation(_graph)
+        DataTypePropagation.propagate_graph(_graph)
 
         def get_data_type(node: torch.fx.Node):
             if OptimizationContext.key in node.meta:
