@@ -918,6 +918,72 @@ class TestForeach(TestCase):
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
     )
+    def test_outplace_forward_mode_AD(self, device, dtype, op):
+        if not op.supports_forward_ad:
+            self.skipTest("forward AD not supported")
+        if op.name == "_foreach_zero":
+            self.skipTest("`_foreach_zero` not implemented")
+
+        def check_sample_eligibility(op, sample, dtype):
+            if op.name == "_foreach_sub" and (
+                # ScalarList having a bool or Scalar of bool
+                (
+                    isinstance(sample.args[0], list)
+                    and any(isinstance(a, bool) for a in sample.args[0])
+                ) or isinstance(sample.args[0], bool)
+            ):
+                return False, _BOOL_SUB_ERR_MSG
+            rhs_arg_has_complex_number = sample.args and ((
+                isinstance(sample.args[0], list)
+                and any(isinstance(a, complex) for a in sample.args[0])
+            ) or (
+                isinstance(sample.args[0], complex)
+            ))
+            if op.name in ("_foreach_clamp_max", "_foreach_clamp_min") and rhs_arg_has_complex_number:
+                return False, "clamp is not supported for complex types"
+
+            return True, ""
+
+        for sample in op.sample_inputs(
+            device, dtype, requires_grad=True, num_input_tenosrs=[5], same_size=True,
+        ):
+            # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
+            if op.name == "_foreach_pow" and isinstance(sample.input, Number):
+                continue
+
+            def func(*tensorlist):
+                kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
+                return op.method_variant(tensorlist, *sample.args, **kwargs)
+
+            working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
+            if not working_sample:
+                with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
+                    gradcheck(
+                        func,
+                        sample.input,
+                        raise_exception=True,
+                        check_forward_ad=True,
+                        check_batched_forward_grad=False,
+                        check_backward_ad=False,
+                        check_batched_grad=False,
+                    )
+            else:
+                # FIXME(crcrpar):
+                # float64: acos, asin, log10, log1p, log2, log, pow, sqrt
+                gradcheck(
+                    func,
+                    sample.input,
+                    raise_exception=True,
+                    check_forward_ad=True,
+                    check_backward_ad=False,
+                    check_batched_grad=False,
+                )
+
+    @ops(
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=(torch.float64, torch.complex128),
+    )
     def test_inplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
