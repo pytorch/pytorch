@@ -1513,7 +1513,10 @@ class TritonKernel(Kernel):
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
                 mutated_args.add(self.args.input_buffers[mutation])
-            if mutation in self.args.inplace_buffers:
+            if (
+                mutation in self.args.inplace_buffers
+                and mutation not in V.graph.removed_buffers
+            ):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
