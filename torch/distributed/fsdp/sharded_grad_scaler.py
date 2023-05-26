@@ -4,8 +4,8 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
+from torch.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.cuda import FloatTensor  # type: ignore[attr-defined]
-from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.optim.sgd import SGD
 
@@ -83,6 +83,7 @@ class ShardedGradScaler(GradScaler):
 
     def __init__(
         self,
+        device: str = "cuda",
         init_scale: float = 2.0**16,
         backoff_factor: float = 0.5,
         growth_factor: float = 2.0,
@@ -91,6 +92,7 @@ class ShardedGradScaler(GradScaler):
         process_group: Optional[ProcessGroup] = dist.group.WORLD,
     ):
         super().__init__(
+            device,
             init_scale=init_scale,
             backoff_factor=backoff_factor,
             growth_factor=growth_factor,
@@ -270,14 +272,21 @@ class ShardedGradScaler(GradScaler):
         future_handles = []
 
         for v in optimizer_state["found_inf_per_device"].values():
-            if v.device.type == "cpu":
-                v_on_cuda = v.cuda()
-                future_handles.append(
-                    dist.all_reduce(
-                        v_on_cuda, async_op=True, group=self.process_group
-                    ).get_future()
-                )
-                v.copy_(v_on_cuda.cpu())
+            if self._device == "cuda":
+                if v.device.type == "cpu":
+                    v_on_cuda = v.cuda()
+                    future_handles.append(
+                        dist.all_reduce(
+                            v_on_cuda, async_op=True, group=self.process_group
+                        ).get_future()
+                    )
+                    v.copy_(v_on_cuda.cpu())
+                else:
+                    future_handles.append(
+                        dist.all_reduce(
+                            v, async_op=True, group=self.process_group
+                        ).get_future()
+                    )
             else:
                 future_handles.append(
                     dist.all_reduce(
@@ -308,7 +317,7 @@ class ShardedGradScaler(GradScaler):
             else:
                 self._growth_tracker = successful
 
-    def update(self, new_scale: Optional[Union[float, FloatTensor]] = None) -> None:
+    def update(self, new_scale: Optional[Union[float, FloatTensor, torch.FloatTensor]] = None) -> None:
         """
         Updates the scale factor.
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``
@@ -335,8 +344,11 @@ class ShardedGradScaler(GradScaler):
             if isinstance(new_scale, float):
                 self._scale.fill_(new_scale)  # type: ignore[union-attr]
             else:
-                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
-                assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
+                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or torch.FloatTensor with requires_grad=False."
+                if self._device == "cuda":
+                    assert  isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
+                else:
+                    assert  isinstance(new_scale, torch.FloatTensor), reason  # type: ignore[attr-defined]
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
                 self._scale.copy_(new_scale)  # type: ignore[union-attr]
