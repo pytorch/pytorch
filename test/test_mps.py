@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
 import platform
 import sys
 import math
@@ -77,6 +78,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'aminmax': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -394,7 +396,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_3': None,
         'rounddecimals_0': None,
         '__rsub__': None,
-        'aminmax': None,
         'angle': None,
         'bucketize': None,
         'cauchy_': None,
@@ -7345,6 +7346,15 @@ class TestNLLLoss(TestCaseMPS):
         x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
         x = net1(x)
         torch.mps.profiler.stop()
+
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
 
     # Test random_, random_.to and random_.from
     def test_random(self):
