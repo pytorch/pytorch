@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Any
+from typing import Any, Dict, List
 from unittest import main, mock, TestCase
 
 import yaml
@@ -170,22 +170,48 @@ class TestConfigFilter(TestCase):
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
     def test_set_periodic_modes(self) -> None:
-        testcases = [
+        testcases: List[Dict[str, str]] = [
             {
+                "job_name": "a CI job",
                 "test_matrix": "{include: []}",
                 "description": "Empty test matrix",
             },
             {
+                "job_name": "a-ci-job",
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
                 "descripion": "Replicate each periodic mode in a different config",
+            },
+            {
+                "job_name": "a-ci-cuda11.8-job",
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Replicate each periodic mode in a different config for a CUDA job",
+            },
+            {
+                "job_name": "a-ci-rocm-job",
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Replicate each periodic mode in a different config for a ROCm job",
+            },
+            {
+                "job_name": "",
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Empty job name",
+            },
+            {
+                "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", runner: "macos"}]}',
+                "descripion": "Missing job name",
             },
         ]
 
         for case in testcases:
+            job_name = case.get("job_name", None)
             test_matrix = yaml.safe_load(case["test_matrix"])
-            scheduled_test_matrix = set_periodic_modes(test_matrix)
+            scheduled_test_matrix = set_periodic_modes(test_matrix, job_name)
+
+            expected_modes = [
+                m for m, c in SUPPORTED_PERIODICAL_MODES.items() if c(job_name)
+            ]
             self.assertEqual(
-                len(test_matrix["include"]) * len(SUPPORTED_PERIODICAL_MODES),
+                len(test_matrix["include"]) * len(expected_modes),
                 len(scheduled_test_matrix["include"]),
             )
 

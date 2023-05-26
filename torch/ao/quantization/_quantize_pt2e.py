@@ -24,7 +24,7 @@ def prepare_pt2e(
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
@@ -50,7 +50,7 @@ def prepare_pt2e(
 def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -66,7 +66,7 @@ def prepare_pt2e_quantizer(
 def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
@@ -83,7 +83,7 @@ def prepare_qat_pt2e_quantizer(
 
 def convert_pt2e(
     model: GraphModule
-):
-    model = _convert_to_reference_decomposed_fx(model)  # type: ignore[assignment]
+) -> GraphModule:
+    model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
     return model
