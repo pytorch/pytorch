@@ -202,6 +202,20 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
+# QQ: this utils should probably not sit here.
+# Where should this live?
+from torch.distributed import ProcessGroup, get_world_size
+from torch.distributed._tensor import DeviceMesh
+def _init_device_mesh(
+    pg: ProcessGroup,
+) -> DeviceMesh:
+    world_size = get_world_size(pg)
+    # device_type of DeviceMesh currently supports cpu and cuda.
+    # QQ: Should we be inferrring device_type from compute_device?
+    device_mesh = DeviceMesh("cuda", torch.arange(world_size))
+    return device_mesh
+
+
 @no_type_check
 def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
@@ -220,6 +234,8 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
+    root_state._device_mesh = _init_device_mesh(root_state.process_group)
+
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -259,6 +275,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
         fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
+        fsdp_state._device_mesh = root_state._device_mesh
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
