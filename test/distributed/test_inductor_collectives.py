@@ -77,7 +77,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = matmul_cat_col(*inputs)
             compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
             inductor_out = compiled_matmul_cat_col(*inputs)
-            assert same(eager_out, inductor_out, tol=0.001)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -116,7 +116,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_inductor_func(eager_func(*eager_inputs), *inductor_inputs)
             print(f"eager_out, {eager_out}")
             print(f"inductor_out, {inductor_out}")
-            assert same(eager_out, inductor_out, tol=0.001)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -153,7 +153,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = eager_func(inductor_func(*inductor_inputs), *eager_inputs)
             compiled_inductor_func = compile(inductor_func, inductor_inputs)
             inductor_out = eager_func(compiled_inductor_func(*inductor_inputs), *eager_inputs)
-            assert same(eager_out, inductor_out, tol=0.001)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -185,7 +185,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = example(*inputs)
             compiled_matmul_cat_col = compile(example, inputs)
             inductor_out = compiled_matmul_cat_col(*inputs)
-            assert same(eager_out, inductor_out, tol=0.001)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -214,7 +214,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = example(*inputs)
             compiled_fn = compile(example, inputs)
             inductor_out = compiled_fn(*inputs)
-            assert same(eager_out, inductor_out, tol=0.001)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
 
 @requires_nccl()
@@ -252,7 +252,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("return (buf1, )") \
             .run(code)
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct)
+        self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_steal_buffer(self):
@@ -286,7 +286,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct)
+        self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config.triton, "descriptive_names", False)
@@ -323,7 +323,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct)
+        self.assertTrue(same(out, correct))
 
     def test_dynamo_trace_allreduce(self):
 
@@ -336,11 +336,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
+        self.assertEqual(counter.frame_count, 1)
 
         # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
-        assert same(out, correct)
+        self.assertEqual(counter.op_count, 2)
+        self.assertTrue(same(out, correct))
 
     def test_dynamo_trace_all_gather_tensor(self):
 
@@ -353,11 +353,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
+        self.assertEqual(counter.frame_count, 1)
 
-        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
-        assert same(out, correct)
+        # should test more precisely, but the 2 is supposed to be (all_gather, wait)
+        self.assertEqual(counter.op_count, 2)
+        self.assertTrue(same(out, correct))
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
@@ -370,11 +370,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func, backend=counter)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert counter.frame_count == 1
+        self.assertEqual(counter.frame_count, 1)
 
-        # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
-        assert counter.op_count == 2
-        assert same(out, correct)
+        # should test more precisely, but the 2 is supposed to be (reduce_scatter, wait)
+        self.assertEqual(counter.op_count, 2)
+        self.assertTrue(same(out, correct))
 
     def test_backwards(self):
         """
@@ -396,13 +396,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             correct_input = input.clone().detach().requires_grad_()
             correct = func(correct_input, **self.get_world_trs())
             correct.sum().backward()
-            assert same(out, correct)
-            assert same(input.grad, correct_input.grad)
+            self.assertTrue(same(out, correct))
+            self.assertTrue(same(input.grad, correct_input.grad))
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
-        assert x.size() == out.size()
+        self.assertEqual(x.size(), out.size())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
