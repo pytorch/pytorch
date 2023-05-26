@@ -55,6 +55,7 @@ def multi_record_test(num_records, **kwargs):
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
+        print(records)
         self.assertEqual(len(records), num_records)
 
     return fn
@@ -223,6 +224,7 @@ exclusions = {
     "aot_graphs",
     "recompiles",
     "ddp_graphs",
+    "perf_hints",
     "not_implemented",
 }
 for name in torch._logging._internal.log_registry.artifact_names:

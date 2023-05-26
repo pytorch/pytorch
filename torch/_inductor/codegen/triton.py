@@ -2146,6 +2146,11 @@ class TritonScheduling:
         """
         if reduction_numel != 1 or config.triton.max_tiles <= 1:
             # TODO(jansel): should we tile reductions?
+            # do perf hint here if stride-1 dim is not being reduced
+            if perf_hint_log.level <= logging.WARNING:
+                for node in EnableReduction.filter(node_schedule):
+                    if cls.candidate_tilings(node) is not empty:
+                        perf_hint_log.warning("reduction over non-contiguous dims")
             return (numel, reduction_numel)
 
         seen_names = set()
