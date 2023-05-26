@@ -148,11 +148,12 @@ class TestQuantizePT2E(QuantizationTestCase):
                 super(M, self).__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 1)
                 self.pool = torch.nn.MaxPool2d(1, 1)
+                self.conv2 = torch.nn.Conv2d(2, 2, 1)
 
             def forward(self, x):
                 x = self.conv(x)
-                x = self.pool(x)
-                return x
+                x2 = self.pool(x)
+                return torch.mul(self.conv2(x2), 10)
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -224,9 +225,9 @@ class TestQuantizePT2E(QuantizationTestCase):
                 pass
 
         m = M()
-        m_pt2e = copy.deepcopy(m)
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
+
         # program capture
         m, guards = torchdynamo.export(
             m,
@@ -234,21 +235,14 @@ class TestQuantizePT2E(QuantizationTestCase):
             aten_graph=True,
         )
         m = prepare_pt2e_quantizer(m, BackendAQuantizer())
-        for node in m.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.aten.convolution.default
-            ):
-                # Add a check to ensure the output_qspec is not annotated of conv node
-                self.assertTrue(node.meta["quantization_annotation"].output_qspec is None)
         m(*example_inputs)
         m = convert_pt2e(m)
         node_occurrence = {
-            # two for input of maxpool
+            # two for input of conv
             # one for input for maxpool
-            # one for output of maxpool
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 4,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 4,
+            # two for output of maxpool and input of conv2
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
         }
         node_list = [
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
@@ -259,6 +253,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             ns.call_function(torch.ops.aten.max_pool2d_with_indices.default),
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.convolution.default),
         ]
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
