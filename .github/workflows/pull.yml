@@ -199,6 +199,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda12_1-py3_10-gcc7-build
     with:
+      timeout-minutes: 360
       build-environment: linux-bionic-cuda12.1-py3.10-gcc7
       docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-build.outputs.test-matrix }}
