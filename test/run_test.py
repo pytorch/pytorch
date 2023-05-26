@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     retry_shell,
     set_cwd,
     shell,
+    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
 from torch.utils import cpp_extension
@@ -950,8 +951,9 @@ def get_pytest_args(
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210)
-        count = 15 if is_distributed_test else 50
+        # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210). The same logic applies
+        # to ASAN, which is also slow
+        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
@@ -1510,7 +1512,11 @@ def run_tests(
 
     def parallel_test_completion_callback(err_message):
         test_failed = handle_error_messages(err_message)
-        if test_failed and not options.continue_through_error:
+        if (
+            test_failed
+            and not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+        ):
             pool.terminate()
 
     try:
@@ -1528,7 +1534,11 @@ def run_tests(
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
 
-        if not options.continue_through_error and len(failure_messages) != 0:
+        if (
+            not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+            and len(failure_messages) != 0
+        ):
             raise RuntimeError(
                 "\n".join(failure_messages)
                 + "\n\nTip: You can keep running tests even on failure by "
@@ -1543,7 +1553,11 @@ def run_tests(
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             test_failed = handle_error_messages(err_message)
-            if test_failed and not options.continue_through_error:
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
                 raise RuntimeError(err_message)
 
     finally:
