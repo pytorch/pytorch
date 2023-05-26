@@ -336,6 +336,35 @@ class TestPasses(TestCase):
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
+    def test_runtime_assert_equality_constraint(self):
+        class Adder(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        m = Adder()
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        exported = torch._export.export(
+            m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
+        )
+        exported = exported.add_runtime_assertions()
+
+        x = torch.rand(3, 5)
+        y = torch.rand(3, 6)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Input arg1's dimension #1 size is not equal to input arg0's dimension #1",
+        ):
+            exported(x, y)
+
+        y = torch.rand(3, 5)
+        dynamo_result = exported(x, y)
+        real_result = m(x, y)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
 
 if __name__ == '__main__':
     run_tests()
