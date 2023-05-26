@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
+import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -569,14 +570,18 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     Infers which inputs are static for a backwards graph
     """
 
-    def is_not_gradout(x):
-        return "tangents" not in x.name
+    def is_saved_tensor(x):
+        return (
+            "tangents" not in x.name
+            and "bwd_seed" not in x.name
+            and "bwd_base_offset" not in x.name
+        )
 
     arg_count = 0
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
-            if is_not_gradout(n):
+            if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
 
@@ -681,7 +686,8 @@ def compile_fx(
             # partition_fn won't be called
             joint_graph_passes(model)
 
-        fixed = len(example_inputs) - num_example_inputs
+        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
+        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
         return inner_compile(
             model,
             example_inputs,
