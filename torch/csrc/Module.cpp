@@ -1272,6 +1272,12 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
+static void LogAPIUsageMetadataFromPython(
+    const std::string& event,
+    const std::map<std::string, std::string>& metadata_map) {
+  c10::LogAPIUsageMetadata(event, metadata_map);
+}
+
 // Weak reference to tensor, used to test a tensor isn't leaked
 class WeakTensorRef {
   c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
@@ -1418,6 +1424,7 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+  py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def(
