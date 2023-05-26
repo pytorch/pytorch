@@ -331,7 +331,7 @@ void reflection_pad2d_kernel_impl(const Tensor& output, const Tensor& input, Int
       cpu_padding<scalar_t, ReflectionPad>(output, input, param);
     });
   } else {
-	AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
       cpu_padding<scalar_t, ReflectionPad>(output, input, param);
     });
   }
@@ -348,7 +348,7 @@ void reflection_pad2d_backward_kernel_impl(
 void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
   PaddingParams param{input, output, padding};
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-	  "reflection_pad3d", [&] {
+      "reflection_pad3d", [&] {
     cpu_padding<scalar_t, ReflectionPad>(output, input, param);
   });
 }
@@ -357,7 +357,7 @@ void reflection_pad3d_backward_kernel_impl(
     const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
   PaddingParams param{grad_input, grad_output, padding};
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, grad_output.scalar_type(),
-	  "reflection_pad3d_backward", [&] {
+      "reflection_pad3d_backward", [&] {
     cpu_padding_backward<scalar_t, ReflectionPad>(grad_input, grad_output, param);
   });
 }
