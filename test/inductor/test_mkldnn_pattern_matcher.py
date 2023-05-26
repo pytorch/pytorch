@@ -366,7 +366,9 @@ class TestPaternMatcher(TestCase):
         exclude_ops = ["mkldnn._convolution_pointwise.binary"]
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(self):
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
             def __init__(self):
@@ -398,8 +400,12 @@ class TestPaternMatcher(TestCase):
         ]
         mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
         mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
         for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
