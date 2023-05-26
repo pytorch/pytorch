@@ -13,6 +13,7 @@ import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -319,7 +320,7 @@ class _TargetArgsExpr(_TargetExpr):
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
         ):
-            return FailedMatch("function_mismatch")
+            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch(f"multiple_users {node}")
@@ -358,10 +359,13 @@ class _TargetArgsExpr(_TargetExpr):
         for pattern in self.flat_args_kwargs[0]:
             if isinstance(pattern, PatternExpr):
                 for other_node in pattern.find_anchor_nodes(ctx, searched):
+                    if not isinstance(other_node, torch.fx.Node):
+                        continue
                     for node in other_node.users:
-                        if node not in searched and self._match_fns(node):
-                            yield node
-                            searched.add(node)
+                        if node not in searched:
+                            if self._match_fns(node):
+                                yield node
+                                searched.add(node)
 
 
 class CallFunction(_TargetArgsExpr):
@@ -380,12 +384,10 @@ class CallMethod(_TargetArgsExpr):
     op = "call_method"
 
 
-class CallFunctionVarArgs(_TargetExpr):
+class _TargetExprVarArgs(_TargetExpr):
     """
     Matches a call_function node with any arguments which are passed into the pattern
     """
-
-    op = "call_function"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if not self._match_fns(node):
@@ -400,6 +402,14 @@ class CallFunctionVarArgs(_TargetExpr):
         m.args.extend(node.args)
         m.kwargs.update(node.kwargs)
         return m
+
+
+class CallFunctionVarArgs(_TargetExprVarArgs):
+    op = "call_function"
+
+
+class CallMethodVarArgs(_TargetExprVarArgs):
+    op = "call_method"
 
 
 class ListOf(PatternExpr):
@@ -485,6 +495,38 @@ class MultiOutputPattern(PatternExpr):
             return MatchContext(self.outputs, graph=node.graph).match(self, node)
         except FailedMatch as e:
             return e
+
+
+class RepeatedExpr(PatternExpr):
+    """
+    Checks for a repeated pattern. Useful for repeated operations after a node such as `split` or `unbind`
+    """
+
+    def __init__(self, inner_pattern):
+        super().__init__()
+        assert isinstance(inner_pattern, PatternExpr)
+        self.inner_pattern = inner_pattern
+
+    @property
+    def fns(self):
+        return self.inner_pattern.fns
+
+    def _match(self, node: torch.fx.Node, ctx: MatchContext):
+        m = ctx.match(self.inner_pattern, node)
+        if not m:
+            return m
+        ctx.pattern_to_node.pop(
+            self.inner_pattern,
+        )
+        # Check all anchor nodes match the pattern
+        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, set()):
+            anchor_m = MatchContext([self], graph=node.graph).match(
+                self.inner_pattern, anchor_node
+            )
+            if not anchor_m:
+                return anchor_m
+            m.extend(anchor_m)
+        return m
 
 
 @dataclasses.dataclass
@@ -635,6 +677,9 @@ def register_replacement(
         )
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
+                if grad and is_integer_dtype(args[i].dtype):
+                    return False
+
                 args[i] = torch.empty_strided(
                     args[i].size(),
                     args[i].stride(),
