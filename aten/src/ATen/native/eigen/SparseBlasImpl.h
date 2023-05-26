@@ -2,7 +2,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace at::native::eigen::sparse {
+namespace at::native::sparse::impl::eigen {
 
 void addmm_out_sparse(
     const at::Tensor& mat1,

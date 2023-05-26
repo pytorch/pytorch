@@ -21,7 +21,7 @@
 #if !AT_USE_MKL_SPARSE()
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/eigen/SparseBlas.h>
+#include <ATen/native/eigen/SparseBlasImpl.h>
 #endif
 
 
@@ -444,7 +444,7 @@ void add_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
 #if !AT_USE_MKL_SPARSE()
-  at::native::eigen::sparse::add_out_sparse(mat1, mat2, alpha, result);
+  sparse::impl::eigen::add_out_sparse(mat1, mat2, alpha, result);
 #else
   sparse::impl::mkl::add_out_sparse_csr(mat1, mat2, alpha, result);
 #endif

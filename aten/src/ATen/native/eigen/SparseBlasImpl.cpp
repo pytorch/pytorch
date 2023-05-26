@@ -1,4 +1,4 @@
-#include <ATen/native/eigen/SparseBlas.h>
+#include <ATen/native/eigen/SparseBlasImpl.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -14,7 +14,7 @@
 
 #include <Eigen/SparseCore>
 
-namespace at::native::eigen::sparse {
+namespace at::native::sparse::impl::eigen {
 
 namespace {
 
