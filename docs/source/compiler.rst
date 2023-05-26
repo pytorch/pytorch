@@ -6,7 +6,7 @@ torch.compiler
 .. automodule:: torch.compiler
 
 torch.compiler API reference
--------------------
+------------------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
