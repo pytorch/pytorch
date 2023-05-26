@@ -75,6 +75,8 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 # Quantization for PyTorch 2.0 Export path
+    # To be moved to compiler side later
+    from quantization.pt2e.test_quantize_pt2e import TestGraphUtils  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
@@ -136,9 +138,6 @@ try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
 except ImportError:
     pass
-
-# To be moved to compiler side later
-from quantization.pt2e.test_quantize_pt2e import TestGraphUtils  # noqa: F401
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401
