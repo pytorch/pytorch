@@ -1796,6 +1796,7 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2133,6 +2134,16 @@ class TestCase(expecttest.TestCase):
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
+
+    def assertLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertLogs(logger, level)
+
+    def assertNoLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertNoLogs(logger, level)
 
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)
