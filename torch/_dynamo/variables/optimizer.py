@@ -1,9 +1,9 @@
-from .user_defined import UserDefinedObjectVariable
-from typing import List, Dict
+from typing import Dict, List
+
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .misc import GetAttrVariable
-
+from .user_defined import UserDefinedObjectVariable
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
