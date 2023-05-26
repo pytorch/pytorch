@@ -152,6 +152,10 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
+        # TODO remove before merging
+        import colorama
+        print(f"{colorama.Fore.GREEN}Got graph:\n{gm.print_readable(False)}{colorama.Fore.RESET}")
+
         self.layout_opt = self.decide_layout_opt()
         self.num_channels_last_conv = 0
 
@@ -384,6 +388,11 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_timed
     def run(self, *args):
+        print(f"graph id is {self.graph_id}") # TODO
+        if self.graph_id == 1:
+            # compile time: [(torch.Size([512, 512, 3, 3]), (4608, 9, 3, 1)), (torch.Size([2, 512, 7, 7]), (25088, 1, 3584, 512))]
+            # breakpoint() # TODO
+            pass
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
@@ -856,7 +865,7 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        if config.benchmark_kernel:
+        if config.benchmark_kernel or True:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
