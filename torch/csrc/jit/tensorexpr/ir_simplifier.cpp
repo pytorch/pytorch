@@ -82,7 +82,7 @@ T gcd(T a, T b) {
 
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
-static bool isMultilanePrimitive(ExprPtr e) {
+bool isMultilanePrimitive(ExprPtr e) {
   return to<Broadcast>(e) || to<Ramp>(e);
 }
 
@@ -232,7 +232,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
 }
 
 // Handles optimization cases for Broadcast/Ramp * Broadcast/Ramp
-static ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
+ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
@@ -1004,7 +1004,7 @@ ExprPtr PolynomialTransformer::mutate(MulPtr v) {
   return alloc<Term>(hasher_, immLike(v, 1), lhs_new, rhs_new);
 }
 
-static ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
+ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
   if (!lhs_new || !rhs_new) {
     return nullptr;
   }
@@ -1610,7 +1610,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   return v;
 }
 
-static StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
+StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
   if (cond->false_stmt()) {
     return nullptr;
   }
@@ -1809,7 +1809,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
 // Returns an immediate containing the greatest common divisor of all terms
 // (inc. the scalar term) in the polynomial. If the GCD is uninteresting
 // (e.g. 1) then returns nullptr.
-static ExprPtr polyGCD(PolynomialPtr poly) {
+ExprPtr polyGCD(PolynomialPtr poly) {
   ExprPtr scalar = poly->scalar();
   const std::vector<TermPtr>& variables = poly->variables();
 
@@ -1867,7 +1867,7 @@ class ModRound {
   ExprPtr mod_divisor;
 };
 
-static c10::optional<class ModRound> isModRound(TermPtr e) {
+c10::optional<class ModRound> isModRound(TermPtr e) {
   DivPtr div{nullptr};
   ModPtr mod{nullptr};
   ExprPtr denom{nullptr};
@@ -1976,7 +1976,7 @@ static c10::optional<class ModRound> isModRound(TermPtr e) {
 // (1) Round + Mod pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x
 // (2) Mod round + Mod pattern: (x/y % z)*y + x%y => ModRound(x, y, z) + Mod(x,
 // y) => x % (y*z)
-static ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
+ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
   std::vector<TermPtr> rounds;
   std::vector<TermPtr> mods;
   std::vector<TermPtr> mod_rounds;
@@ -2658,10 +2658,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) j is not negative
-static ExprPtr distributeDiv(
-    ExprPtr lhs,
-    ExprPtr rhs,
-    VarBoundInfo var_bound_info) {
+ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
@@ -2779,10 +2776,7 @@ static ExprPtr distributeDiv(
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, j has to be not negative. d) j is not negative
-static ExprPtr distributeMod(
-    ExprPtr lhs,
-    ExprPtr rhs,
-    VarBoundInfo var_bound_info) {
+ExprPtr distributeMod(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
