@@ -2025,8 +2025,9 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
                 cuda_flags.append('-std=c++17')
-            if os.getenv("CC") is not None:
-                cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
+            cc_env = os.getenv("CC")
+            if cc_env is not None:
+                cuda_flags = ['-ccbin', cc_env] + cuda_flags
     else:
         cuda_flags = None
 
