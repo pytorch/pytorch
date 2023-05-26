@@ -2151,6 +2151,7 @@ class TritonScheduling:
                 for node in EnableReduction.filter(node_schedule):
                     if cls.candidate_tilings(node) is not empty:
                         perf_hint_log.warning("reduction over non-contiguous dims")
+                        break
             return (numel, reduction_numel)
 
         seen_names = set()
