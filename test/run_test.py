@@ -604,7 +604,7 @@ def run_test(
     )
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
 
-    with open(log_path, "w", encoding="utf8") as f:
+    with open(log_path, "w") as f:
         ret_code = retry_shell(
             command,
             test_directory,
@@ -920,7 +920,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, "rb"))
     test = str(test)
     n = 100
-    with open(file_path, "r", encoding="utf8") as f:
+    with open(file_path, "rb") as f:
         print_to_stderr("")
         if failed:
             if n < num_lines:
@@ -931,15 +931,15 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
                     f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})"
                 )
                 for _ in range(num_lines - n):
-                    print_to_stderr(next(f).rstrip())
+                    print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
                 print_to_stderr("##[endgroup]")
             for _ in range(min(n, num_lines)):
-                print_to_stderr(next(f).rstrip())
+                print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
             print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read())
+            print_to_stderr(f.read().decode("utf-8", errors="ignore"))
             print_to_stderr("##[endgroup]")
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         print_to_stderr("")
@@ -1644,7 +1644,10 @@ def main():
     if len(failure_messages) != 0:
         for err in failure_messages:
             print_to_stderr(err)
-        sys.exit(1)
+
+        # A disabled test is expected to fail, so there is no need to report a failure here
+        if not RERUN_DISABLED_TESTS:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
