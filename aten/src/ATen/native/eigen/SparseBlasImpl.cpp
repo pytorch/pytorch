@@ -51,6 +51,8 @@ to_EigenCsc(const at::Tensor& tensor) {
   int64_t cols = tensor.size(1);
   int64_t nnz = tensor._nnz();
 
+  TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensors");
+
   index_t* ccol_indices_ptr = tensor.ccol_indices().data_ptr<index_t>();
   index_t* row_indices_ptr = tensor.row_indices().data_ptr<index_t>();
   scalar_t* values_ptr = tensor.values().data_ptr<scalar_t>();
@@ -65,6 +67,8 @@ to_EigenCsr(const at::Tensor& tensor) {
   int64_t rows = tensor.size(0);
   int64_t cols = tensor.size(1);
   int64_t nnz = tensor._nnz();
+
+  TORCH_CHECK(tensor.values().is_contiguous(), "eigen accepts only contiguous tensors");
 
   index_t* crow_indices_ptr = tensor.crow_indices().data_ptr<index_t>();
   index_t* col_indices_ptr = tensor.col_indices().data_ptr<index_t>();
