@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-import unittest
 from typing import Any, List, Optional, Tuple
 
 import torch
