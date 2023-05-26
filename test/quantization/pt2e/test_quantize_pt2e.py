@@ -21,6 +21,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QNNPackQuantizer,
     Quantizer,
     QuantizationSpec,
+    SharedQuantizationSpec,
     X86InductorQuantizer,
 )
 from torch.ao.quantization._quantize_pt2e import (
@@ -157,6 +158,27 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = QuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                weight_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                bias_qspec = QuantizationSpec(
+                    dtype=torch.float32,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
@@ -168,27 +190,6 @@ class TestQuantizePT2E(QuantizationTestCase):
                         assert isinstance(weight, Node)
                         bias = node.args[2]
                         assert isinstance(bias, Node)
-                        act_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.default_observer,
-                        )
-                        weight_qspec = QuantizationSpec(
-                            dtype=torch.int8,
-                            quant_min=-128,
-                            quant_max=127,
-                            qscheme=torch.per_tensor_affine,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.default_weight_observer,
-                        )
-                        bias_qspec = QuantizationSpec(
-                            dtype=torch.float32,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -213,8 +214,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                             _annotated=True,
                         )
                         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                            output_qspec=act_qspec,
-                            _input_output_share_observers=True,
+                            output_qspec=SharedQuantizationSpec((input_act, maxpool_node)),
                             _annotated=True,
                         )
 
@@ -1178,6 +1178,7 @@ class TestX86InductorQuantizePT2E(QuantizationTestCase):
         inplace_add_list = [True, False]
         conv2d_type_list = [Conv2DType.left, Conv2DType.right, Conv2DType.both]
         use_bias_list = [True, False]
+
         with override_quantized_engine("x86"):
             with torch.no_grad():
                 for inplace_add, conv2d_type, use_bias in itertools.product(inplace_add_list, conv2d_type_list, use_bias_list):
@@ -1213,11 +1214,12 @@ class TestX86InductorQuantizePT2E(QuantizationTestCase):
                     else:
                         node_occurrence = {
                             # one for input and weight of the conv
+                            # one for input and weight of another conv
                             # one for output for the add
                             # 2 conv will share same input quant/dequant
                             # one for extra input node of add
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 4,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 4,
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
                         }
@@ -1326,11 +1328,12 @@ class TestX86InductorQuantizePT2E(QuantizationTestCase):
                     else:
                         node_occurrence = {
                             # one for input and weight of the conv
+                            # one for input and weight of another conv
                             # one for output for the relu
                             # 2 conv will share same input quant/dequant
                             # one for extra input node of add
-                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 4,
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 4,
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
                         }
