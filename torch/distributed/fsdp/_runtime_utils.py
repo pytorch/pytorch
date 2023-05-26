@@ -17,7 +17,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.distributed import get_world_size, ProcessGroup
+from torch.distributed import ProcessGroup
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
@@ -204,11 +204,18 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
+import torch.distributed as dist
+
+
 def _init_device_mesh(
     pg: ProcessGroup,
-) -> DeviceMesh:
-    world_size = get_world_size(pg)
-    device_mesh = DeviceMesh("cuda", torch.arange(world_size))
+) -> Optional[DeviceMesh]:
+    # We are testing for dist.get_world_size(pg) == dist.get_world_size() for now.
+    # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size().
+    if dist.get_world_size(pg) != dist.get_world_size():
+        return None
+    mesh_tensor = torch.arange(dist.get_world_size(pg))
+    device_mesh = DeviceMesh("cuda", mesh_tensor)
     return device_mesh
 
 
