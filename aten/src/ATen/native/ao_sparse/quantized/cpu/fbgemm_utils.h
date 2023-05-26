@@ -89,8 +89,3 @@ struct TORCH_API PackedLinearWeight
 }}  // namespace ao::sparse
 
 #endif // USE_FBGEMM
-
-namespace ao {
-namespace sparse {
-int register_linear_params();
-}}  // namespace ao::sparse
