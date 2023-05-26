@@ -48,7 +48,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import freeze_rng_state
+from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 TEST_CUDA = torch.cuda.is_available()
@@ -3702,7 +3702,7 @@ def fn():
         self.assertTrue(same(ref, res))
         self.assertTrue(same(x, x1))
 
-    def test_if_cond_nn_mod(self):
+    def test_if_cond_nn_mod1(self):
         class MockModule(torch.nn.Module):
             def __init__(self, output_relu=True):
                 super().__init__()
@@ -3727,6 +3727,25 @@ def fn():
 
         x = torch.rand(4)
         ref = model(x)
+        res = opt_model(x)
+        self.assertTrue(same(ref, res))
+
+    def test_if_cond_nn_mod2(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Sequential()
+
+            def forward(self, x):
+                if self.layer:
+                    return x + 1
+                else:
+                    return x - 1
+
+        model = MockModule()
+        x = torch.rand(4)
+        ref = model(x)
+        opt_model = torch.compile(backend="eager")(model)
         res = opt_model(x)
         self.assertTrue(same(ref, res))
 
@@ -5227,6 +5246,8 @@ def fn():
 
     def test_guards_cse_pass_single(self):
         if not self._has_ast_unparse():
+            if IS_FBCODE:
+                raise RuntimeError("Needs astunparse or Python-3.9+")
             raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 

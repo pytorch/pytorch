@@ -25,7 +25,7 @@ import torch._dynamo
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
-from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
+from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -2030,6 +2030,9 @@ class CommonTemplate:
 
     @requires_multigpu()
     def test_multi_gpu_device(self):
+        # TODO: https://github.com/pytorch/pytorch/issues/92627
+        x = torch.rand([4], device="cuda")
+
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
             r = r.to("cuda:1")
@@ -5178,15 +5181,28 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
         if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
-            expected_kernel = 6
+            expected_kernel = 5
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
+
+    def test_randint_kernel_count(self):
+        @torch._dynamo.optimize_assert("inductor")
+        def fn1():
+            random_tensor1 = torch.randint(10, [32], device=self.device)
+            random_tensor2 = torch.randint(10, [32], device=self.device)
+            random_tensor3 = torch.randint(10, [32], device=self.device)
+            return random_tensor1, random_tensor2, random_tensor3
+
+        _, source_codes = run_and_get_code(fn1)
+        if self.device == "cuda":
+            self.assertEqual(len(source_codes), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
     def test_roll(self):
         def fn(a):
@@ -6025,7 +6041,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.int64,
                 torch.int64,
                 "argmin",
                 get_index,
@@ -6038,7 +6054,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.bool,
                 torch.bool,
                 "any",
                 get_index,
@@ -6071,7 +6087,7 @@ class CommonTemplate:
                 bitwise_not,
             ),
         )
-        _data_type_propagation(_graph)
+        DataTypePropagation.propagate_graph(_graph)
 
         def get_data_type(node: torch.fx.Node):
             if OptimizationContext.key in node.meta:

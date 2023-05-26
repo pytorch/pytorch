@@ -1314,6 +1314,10 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+
+        if isinstance(a, ListVariable):
+            return ConstantVariable(len(a.items) == 0).add_options(self, a)
+
         return None
 
     call_eq = _comparison
