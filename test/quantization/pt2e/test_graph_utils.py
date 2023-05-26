@@ -1,19 +1,15 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import operator
-import unittest
-from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
 
 from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
-from torch.fx import Node
 from torch.testing._internal.common_utils import TestCase
 
 
 class TestGraphUtils(TestCase):
-    def test_conv_bn_relu(self):
+    def test_conv_bn_conv_relu(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -44,15 +40,18 @@ class TestGraphUtils(TestCase):
             m, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU]
         )
         self.assertEqual(len(fused_partitions), 1)
-        x = lambda: find_sequential_partitions(
-            m,
-            [
-                torch.nn.Conv2d,
-                torch.nn.BatchNorm2d,
-                torch.nn.ReLU,
-                torch.nn.functional.conv2d,
-            ],
-        )
+
+        def x():
+            find_sequential_partitions(
+                m,
+                [
+                    torch.nn.Conv2d,
+                    torch.nn.BatchNorm2d,
+                    torch.nn.ReLU,
+                    torch.nn.functional.conv2d,
+                ],
+            )
+
         self.assertRaises(ValueError, x)
 
     def test_conv_bn_relu(self):

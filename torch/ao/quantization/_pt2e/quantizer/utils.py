@@ -5,7 +5,6 @@ from torch.ao.quantization._pt2e.quantizer.quantizer import (
     QuantizationSpec,
     QuantizationAnnotation,
 )
-from torch.fx import Node
 
 def get_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
