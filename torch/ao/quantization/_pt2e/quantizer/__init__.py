@@ -1,8 +1,18 @@
 from .qnnpack_quantizer import QNNPackQuantizer
-from .quantizer import OperatorConfig, Quantizer, QuantizationAnnotation
+from .quantizer import (
+    EdgeOrNode,
+    OperatorConfig,
+    Quantizer,
+    QuantizationSpec,
+    QuantizationAnnotation,
+    SharedQuantizationSpec,
+)
 
 __all__ = [
+    "EdgeOrNode",
     "Quantizer",
+    "QuantizationSpec",
     "QNNPackQuantizer",
     "QuantizationAnnotation",
+    "SharedQuantizationSpec",
 ]
