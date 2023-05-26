@@ -28,8 +28,15 @@ def replace_node_with_constant(gm, node, constant):
     setattr(gm, qualname, constant)
 
 
-def replace_params_with_constants(gm, real_inputs, example_inputs_, fw_metadata):
-    fake_inp_nodes = [node for (_, node) in zip(real_inputs, gm.graph.nodes)]
+def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
+    """
+    Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
+
+    Returns a list of indices representing the input parameters that were not converted to constants.
+    """
+
+    params = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    fake_inp_nodes = [node for (_, node) in zip(flat_params, params)]
 
     g = gm.graph
 
@@ -40,11 +47,7 @@ def replace_params_with_constants(gm, real_inputs, example_inputs_, fw_metadata)
         if out_info.base_idx is not None
     ]
 
-    for i, (real_input, fake_input, node) in enumerate(
-        zip(real_inputs, example_inputs_, fake_inp_nodes)
-    ):
-        assert real_input.shape == fake_input.shape
-
+    for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
         if i in fw_metadata.mutated_inp_indices or aliased_input_args:
             preserved_arg_indices.append(i)
             continue
@@ -52,12 +55,11 @@ def replace_params_with_constants(gm, real_inputs, example_inputs_, fw_metadata)
         replace_node_with_constant(gm, node, real_input)
 
     # add on non param inputs
-    preserved_arg_indices.extend(range(len(real_inputs), len(example_inputs_)))
+    preserved_arg_indices.extend(range(len(flat_params), len(params)))
 
-    g.lint()
     # is this necessary ?
     gm.recompile()
-    return gm, preserved_arg_indices
+    return preserved_arg_indices
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -114,25 +116,38 @@ def constant_fold(gm):
 
 
 def freeze(
-    original_gm: torch.fx.GraphModule,
-    gm: torch.fx.GraphModule,
-    example_inputs_: List[torch.Tensor],
+    dynamo_gm: torch.fx.GraphModule,
+    aot_autograd_gm: torch.fx.GraphModule,
     fw_metadata,
 ) -> Tuple[torch.fx.GraphModule, List[int]]:
-    "Inlines unmutated parameters into constants and runs constant propagation and other optimizations"
+    """
+    Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
+    and other techniques. If enabled, the function also discards the original parameters of the module for memory efficiency.
 
+    Assumes that this function is run in dynamo tracing post aot_autograd.
+
+    Args:
+        dynamo_gm (torch.fx.GraphModule): The Dynamo constructed GraphModule.
+        aot_autograd_gm (torch.fx.GraphModule): The aot_autograd constructed GraphModule to be frozen.
+        example_inputs_ (List[torch.Tensor]): A list of example input tensors to be used in the freezing process.
+        fw_metadata: Metadata for the forward method of the graph module.
+
+    Returns:
+        Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
+        of the inputs that were preserved (not turned into constants).
+    """
     params_flat = torch._guards.TracingContext.get().params_flat
-    gm, preserved_arg_indices = replace_params_with_constants(
-        gm, params_flat, example_inputs_, fw_metadata
+    preserved_arg_indices = replace_params_with_constants(
+        aot_autograd_gm, params_flat, fw_metadata
     )
 
-    constant_fold(gm)
+    constant_fold(aot_autograd_gm)
 
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
-        discard_traced_gm_params(original_gm)
-    return gm, preserved_arg_indices
+        discard_traced_gm_params(dynamo_gm)
+    return aot_autograd_gm, preserved_arg_indices
 
 
 class ErasedTensor(torch.Tensor):

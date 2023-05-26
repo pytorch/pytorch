@@ -698,14 +698,15 @@ def compile_fx(
     if config.freezing:
         from torch._inductor.freezing import freeze
 
-        def inference_compiler(model: torch.fx.GraphModule, example_inputs):
+        def inference_compiler(
+            aot_autograd_model: torch.fx.GraphModule, example_inputs
+        ):
             # partition_fn won't be called
-            joint_graph_passes(model)
+            joint_graph_passes(aot_autograd_model)
 
             opt_model, preserved_arg_indices = freeze(
                 model_,
-                model,
-                example_inputs,
+                aot_autograd_model,
                 fw_metadata=torch._guards.TracingContext.get().fw_metadata,
             )
 

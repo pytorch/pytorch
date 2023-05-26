@@ -6,13 +6,7 @@ from torch import _prims
 log = logging.getLogger(__name__)
 
 
-def make_prim(
-    schema,
-    impl_aten,
-    return_type=_prims.RETURN_TYPE.NEW,
-    doc="",
-    tags=None
-):
+def make_prim(schema, impl_aten, return_type=_prims.RETURN_TYPE.NEW, doc="", tags=None):
     def meta(*args, **kwargs):
         return _prims.TensorMeta(impl_aten(*args, **kwargs))
 
