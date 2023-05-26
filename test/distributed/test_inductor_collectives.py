@@ -450,7 +450,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 0
         assert same(outputs, correct_outputs)
 
-
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
             x = pg.rank() + 1 % pg.size()
