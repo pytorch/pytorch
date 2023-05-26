@@ -909,7 +909,7 @@ FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
   TYPED_ATTR_WITH_DEFAULT(event_type, method_name, expression, {})
 
 TYPED_ATTR_WITH_DEFAULT(TorchOp, sequenceNr, e.sequence_number_, -1)
-TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
+TYPED_ATTR_WITH_DEFAULT(TorchOp, fwdThreadId, e.forward_tid_, 0);
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
