@@ -31,6 +31,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/Half.h>
 #include <c10/util/copysign.h>
 #include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
@@ -258,6 +259,14 @@ public:
       }
     }
     return vector;
+  }
+  bool has_infinite() const {
+    for (int64_t i = 0; i != size(); i++) {
+      if(_isnan(values[i]) || _isinf(values[i])) {
+        return true;
+      }
+    }
+    return false;
   }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
