@@ -366,7 +366,7 @@ class TestPaternMatcher(TestCase):
         exclude_ops = ["mkldnn._convolution_pointwise.binary"]
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
         self, include_ops=None, exclude_ops=None
     ):
         # Written buffer is graph input, we can't fuse inplace.
