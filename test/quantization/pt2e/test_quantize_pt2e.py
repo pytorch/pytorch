@@ -21,6 +21,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QuantizationSpec,
     Quantizer,
     SharedQuantizationSpec,
+    DerivedQuantizationSpec,
 )
 from torch.ao.quantization._quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
@@ -40,13 +41,15 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
     prepare_qat_fx,
 )
-from torch.fx import Node
+from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
 )
+from torch.fx import Node
+from torch import Tensor
 from torch.testing._internal.common_quantized import override_quantized_engine
 
 
@@ -256,6 +259,107 @@ class TestQuantizePT2E(QuantizationTestCase):
             ns.call_function(torch.ops.aten.max_pool2d_with_indices.default),
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
+        )
+
+    def test_derived_qspec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.convolution.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        weight = node.args[1]
+                        assert isinstance(weight, Node)
+                        bias = node.args[2]
+                        assert isinstance(bias, Node)
+                        act_qspec = QuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                        )
+                        weight_qspec = QuantizationSpec(
+                            dtype=torch.int8,
+                            quant_min=-128,
+                            quant_max=127,
+                            qscheme=torch.per_tensor_affine,
+                            is_dynamic=False,
+                            observer_or_fake_quant_ctr=observer.default_weight_observer,
+                        )
+
+                        def derive_qparams_fn(obs_or_fqs: List[ObserverOrFakeQuantize]) -> Tuple[Tensor, Tensor]:
+                            assert len(obs_or_fqs) == 2, \
+                                "Expecting two obs/fqs, one for activation and one for weight, got: {}".format(len(obs_or_fq))
+                            act_obs_or_fq = obs_or_fqs[0]
+                            weight_obs_or_fq = obs_or_fqs[1]
+                            act_scale, act_zp = act_obs_or_fq.calculate_qparams()
+                            weight_scale, weight_zp = weight_obs_or_fq.calculate_qparams()
+                            return torch.tensor([act_scale * weight_scale]).to(torch.float32), torch.tensor([0]).to(torch.int32)
+
+                        bias_qspec = DerivedQuantizationSpec(
+                            derived_from=[(input_act, node), (weight, node)],
+                            derive_qparams_fn=derive_qparams_fn,
+                            dtype=torch.int32,
+                            quant_min=-2**31,
+                            quant_max=2**31 - 1,
+                            qscheme=torch.per_tensor_symmetric,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                                weight: weight_qspec,
+                                bias: bias_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+            @classmethod
+            def get_supported_operators(cls) -> List[OperatorConfig]:
+                pass
+
+        m = M().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # program capture
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        node_occurrence = {
+            # input, weight, bias, output for the conv
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 4,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 4,
+        }
+        node_list = [
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.convolution.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
         ]
         self.checkGraphModuleNodes(
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
