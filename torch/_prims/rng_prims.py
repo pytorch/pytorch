@@ -120,7 +120,7 @@ def register_philox_rand():
             CUDARngStateHelper.set_torch_state_tensor(seed, offset)
             random_values = torch.rand(shape, device=device, dtype=dtype)
 
-        return random_values, philox_rand_offset(shape)
+        return random_values, philox_rand_offset(shape).to(device=device)
 
     register_rng_prim(
         name=name,
