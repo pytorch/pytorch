@@ -70,7 +70,7 @@ __global__ void __launch_bounds__(
 fmha_cutlassB_f32_aligned_64x64_k32_dropout_sm80(typename AttentionBackwardKernel<cutlass::arch::Sm80, float, true, true, false, 64, 64, 32>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 800
-#if __CUDA_ARCH__ < 900
+#if __CUDA_ARCH__ < 1000
   if (!p.advance_to_block()) {
     return;
   }
@@ -79,7 +79,7 @@ fmha_cutlassB_f32_aligned_64x64_k32_dropout_sm80(typename AttentionBackwardKerne
 #endif
 #endif
     printf(
-        "FATAL: kernel `fmha_cutlassB_f32_aligned_64x64_k32_dropout_sm80` is for sm80-sm90, but was built for sm%d\n",
+        "FATAL: kernel `fmha_cutlassB_f32_aligned_64x64_k32_dropout_sm80` is for sm80-sm100, but was built for sm%d\n",
         int(__CUDA_ARCH__ + 0) / 10);
 #endif
 }

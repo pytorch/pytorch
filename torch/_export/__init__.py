@@ -1,7 +1,6 @@
 import dataclasses
 import weakref
 from typing import Any, Callable, List, Tuple, Optional, Dict, Union
-from collections import defaultdict
 
 import sympy
 
@@ -10,9 +9,9 @@ import torch._dynamo
 import torch.fx
 from .exported_program import (
     CallSpec,
-    ConstraintExpr,
     ExportedProgram,
     ExportGraphSignature,
+    _set_constraints,
 )
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
@@ -87,39 +86,6 @@ class ExportDynamoConfig:
 
 
 DECOMP_TABLE = core_aten_decompositions()
-
-
-def _set_constraints(
-    exported_program: ExportedProgram,
-    input_shape_constraints,
-    inline_constraints: Dict[str, Tuple[int, int]],
-    example_inputs: Any,
-):
-    # TODO(angelayi, avik): clean this up
-
-    exported_program.symbol_to_range = inline_constraints
-
-    # group by input id
-    input_shape_constraints_by_tensor_id = defaultdict(list)
-    for constraint in input_shape_constraints:
-        input_shape_constraints_by_tensor_id[constraint["t_id"]].append(
-            (constraint["dim"], constraint["min"], constraint["max"])
-        )
-
-    input_shape_constraints_by_src_name: Dict[str, List[Tuple[int, ConstraintExpr, ConstraintExpr]]] = {}
-    input_name_to_example_inputs: Dict[str, Any] = {}
-    if example_inputs is not None:
-        input_tracker = 0
-        for node in exported_program.graph.nodes:
-            if node.op == "placeholder":
-                example_input = example_inputs[input_tracker]
-                if id(example_input) in input_shape_constraints_by_tensor_id:
-                    input_shape_constraints_by_src_name[node.name] = input_shape_constraints_by_tensor_id[id(example_input)]
-                input_name_to_example_inputs[node.name] = example_input
-                input_tracker += 1
-
-    exported_program._input_shape_constraints = input_shape_constraints_by_src_name
-    exported_program._input_name_to_example_inputs = input_name_to_example_inputs
 
 
 def export(
