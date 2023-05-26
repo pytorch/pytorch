@@ -34,13 +34,18 @@ def replace_params_with_constants(gm, real_inputs, example_inputs_, fw_metadata)
     g = gm.graph
 
     preserved_arg_indices = []
+    aliased_input_args = [
+        out_info.base_idx
+        for out_info in fw_metadata.output_info
+        if out_info.base_idx is not None
+    ]
 
     for i, (real_input, fake_input, node) in enumerate(
         zip(real_inputs, example_inputs_, fake_inp_nodes)
     ):
         assert real_input.shape == fake_input.shape
 
-        if i in fw_metadata.mutated_inp_indices:
+        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
             preserved_arg_indices.append(i)
             continue
 
@@ -94,6 +99,15 @@ def constant_fold(gm):
     for node, constant in node_replacements.items():
         replace_node_with_constant(gm, node, constant)
 
+    erased_params = []
+    for node in gm.graph.nodes:
+        if node.op == "get_attr" and len(node.users) == 0:
+            delattr(gm, node.target)
+            erased_params.append(node)
+
+    for node in erased_params:
+        gm.graph.erase_node(node)
+
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
@@ -106,17 +120,8 @@ def freeze(
     fw_metadata,
 ) -> Tuple[torch.fx.GraphModule, List[int]]:
     "Inlines unmutated parameters into constants and runs constant propagation and other optimizations"
-    
-    params = {
-        **dict(original_gm.named_parameters(remove_duplicate=False)),
-        **dict(original_gm.named_buffers(remove_duplicate=False)),
-    }
-    params_flat, _ = pytree.tree_flatten(params)
-    params_flat = tuple(params_flat)
 
-    # TODO - aot_autograd currently doesn't have a way of not updating the calling convention to include
-    # parameters, so we need to drop parameters that became constants from inputs. This also prevents 
-    # deallocating unused parameters if `freezing_discard_parameters` is True.
+    params_flat = torch._guards.TracingContext.get().params_flat
     gm, preserved_arg_indices = replace_params_with_constants(
         gm, params_flat, example_inputs_, fw_metadata
     )
@@ -126,6 +131,7 @@ def freeze(
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
+        discard_traced_gm_params(original_gm)
     return gm, preserved_arg_indices
 
 
@@ -171,3 +177,17 @@ def invalidate_eager_modules():
                 e_t.requires_grad_(True)
                 e_t._is_param = True
             setattr(mod, attr_name, e_t)
+
+
+@torch.utils._python_dispatch._disable_current_modes()
+def discard_traced_gm_params(mod):
+    for attr_name, tensor in list(
+        itertools.chain(
+            mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
+        )
+    ):
+        e_t = ErasedTensor(tensor, attr_name, mod)
+        if isinstance(tensor, torch.nn.Parameter):
+            e_t.requires_grad_(True)
+            e_t._is_param = True
+        setattr(mod, attr_name, e_t)
