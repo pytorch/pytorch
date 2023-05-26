@@ -223,6 +223,7 @@ def compile_fx_inner(
     aot_mode=False,
     is_inference=False,
     boxed_forward_device_index=None,
+    user_visible_outputs=set(),
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -292,6 +293,7 @@ def compile_fx_inner(
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
+            user_visible_outputs=user_visible_outputs,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -691,6 +693,27 @@ def compile_fx(
             joint_graph_passes(model)
 
         fixed = len(example_inputs) - num_example_inputs
+        user_visible_outputs = set()
+
+        if config.keep_output_stride:
+            *_, orig_model_outputs_node = model_.graph.nodes
+            *_, model_outputs_node = model.graph.nodes
+            assert orig_model_outputs_node.op == "output"
+            assert model_outputs_node.op == "output"
+            orig_model_outputs = orig_model_outputs_node.args[0]
+            model_outputs = model_outputs_node.args[0]
+            assert len(orig_model_outputs) <= len(model_outputs)
+
+            # We makes the following assumption
+            # For inference
+            #   len(orig_model_outputs) == len(model_outputs)
+            # For training
+            #   len(orig_model_outputs) < len(model_outputs)
+            # and the model_outputs starts with orignal model's outputs followed
+            # by saved activations.
+
+            user_visible_outputs = {n.name for n in model_outputs[:len(orig_model_outputs)]}
+
         return inner_compile(
             model,
             example_inputs,
@@ -699,6 +722,7 @@ def compile_fx(
             graph_id=graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=forward_device,
+            user_visible_outputs=user_visible_outputs,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)

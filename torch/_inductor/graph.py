@@ -149,6 +149,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
+        user_visible_outputs=set(),
     ):
         super().__init__(gm)
 
@@ -193,6 +194,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
         self._warned_fallback = {"aten.convolution_backward"}
+        self.user_visible_outputs = user_visible_outputs
 
     def decide_layout_opt(self) -> bool:
         """
@@ -389,10 +391,8 @@ class GraphLowering(torch.fx.Interpreter):
     @dynamo_timed
     def run(self, *args):
         print(f"graph id is {self.graph_id}") # TODO
-        if self.graph_id == 1:
-            # compile time: [(torch.Size([512, 512, 3, 3]), (4608, 9, 3, 1)), (torch.Size([2, 512, 7, 7]), (25088, 1, 3584, 512))]
-            # breakpoint() # TODO
-            pass
+        for t in args:
+            print(f"- {t.size()} {t.stride()}")
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
@@ -666,6 +666,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
+                        and n.name not in self.user_visible_outputs
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
 

@@ -4,35 +4,15 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch._dynamo.test_case import run_tests, TestCase
 from torch import nn
 import torch
+import os
+import copy
+from torch._dynamo.utils import same
+
+USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER") == "1"
 
 class TestLayoutOptim(TestCase):
-    def test_graph_break(self): # not fully repro
-        """
-        Make sure graph break does not cause any accuracy issue.
-        The numerical may not match if the output of upstream graph's stride does
-        not match downstream graph's assumption for its inputs.
-        """
-        class Model(nn.Module):
-            def __init__(self, dim=512):
-                super().__init__()
-                self.conv1 = nn.Conv2d(3, dim, kernel_size=3, stride=2, bias=False)
-                self.conv2 = nn.Conv2d(dim, dim, kernel_size=3, stride=2, bias=False)
 
-            def forward(self, x):
-                x = self.conv1(x)
-                torch._dynamo.graph_break()
-                x = self.conv2(x)
-                return x
-
-        # TODO use verify_accuracy_for_model
-        mod = Model().to("cuda")
-        inp = torch.rand(2, 3, 16, 16).to("cuda")
-        expected_out = mod(inp)
-        opt_mod = torch.compile(mod)
-        actual_out = opt_mod(inp)
-        self.assertTrue(torch.allclose(expected_out, actual_out), f"expected:\n{expected_out}\nactual:\n{actual_out}") 
-
-    def verify_accuracy_for_model(self, model_class, use_ddp_wrapper=False):
+    def verify_accuracy_for_model(self, model_class, use_ddp_wrapper=USE_DDP_WRAPPER):
         # there are 2 potential ways to introduce graph breaks
         # 1. manually
         # 2. using DDP
@@ -41,6 +21,10 @@ class TestLayoutOptim(TestCase):
         mod = model_class(manual_graph_break=manual_graph_break).cuda()
         inp = [t.cuda() for t in mod.get_example_inputs()]
         expected_out = mod(*inp)
+
+        fp64_mod = copy.deepcopy(mod).to(torch.float64)
+        fp64_inp = [t.to(torch.float64) for t in copy.deepcopy(inp)]
+        fp64_out = fp64_mod(*fp64_inp)
 
         if use_ddp_wrapper:
             import torch.distributed as dist
@@ -55,8 +39,34 @@ class TestLayoutOptim(TestCase):
         else:
             opt_mod = torch.compile(mod)
         actual_out = opt_mod(*inp)
-        self.assertTrue(torch.allclose(expected_out, actual_out), f"expected:\n{expected_out}\nactual:\n{actual_out}") 
 
+        expected_sum = expected_out.sum()
+        actual_sum = actual_out.sum()
+        print(f"Expected sum {expected_sum}, actual sum {actual_sum}")
+        self.assertTrue(same(expected_out, actual_out, fp64_ref=fp64_out))
+
+    def test_2conv_with_graph_break(self):
+        """
+        Make sure graph break does not cause any accuracy issue.
+        """
+        class Model(nn.Module):
+            def __init__(self, dim=512, manual_graph_break=False):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, dim, kernel_size=3, stride=2, bias=False)
+                self.conv2 = nn.Conv2d(dim, dim, kernel_size=3, stride=2, bias=False)
+                self.manual_graph_break = manual_graph_break
+
+            def forward(self, x):
+                x = self.conv1(x)
+                if self.manual_graph_break:
+                    torch._dynamo.graph_break()
+                x = self.conv2(x)
+                return x
+
+            def get_example_inputs(self):
+                return torch.rand(2, 3, 16, 16), 
+
+        self.verify_accuracy_for_model(Model)
 
     def test_3conv_with_graph_break(self):
         class Model(nn.Module):
@@ -79,8 +89,34 @@ class TestLayoutOptim(TestCase):
             def get_example_inputs(self):
                 return torch.randn(2, 3, 16, 16),
 
-        self.verify_accuracy_for_model(Model, use_ddp_wrapper=False)
+        self.verify_accuracy_for_model(Model)
 
+    def test_keep_output_layout(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 128, kernel_size=3, padding=1, stride=1, bias=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+            def get_example_inputs(self):
+                return torch.randn(2, 3, 5, 5),
+
+        mod = Model().cuda()
+        inp = [t.cuda() for t in mod.get_example_inputs()]
+        out = mod(*inp)
+
+        opt_mod = torch.compile(mod)
+        opt_out = opt_mod(*inp)
+
+        # We should be able to do view on eager output
+        out.view(5, -1)
+
+        # We should be able to do view on the output of the optimized module
+        # Note that if the output is channels last, the view op will fail.
+        opt_out.view(5, -1)
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:
