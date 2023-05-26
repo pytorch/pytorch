@@ -673,6 +673,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float32],
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
