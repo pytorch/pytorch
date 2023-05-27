@@ -91,44 +91,28 @@ DONT_WRAP_FILES = {
 
 class OptimizedModule(torch.nn.Module):
     """
-    Wraps the original nn.Module object and later patches its `forward` method to optimized `self.forward` method.
-    When calling `torch.compile(mod)` the output is an `OptimizedModule`
-    Compilation occurs the first time `forward()` is called
-
-    Note:
-    - The OptimizedModule and original module share `state_dict` so you can run `torch.save(opt_model.state_dict())`
-
+    Wraps the original nn.Module object and later patches its
+    forward method to optimized self.forward method.
     """
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
-        """
-        Initializes an instance of OptimizedModule.
-
-        Arguments:
-        - mod: The original nn.Module object to be wrapped and optimized.
-        - dynamo_ctx: The context for optimizing the forward method.
-
-        """
-
         super().__init__()
+        # Installs the params/buffer
         self._orig_mod = mod
         self.dynamo_ctx = dynamo_ctx
         self._initialize()
 
     def _initialize(self):
-        """
-        Initializes the OptimizedModule.
-
-        Note:
-        - This method sets up the forward method based on the type of the original module.
-
-        """
-
+        # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
             inspect.getsourcefile(self._orig_mod.forward)
         ):
+            # This may be a torch.nn.* instance in skipfiles.py which
+            # won't trigger a frame evaluation workaround to add an extra
+            # frame we can capture
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
+            # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
@@ -136,71 +120,26 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self._call_lazy_check
 
     def __getstate__(self):
-        """
-        Gets the state of the OptimizedModule for serialization.
-
-        Returns:
-        - The state dictionary of the OptimizedModule, excluding the 'forward' and '__call__' attributes.
-
-        """
-
         state = dict(self.__dict__)
         state.pop("forward", None)
         state.pop("__call__", None)
         return state
 
     def __setstate__(self, state):
-        """
-        Sets the state of the OptimizedModule during deserialization.
-
-        Arguments:
-        - state: The state dictionary of the OptimizedModule.
-
-        Note:
-        - After setting the state, the OptimizedModule is re-initialized.
-
-        """
-
         self.__dict__ = state
         self._initialize()
 
     def __getattr__(self, name):
-        """
-        Retrieves attributes from the OptimizedModule.
-
-        Arguments:
-        - name: The name of the attribute to retrieve.
-
-        Returns:
-        - The value of the attribute if found in the original module, otherwise raises an AttributeError.
-
-        Note:
-        - This method is called when an attribute is not found in the OptimizedModule itself.
-        - The '_orig_mod' attribute can be accessed directly using the '_orig_mod' name.
-
-        """
-
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
     def _call_lazy_check(self, *args, **kwargs):
-        """
-        Calls the forward method after checking for lazy module initialization.
-
-        Arguments:
-        - *args: Positional arguments to pass to the forward method.
-        - **kwargs: Keyword arguments to pass to the forward method.
-
-        Returns:
-        - The result of the forward method call.
-
-        Note:
-        - This method is used when the original module has a lazy initialization hook.
-        - It runs the pre-hooks for lazy module initialization before invoking the forward method.
-        """
-
         if hasattr(self._orig_mod, "_initialize_hook"):
+            # In the case of a lazy module, we want to run
+            # the pre-hooks which initialize it.
+            # Afterwards, lazy module deletes its pre-hooks
+            # to avoid treating it as lazy on subsequent recompile.
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
@@ -784,15 +723,32 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        arg_len: int,
+        flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
+        example_fake_inputs: List[torch.Tensor],
     ):
         super().__init__(m)
-        self.new_args = [
-            super(FlattenInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-            for i in range(0, arg_len)
-        ]
+
+        matched_input_elements_to_fake = {
+            val: example_fake_inputs[ix]
+            for ix, val in enumerate(matched_input_elements_positions)
+        }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
+
+        self.new_args = []
+        for i in range(0, len(flat_args)):
+            arg = super(FlattenInputOutputSignature, self).placeholder(
+                f"arg{i}", (), {}
+            )
+            if i in matched_input_elements_to_fake:
+                arg.node.meta["val"] = matched_input_elements_to_fake[i]
+            else:
+                # Fill node.mata["val"] with faketensor from the input,
+                # if it's not found in matched_input_elements_positions
+                if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+            self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
 
@@ -1079,9 +1035,10 @@ def export(
 
     new_graph = FlattenInputOutputSignature(
         graph,
-        len(flat_args),
+        flat_args,
         matched_input_elements_positions,
         matched_output_elements_positions,
+        example_fake_inputs,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1187,9 +1144,6 @@ def export(
     )
 
     new_graph.recompile()
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
-
     return (new_graph, out_guards)
 
 

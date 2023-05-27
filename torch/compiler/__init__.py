@@ -2,20 +2,15 @@ import torch
 import torch._dynamo
 import torch._inductor
 from typing import Callable, Union, List, Set, Tuple, Any, Dict
-from torch._dynamo.eval_frame import OptimizedModule
 
 __all__ = [
-    "OptimizedModule",
     "compile",
     "is_enabled",
     "reset",
     "allow_in_graph",
     "list_backends",
     "explain",
-    "is_compiling",
     "disable",
-    "list_options",
-    "list_mode_options",
 ]
 
 def compile(*args, **kwargs):
@@ -25,47 +20,16 @@ def compile(*args, **kwargs):
 
     return torch.compile(*args, **kwargs)
 
-def is_enabled() -> bool:
-    """
-    Check if compilation is enabled in the current environment.
-
-    This function checks if the `torch.compile` attribute exists in the `torch` module,
-    indicating that compilation is enabled. It returns `True` if compilation is enabled,
-    and `False` otherwise.
-
-    Returns:
-    - A boolean value indicating whether compilation is enabled (`True`) or not (`False`).
-
-    Note:
-    - The function checks the presence of the `torch.compile` attribute using the `hasattr()` function.
-    - If `torch.compile` exists, it indicates that compilation is enabled, and the function returns `True`.
-    - If `torch.compile` does not exist, it indicates that compilation is not enabled, and the function returns `False`.
-
-    """
-
-    if hasattr(torch, "compile"):
-        return True
-    else:
-        return False
-
 def reset() -> None:
     """
-    Clear all compile caches and restore the initial state.
+    This function clears all compilation caches and restores the system to its initial state. 
+    It is recommended to call this function, especially after using operations like `torch.compile(...)`
+    to ensure a clean state before subsequent compilation.
 
-    This function clears all compile caches and resets various internal state variables to their initial values.
-
-    It performs the following operations:
-    1. Clears the input and output code caches.
-    2. Clears the original code map.
-    3. Clears the guard failures.
-    4. Clears the cache for the `ContinueExecutionCache` class.
-    5. If the most recent backend in the evaluation frame has a 'reset' method, it is called.
-    6. Resets the most recent backend in the evaluation frame to None.
-    7. Clears the compilation metrics.
-    8. Resets the frame count to its initial value.
-
-    Note:
-    - Call this function if you're compiling more than one model in a program or if you're changing the compile options
+    Usage:
+    1. Call `reset()` to clear all compilation caches and restore the initial state.
+    2. Perform any desired operations, such as `torch.compile(...)`.
+    3. If you need to start fresh or perform another `torch.compile(...)`, call `reset()` to ensure a clean state.
 
     """
 
@@ -88,6 +52,14 @@ def allow_in_graph(fn):
 
     Note:
     - The function assumes that `fn` is a callable. If it is not, an assertion error is raised.
+
+    Warning:
+    - `allow_in_graph` skips TorchDynamo completely on the decorated function
+    skipping all TorchDynamo safety checks (graph breaks, handling closures, etc).
+    - Therefore, one has to be very careful with `allow_in_graph`
+    Today, downstream components like AOT Autograd rely on TorchDynamo to take care of complex Python features
+    but `allow_in_graph` bypasses TorchDynamo.
+    - If not careful, this could lead to soundness and really hard-to-debug issues.
     """
 
     return torch._dynamo.allow_in_graph(fn)
@@ -104,11 +76,6 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 
     Returns:
     - A sorted list of backend names that can be passed to `torch.compile()`.
-
-    Note:
-    - The function internally performs a lazy import using the `_lazy_import()` function.
-    - The `exclude_tags` argument allows users to filter out backends based on their tags.
-    If the argument is not provided or is set to `None`, no tags will be excluded.
 
     Example:
     To retrieve a list of available backends excluding the tags "debug" and "experimental",
@@ -176,7 +143,7 @@ def assume_constant_result(fn):
     - fn: The function to be marked as having a constant result.
 
     Returns:
-    - The same function `fn` with the `_dynamo_marked_constant` attribute set to `True`.
+    - The same function `fn`
 
     Example:
     To mark a function `my_function()` as having a constant result, we can call the
@@ -185,26 +152,13 @@ def assume_constant_result(fn):
     ::
         marked_function = assume_constant_result(my_function)
 
+    Warning:
+    - `assume_constant_result` can if invalid cause safety and soundness, `torch.compile`
+    will not attempt to validate whether the constant assumption is true or not
+
     """
 
     return torch._dynamo.assume_constant_result(fn)
-
-def is_compiling() -> bool:
-    """
-    This function checks the status of compilation phase
-
-    Returns:
-    - A boolean value indicating if compilation is currently compiling
-
-    Example:
-    We can check if compilation is currently compiling by calling the function as follows:
-
-    ::
-        compiling = torch.compiler.is_compiling()
-
-    """
-
-    return torch._dynamo.is_compiling()
 
 def disable(fn=None, recursive=True):
     """
@@ -265,55 +219,3 @@ def disable(fn=None, recursive=True):
     """
 
     return torch._dynamo.disable(fn, recursive)
-
-def list_options() -> Dict[str, Any]:
-    """
-    This function returns a dictionary that provides information about the available
-    optimizations and debug configurations that can be used with the `torch.compile()`
-    function. The options are documented in `torch._inductor.config`.
-
-    Returns:
-    - A dictionary containing the available optimizations and debug configurations.
-
-    Example:
-    To retrieve the available options for optimizations and debug configurations,
-    we can call the `list_options()` function as follows:
-
-    ::
-        options = torch.compiler.list_options()
-
-    """
-
-    return torch._inductor.list_options()
-
-def list_mode_options(mode: str = None) -> Dict[str, Any]:
-    """
-    This function returns a dictionary that provides information about the optimizations
-    performed by each available mode passed to the `torch.compile()` function.
-
-    Args:
-    - mode (str, optional): The mode to return the optimizations for. If None, optimizations
-    for all modes are returned.
-
-    Returns:
-    - A dictionary describing the optimizations performed by the specified mode(s).
-    If `mode` is provided, the dictionary contains the optimizations specific to that mode.
-    If `mode` is None, the dictionary contains optimizations for all available modes.
-
-    Example:
-    To retrieve the optimizations performed by each available mode passed to `torch.compile()`,
-    we can call the `list_mode_options()` function as follows:
-
-    ::
-      options = torch.compiler.list_mode_options()
-
-    To retrieve the optimizations for a specific mode, we can pass the mode name as an argument:
-
-    ::
-        options = torch.compiler.list_mode_options(mode="max-autotune")
-
-    In this example, `options` will contain the optimizations specific to the "max-autotune" mode.
-
-    """
-
-    return torch._inductor.list_mode_options(mode)

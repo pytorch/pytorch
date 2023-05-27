@@ -12,14 +12,9 @@ torch.compiler API reference
     :nosignatures:
 
      compile
-     is_enabled
      reset
      allow_in_graph
      assume_constant_result
      list_backends
      explain
-     is_compiling
      disable
-     list_options
-     list_mode_options
-     OptimizedModule
