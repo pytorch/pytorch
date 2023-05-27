@@ -1176,27 +1176,6 @@ def is_stride_order_storage_and_layout(x, stride_order):
 class BaseView(IRNode):
     data: IRNode
 
-    def make_reindexer(self):
-        raise NotImplementedError(f"make_reindexer NYI on {self}")
-
-    def make_indexer(self):
-        inner = self.data.make_indexer()
-        reindex = self.make_reindexer()
-
-        def indexer(idx):
-            return inner(reindex(idx))
-
-        return indexer
-
-    def make_loader(self):
-        inner = self.data.make_loader()
-        reindex = self.make_reindexer()
-
-        def loader(idx):
-            return inner(reindex(idx))
-
-        return loader
-
     def get_dtype(self):
         return self.data.get_dtype()
 
@@ -1290,21 +1269,22 @@ class ExpandView(BaseView):
     def get_size(self):
         return self.size
 
-    def make_reindexer(self):
+    def make_loader(self):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
+        inner = self.data.make_loader()
 
-        def reindex(index):
+        def load(index):
             index = list(index[skip:])
             assert len(index) == len(actual)
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
                     index[i] = sympy.Integer(0)
-            return index
+            return inner(index)
 
-        return reindex
+        return load
 
 
 @dataclasses.dataclass
@@ -1338,15 +1318,17 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
-    def make_reindexer(self):
+    def make_loader(self):
+        inner = self.data.make_loader()
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]
         assert set(inv) == set(range(len(self.dims)))
 
-        def reindex(index):
-            return [index[i] for i in inv]
+        def load(index):
+            index = [index[i] for i in inv]
+            return inner(index)
 
-        return reindex
+        return load
 
 
 class SqueezeView(BaseView):
@@ -1412,8 +1394,13 @@ class View(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
-    def make_reindexer(self):
-        return self.reindex
+    def make_indexer(self):
+        base_indexer = self.data.make_indexer()
+
+        def indexer(idx):
+            return base_indexer(self.reindex(idx))
+
+        return indexer
 
     @staticmethod
     def handle_negative_index(idx, size):
@@ -1561,6 +1548,13 @@ class View(BaseView):
 
     def get_size(self):
         return self.size
+
+    def make_loader(self):
+        def load(index):
+            return inner(self.reindex(index))
+
+        inner = self.data.make_loader()
+        return load
 
 
 @dataclasses.dataclass
@@ -2004,8 +1998,6 @@ class MutationLayout(Layout):
             None,  # type: ignore[arg-type]
         )
         self.target = target
-        name = self.get_buffer().get_name()
-        V.graph.mark_buffer_mutated(name)
 
     @Layout.stride.getter
     def stride(self):
@@ -2014,7 +2006,7 @@ class MutationLayout(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def get_buffer(self) -> "Buffer":
+    def real_layout(self):
         def unwrap_views(target):
             if isinstance(target, MutationLayout):
                 return unwrap_views(target.target)
@@ -2024,16 +2016,12 @@ class MutationLayout(Layout):
                 return unwrap_views(target.data)
             return target
 
-        result = unwrap_views(self.target)
-        assert isinstance(result, Buffer), "MutationLayout must refer to a buffer"
-        return result
-
-    def real_layout(self):
-        return self.get_buffer().layout
+        return unwrap_views(self.target).layout
 
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
+        V.graph.realize_users_of(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -2225,17 +2213,6 @@ class ComputedBuffer(Buffer):
                     self.get_store_function(),
                     self.data.get_size(),
                 )
-
-    def make_loader(self):
-        # Inline constants and index_expressions
-        can_inline = (
-            hasattr(self.data, "make_loader")
-            and self.name not in V.graph.mutated_buffers
-            and len(self.get_read_writes().reads) == 0
-        )
-        if can_inline:
-            return self.data.make_loader()
-        return super().make_loader()
 
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
@@ -2727,19 +2704,16 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
-        # NOTE: Don't use extract_read_writes here as it fails when
-        # make_loader() inlines the computation
         x.unwrap_view().freeze_layout()
-        index_args, var_ranges = dependencies.index_vars_squeeze(
-            x.get_size(), prefix="r"
-        )
-        range_vars = index_args[0]
-        index = x.make_indexer()(range_vars)
+        rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
+        assert len(rw.reads) == 1
 
-        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)
-        strides = V.graph.sizevars.stride_vars(index, range_vars)
-        offset = V.graph.sizevars.offset_var(index, range_vars)
-        expected = sympy_dot(range_vars, strides) + offset
+        index = V.graph.sizevars.simplify_with_ranges(
+            list(rw.reads)[0].index, rw.var_ranges
+        )
+        strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
+        offset = V.graph.sizevars.offset_var(index, rw.range_vars)
+        expected = sympy_dot(rw.range_vars, strides) + offset
 
         if index != expected:
             log.debug(
@@ -3737,6 +3711,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.require_stride_order(other, req_stride_order)
+        V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,
