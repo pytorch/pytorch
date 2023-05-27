@@ -173,14 +173,14 @@ def _process_constraints(
         example_inputs: Flattened list of example inputs used to export the graph module
 
     Returns:
-        symbol_to_constraints (Dict[sympy.Symbol, List[Constraints]]): Mapping of
-            symbols (SymInt/SymFloat/SymBool) appearing in fake tensors to their
-            constraints, which are either their range (lower, upper) constraint,
-            or an equality constraint with another symbol.
+        symbol_to_range (Dict[sympy.Symbol, RangeConstraints]): Mapping of
+            symbols (from SymInts) appearing in the fake tensors in
+            node.meta["val"] to their range constraints, which are a tuple
+            containing (lower, upper) constraints.
 
-        symbol_to_fx_source (Dict[sympy.Symbol, Tuple[torch.fx.Node, int]]): Mapping
-            of symbols to the FX node in which they appear in, and their
-            dimension.
+        equality_constraints (Dict[NodeDim, List[NodeDim]]): Mapping of (node,
+            dim) to a list of other (node, dim) tuples to mark that these
+            dimensions are equal.
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
