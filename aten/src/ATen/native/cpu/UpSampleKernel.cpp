@@ -758,6 +758,10 @@ struct HelperInterpBase {
     xsize = std::min(
         static_cast<int64_t>(center + support + 0.5 + align_corners_delta), input_size) - xmin;
 
+    // There are rare cases when due to precision xsize can be larger than max_interp_size by one.
+    // We have to clip the value
+    xsize = std::clamp(xsize, static_cast<int64_t>(0), max_interp_size);
+
     int64_t j = 0;
     for (; j < xsize; j++) {
       scalar_t w = filter_fn((j + xmin - center + 0.5 - align_corners_delta) * invscale);
