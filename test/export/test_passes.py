@@ -221,6 +221,19 @@ class TestPasses(TestCase):
         self.assertTrue(pass_result.modified)
         self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
 
+    def test_functionalization_with_view_copy(self) -> None:
+        def foo(x):
+            x.add_(4)
+            y = x.view(x.shape)
+            return x.cos() + y.cos()
+
+        x = torch.zeros(4, 2, 3)
+
+        ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
+        # After this pass, there shouldn't be any view nodes in the graph
+        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view.default) == 0)
+        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view_copy.default) > 0)
+
     def test_views_op_having_view_copy(self) -> None:
         schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
         aten_schemas = [s[6:] for s in schemas if s.startswith("aten::")]
@@ -306,12 +319,12 @@ class TestPasses(TestCase):
                 def true_fn(x, y):
                     b = x.item()
                     constrain_as_value(b, min=2, max=5)
-                    return x
+                    return x - b
 
                 def false_fn(x, y):
                     c = y.item()
                     constrain_as_value(c, min=2, max=5)
-                    return y
+                    return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
                 return ret
@@ -322,6 +335,35 @@ class TestPasses(TestCase):
         ep = export(mod, (torch.tensor(True), x, y)).add_runtime_assertions()
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
+
+    def test_runtime_assert_equality_constraint(self):
+        class Adder(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        m = Adder()
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        exported = torch._export.export(
+            m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
+        )
+        exported = exported.add_runtime_assertions()
+
+        x = torch.rand(3, 5)
+        y = torch.rand(3, 6)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Input arg1's dimension #1 size is not equal to input arg0's dimension #1",
+        ):
+            exported(x, y)
+
+        y = torch.rand(3, 5)
+        dynamo_result = exported(x, y)
+        real_result = m(x, y)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 
 if __name__ == '__main__':
