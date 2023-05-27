@@ -665,6 +665,50 @@ class TestQuantizePT2E(QuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
+    def test_propagate_annotation(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.view(-1, 3)
+                x = torch.nn.functional.hardtanh(x, -0.5, 0.5)
+                x = self.linear(x)
+                return x
+
+        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
+        quantizer = QNNPackQuantizer()
+        operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m = M().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # program capture
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+
+        m = prepare_pt2e_quantizer(m, quantizer)
+        m(*example_inputs)
+        self.assertEqual(id(m.activation_post_process_2), id(m.activation_post_process_3))
+        self.assertEqual(id(m.activation_post_process_3), id(m.activation_post_process_4))
+        m = convert_pt2e(m)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
+        }
+        self.checkGraphModuleNodes(
+            m, expected_node_occurrence=node_occurrence
+        )
+
     def test_prepare_qat_conv_bn_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
