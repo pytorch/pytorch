@@ -386,11 +386,10 @@ def main() -> None:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
 
-    # DEBUG: TO BE REVERTED
-    # if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-    # we don't want to run the mem leak check or disabled tests on normal
-    # periodically scheduled jobs, only the ones at this time
-    filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
+    if args.event_name == "schedule" and args.schedule == "29 8 * * *":
+        # we don't want to run the mem leak check or disabled tests on normal
+        # periodically scheduled jobs, only the ones at this time
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
     if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
