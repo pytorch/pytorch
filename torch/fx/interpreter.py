@@ -138,10 +138,7 @@ class Interpreter:
                 self.env[node] = self.run_node(node)
             except Exception as e:
                 if self.extra_traceback:
-                    call_module_extra = ""
-                    if node.op == "call_module":
-                        call_module_extra = f" (module type: {type(getattr(self.module, node.target))})"
-                    msg = f"While executing{call_module_extra} {node.format_node()}"
+                    msg = f"While executing {node.format_node()}"
                     msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
                     msg += f"\nOriginal traceback:\n{node.stack_trace}"
                     e.args = (msg,) + e.args[1:]

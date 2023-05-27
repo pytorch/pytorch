@@ -185,8 +185,13 @@ class JitScalarType(enum.IntEnum):
             except RuntimeError:
                 return cls._from_name(str(value.type().getElementType()))
 
-        # value must be a non-list torch._C.Value scalar
-        scalar_type = value.type().scalarType()
+        scalar_type = None
+        if value.node().kind() != "prim::Constant" or not isinstance(
+            value.type(), torch._C.NoneType
+        ):
+            # value must be a non-list torch._C.Value scalar
+            scalar_type = value.type().scalarType()
+
         if scalar_type is not None:
             return cls._from_name(scalar_type)
 
@@ -336,6 +341,24 @@ _SCALAR_TYPE_TO_DTYPE = {
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
 
+# NOTE: this is a mapping from torch dtype to a set of compatible onnx types
+# It's used in dispatcher to find the best match overload for the input dtypes
+TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS = {
+    torch.bfloat16: {"tensor(bfloat16)"},
+    torch.bool: {"tensor(bool)"},
+    torch.float64: {"tensor(double)"},
+    torch.float32: {"tensor(float)"},
+    torch.float16: {"tensor(float16)"},
+    torch.int16: {"tensor(int16)"},
+    torch.int32: {"tensor(int32)"},
+    torch.int64: {"tensor(int64)"},
+    torch.int8: {"tensor(int8)"},
+    torch.uint8: {"tensor(uint8)"},
+    str: {"tensor(string)"},
+    int: {"tensor(int16)", "tensor(int32)", "tensor(int64)"},
+    float: {"tensor(float16)", "tensor(float)", "tensor(double)"},
+    bool: {"tensor(int32)", "tensor(int64)", "tensor(bool)"},
+}
 
 # NOTE: Belows are from torch/fx/node.py
 BaseArgumentTypes = Union[
