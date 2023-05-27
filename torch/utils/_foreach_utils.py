@@ -5,59 +5,19 @@ import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
-__all__ = ["SupportForeachDevices"]
+__all__ = ["get_foreach_kernels_supported_devices", "get_fused_kernels_supported_devices"]
 
-class SupportForeachDevices(object):
+def get_foreach_kernels_supported_devices() -> List[str]:
     r"""
-    A class that manages the default device type for foreach support,
-    default is List['cuda'].
+    Return the device type list that supports foreach kernels.
     """
-    _default_device_types = ["cuda"]
+    return ["cuda", torch._C._get_privateuse1_backend_name()]
 
-    @staticmethod
-    def add_device_type(device: str = "cuda"):
-        """
-        Add the device type to the default value list for foreach support.
-
-        Args:
-            device (str): The device type to add to the default value list. Default is 'cuda'.
-        """
-        if device not in SupportForeachDevices._default_device_types:
-            SupportForeachDevices._default_device_types.append(device)
-
-    @staticmethod
-    def remove_device_type(device: str = "cuda"):
-        """
-        Remove the default device type for foreach support.
-
-        Args:
-            device (str): The device type to remove from the default value list. Default is 'cuda'.
-        """
-        if device in SupportForeachDevices._default_device_types:
-            SupportForeachDevices._default_device_types.remove(device)
-
-    @staticmethod
-    def get_device_types() -> List[str]:
-        """
-        Get the current default device types that supports foreach operators.
-
-        Returns:
-            List[str]: Get list of current default device type.
-        """
-        return SupportForeachDevices._default_device_types
-
-    @staticmethod
-    def get_device_types_and(device: str) -> List[str]:
-        """
-        Get the device types that supports foreach operators (current default devices and input device together).
-
-        Returns:
-            List[str]: Get list of the device type.
-        """
-        if device in SupportForeachDevices._default_device_types:
-            return SupportForeachDevices._default_device_types
-        else:
-            return SupportForeachDevices._default_device_types + [device,]
+def get_fused_kernels_supported_devices() -> List[str]:
+    r"""
+    Return the device type list that supports fused kernels in optimizer.
+    """
+    return ["cuda", torch._C._get_privateuse1_backend_name()]
 
 # This util function splits tensors into groups by device and dtype, which is useful before sending
 # tensors off to a foreach implementation, which requires tensors to be on one device and dtype.
@@ -90,6 +50,20 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
     return per_device_and_dtype_tensors
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
-    if device.type not in SupportForeachDevices.get_device_types_and("cpu") or torch.jit.is_scripting():
+    if device.type not in ["cpu", "cuda", torch._C._get_privateuse1_backend_name()] or torch.jit.is_scripting():
         return False
     return all(t is None or type(t) == torch.Tensor for t in tensors)
+
+def _check_same_device(params: List[Tensor]) -> bool:
+    r"""
+    Checks that all Tensors in params have the same device.
+    """
+    device_type = ""
+    for p in params:
+        if p is None:
+            continue
+        if device_type == "":
+            device_type = p.device.type
+        if device_type != p.device.type:
+            return False
+    return True

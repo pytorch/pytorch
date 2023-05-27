@@ -5,7 +5,9 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
                         _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, SupportForeachDevices
+from torch.utils._foreach_utils import (_group_tensors_by_device_and_dtype,
+                                        get_fused_kernels_supported_devices,
+                                        _check_same_device)
 
 __all__ = ['Adam', 'adam']
 
@@ -40,12 +42,15 @@ class Adam(Optimizer):
             # Support AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
+            if not all(_check_same_device(pg['params']) for pg in self.param_groups):
+                raise RuntimeError("`fused=True` requires all the params to be on same device.")
+            fused_suppoted_devices = get_fused_kernels_supported_devices()
             if not all(
-                p.device.type in SupportForeachDevices.get_device_types() and
+                p.device.type in fused_suppoted_devices and
                 torch.is_floating_point(p) for pg in self.param_groups for p in pg['params']
             ):
                 raise RuntimeError("`fused=True` requires all the params to be "
-                                   f"{SupportForeachDevices.get_device_types()}, floating point Tensor")
+                                   f"{fused_suppoted_devices}, floating point Tensor.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
