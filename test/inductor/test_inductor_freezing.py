@@ -110,8 +110,6 @@ class OptimizeForInferenceTemplate(TestCase):
             def foo(mod):
                 return mod()
 
-            inp = torch.rand([1], device="cuda")
-
             out_comp = foo(mod)
             out_comp2 = foo(mod)
 
@@ -128,8 +126,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 return self.aliased_param[1:], self.aliased_param
 
         mod = Mod().to(self.device).eval()
-
-        inp = torch.rand([4], device="cuda")
 
         @torch.compile()
         def foo(mod):
@@ -201,8 +197,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
         mod = Mod().eval().to(self.device)
         inp = torch.rand([10], device=self.device)
-
-        t = torch.rand([10], device="cuda")
 
         with torch.no_grad():
             eager = mod(inp)

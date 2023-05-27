@@ -183,7 +183,7 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
 disable_cpp_codegen = is_fbcode()
 
-freezing = True
+freezing = False
 
 freezing_discard_parameters = False
 
