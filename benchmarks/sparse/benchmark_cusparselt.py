@@ -7,7 +7,7 @@ from tqdm import tqdm
 import pandas as pd
 import argparse
 import random
-from torch.ao.pruning import SemiStructuredSparseTensor, SemiStructuredSparseTensorCUTLASS
+from torch.sparse import to_semi_structured_sparse
 
 
 torch.set_printoptions(
@@ -31,22 +31,6 @@ class Model(nn.Module):
         return self.linear(x)
 
 
-def gen_two_four_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
-    def random_mask_choice(i=None):
-        choices = [
-            [1, 1, 0, 0],
-            [1, 0, 1, 0],
-            [1, 0, 0, 1],
-            [0, 1, 1, 0],
-            [0, 1, 0, 1],
-            [1, 0, 1, 0],
-        ]
-        return choices[random.randint(0, len(choices) - 1) if i is None else i]
-
-    mask_entries = [random_mask_choice() for i in range(r * c // 4)]
-    return (
-        torch.tensor(mask_entries, dtype=dtype, device=device).view(r, c).contiguous()
-    )
 
 
 def test_linear(m, k, n, dtype, contiguous, backend):
@@ -70,7 +54,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
             SemiStructuredSparseTensorCUTLASS(sparse_weight, mask_or_meta=mask.bool())
         )
     else:
-        model.linear.weight = nn.Parameter(SemiStructuredSparseTensor(sparse_weight, contiguous_output=contiguous))
+        model.linear.weight = nn.Parameter(to_semi_structured_sparse(sparse_weight))
 
     sparse_output = model(input_tensor)
 
@@ -102,9 +86,9 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     bias = torch.rand(n).to(dtype).cuda()
 
     if backend == "cutlass":
-        sA = SemiStructuredSparseTensor(A, mask_or_meta=A)
+        sA = to_semi_structured_sparse(A, mask_or_meta=A)
     else:
-        sA = SemiStructuredSparseTensor(A, contiguous_output=contiguous)
+        sA = to_semi_structured_sparse(A)
 
     # torch.mm calculation
     if dtype is not torch.int8:

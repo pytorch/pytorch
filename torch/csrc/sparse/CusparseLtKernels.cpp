@@ -59,16 +59,18 @@ struct CusparseLt : public torch::CustomClassHolder {
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   // struct functions / constructor
-  at::Tensor cusparselt_mm(const at::Tensor& input, bool transposeResult);
+  at::Tensor cusparselt_mm(const at::Tensor& input, bool transpose_dense, bool transpose_result);
   at::Tensor cusparselt_addmm(
       const at::Tensor& input,
       const at::Tensor& bias,
-      bool transposeResult);
+      bool transpose_dense,
+      bool transpose_result);
   at::Tensor cusparselt_helper(
       const at::Tensor& input,
       void* dBias,
       int64_t biasStride,
-      bool transposeResult);
+      bool transpose_dense,
+      bool transpose_result);
   void compress(const at::Tensor& sparse_input, bool transpose_sparse);
   CusparseLt(const at::Tensor& sparse_compressed)
       : sparse_compressed{sparse_compressed} {
@@ -161,44 +163,46 @@ void CusparseLt::compress(
 
 at::Tensor CusparseLt::cusparselt_mm(
     const at::Tensor& input,
-    bool transposeResult) {
-  return CusparseLt::cusparselt_helper(input, nullptr, 0, transposeResult);
+    bool transpose_dense, 
+    bool transpose_result) {
+  return CusparseLt::cusparselt_helper(input, nullptr, 0, transpose_dense, transpose_result);
 }
 
 at::Tensor CusparseLt::cusparselt_addmm(
     const at::Tensor& input,
     const at::Tensor& bias,
-    bool transposeResult) {
+    bool transpose_dense, 
+    bool transpose_result) {
   return CusparseLt::cusparselt_helper(
-      input, bias.data_ptr(), 0, transposeResult);
+      input, bias.data_ptr(), 0, transpose_dense, transpose_result);
 }
 
 at::Tensor CusparseLt::cusparselt_helper(
     const at::Tensor& input,
     void* dBias,
     int64_t biasStride,
-    bool transposeResult) {
+    bool transpose_dense, 
+    bool transpose_result) {
   cusparseLtMatmulDescriptor_t matmul;
 
   int64_t k = input.size(0);
   int64_t n = input.size(1);
 
   // create tensor
-  auto res = (transposeResult) ? input.new_empty({n, num_A_rows})
+  auto res = (transpose_result) ? input.new_empty({n, num_A_rows})
                                : input.new_empty({num_A_rows, n});
 
   cusparseOrder_t result_order =
-      (transposeResult) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-// cusparseOrder_t dense_input_order = CUSPARSE_ORDER_ROW;
-  cusparseOperation_t opB = (input.is_contiguous())? CUSPARSE_OPERATION_NON_TRANSPOSE : CUSPARSE_OPERATION_TRANSPOSE;
+      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+  cusparseOperation_t opB = (transpose_dense)? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  int64_t num_B_rows = (input.is_contiguous())? k : n;
-  int64_t num_B_cols = (input.is_contiguous())? n : k;
+  int64_t num_B_rows = (transpose_dense)? n : k;
+  int64_t num_B_cols = (transpose_dense)? k : n;
   int64_t num_C_rows = num_A_rows;
   int64_t num_C_cols = n;
 
   int64_t ldb = num_B_cols;
-  int64_t ldc = (transposeResult) ? num_C_rows : num_C_cols;
+  int64_t ldc = (transpose_result) ? num_C_rows : num_C_cols;
 
   // initalize dense input descriptor
   CHECK_CUSPARSE(cusparseLtDenseDescriptorInit(
