@@ -1,3 +1,5 @@
+import collections
+import inspect
 import logging
 
 import math
@@ -11,6 +13,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
+from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
@@ -72,8 +75,23 @@ constant_fold_functions = [
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
+
+constant_processgroup_functions = []
+
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
+    from torch.distributed.distributed_c10d import (
+        _get_group_tag,
+        get_process_group_ranks,
+    )
+
+    constant_processgroup_functions.extend(
+        [
+            get_process_group_ranks,
+            _get_group_tag,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -128,9 +146,12 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-
-        if value in tensor_dunder_fns_remap:
+        if (
+            isinstance(value, collections.abc.Hashable)
+            and value in tensor_dunder_fns_remap
+        ):
             value = tensor_dunder_fns_remap[value]
+
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -494,6 +515,18 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif (
+            inspect.isfunction(self.value)
+            and self.value in constant_processgroup_functions
+        ):
+            # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+            # ID_MATCH based on how it was constructed.
+
+            # We desugar it at trace-time into ranks by directly calling util
+            # bake the result into the trace
+            assert len(args) == 1, "Expected one arg (pg)"
+            assert isinstance(args[0], ProcessGroupVariable)
+            return ConstantVariable(self.value(args[0].as_python_constant()))
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -561,7 +594,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
-
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -773,35 +805,49 @@ def speculate_subgraph(
             output = f.call_function(tx, args, {})
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
-            # TODO: support non single Tensor output
+            # TODO: support pytree output
             # We check always_restore because we dont use the output or side effects of always_restore code,
             # like bwd.
-            if not isinstance(output, TensorVariable) and not always_restore:
-                unimplemented(
-                    "HigherOrderOperator with body with non single Tensor output"
-                )
-
             if always_restore:
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
+            else:
+                if not isinstance(
+                    output, (TensorVariable, ListVariable, TupleVariable)
+                ):
+                    unimplemented("HigherOrderOperator with body with pytree output")
 
-            tx.output.guards.update(output.guards)
-            tx.output.create_node(
-                "output",
-                "output",
-                (tracer.create_arg((output.as_proxy(),))),
-                {},
-            )
-            graph = tx.output.graph
-            lifted_freevars = tracer.lifted_freevars
+                if isinstance(output, (ListVariable, TupleVariable)):
+                    if any(
+                        not isinstance(var, TensorVariable)
+                        for var in output.unpack_var_sequence(tx)
+                    ):
+                        unimplemented(
+                            "HigherOrderOperator body's output must consist of tensors only"
+                        )
 
-            return (
-                output,
-                graph,
-                lifted_freevars,
-            )
+                tx.output.guards.update(output.guards)
+                tx.output.create_node(
+                    "output",
+                    "output",
+                    (tracer.create_arg((output.as_proxy(),))),
+                    {},
+                )
+                graph = tx.output.graph
+                lifted_freevars = tracer.lifted_freevars
+
+                return (
+                    output,
+                    graph,
+                    lifted_freevars,
+                )
 
     except torch._dynamo.exc.Unsupported as ex:
+        log.warning(
+            "TorchDynamo tracing of HigherOrderOperator did not go well. "
+            "Falling back to eager behavior. This can result in a slowdown."
+        )
+        log.exception(ex)
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
         raise
@@ -1203,10 +1249,13 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             p_args = (
                 body_node,
                 *(arg.as_proxy() for arg in args[1:]),
-                *(arg for arg in body_lifted_freevars),
+                *(arg for arg in body_lifted_freevars.keys()),
             )
-            r = body_r.as_proxy().node.meta["example_value"]
-            example_value = r
+            example_value = pytree.tree_map_only(
+                torch.fx.Proxy,
+                lambda a: a.node.meta["example_value"],
+                body_r.as_proxy(),
+            )
         elif self.value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",
@@ -1243,7 +1292,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             post_guards = tx.output.guards
             if body_lifted_freevars:
-                for freevar in body_lifted_freevars:
+                for freevar in body_lifted_freevars.keys():
                     if "saved_tensor_marked" not in freevar.node.meta:
                         unimplemented("NYI - freevars in autograd function.")
 
@@ -1268,7 +1317,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             p_args = (
                 *(arg.as_proxy() for arg in args),
-                *(arg for arg in body_lifted_freevars),
+                *(arg for arg in body_lifted_freevars.keys()),
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r

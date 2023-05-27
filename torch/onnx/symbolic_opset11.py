@@ -1462,14 +1462,14 @@ def embedding_bag(
 def embedding_renorm(g: jit_utils.GraphContext, weight, indices, max_norm, norm_type):
     unique_indices = g.op("Unique", indices)
     partial_weight = g.op("Gather", weight, unique_indices)
-    norm_type = int(norm_type)
-    if norm_type == 1:
+    norm_i = int(norm_type)
+    if norm_i == 1:
         norm_type = "ReduceL1"
-    elif norm_type == 2:
+    elif norm_i == 2:
         norm_type = "ReduceL2"
     else:
         raise errors.SymbolicValueError(
-            f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
+            f"Unsupported: ONNX export of embedding_renorm with norm: {norm_i}. "
             "Only 1. and 2. are supported.",
             weight,
         )
