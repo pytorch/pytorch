@@ -2030,6 +2030,9 @@ class CommonTemplate:
 
     @requires_multigpu()
     def test_multi_gpu_device(self):
+        # TODO: https://github.com/pytorch/pytorch/issues/92627
+        x = torch.rand([4], device="cuda")
+
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
             r = r.to("cuda:1")

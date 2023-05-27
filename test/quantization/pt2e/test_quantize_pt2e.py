@@ -19,6 +19,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QNNPackQuantizer,
     Quantizer,
     QuantizationSpec,
+    SharedQuantizationSpec,
 )
 from torch.ao.quantization._quantize_pt2e import (
     convert_pt2e,
@@ -151,6 +152,27 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                act_qspec = QuantizationSpec(
+                    dtype=torch.uint8,
+                    quant_min=0,
+                    quant_max=255,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                weight_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                bias_qspec = QuantizationSpec(
+                    dtype=torch.float32,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.PlaceholderObserver,
+                )
                 for node in model.graph.nodes:
                     if (
                         node.op == "call_function"
@@ -162,27 +184,6 @@ class TestQuantizePT2E(QuantizationTestCase):
                         assert isinstance(weight, Node)
                         bias = node.args[2]
                         assert isinstance(bias, Node)
-                        act_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=torch.per_tensor_affine,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.default_observer,
-                        )
-                        weight_qspec = QuantizationSpec(
-                            dtype=torch.int8,
-                            quant_min=-128,
-                            quant_max=127,
-                            qscheme=torch.per_tensor_affine,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.default_weight_observer,
-                        )
-                        bias_qspec = QuantizationSpec(
-                            dtype=torch.float32,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=observer.PlaceholderObserver,
-                        )
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -208,8 +209,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                             _annotated=True,
                         )
                         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                            output_qspec=act_qspec,
-                            _input_output_share_observers=True,
+                            output_qspec=SharedQuantizationSpec((input_act, maxpool_node)),
                             _annotated=True,
                         )
 
