@@ -70,42 +70,20 @@ def check_inplace_broadcast(self_shape, *args_shape):
 
 
 @register_meta([aten.take.default, aten.take.out])
-def meta_take(self, index, *, out=None):
+@out_wrapper()
+def meta_take(self, index):
     # Type and device checks
     check(
         index.dtype == torch.long,
         lambda: f"take(): Expected a long tensor for index, but got {index.dtype}",
     )
-    if out is not None:
-        check(
-            self.dtype == out.dtype,
-            lambda: (
-                f"take(): self and out expected to have the same dtype, "
-                f"but got self.dtype = {self.dtype} and out.dtype = {out.dtype}"
-            ),
-        )
-        check(
-            self.device == out.device and self.device == index.device,
-            lambda: (
-                f"take(): self, index and out expected to be in the same device, "
-                f"but got self.device = {self.device}, index.device = {index.device}, "
-                f"and out.device = {out.device}"
-            ),
-        )
-
     # Index checks
     check(
         not (self.numel() == 0 and index.numel() != 0),
         lambda: "take(): tried to take from an empty tensor",
         IndexError,
     )
-
-    result = self.new_empty(index.shape)
-    if out is not None:
-        assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-    return result
+    return self.new_empty(index.shape)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
