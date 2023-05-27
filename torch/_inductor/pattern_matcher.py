@@ -13,6 +13,7 @@ import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
+from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -676,6 +677,9 @@ def register_replacement(
         )
         for i, grad in enumerate(requires_grad):
             if isinstance(args[i], torch.Tensor):
+                if grad and is_integer_dtype(args[i].dtype):
+                    return False
+
                 args[i] = torch.empty_strided(
                     args[i].size(),
                     args[i].stride(),
