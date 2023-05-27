@@ -14,18 +14,43 @@ from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import \
     TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes, toleranceOverride,
+     tol)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_reduce_op_db, foreach_lerp_op_db, DecorateInfo)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types, complex_types,
     floating_types_and, floating_types, integral_types_and,
 )
 
-
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
+# TODO: Share the implementation with functorch/common_utils.py
+def tol2(op_name, variant_name, override_dct, *, device_type=None):
+    return (op_name, variant_name, override_dct, device_type)
+
+def tol1(op_name, override_dct, *, device_type=None):
+    return tol2(op_name, '', override_dct, device_type=device_type)
+
+def opsToleranceOverride(test_case_name, base_test_name, overrides):
+    all_opinfos = foreach_unary_op_db
+    for override in overrides:
+        op_name, variant_name, override, device_type = override
+        matching_opinfos = [o for o in all_opinfos
+                            if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        decorators.append(DecorateInfo(
+            toleranceOverride(override),
+            test_case_name, base_test_name, device_type=device_type))
+        opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped
 
 class RegularFuncWrapper:
     def __init__(self, func):
@@ -406,6 +431,16 @@ class TestForeach(TestCase):
 
     @ops(foreach_unary_op_db)
     @parametrize("is_fastpath", (True, False))
+    @opsToleranceOverride('TestForeach', 'test_unary_op', (
+        tol1('_foreach_acos',
+             {torch.complex64: tol(atol=1e-05, rtol=1e-05)}, device_type='cuda'),
+        tol1('_foreach_asin',
+             {torch.complex64: tol(atol=1e-05, rtol=1e-05)}, device_type='cuda'),
+        tol1('_foreach_tan',
+             {torch.complex64: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
+        tol1('_foreach_tanh',
+             {torch.complex64: tol(atol=5e-03, rtol=1e-04)}, device_type='cuda'),
+    ))
     def test_unary_op(self, device, dtype, op, is_fastpath):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
         samples = op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)
