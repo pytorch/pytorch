@@ -3,20 +3,18 @@ import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, List, Optional
+from typing import Any, Dict, List
 
 import sympy
 
 import torch
 import torch.fx
 
-from torch._export.graph_module import ConstraintsContainer, get_export_meta
 from torch._export.pass_base import ExportPassBase, ProxyValue
 from torch._export.pass_infra.node_metadata import NodeMetadata
-from torch.fx.passes.infra.pass_base import PassResult
 
 
-__all__ = ["AddRuntimeAssertionsForConstraintsPass"]
+__all__ = ["_AddRuntimeAssertionsForConstraintsPass"]
 
 
 @dataclass
@@ -26,17 +24,26 @@ class ConstraintSpec:
     """
     dim: int
 
+
 @dataclass
 class RangeConstraintSpec(ConstraintSpec):
     # encodes min_val <= _.size()[dim] <= max_val
     min_val: int
     max_val: int
 
+
 @dataclass
 class EqualityConstraintSpec(ConstraintSpec):
     # encodes _.size()[dim] = other_name.size()[other_dim]
     other_name: str
     other_dim: int
+
+
+@dataclass
+class ConstraintsContainer:
+    ranges: Any
+    equalities: Any
+
 
 # Convert simple sympy Integers into concrete int to
 # insert into graph
@@ -49,10 +56,18 @@ def _convert_to_int(val):
         "Export constraints cannot be non-integer expressions"
     )
 
-class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
-    def __init__(self) -> None:
+class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
+    def __init__(
+        self,
+        input_shape_constraints,
+        input_name_to_example_inputs,
+        inline_constraints,
+    ) -> None:
         super().__init__()
-        self.current_gm: Optional[torch.fx.GraphModule] = None
+        self.constraints = self._process_shape_constraints(input_shape_constraints)
+        self.input_name_to_example_inputs = input_name_to_example_inputs
+        self.inline_constraints = inline_constraints
+        self.input_name_to_args: Dict[str, ProxyValue] = {}
 
     def _process_shape_constraints(self, constraints) -> Dict[str, List[ConstraintSpec]]:
         input_name_to_dim_constraints: Dict[str, ConstraintsContainer] = defaultdict(
@@ -87,16 +102,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     )
 
         return input_name_to_constraints
-
-    def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-        self.current_gm = graph_module
-        assert isinstance(self.current_gm, torch.fx.GraphModule)
-        self.constraints = self._process_shape_constraints(get_export_meta(self.current_gm).input_shape_constraints)
-        self.input_name_to_example_inputs = get_export_meta(self.current_gm).input_name_to_example_inputs
-        self.inline_constraints = get_export_meta(self.current_gm).inline_constraints
-
-        self.input_name_to_args: Dict[str, ProxyValue] = {}
-        return super().call(graph_module)
 
     def _insert_specialized_shapes_assert(self, arg, dims, name, current_inp):
         # we don't want to get shapes from meta as they will be symbolic
@@ -143,8 +148,6 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def postprocess_placeholders(self):
         # Add runtime asserts for input shape constraints. We do this here
         # because we can handle both (unary) predicates and (binary) relations.
-        assert self.current_gm is not None
-
         for name, arg in self.input_name_to_args.items():
             current_inp = self.input_name_to_example_inputs[name]
             all_dims = set(range(current_inp.dim()))
@@ -240,8 +243,8 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     expr = val.node._expr
                     if expr in self.inline_constraints:
                         constraint = self.inline_constraints[expr]
-                        lower = _convert_to_int(constraint.lower)
-                        upper = _convert_to_int(constraint.upper)
+                        lower = _convert_to_int(constraint[0])
+                        upper = _convert_to_int(constraint[1])
                         assert_msg = f" is outside of inline constraint [{lower}, {upper}]."
                         call_backs.append(partial(self._assert_range_constraint, lower=lower, upper=upper, low_threshold=-1))
                         messages.append(assert_msg)
@@ -250,7 +253,7 @@ class AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                         cbs, msgs = add_assertions(sym)
                         for cb, msg in zip(cbs, msgs):
                             def sym_size_cb(proxy, assert_msg, dim):
-                                dim_proxy = super(AddRuntimeAssertionsForConstraintsPass, self).call_operator(
+                                dim_proxy = super(_AddRuntimeAssertionsForConstraintsPass, self).call_operator(
                                     torch.ops.aten.sym_size,
                                     (proxy, dim),
                                     {},
