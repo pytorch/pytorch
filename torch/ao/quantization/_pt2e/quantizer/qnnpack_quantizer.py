@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import copy
 import functools
+
 import operator
 from typing import Callable, Dict, List, Optional, Set, Any
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
+
+from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 
 from torch.ao.quantization._pt2e.quantizer.utils import (
     get_act_qspec,
@@ -18,7 +21,6 @@ from torch.ao.quantization._pt2e.quantizer.utils import (
 )
 
 from torch.fx import Node
-
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 from .quantizer import (
@@ -270,12 +272,12 @@ class QNNPackQuantizer(Quantizer):
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
         self._annotate_linear(model, config)
+        if config.is_qat:
+            self._annotate_conv2d_bn_relu(model, config)
+            self._annotate_conv2d_bn(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
-            if config.is_qat:
-                self._annotate_conv2d_bn_relu(node, config)
-                self._annotate_conv2d_bn(node, config)
             self._annotate_conv2d_relu(node, config)
             self._annotate_conv2d(node, config)
             self._annotate_maxpool2d(node, config)
@@ -287,145 +289,114 @@ class QNNPackQuantizer(Quantizer):
         return model
 
     def _annotate_conv2d_bn(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
         """
-        Match the following pattern:
-
-          ... -> conv -> bn -> getitem[0] -> ...
-
-        Annotate it to get the following pattern after prepare:
-
-               weight -> fq1
-                          |
-          ...  -> fq0 -> conv -> bn -> getitem[0] -> fq2 -> ...
-
+        Find Conv2d + batchnorm parititions
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
-        if (
-            node.op != "call_function"
-            or node.target != operator.getitem
-            or node.args[1] != 0
-        ):
-            return
-        getitem_node = node
-        bn_node = getitem_node.args[0]
-        assert isinstance(bn_node, Node)
-        if (
-            bn_node.op != "call_function"
-            or bn_node.target != torch.ops.aten._native_batch_norm_legit.default
-        ):
-            return
-        conv_node = bn_node.args[0]
-        assert isinstance(conv_node, Node)
-        if (
-            conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
-        ):
-            return
-        if _is_annotated([getitem_node, bn_node, conv_node]):
-            return
-
-        input_qspec_map = {}
-        input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
-
-        weight = conv_node.args[1]
-        assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
-
-        bias = conv_node.args[2]
-        if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
-
-        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            _annotated=True
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d]
         )
+        for fused_partition in fused_partitions:
+            conv_partition, bn_partition = fused_partition
+            if len(conv_partition.output_nodes) > 1:
+                raise ValueError("conv partition has more than one output node")
+            conv_node = conv_partition.output_nodes[0]
+            conv_node_users = list(conv_node.users.keys())
+            if len(conv_node_users) > 1:
+                raise ValueError(
+                    "Conv node must be consumed by BN only for it to be fusable."
+                )
+            if len(bn_partition.output_nodes) > 1:
+                raise ValueError("BatchNorm partition has more than one output node")
+            bn_output_node = bn_partition.output_nodes[0]
 
-        bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            _annotated=True
-        )
-        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
-            _annotated=True
-        )
+            if _is_annotated([bn_output_node, conv_node]):
+                continue
+
+            input_qspec_map = {}
+            input_act = conv_node.args[0]
+            assert isinstance(input_act, Node)
+            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+
+            weight = conv_node.args[1]
+            assert isinstance(weight, Node)
+            input_qspec_map[weight] = get_weight_qspec(quantization_config)
+
+            bias = conv_node.args[2]
+            if isinstance(bias, Node):
+                input_qspec_map[bias] = get_bias_qspec(quantization_config)
+
+            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True
+            )
+
+            bn_output_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_bn_relu(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
         """
-        Match the following pattern:
-
-          ... -> conv -> bn -> getitem[0] -> relu -> ...
-
-        Annotate it to get the following pattern after prepare:
-
-               weight -> fq1
-                          |
-          ...  -> fq0 -> conv -> bn -> getitem[0] -> relu -> fq2 -> ...
-
+        Find Conv2d + batchnorm + relu parititions
         Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
         """
-        if node.op != "call_function" or node.target not in [
-            torch.ops.aten.relu_.default,
-            torch.ops.aten.relu.default,
-        ]:
-            return
-        relu_node = node
-        getitem_node = relu_node.args[0]
-        assert isinstance(getitem_node, Node)
-        if (
-            getitem_node.op != "call_function"
-            or getitem_node.target != operator.getitem
-            or getitem_node.args[1] != 0
-        ):
-            return
-        bn_node = getitem_node.args[0]
-        assert isinstance(bn_node, Node)
-        if (
-            bn_node.op != "call_function"
-            or bn_node.target != torch.ops.aten._native_batch_norm_legit.default
-        ):
-            return
-        conv_node = bn_node.args[0]
-        assert isinstance(conv_node, Node)
-        if (
-            conv_node.op != "call_function"
-            or conv_node.target != torch.ops.aten.convolution.default
-        ):
-            return
-        if _is_annotated([relu_node, getitem_node, bn_node, conv_node]):
-            return
-
-        input_qspec_map = {}
-        input_act = conv_node.args[0]
-        assert isinstance(input_act, Node)
-        input_qspec_map[input_act] = get_act_qspec(quantization_config)
-
-        weight = conv_node.args[1]
-        assert isinstance(weight, Node)
-        input_qspec_map[weight] = get_weight_qspec(quantization_config)
-
-        bias = conv_node.args[2]
-        if isinstance(bias, Node):
-            input_qspec_map[bias] = get_bias_qspec(quantization_config)
-
-        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            _annotated=True
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU]
         )
-        bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            _annotated=True
-        )
-        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            _annotated=True
-        )
-        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
-            _annotated=True
-        )
+        for fused_partition in fused_partitions:
+            conv_partition, bn_partition, relu_partition = fused_partition
+            if len(relu_partition.output_nodes) > 1:
+                raise ValueError("Relu partition has more than one output node")
+            relu_node = relu_partition.output_nodes[0]
+            if len(conv_partition.output_nodes) > 1:
+                raise ValueError("conv partition has more than one output node")
+            conv_node = conv_partition.output_nodes[0]
+            conv_node_users = list(conv_node.users.keys())
+            if len(conv_node_users) > 1:
+                raise ValueError(
+                    "Conv node must be consumed by BN only for it to be fusable."
+                )
+            if len(bn_partition.output_nodes) > 1:
+                raise ValueError("BatchNorm partition has more than one output node")
+            bn_output_node = bn_partition.output_nodes[0]
+
+            if _is_annotated([relu_node, bn_output_node, conv_node]):
+                continue
+
+            input_qspec_map = {}
+            input_act = conv_node.args[0]
+            assert isinstance(input_act, Node)
+            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+
+            weight = conv_node.args[1]
+            assert isinstance(weight, Node)
+            input_qspec_map[weight] = get_weight_qspec(quantization_config)
+
+            bias = conv_node.args[2]
+            if isinstance(bias, Node):
+                input_qspec_map[bias] = get_bias_qspec(quantization_config)
+
+            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                _annotated=True
+            )
+
+            relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            nodes_to_mark_annotated.extend(list(relu_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_relu(
         self, node: Node, quantization_config: QuantizationConfig
