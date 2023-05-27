@@ -46,9 +46,6 @@ def gen_two_four_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
     )
 
 
-def gen_n_m_sparse_mask(r, c, n, m, dtype, device):
-    pass
-
 
 """
 One assumption we make about Tensors are that if they are contiguous, if they are not then they are transposed. 
