@@ -2537,8 +2537,7 @@ class CppScheduling:
         else:
             self.kernel_group = KernelGroup()
 
-    @staticmethod
-    def can_fuse_horizontal(node1, node2):
+    def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:
@@ -2548,9 +2547,17 @@ class CppScheduling:
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
         return False
 
-    @classmethod
-    def can_fuse_vertical(cls, node1, node2):
-        return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
+    def can_fuse_horizontal(self, node1, node2):
+        if (
+            len(node1.get_nodes()) + len(node2.get_nodes())
+            > config.cpp.max_horizontal_fusion_size
+        ):
+            return False
+
+        return self._can_fuse_horizontal_impl(node1, node2)
+
+    def can_fuse_vertical(self, node1, node2):
+        return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
 
     def codegen_nodes(self, nodes):
         """

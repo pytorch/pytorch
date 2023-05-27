@@ -703,6 +703,14 @@ class Constraint(ConstraintTarget):
             "dim": self.dim,
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
+            "shared": (
+                None
+                if self.shared is None
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
+            ),
         }
 
     def __eq__(self, other):
@@ -1051,7 +1059,7 @@ def export(
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
         # Inline constraints added by users correspond to unbacked symbols in shape_env,
         new_graph.meta["inline_constraints"] = {
-            k: v
+            k: (v.lower, v.upper)
             for k, v in shape_env.var_to_range.items()
             if re.match(r"^[if]\d+$", str(k))
         }
