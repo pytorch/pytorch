@@ -57,24 +57,6 @@ def get_freezing_patterns():
         exclusive_arg_names=("w1", "w2", "w3"),
     )
 
-    # def addmm_fuse_pattern(inp, w1, w2, w3, b1, b2, b3):
-    #     return (aten.addmm(inp, w1, b1), aten.addmm(inp, w2, b2), aten.addmm(inp, w3, b3))
-
-    # def addmm_fuse_replacement(inp, w1, w2, w3, b1, b2, b3):
-    #     cat_t = torch.cat((w1, w2, w3), dim=1)
-    #     cat_b = torch((b1, b2, b3), dim=1)
-    #     return torch.addmm(inp, cat_t, cat_b).chunk(3, dim=1)
-
-    # register_replacement(
-    #     addmm_fuse_pattern,
-    #     addmm_fuse_replacement,
-    #     [val() for _ in range(7)],
-    #     inference_graph,
-    #     patterns,
-    #     extra_check=check_concat_weights,
-    #     exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3")
-    # )
-
     def addmm_fuse_pattern_second(inp, w1, w2, w3, b1, b2, b3):
         return (
             aten.addmm(b1, inp, w1),

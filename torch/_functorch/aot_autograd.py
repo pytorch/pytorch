@@ -1285,9 +1285,7 @@ def create_joint(
             warnings.filterwarnings(
                 "ignore", "Anomaly Detection has been enabled."
             )
-            with torch.autograd.set_multithreading_enabled(
-                False
-            ), torch.autograd.detect_anomaly(check_nan=False):
+            with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(*args)
 
     return inner_fn_with_anomaly
@@ -1374,9 +1372,7 @@ def create_functionalized_graph(
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
 
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), enable_python_dispatcher():
+    with enable_python_dispatcher():
         fx_g = make_fx(helper, decomposition_table=aot_config.decompositions)(*args)
 
     return fx_g
@@ -1534,7 +1530,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             adjusted_flat_args = [seed, offset, *flat_args]
             flat_args.clear()  # Don't hold extra reference
 
-        torch._guards.TracingContext.get().fw_metadata = fw_metadata
+        if torch._guards.TracingContext.get():
+            torch._guards.TracingContext.get().fw_metadata = fw_metadata
         compiled_fw = compiler(fw_module, flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
@@ -3204,6 +3201,7 @@ Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}""")
+
             # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
             # and turning it on will require a non-trivial calling convention change for any export runtime.
             if config.functionalize_rng_ops:
@@ -3230,6 +3228,19 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
         if aot_config.is_export:
+
+            mutated_user_inp_locs = [
+                idx - aot_config.num_params_buffers
+                for idx in fw_metadata.mutated_inp_indices
+                if idx >= aot_config.num_params_buffers
+            ]
+            if len(mutated_user_inp_locs) > 0:
+                raise RuntimeError(f"""
+Found following user inputs located at {mutated_user_inp_locs} are mutated. This is currently banned in the aot_export workflow.
+If you need this functionality, please file a github issue.
+
+fw_metadata={str(fw_metadata)}""")
+
             # During export, we don't get back a callable - we get back the raw fx graph
             # (either a joint or an inference-only graph)
             assert isinstance(compiled_fn, torch.fx.GraphModule)
@@ -3619,7 +3630,7 @@ def aot_module_simplified(
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = tuple(params_flat)
+    params_flat = list(params_flat)
     params_len = len(params_flat)
 
     functional_call = create_functional_call(mod, params_spec, params_len)
@@ -3634,6 +3645,9 @@ def aot_module_simplified(
     full_args = []
     # First, the params
     full_args.extend(params_flat)
+
+    if torch._guards.TracingContext.get():
+        torch._guards.TracingContext.get().params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -3695,10 +3709,12 @@ def aot_module_simplified(
         aot_config,
     )
 
+
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
+
     def forward(*runtime_args):
         full_args = []
         full_args.extend(params_flat)
