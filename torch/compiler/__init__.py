@@ -153,7 +153,7 @@ def assume_constant_result(fn):
         marked_function = assume_constant_result(my_function)
 
     Warning:
-    - `assume_constant_result` can if invalid cause safety and soundness, `torch.compile`
+    - `assume_constant_result` can if invalid cause safety and soundness issues, `torch.compile`
     will not attempt to validate whether the constant assumption is true or not
 
     """
