@@ -356,8 +356,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     materializeOpEvents(records_and_trace.first);
 
-    // finalizeCPUTrace(cpu_trace_.get());
-
     // `kineto_events_` does not include Python events. Instead it exposes them
     // via the `stacks` property.
     kineto_events_.erase(

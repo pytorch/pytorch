@@ -1430,7 +1430,6 @@ class TestProfiler(TestCase):
         if kineto_available():
             self._test_profiler_tracing(True)
 
-    @unittest.skip("Disable forward->backward link to workaround profiler crash")
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -1449,17 +1448,18 @@ class TestProfiler(TestCase):
                 for e in events:
                     if e["ph"] == "X":
                         ts_to_name[e["ts"]] = e["name"]
-                    if "cat" in e and "name" in e and e["cat"] == "forward_backward" and e["name"] == "fwd_bwd":
+                    if "cat" in e and "name" in e and e["cat"] == "fwdbwd" and e["name"] == "fwdbwd":
                         if e["ph"] == "s":
                             flow_s_to_ts[e["id"]] = e["ts"]
                         elif e["ph"] == "f":
                             flow_f_to_ts[e["id"]] = e["ts"]
-                self.assertTrue(len(flow_s_to_ts) == 2)
-                self.assertTrue(len(flow_f_to_ts) == 2)
-                self.assertTrue(1 in flow_s_to_ts.keys())
-                self.assertTrue(1 in flow_f_to_ts.keys())
-                self.assertTrue(2 in flow_s_to_ts.keys())
-                self.assertTrue(2 in flow_f_to_ts.keys())
+
+                self.assertEqual(len(flow_s_to_ts), 2)
+                self.assertEqual(len(flow_f_to_ts), 2)
+                self.assertIn(1, flow_s_to_ts)
+                self.assertIn(1, flow_f_to_ts)
+                self.assertIn(2, flow_s_to_ts)
+                self.assertIn(2, flow_f_to_ts)
                 s_ts_1 = flow_s_to_ts[1]
                 f_ts_1 = flow_f_to_ts[1]
                 s_ts_2 = flow_s_to_ts[2]
