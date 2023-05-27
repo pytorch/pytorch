@@ -106,11 +106,11 @@ class DeviceMesh(object):
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
+        # always try to create default (world) pg, even if it is not initialized
+        # already. The world pg is used for device mesh identity (rank) on each
+        # process (we need to know if the current global rank is in the mesh or not)
+        self._get_or_create_default_group()
         if _init_process_groups:
-            # always try to create default (world) pg, even if it is not initialized
-            # already. The world pg is used for device mesh identity (rank) on each
-            # process (we need to know if the current global rank is in the mesh or not)
-            self._get_or_create_default_group()
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
