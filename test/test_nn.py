@@ -2108,12 +2108,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
-    def test_threshold_bfloat16(self):
+    def test_threshold_bfloat16_half(self):
         x = torch.randn(100)
-        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
-            expected = F.threshold(x, threshold, 0).bfloat16().float()
-            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
-            self.assertEqual(res_bf16, expected)
+        for dtype in [torch.bfloat16, torch.half]:
+            for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
+                expected = F.threshold(x, threshold, 0).to(dtype=dtype).float()
+                res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
+                self.assertEqual(res_bf16, expected)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
@@ -7228,6 +7229,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
 
+    def test_max_pool1d_invalid_output_size(self):
+        arg_1 = 3
+        arg_2 = 255
+        arg_3 = False
+        arg_class = torch.nn.MaxPool1d(kernel_size=arg_1, stride=arg_2, return_indices=arg_3)
+        arg_4_0 = torch.as_tensor([[0.3204]])
+        arg_4 = [arg_4_0,]
+
+        with self.assertRaises(RuntimeError):
+            res = arg_class(*arg_4)
 
 class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
@@ -9674,18 +9685,35 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
     @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
+    @parametrize_test("non_contig", [False, "sliced", "restrided"])
+    @parametrize_test("batch_size", [1, 5])
     def test_upsamplingBiLinear2d_consistency(
-        self, device, memory_format, antialias, align_corners, num_channels, output_size, check_as_unsqueezed_3d_tensor
+        self,
+        device,
+        memory_format,
+        antialias,
+        align_corners,
+        num_channels,
+        output_size,
+        check_as_unsqueezed_3d_tensor,
+        non_contig,
+        batch_size,
     ):
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
         mode = "bilinear"
-        # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
-        input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        # Check if Max Abs Error between resized input_uint8 and resized input_float is
+        # smaller than a tolerated value, e.g. 1.0
+        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
-        if check_as_unsqueezed_3d_tensor:
+        if non_contig == "sliced":
+            input_ui8 = input_ui8[:, :, 10:-10, 10:-10]
+        elif non_contig == "restrided":
+            input_ui8 = input_ui8[:, :, ::2, ::2]
+
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor:
             input_ui8 = input_ui8[0, ...]
             input_ui8 = input_ui8[None, ...]
 
@@ -9698,15 +9726,16 @@ class TestNNDeviceType(NNTestCase):
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
 
+        if non_contig is False:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
+
         # FIXME if-clause shows the current behaviour which is definitely unexpected.
         # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
         # See for more details: https://github.com/pytorch/pytorch/pull/100373
-        if check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
-            self.assertTrue(input_ui8.is_contiguous(memory_format=torch.channels_last))
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
             self.assertTrue(output_ui8.is_contiguous())
             self.assertTrue(output_f32.is_contiguous())
         else:
-            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
@@ -9721,6 +9750,28 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
         self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
         self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
+
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("input_size, output_size", [(399, 437), (403, 377)])
+    def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
+        # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
+
+        if torch.device(device).type == "cuda":
+            raise SkipTest("CUDA implementation is not yet supporting uint8")
+
+        mode = "bilinear"
+        input_ui8 = torch.randint(0, 256, size=(1, 3, input_size, input_size), dtype=torch.uint8, device=device)
+        input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+        input_f32 = input_ui8.float()
+
+        output_f32 = F.interpolate(
+            input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
+        ).round().to(torch.uint8)
+        output_ui8 = F.interpolate(
+            input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
+        )
+        torch.testing.assert_close(output_f32, output_ui8, atol=1, rtol=0)
 
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
@@ -10433,6 +10484,40 @@ class TestNNDeviceType(NNTestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
+
+    @skipMeta
+    @dtypes(torch.float32, torch.bfloat16)
+    @onlyCPU
+    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+        batch = 10
+        seq_len = 12
+        input = 3
+        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        import copy
+        Net_clone = copy.deepcopy(Net)
+        x = torch.rand(batch, seq_len, input)
+        x1 = x.clone().requires_grad_(True)
+        x2 = x.clone().requires_grad_(True)
+
+        torch._C._set_mkldnn_enabled(False)
+        out1, _ = Net(x1)
+        der_out1 = torch.autograd.grad(out1, x1,
+                                       grad_outputs=torch.ones_like(out1),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss1 = der_out1.sum()
+        loss1.backward(retain_graph=True)
+
+        torch._C._set_mkldnn_enabled(True)
+        out2, _ = Net(x2)
+        der_out2 = torch.autograd.grad(out2, x2,
+                                       grad_outputs=torch.ones_like(out2),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss2 = der_out2.sum()
+        loss2.backward(retain_graph=True)
+        assert torch.allclose(der_out1, der_out2)
+        assert torch.allclose(x1.grad, x2.grad)
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):
@@ -11153,36 +11238,46 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCPU
-    def test_activations_bfloat16_cpu(self, device):
-        def test_bfloat16(fn, device, inp_dims, prec):
-            # bfloat16 compute
-            input = torch.randn(inp_dims, dtype=torch.bfloat16, device=device, requires_grad=True)
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_activations_bfloat16_half_cpu(self, device, dtype):
+        def test_helper(fn, device, inp_dims, prec=None):
+            torch.manual_seed(37)
+            # bfloat16/half compute
+            fn = fn.to(dtype=dtype)
+            input = torch.randn(inp_dims, dtype=dtype, device=device, requires_grad=True)
             out = fn(input)
-            grad_input = torch.randn_like(out, dtype=torch.bfloat16, device=device)
+            grad_input = torch.randn_like(out, dtype=dtype, device=device)
             out.backward(grad_input)
 
             # fp32 compute
             input2 = input.detach().clone().float().requires_grad_(True)
-            out2 = fn(input2)
+            out2 = fn.float()(input2)
             grad_input2 = grad_input.detach().clone().float()
             out2.backward(grad_input2)
 
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2, atol=prec, rtol=0, exact_dtype=False)
-            self.assertEqual(input.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec)
+            self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype), atol=prec, rtol=prec)
 
         shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
         for shape in shapes:
-            test_bfloat16(torch.nn.LogSigmoid(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Hardsigmoid(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
+            test_helper(torch.nn.LogSigmoid(), device, shape)
+            test_helper(torch.nn.Hardsigmoid(), device, shape)
+            test_helper(torch.nn.Hardshrink(), device, shape)
+            test_helper(torch.nn.Softshrink(), device, shape)
+            test_helper(torch.nn.Hardswish(), device, shape)
+            test_helper(torch.nn.Softplus(), device, shape)
+            test_helper(torch.nn.SiLU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.Mish(), device, shape)
+            test_helper(torch.nn.ELU(), device, shape)
+            test_helper(torch.nn.PReLU(), device, shape)
+            test_helper(torch.nn.GLU(), device, shape, prec=1e-2)
+            test_helper(torch.nn.Threshold(0.1, 20), device, shape)
+            test_helper(torch.nn.GELU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.LeakyReLU(), device, shape)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):

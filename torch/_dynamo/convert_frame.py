@@ -11,8 +11,12 @@ import torch
 import torch._logging
 from torch._guards import tracing
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    GuardOnDataDependentSymNode,
+)
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
 from .allowed_functions import is_allowed
@@ -49,6 +53,7 @@ from .utils import (
     increment_frame,
     is_namedtuple,
     istype,
+    LazyString,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -98,6 +103,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     skip_code(result.__code__)
     return result
 
+
 class WrapConvertContext:
     def __init__(self, fn):
         self.fn = fn
@@ -122,6 +128,7 @@ class WrapConvertContext:
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+
 
 def wrap_convert_context(fn):
     """
@@ -214,15 +221,21 @@ def exception_handler(e, code, frame=None):
 
 FRAME_COUNTER = 0
 
+
 class FrameConverterAssert:
-    def __init__(self, compiler_fn: CompilerFn, one_graph: bool = True, export: bool = False, export_constraints=None):
+    def __init__(
+        self,
+        compiler_fn: CompilerFn,
+        one_graph: bool = True,
+        export: bool = False,
+        export_constraints=None,
+    ):
         self.compiler_fn = compiler_fn
         self.one_graph = one_graph
         self.export = export
         self.export_constraints = export_constraints
         self._torchdynamo_orig_callable = compiler_fn
         reset_graph_break_dup_checker()
-
 
     def convert_frame_assert(
         compiler_fn: CompilerFn,
@@ -302,7 +315,9 @@ class FrameConverterAssert:
             if cache_size >= config.cache_size_limit:
 
                 def format_func_info(code):
-                    return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+                    return (
+                        f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
+                    )
 
                 def format_guard_failures(code):
                     # For the common case, it's sufficient to see just the most recent failure.
@@ -361,13 +376,24 @@ class FrameConverterAssert:
         _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
         return wrap_convert_context(_convert_frame_assert)
 
+    def __call__(
+        self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
+        return FrameConverterAssert.convert_frame_assert(
+            self.compiler_fn, self.one_graph, self.export, self.export_constraints
+        )(frame, cache_size, hooks, frame_state)
 
-    def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
-        return FrameConverterAssert.convert_frame_assert(self.compiler_fn, self.one_graph, self.export, self.export_constraints)(frame, cache_size, hooks, frame_state)
 
-def convert_frame_assert(compiler_fn: CompilerFn, one_graph: bool = True, export: bool = False, export_constraints=None):
+def convert_frame_assert(
+    compiler_fn: CompilerFn,
+    one_graph: bool = True,
+    export: bool = False,
+    export_constraints=None,
+):
     """Fully convert a frame into an FX graph"""
-    return wrap_convert_context(FrameConverterAssert(compiler_fn, one_graph, export, export_constraints))
+    return wrap_convert_context(
+        FrameConverterAssert(compiler_fn, one_graph, export, export_constraints)
+    )
 
 
 @dynamo_timed(phase_name="entire_frame_compile")
@@ -425,8 +451,11 @@ def _compile(
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
                 break
-            except exc.RestartAnalysis:
-                log.debug("Restarting analysis ...")
+            except exc.RestartAnalysis as e:
+                log.info(
+                    "Restarting analysis due to %s",
+                    LazyString(format_traceback_short, e.__traceback__),
+                )
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -498,13 +527,13 @@ def _compile(
         BackendCompilerFailed,
         AssertionError,
         ConstraintViolationError,
+        GuardOnDataDependentSymNode,
     ) as e:
         exception_handler(e, code, frame)
         raise
     except Exception as e:
         exception_handler(e, code, frame)
-        # TODO: Why???  Why not raise the original exception as is
-        raise InternalTorchDynamoError() from e
+        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
 class FrameConverter:
@@ -512,7 +541,9 @@ class FrameConverter:
         self.inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
         self._torchdynamo_orig_callable = compiler_fn
 
-    def _convert_frame(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
+    def _convert_frame(
+        self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         counters["frames"]["total"] += 1
         try:
             result = self.inner_convert(frame, cache_size, hooks, frame_state)
@@ -526,13 +557,16 @@ class FrameConverter:
             log.info("converting frame raised error, suppressing error")
         return None
 
-    def __call__(self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state):
+    def __call__(
+        self, frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
+    ):
         return self._convert_frame(frame, cache_size, hooks, frame_state)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return FrameConverter(compiler_fn, hooks)
+
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
