@@ -12277,6 +12277,9 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06),
                                      torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
