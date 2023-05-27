@@ -4,7 +4,7 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export, dynamic_dim, _export
+from torch._export import export, dynamic_dim
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ConstPropPass,
@@ -34,18 +34,14 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        gm = export(f, (x,)).find_method("forward")
-
-        new_gm = ReplaceViewOpsWithViewCopyOpsPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
+        ep = export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
 
         count_after = 0
-        for node in new_gm.graph.nodes:
+        for node in ep.graph.nodes:
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(gm(x), f(x)))
+        self.assertTrue(torch.allclose(ep(x), f(x)))
 
     def test_const_prop_pass(self) -> None:
         class M(torch.nn.Module):
@@ -58,18 +54,16 @@ class TestPasses(TestCase):
                 c = torch.cat([self.a, b])
                 return (c + c) + x
 
-        def count_additions(gm) -> int:
+        def count_additions(ep) -> int:
             return sum(
-                (node.target == torch.ops.aten.add.Tensor) for node in gm.graph.nodes
+                (node.target == torch.ops.aten.add.Tensor) for node in ep.graph.nodes
             )
 
-        gm = export(M(), (torch.zeros(2, 2, 3),)).find_method("forward")
-        self.assertEqual(count_additions(gm), 3)
+        ep = export(M(), (torch.zeros(2, 2, 3),))
+        self.assertEqual(count_additions(ep), 3)
 
-        new_gm = ConstPropPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
-        self.assertEqual(count_additions(new_gm), 1)
+        ep = ep.transform(ConstPropPass())
+        self.assertEqual(count_additions(ep), 1)
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -112,19 +106,19 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = export(M(), (x, y), constraints=constraints).add_runtime_assertions().find_method("forward")
+        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
 
-        num_assert = count_call_function(gm.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(gm.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            gm(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         with self.assertRaisesRegex(RuntimeError, "Input arg1"):
-            gm(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
@@ -214,12 +208,11 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        gm = _export(M(), (x,))
-        self.assertEqual(count_call_function(gm.graph, torch.ops.aten.view.default), 1)
+        ep = export(M(), (x,))
+        self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        pass_result = ReplaceViewOpsWithViewCopyOpsPass()(gm)
-        self.assertTrue(pass_result.modified)
-        self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
+        ep = ep.transform(ReplaceViewOpsWithViewCopyOpsPass())
+        self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
         def foo(x):
@@ -231,8 +224,8 @@ class TestPasses(TestCase):
 
         ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
-        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view.default) == 0)
-        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view_copy.default) > 0)
+        self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
+        self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
 
     def test_views_op_having_view_copy(self) -> None:
         schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
