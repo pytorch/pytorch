@@ -11,7 +11,7 @@ from .exported_program import (
     CallSpec,
     ExportedProgram,
     ExportGraphSignature,
-    _set_constraints,
+    _process_constraints,
 )
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
@@ -147,18 +147,15 @@ def export(
         backward_signature=None,
     )
 
+    symbol_to_range, equality_constraints = _process_constraints(gm, flat_args)
     exported_program = ExportedProgram(
         gm,
         gm.graph,
         graph_signature,
         CallSpec(in_spec, out_spec),
         {},
-    )
-    _set_constraints(
-        exported_program,
-        gm.meta.get("input_shape_constraints", []),
-        gm.meta.get("inline_constraints", []),
-        flat_args,
+        symbol_to_range,
+        equality_constraints,
     )
 
     return exported_program

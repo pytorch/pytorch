@@ -1,21 +1,23 @@
+from collections import defaultdict
 import copy
 import dataclasses
+import math
 import sympy
-from collections import defaultdict
-
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from sympy.logic.boolalg import Boolean as SympyBoolean
 
 import torch
 from torch.fx.passes.pass_manager import PassManager
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+from torch.fx.experimental.symbolic_shapes import SymInt
+from torch._subclasses.fake_tensor import FakeTensor
 from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForConstraintsPass,
-    ConstraintsContainer,
+    NodeDim,
+    RangeConstraint,
 )
 
 
@@ -35,9 +37,6 @@ LeafValue = Union[
     torch.layout,
     torch.memory_format,
 ]
-
-
-ConstraintExpr = Union[sympy.Expr, SympyBoolean]
 
 
 # Information to maintain user calling/returning specs
@@ -78,6 +77,8 @@ class ExportedProgram:
         graph_signature: ExportGraphSignature,
         call_spec: CallSpec,
         state_dict: Dict[str, Any],
+        symbol_to_range: Dict[sympy.Symbol, RangeConstraint],
+        equality_constraints: Dict[NodeDim, List[NodeDim]],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -86,9 +87,8 @@ class ExportedProgram:
         self.graph_signature: ExportGraphSignature = graph_signature
         self.call_spec: CallSpec = call_spec
         self.state_dict: Dict[str, Any] = state_dict
-        self.symbol_to_range: Dict[str, Tuple[int, int]] = {}
-        self._input_shape_constraints: Dict[str, ConstraintsContainer] = {}
-        self._input_name_to_example_inputs: Dict[str, Any] = {}
+        self.symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = symbol_to_range
+        self.equality_constraints: Dict[NodeDim, List[NodeDim]] = equality_constraints
 
     def __call__(self, *args: Any) -> Any:
         if self.call_spec.in_spec is not None:
@@ -147,57 +147,117 @@ class ExportedProgram:
             copy.deepcopy(self.graph_signature),
             copy.deepcopy(self.call_spec),
             self.state_dict,
+            copy.deepcopy(self.symbol_to_range),
+            copy.deepcopy(self.equality_constraints),
         )
         return transformed_ep
 
     def add_runtime_assertions(self) -> "ExportedProgram":
         return self.transform(
-            _AddRuntimeAssertionsForConstraintsPass(
-                self._input_shape_constraints,
-                self._input_name_to_example_inputs,
-                # Only add in inline constraints which are unbacked symints (which
-                # start with 'i')
-                {k: v for (k, v) in self.symbol_to_range.items() if str(k).startswith('i')},
-            )
+            _AddRuntimeAssertionsForConstraintsPass(self.symbol_to_range, self.equality_constraints)
         )
 
 
-def _set_constraints(
-    exported_program: ExportedProgram,
-    input_shape_constraints,
-    inline_constraints: Dict[str, Tuple[int, int]],
-    example_inputs: Any,
-):
-    # TODO(angelayi): clean this up in a later diff
+def _process_constraints(
+    graph_module: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+) -> Tuple[Dict[sympy.Symbol, RangeConstraint], Dict[NodeDim, List[NodeDim]]]:
+    """
+    Process the constraints stored in the graph module to return something more readable.
 
-    exported_program.symbol_to_range = inline_constraints
+    Args:
+        graph_module (torch.fx.GraphModule): GraphModule returned from
+            dynamo.export, which contains the "input_shape_constraints" and
+            "inline_constraints" metadata
 
-    tensor_id_to_input_names: Dict[int, List[str]] = defaultdict(list)
-    input_name_to_example_inputs: Dict[str, Any] = {}
-    if example_inputs is not None:
-        input_tracker = 0
-        for node in exported_program.graph.nodes:
-            if node.op == "placeholder":
-                example_input = example_inputs[input_tracker]
-                tensor_id_to_input_names[id(example_input)].append(node.name)
-                input_name_to_example_inputs[node.name] = example_input
-                input_tracker += 1
+        example_inputs: Flattened list of example inputs used to export the graph module
 
-    input_shape_constraints_by_src_name: Dict[str, ConstraintsContainer] = defaultdict(
-        lambda: ConstraintsContainer([], [])
-    )
+    Returns:
+        symbol_to_constraints (Dict[sympy.Symbol, List[Constraints]]): Mapping of
+            symbols (SymInt/SymFloat/SymBool) appearing in fake tensors to their
+            constraints, which are either their range (lower, upper) constraint,
+            or an equality constraint with another symbol.
+
+        symbol_to_fx_source (Dict[sympy.Symbol, Tuple[torch.fx.Node, int]]): Mapping
+            of symbols to the FX node in which they appear in, and their
+            dimension.
+    """
+    input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
+    inline_constraints = graph_module.meta.get("inline_constraints", [])
+
+    # Create dict mapping tensor_id to node names
+    # And another dict mapping placeholder node names to their nodes
+    tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
+    placeholder_nodes: Dict[str, torch.fx.Node] = {}
+    for i, node in enumerate(graph_module.graph.nodes):
+        if node.op != "placeholder":
+            # All placeholder nodes should be together in the beginning of the
+            # graph
+            break
+        example_input = example_inputs[i]
+        tensor_id_to_nodes[id(example_input)].append(node.name)
+        placeholder_nodes[node.name] = node
+
+    # Create dict mapping (node name, dim) to a list of other (node name, dim)
+    # to mark that they are equal
+    equality_constraints: Dict[NodeDim, List[NodeDim]] = defaultdict(list)
+    # Create dict mapping (node name, dim) a list of range (lower, upper)
+    # constraints
+    range_constraints: Dict[NodeDim, List[RangeConstraint]] = defaultdict(list)
     for constraint in input_shape_constraints:
-        for name in tensor_id_to_input_names[constraint["t_id"]]:
-            input_shape_constraints_by_src_name[name].ranges.append(
-                (constraint["dim"], constraint["min"], constraint["max"])
-            )
-        if constraint["shared"] is not None:
-            for name in tensor_id_to_input_names[constraint["shared"]["t_id"]]:
-                for other_name in tensor_id_to_input_names[constraint["t_id"]]:
-                    input_shape_constraints_by_src_name[name].equalities.append(
-                        (constraint["shared"]["dim"], other_name, constraint["dim"])
-                    )
-                input_tracker += 1
+        for node in tensor_id_to_nodes[constraint["t_id"]]:
+            node_dim = NodeDim(node, constraint["dim"])
 
-    exported_program._input_shape_constraints = input_shape_constraints_by_src_name
-    exported_program._input_name_to_example_inputs = input_name_to_example_inputs
+            # Accumulate range constraints
+            range_constraints[node_dim].append(
+                RangeConstraint(constraint["min"], constraint["max"])
+            )
+
+            # Accumulate equality constraints
+            if shared := constraint.get("shared", None):
+                for other_node in tensor_id_to_nodes[shared["t_id"]]:
+                    other_node_dim = NodeDim(other_node, shared["dim"])
+                    equality_constraints[node_dim].append(other_node_dim)
+
+    # Create dict mapping symbol to a range (lower, upper)
+    symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = {}
+
+    # Convert simple sympy Integers into concrete int to
+    # insert into graph
+    def _convert_to_int(val):
+        if val == sympy.oo:
+            return math.inf
+        if val == -sympy.oo:
+            return -math.inf
+        if isinstance(val, sympy.Integer):
+            return int(val)
+        raise RuntimeError(
+            "Export constraints cannot be non-integer expressions"
+        )
+
+    # Add inline constraints to symbol_to_ranges
+    for symbol, (min_val, max_val) in inline_constraints.items():
+        symbol_to_range[symbol] = RangeConstraint(
+            _convert_to_int(min_val), _convert_to_int(max_val)
+        )
+
+    # Add input range constraints to symbol_ro_ranges
+    for (node_name, dim), range_constraints in range_constraints.items():
+        # Simplify the range constraints into a single range constraint
+        # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
+        min_vals, max_vals = zip(*range_constraints)
+        min_val = max(min_vals)
+        max_val = min(max_vals)
+        assert min_val <= max_val
+
+        # Add input node range constraints
+        val = placeholder_nodes[node_name].meta["val"]
+        assert isinstance(val, FakeTensor)
+        symint = val.shape[dim]
+        assert isinstance(symint, SymInt)
+        symbol = symint.node._expr
+        symbol_to_range[symbol] = RangeConstraint(
+            _convert_to_int(min_val), _convert_to_int(max_val)
+        )
+
+    return symbol_to_range, equality_constraints
