@@ -26,9 +26,7 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor import ir
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 
 @dataclass
@@ -99,23 +97,6 @@ class SymPyOps:
     @staticmethod
     def neg(x):
         return TypedExpr(-x.expr, x.dtype)
-
-    @staticmethod
-    def floordiv(x, y):
-        result_type = torch.promote_types(x.dtype, y.dtype)
-        if not is_integer_dtype(result_type):
-            return NotImplemented
-
-        return TypedExpr(FloorDiv(x.expr, y.expr), result_type)
-
-    @staticmethod
-    def remainder(x, y):
-        result_type = torch.promote_types(x.dtype, y.dtype)
-        if not is_integer_dtype(result_type):
-            return NotImplemented
-
-        result_expr = ir.ModularIndexing(x.expr, sympy.Integer(1), y.expr)
-        return TypedExpr(result_expr, result_type)
 
 
 @dataclass

@@ -715,35 +715,6 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
-    def test_index_propagation_floordiv(self):
-        def repeat_interleave(x, n):
-            # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
-            i = torch.arange(x.shape[0] * n, device=x.device)
-            return x[i // n]
-
-        x = torch.randn(8, device=self.device)
-        repeat_interleave_opt = torch._dynamo.optimize("inductor")(repeat_interleave)
-        # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(self, repeat_interleave_opt, x, 3)
-        expect = torch.repeat_interleave(x, 3)
-        self.assertEqual(expect, actual)
-        self.assertEqual(actual, repeat_interleave(x, 3))
-
-    def test_index_propagation_remainder(self):
-        def repeat(x, n):
-            # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
-            i = torch.arange(x.shape[0] * n, device=x.device)
-            return x[i % x.shape[0]]
-
-        x = torch.randn(8, device=self.device)
-        repeat_opt = torch._dynamo.optimize("inductor")(repeat)
-
-        # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(self, repeat_opt, x, 3)
-        expect = x.repeat(3)
-        self.assertEqual(expect, actual)
-        self.assertEqual(actual, repeat(x, 3))
-
     def test_computed_buffer_inlining(self):
         def flip(x):
             idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
