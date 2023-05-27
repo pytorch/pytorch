@@ -407,21 +407,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
-        "new_full",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_full", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_ones",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_ones", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_zeros",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_zeros", "ORT 1.15 will support"),
-    ),
-    xfail(
         "nn.functional.adaptive_avg_pool1d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
     ),
