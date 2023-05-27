@@ -91,7 +91,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_model(Model)
 
-    def test_keep_output_layout(self):
+    def test_keep_output_layout_infer(self):
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -117,6 +117,34 @@ class TestLayoutOptim(TestCase):
         # We should be able to do view on the output of the optimized module
         # Note that if the output is channels last, the view op will fail.
         opt_out.view(5, -1)
+
+    def test_keep_output_layout_train(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 128, kernel_size=3, padding=1, stride=1, bias=False)
+                self.linear = nn.Linear(128 * 5 * 5, 10)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.flatten(x, 1)
+                x = self.linear(x)
+                return x
+
+            def get_example_inputs(self):
+                return torch.randn(2, 3, 5, 5),
+
+        mod = Model().cuda()
+        inp = [t.cuda() for t in mod.get_example_inputs()]
+        def f(inp):
+            x = mod(*inp)
+            x.sum().backward()
+           
+        opt_f = torch.compile(f)
+        f(inp)
+        opt_f(inp)
+        assert False, "ni"  # TODO
+
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:

@@ -714,6 +714,7 @@ def compile_fx(
 
             user_visible_outputs = {n.name for n in model_outputs[:len(orig_model_outputs)]}
 
+        # breakpoint() # TODO
         return inner_compile(
             model,
             example_inputs,
