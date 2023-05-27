@@ -1,11 +1,14 @@
 import threading
 import torch
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
+from ..modules import Module
 from torch.cuda._utils import _get_device_index
 from torch.cuda.amp import autocast
 from torch._utils import ExceptionWrapper
 
+__all__ = ['get_a_var', 'parallel_apply']
 
-def get_a_var(obj):
+def get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
     if isinstance(obj, torch.Tensor):
         return obj
 
@@ -19,8 +22,12 @@ def get_a_var(obj):
                 return result
     return None
 
-
-def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
+def parallel_apply(
+    modules: Sequence[Module],
+    inputs: Sequence[Any],
+    kwargs_tup: Optional[Sequence[Dict[str, Any]]] = None,
+    devices: Optional[Sequence[Optional[Union[int, torch.device]]]] = None,
+) -> List[Any]:
     r"""Applies each `module` in :attr:`modules` in parallel on arguments
     contained in :attr:`inputs` (positional) and :attr:`kwargs_tup` (keyword)
     on each of :attr:`devices`.
@@ -39,7 +46,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:
-        kwargs_tup = ({},) * len(modules)
+        kwargs_tup = (cast(Dict[str, Any], {}),) * len(modules)
     if devices is not None:
         assert len(modules) == len(devices)
     else:
@@ -50,10 +57,24 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     results = {}
     grad_enabled, autocast_enabled = torch.is_grad_enabled(), torch.is_autocast_enabled()
 
-    def _worker(i, module, input, kwargs, device=None, stream=None):
+    def _worker(
+        i: int,
+        module: Module,
+        input: Any,
+        kwargs: Dict[str, Any],
+        device: Optional[Union[int, torch.device]] = None,
+        stream: Optional[torch.cuda.Stream] = None,
+    ) -> None:
         torch.set_grad_enabled(grad_enabled)
         if device is None:
-            device = get_a_var(input).get_device()
+            t = get_a_var(input)
+            if t is None:
+                with lock:
+                    results[i] = ExceptionWrapper(
+                        where="in replica {}, no device was provided and no tensor input was found; "
+                        "device cannot be resolved".format(i))
+                return
+            device = t.get_device()
         if stream is None:
             stream = torch.cuda.current_stream(device)
         try:
