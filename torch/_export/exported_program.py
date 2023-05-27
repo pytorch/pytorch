@@ -242,7 +242,7 @@ def _process_constraints(
         )
 
     # Add input range constraints to symbol_ro_ranges
-    for (node_name, dim), range_constraints in range_constraints.items():
+    for (node_name, dim), range_constraints in range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
         min_vals, max_vals = zip(*range_constraints)
