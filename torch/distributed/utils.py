@@ -5,9 +5,7 @@ from typing import Any, Callable, Dict, List, OrderedDict, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch.nn.parallel._functions import _get_stream
-from torch.nn.parallel.scatter_gather import (  # type: ignore[attr-defined]
-    _is_namedtuple,
-)
+from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
 
 __all__ = []  # type: ignore[var-annotated]
@@ -87,6 +85,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                     if isinstance(obj, PackedSequence):
                         output.data.record_stream(current_stream)  # type: ignore[arg-type]
                     else:
+                        assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
         if _is_namedtuple(obj):

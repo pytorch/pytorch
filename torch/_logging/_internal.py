@@ -121,8 +121,8 @@ def set_logs(
     all: Optional[int] = None,
     dynamo: Optional[int] = None,
     aot: Optional[int] = None,
-    dynamic: int = None,
-    inductor: int = None,
+    dynamic: Optional[int] = None,
+    inductor: Optional[int] = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
     aot_joint_graph: bool = False,
@@ -280,14 +280,16 @@ def set_logs(
             if log_registry.is_artifact(alias):
                 if val:
                     log_state.enable_artifact(alias)
-            elif log_registry.is_log(alias):
+            elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
                 if val not in logging._levelToName:
                     raise ValueError(
                         f"Unrecognized log level for log {alias}: {val}, valid level values "
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
 
-                log_state.enable_log(log_registry.log_alias_to_log_qname[alias], val)
+                log_state.enable_log(
+                    log_registry.log_alias_to_log_qname.get(alias, alias), val
+                )
             elif alias == "all":
                 continue
             else:
