@@ -1,5 +1,6 @@
 import itertools
 from typing import Any, List, OrderedDict, Set
+import operator
 
 import torch
 
@@ -13,6 +14,7 @@ _EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.Conv2d, torch.nn.functional.conv2d},
     {torch.nn.ReLU, torch.nn.functional.relu, torch.nn.functional.relu_},
     {torch.nn.BatchNorm2d, torch.nn.functional.batch_norm},
+    {torch.add, operator.add},
 ]
 
 
