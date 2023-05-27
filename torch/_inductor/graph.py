@@ -170,7 +170,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
-        self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
@@ -252,13 +251,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
-    def mark_buffer_mutated(self, name: str):
+    def realize_users_of(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
         the old version are realized before the mutation happens.
         """
         assert isinstance(name, str)
-        self.mutated_buffers.add(name)
 
         def visit(value):
             if isinstance(value, (list, tuple)):
@@ -272,7 +270,7 @@ class GraphLowering(torch.fx.Interpreter):
             try:
                 visit(value)
             except Exception:
-                log.warning("error in mark_buffer_mutated", exc_info=True)
+                log.warning("error in realize_users_of", exc_info=True)
 
     def add_tensor_constant(self, data):
         def allocate():
