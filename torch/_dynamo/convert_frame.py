@@ -16,6 +16,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
 from .allowed_functions import is_allowed
@@ -52,6 +53,7 @@ from .utils import (
     increment_frame,
     is_namedtuple,
     istype,
+    LazyString,
     orig_code_map,
     reset_graph_break_dup_checker,
     setup_compile_debug,
@@ -428,8 +430,11 @@ def _compile(
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
                 break
-            except exc.RestartAnalysis:
-                log.debug("Restarting analysis ...")
+            except exc.RestartAnalysis as e:
+                log.info(
+                    "Restarting analysis due to %s",
+                    LazyString(format_traceback_short, e.__traceback__),
+                )
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
