@@ -567,7 +567,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif istype(value, torch._C._distributed_c10d.ProcessGroup):
+        elif ProcessGroupVariable.is_process_group(value):
             return ProcessGroupVariable(
                 value,
                 source=self.source,

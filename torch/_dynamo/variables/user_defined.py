@@ -559,3 +559,12 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
             ).add_options(self)
         # TODO should this just raise unimplemented?
         return super().var_getattr(tx, name)
+
+    @staticmethod
+    def is_process_group(value):
+        # we can't rely on importing/accessing torch distributed, it is not always built.
+        if torch.distributed.is_available():
+            from torch._C._distributed_c10d import ProcessGroup
+
+            return istype(value, ProcessGroup)
+        return False
