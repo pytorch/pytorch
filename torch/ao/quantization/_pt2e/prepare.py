@@ -27,7 +27,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QuantizationAnnotation,
     EdgeOrNode,
 )
-from torch.ao.quantization import ObserverOrFakeQuantizer
+from torch.ao.quantization import ObserverOrFakeQuantize
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -35,7 +35,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -92,7 +92,7 @@ def _maybe_insert_input_observers_for_node(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -124,7 +124,7 @@ def _maybe_insert_input_observers_for_node(
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ):
     this_node_dtype_info = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
     if "val" in node.meta:
@@ -201,7 +201,7 @@ def prepare(
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer] = {}
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
 
     for node in nodes_before_observation:
 
