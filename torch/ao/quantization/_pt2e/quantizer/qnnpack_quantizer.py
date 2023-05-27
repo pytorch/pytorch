@@ -291,12 +291,9 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_maxpool2d(model, config)
         self._annotate_add_relu(model, config)
         self._annotate_add(model, config)
-        for node in reversed(model.graph.nodes):
-            # one improvement is to register node annotators for each
-            # supported op type.
-            self._annotate_hardtanh(node, config)
-            self._annotate_mean(node, config)
-            self._annotate_adaptive_avg_pool2d(node, config)
+        self._annotate_hardtanh(model, config)
+        self._annotate_mean(model, config)
+        self._annotate_adaptive_avg_pool2d(model, config)
         return model
 
     def _annotate_conv2d_bn(
@@ -582,53 +579,51 @@ class QNNPackQuantizer(Quantizer):
     def _annotate_input_out_obs_sharing_op(
         self,
         op: Callable,
-        node: Node,
+        gm: torch.fx.GraphModule,
         quantization_config: QuantizationConfig,
     ) -> None:
-        io_obs_sharing_node = node
-        if (
-            io_obs_sharing_node.op != "call_function"
-            or io_obs_sharing_node.target != op
-        ):
-            return
-        if _is_annotated([io_obs_sharing_node]):
-            return
-
-        input_act = io_obs_sharing_node.args[0]
-        assert isinstance(input_act, Node)
-
-        act_qspec = get_act_qspec(quantization_config)
-        io_obs_sharing_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map={
-                input_act: act_qspec,
-            },
-            output_qspec=act_qspec,
-            _input_output_share_observers=True,
-            _annotated=True,
+        module_partitions = get_source_partitions(
+            gm.graph,
+            [op],
         )
+        partitions = list(itertools.chain(*module_partitions.values()))
+        for partition in partitions:
+            io_obs_sharing_node = partition.output_nodes[0]
+            if _is_annotated([io_obs_sharing_node]):
+                continue
+
+            input_act = io_obs_sharing_node.args[0]
+            assert isinstance(input_act, Node)
+
+            act_qspec = get_act_qspec(quantization_config)
+            io_obs_sharing_node.meta[
+                "quantization_annotation"
+            ] = QuantizationAnnotation(
+                input_qspec_map={
+                    input_act: act_qspec,
+                },
+                output_qspec=act_qspec,
+                _input_output_share_observers=True,
+                _annotated=True,
+            )
 
     def _annotate_hardtanh(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.hardtanh.default, node, quantization_config
+            torch.nn.modules.Hardtanh, gm, quantization_config
         )
 
     def _annotate_mean(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.mean.default, node, quantization_config
-        )
-        self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.mean.dim, node, quantization_config
-        )
+        self._annotate_input_out_obs_sharing_op(torch.mean, gm, quantization_config)
 
     def _annotate_adaptive_avg_pool2d(
-        self, node: Node, quantization_config: QuantizationConfig
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
         self._annotate_input_out_obs_sharing_op(
-            torch.ops.aten.adaptive_avg_pool2d.default, node, quantization_config
+            torch.nn.AdaptiveAvgPool2d, gm, quantization_config
         )
 
     def _annotate_add_relu(
