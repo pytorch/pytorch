@@ -843,8 +843,6 @@ aten::linear_backward.out
 aten::log_softmax.int_out
 aten::logaddexp2
 aten::logaddexp2.out
-aten::logcumsumexp
-aten::logcumsumexp.out
 aten::logit_backward.grad_input
 aten::lstm_mps_backward
 aten::lstm_mps_backward.out

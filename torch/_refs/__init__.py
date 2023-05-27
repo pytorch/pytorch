@@ -95,6 +95,7 @@ __all__ = [
     "log2",
     "log10",
     "log_softmax",
+    "logcumsumexp",
     "nan_to_num",
     "neg",
     "positive",
@@ -709,6 +710,20 @@ def log_softmax(
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
+
+
+@register_decomposition(aten.logcumsumexp)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
+def logcumsumexp(
+    a: TensorLikeType,
+    dim: int,
+) -> TensorLikeType:
+    utils.canonicalize_dim(a.ndim, dim)
+    return torch.empty_like(a).contiguous()
 
 
 @register_decomposition(aten.logsumexp)
