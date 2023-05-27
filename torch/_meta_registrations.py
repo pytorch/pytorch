@@ -4,7 +4,12 @@ from typing import List, Optional, Sequence, Tuple, Union
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
+from torch._decomp import (
+    _add_op_to_registry,
+    _convert_out_params,
+    global_decomposition_table,
+    meta_table,
+)
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -36,6 +41,8 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 
 def register_meta(op):
     def wrapper(fn):
+        fn = _convert_out_params(fn)
+
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
@@ -63,42 +70,20 @@ def check_inplace_broadcast(self_shape, *args_shape):
 
 
 @register_meta([aten.take.default, aten.take.out])
-def meta_take(self, index, *, out=None):
+@out_wrapper()
+def meta_take(self, index):
     # Type and device checks
     check(
         index.dtype == torch.long,
         lambda: f"take(): Expected a long tensor for index, but got {index.dtype}",
     )
-    if out is not None:
-        check(
-            self.dtype == out.dtype,
-            lambda: (
-                f"take(): self and out expected to have the same dtype, "
-                f"but got self.dtype = {self.dtype} and out.dtype = {out.dtype}"
-            ),
-        )
-        check(
-            self.device == out.device and self.device == index.device,
-            lambda: (
-                f"take(): self, index and out expected to be in the same device, "
-                f"but got self.device = {self.device}, index.device = {index.device}, "
-                f"and out.device = {out.device}"
-            ),
-        )
-
     # Index checks
     check(
         not (self.numel() == 0 and index.numel() != 0),
         lambda: "take(): tried to take from an empty tensor",
         IndexError,
     )
-
-    result = self.new_empty(index.shape)
-    if out is not None:
-        assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-    return result
+    return self.new_empty(index.shape)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
@@ -433,13 +418,11 @@ def checkUplo(UPLO: str):
 
 
 @register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
+@out_wrapper("eigenvalues", "eigenvectors")
 def meta__linalg_eigh(
     A: Tensor,
     UPLO: str = "L",
     compute_v: bool = True,
-    *,
-    eigenvalues: Tensor = None,
-    eigenvectors: Tensor = None,
 ):
     squareCheckInputs(A, "linalg.eigh")
     checkUplo(UPLO)
@@ -453,15 +436,6 @@ def meta__linalg_eigh(
 
     shape.pop()
     vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
-
-    if eigenvalues is not None and eigenvectors is not None:
-        assert isinstance(eigenvalues, TensorLike)
-        assert isinstance(eigenvectors, TensorLike)
-        eigenvalues = _maybe_resize_out(eigenvalues, vals.shape)
-        eigenvectors = _maybe_resize_out(eigenvectors, vecs.shape)
-        _safe_copy_out(copy_from=vals, copy_to=eigenvalues)  # type: ignore[arg-type]
-        _safe_copy_out(copy_from=vecs, copy_to=eigenvectors)  # type: ignore[arg-type]
-        return eigenvalues, eigenvectors
 
     return vals, vecs
 
