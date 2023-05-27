@@ -69,7 +69,8 @@ runs:
 
         LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log | tail -n 1)
         if [ -n "${LOG_FILE}" ]; then
-          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:,]' '{print $2}' | sed 's/"//g' | xargs)
+          # For example, jobDisplayName: linux-bionic-py3.8-clang9 / test (default, 2, 3, linux.2xlarge)
+          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $2}' | sed 's/"//g' | xargs)
           echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
         fi
 
