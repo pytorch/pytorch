@@ -2,7 +2,7 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-from typing import Any
+from typing import Optional, Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
@@ -19,7 +19,7 @@ class RemovableHandle:
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
+    def __init__(self, hooks_dict: Any, *, extra_dict: Optional[Any] = None) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1

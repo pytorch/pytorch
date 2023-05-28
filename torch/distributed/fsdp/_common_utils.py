@@ -49,7 +49,7 @@ class _FSDPDeviceHandle:
     semantics to be integrated with FSDP.
     """
 
-    def __init__(self, device: torch.device, backend: Any = None):
+    def __init__(self, device: torch.device, backend: Optional[Any] = None):
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)

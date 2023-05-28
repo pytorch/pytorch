@@ -173,7 +173,7 @@ Examples::
         size=(3, 3), nnz=3, layout=torch.sparse_csr)
 """)
 
-def sum(input: Tensor, dim: DimOrDims = None,
+def sum(input: Tensor, dim: Optional[DimOrDims] = None,
         dtype: Optional[DType] = None) -> Tensor:
     r"""
     Returns the sum of each row of the sparse tensor :attr:`input` in the given

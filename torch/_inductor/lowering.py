@@ -2348,7 +2348,14 @@ def scatter(x, dim: int, index, src, **kwargs):
 
 
 def scatter_fallback(
-    fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
+    fn,
+    self,
+    dim: int,
+    index,
+    src,
+    *,
+    reduce: Optional[str] = None,
+    include_self: bool = True,
 ):
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
@@ -2365,7 +2372,7 @@ def scatter_fallback(
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
-def scatter_(self, dim: int, index, src, *, reduce: str = None):
+def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
 
     fallback_result = scatter_fallback(
@@ -2500,7 +2507,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     return self
 
 
-def upsample_nearestnd(x, output_size, scales_x: Tuple[float] = None, n: int = 2):
+def upsample_nearestnd(
+    x, output_size, scales_x: Optional[Tuple[float]] = None, n: int = 2
+):
     x.realize_hint()  # elements are reused
     x_loader = x.make_loader()
     i_sizes = x.get_size()[-n:]

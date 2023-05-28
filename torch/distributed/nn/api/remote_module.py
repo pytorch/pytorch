@@ -128,9 +128,9 @@ class _RemoteModule(nn.Module):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
-        _module_interface_cls: Any = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
+        _module_interface_cls: Optional[Any] = None,
     ):
         """
         A RemoteModule instance can only be created after RPC initialization.
@@ -512,7 +512,7 @@ class _RemoteModule(nn.Module):
     def init_from_module_rref(
         remote_device: str,
         module_rref: rpc.RRef[nn.Module],
-        _module_interface_cls: Any = None,
+        _module_interface_cls: Optional[Any] = None,
     ):
         """
         Besides the constructor, a RemoteModule instance can also be initialized given a module RRef.
@@ -683,8 +683,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: Type[nn.Module],
-        args: Tuple = None,
-        kwargs: Dict[str, Any] = None,
+        args: Optional[Tuple] = None,
+        kwargs: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 

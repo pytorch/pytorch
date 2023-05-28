@@ -954,7 +954,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
 _exception_logger
 @_time_logger
 def init_process_group(
-    backend: Union[str, Backend] = None,
+    backend: Optional[Union[str, Backend]] = None,
     init_method: Optional[str] = None,
     timeout: timedelta = default_pg_timeout,
     world_size: int = -1,

@@ -537,7 +537,7 @@ class Source:
         return self.guard_source().is_nn_module()
 
 
-def detect_fake_mode(inputs: Any = None):
+def detect_fake_mode(inputs: Optional[Any] = None):
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we

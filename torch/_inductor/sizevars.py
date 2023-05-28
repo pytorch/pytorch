@@ -1,7 +1,7 @@
 import functools
 import itertools
 import logging
-from typing import Callable, Dict, List, Union
+from typing import Callable, Dict, List, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -388,7 +388,7 @@ class SizeVarAllocator:
         def stride_vars(
             index: Expr,
             vars: List[sympy.Symbol],
-            support_vars: List[sympy.Symbol] = None,
+            support_vars: Optional[List[sympy.Symbol]] = None,
         ) -> List[Expr]:
             if not support_vars:
                 support_vars = vars
@@ -442,7 +442,7 @@ class SizeVarAllocator:
         self,
         index: Expr,
         vars: List[sympy.Symbol],
-        support_vars: List[sympy.Symbol] = None,
+        support_vars: Optional[List[sympy.Symbol]] = None,
     ) -> List[int]:
         for v in index.free_symbols:
             if v.name.startswith("indirect"):

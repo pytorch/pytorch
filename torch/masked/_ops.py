@@ -1032,7 +1032,7 @@ def _combine_input_and_mask(
 @_apply_docstring_templates
 def sum(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1085,7 +1085,7 @@ def sum(
 @_apply_docstring_templates
 def prod(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1202,7 +1202,7 @@ def cumprod(
 @_apply_docstring_templates
 def amax(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1252,7 +1252,7 @@ def amax(
 @_apply_docstring_templates
 def amin(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1302,7 +1302,7 @@ def amin(
 @_apply_docstring_templates
 def argmax(
     input: Union[Tensor, MaskedTensor],
-    dim: int = None,
+    dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1328,7 +1328,7 @@ def argmax(
 @_apply_docstring_templates
 def argmin(
     input: Union[Tensor, MaskedTensor],
-    dim: int = None,
+    dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1354,7 +1354,7 @@ def argmin(
 @_apply_docstring_templates
 def mean(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1459,7 +1459,7 @@ elements, have ``nan`` values.
 @_apply_docstring_templates
 def logsumexp(
     input: Tensor,
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: bool = False,
     dtype: Optional[DType] = None,
@@ -1503,7 +1503,7 @@ def logaddexp(
 def norm(
     input: Union[Tensor, MaskedTensor],
     ord: Optional[float] = 2.0,
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1610,7 +1610,7 @@ def _std_var(
 @_apply_docstring_templates
 def var(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     unbiased: Optional[bool] = None,
     *,
     correction: Optional[Union[int, float]] = None,
@@ -1641,7 +1641,7 @@ fully masked-out elements, have ``nan`` values.
 @_apply_docstring_templates
 def std(
     input: Union[Tensor, MaskedTensor],
-    dim: DimOrDims = None,
+    dim: Optional[DimOrDims] = None,
     unbiased: Optional[bool] = None,
     *,
     correction: Optional[int] = None,

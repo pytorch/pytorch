@@ -741,8 +741,8 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
 
 def load(
     f: FILE_LIKE,
-    map_location: MAP_LOCATION = None,
-    pickle_module: Any = None,
+    map_location: Optional[MAP_LOCATION] = None,
+    pickle_module: Optional[Any] = None,
     *,
     weights_only: bool = False,
     **pickle_load_args: Any

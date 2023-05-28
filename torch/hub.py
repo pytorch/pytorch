@@ -689,7 +689,7 @@ def _legacy_zip_load(filename: str, model_dir: str, map_location: MAP_LOCATION, 
 def load_state_dict_from_url(
     url: str,
     model_dir: Optional[str] = None,
-    map_location: MAP_LOCATION = None,
+    map_location: Optional[MAP_LOCATION] = None,
     progress: bool = True,
     check_hash: bool = False,
     file_name: Optional[str] = None,

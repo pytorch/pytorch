@@ -170,7 +170,7 @@ class RendezvousParameters:
         self.config = kwargs
         self.local_addr = local_addr
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Optional[Any] = None) -> Any:
         """Returns the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 

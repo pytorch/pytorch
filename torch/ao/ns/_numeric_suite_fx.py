@@ -772,7 +772,7 @@ def prepare_n_shadows_model(
     backend_config: BackendConfig,
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
-    custom_tracer: Any = None,
+    custom_tracer: Optional[Any] = None,
 ) -> GraphModule:
     """
     Given a model with a graph with M ops such as

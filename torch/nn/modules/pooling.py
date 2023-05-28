@@ -546,7 +546,7 @@ class AvgPool1d(_AvgPoolNd):
     ceil_mode: bool
     count_include_pad: bool
 
-    def __init__(self, kernel_size: _size_1_t, stride: _size_1_t = None, padding: _size_1_t = 0, ceil_mode: bool = False,
+    def __init__(self, kernel_size: _size_1_t, stride: Optional[_size_1_t] = None, padding: _size_1_t = 0, ceil_mode: bool = False,
                  count_include_pad: bool = True) -> None:
         super().__init__()
         self.kernel_size = _single(kernel_size)

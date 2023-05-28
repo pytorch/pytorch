@@ -359,7 +359,7 @@ def trace(data):
     return out.getvalue()
 
 class PlotWriter:
-    def __init__(self, categories: List[str] = None):
+    def __init__(self, categories: Optional[List[str]] = None):
         string_table: List[str] = []
 
         # compresses lists of strings that have common suffixes

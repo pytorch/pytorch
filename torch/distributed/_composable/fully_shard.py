@@ -47,8 +47,10 @@ def fully_shard(
     param_init_fn: Optional[Callable[[nn.Module], None]] = None,
     sync_module_states: bool = False,
     forward_prefetch: bool = False,
-    ignored_states: Union[
-        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+    ignored_states: Optional[
+        Union[
+            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+        ]
     ] = None,
 ) -> nn.Module:
     """

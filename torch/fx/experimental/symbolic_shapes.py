@@ -2068,7 +2068,7 @@ class ShapeEnv:
         val: int,
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
-        constraint_dim: DimConstraint = None,  # NB: includes None
+        constraint_dim: Optional[DimConstraint] = None,  # NB: includes None
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user

@@ -153,7 +153,7 @@ class TracerBase:
     @compatibility(is_backward_compatible=True)
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
+                     proxy_factory_fn: Optional[Callable[[Node], 'Proxy']] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -353,7 +353,7 @@ class Proxy:
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
+    def __init__(self, node: Node, tracer: Optional['Optional[TracerBase]'] = None):
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)

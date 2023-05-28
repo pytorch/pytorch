@@ -5,7 +5,7 @@ import enum
 import logging
 import os
 import threading
-from typing import NamedTuple
+from typing import Optional, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -132,7 +132,7 @@ class HybridModel(nn.Module):
         self,
         remote_em_rref: rpc.RRef,
         remote_net_rref: rpc.RRef,
-        process_group_for_ddp: dist.ProcessGroup = None,
+        process_group_for_ddp: Optional[dist.ProcessGroup] = None,
     ):
         super().__init__()
         self.remote_em_rref = remote_em_rref

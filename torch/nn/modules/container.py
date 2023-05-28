@@ -718,7 +718,7 @@ class ParameterDict(Module):
                 return x
     """
 
-    def __init__(self, parameters: Any = None) -> None:
+    def __init__(self, parameters: Optional[Any] = None) -> None:
         super().__init__()
         self._keys: Dict[str, None] = {}
         if parameters is not None:

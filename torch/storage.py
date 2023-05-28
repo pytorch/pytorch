@@ -3,7 +3,7 @@ import io
 import torch
 from ._utils import _type, _cuda
 from torch.types import Storage
-from typing import Any, TypeVar, Type, Union, cast, Dict as _Dict
+from typing import Optional, Any, TypeVar, Type, Union, cast, Dict as _Dict
 import copy
 import collections
 from functools import lru_cache
@@ -30,14 +30,14 @@ class _StorageBase:
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def __setitem__(self, *args, **kwargs): ...  # noqa: E704
-    def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
+    def copy_(self, source: T, non_blocking: Optional[bool] = None) -> T: ...  # noqa: E704
     def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
         return self.nbytes()
 
-    def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
+    def type(self, dtype: Optional[str] = None, non_blocking: bool = False) -> T: ...  # noqa: E704
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
 
@@ -693,7 +693,7 @@ class TypedStorage:
         tmp_tensor = torch.tensor([], dtype=self.dtype, device=self._untyped_storage.device).set_(self)
         return tmp_tensor[idx_wrapped].item()
 
-    def copy_(self, source: T, non_blocking: bool = None):
+    def copy_(self, source: T, non_blocking: Optional[bool] = None):
         _warn_typed_storage_removal()
         if isinstance(source, TypedStorage):
             self._untyped_storage.copy_(source._untyped_storage, non_blocking)
@@ -709,7 +709,7 @@ class TypedStorage:
     def _nbytes(self):
         return self._untyped_storage.nbytes()
 
-    def type(self, dtype: str = None, non_blocking: bool = False) -> Union[T, str]:
+    def type(self, dtype: Optional[str] = None, non_blocking: bool = False) -> Union[T, str]:
         _warn_typed_storage_removal()
         if dtype is None:
             legacy_class = self._get_legacy_storage_class()

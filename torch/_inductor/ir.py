@@ -1846,7 +1846,7 @@ class FixedLayout(Layout):
         device: torch.device,
         dtype: torch.dtype,
         size: List[Expr],
-        stride: List[Expr] = None,
+        stride: Optional[List[Expr]] = None,
         offset: Expr = Integer(0),
     ):
         if stride is None:
@@ -3052,7 +3052,7 @@ class ScatterFallback(ExternKernel):
         index,
         src,
         *,
-        reduce: str = None,
+        reduce: Optional[str] = None,
         include_self: bool = True,
     ):
         assert fn in {"aten.scatter_", "aten.scatter_reduce_"}
@@ -3369,7 +3369,7 @@ def _prepare_convolution_fusion_create(
     dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding: List[int] = None,
+    output_padding: Optional[List[int]] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args

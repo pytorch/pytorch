@@ -706,7 +706,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: Optional[_device_t] = None) -> None:
     r"""Waits for all kernels in all streams on a CUDA device to complete.
 
     Args:

@@ -244,8 +244,10 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-    ignored_states: Union[
-        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+    ignored_states: Optional[
+        Union[
+            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+        ]
     ] = None,
 ) -> _FSDPState:
     assert (

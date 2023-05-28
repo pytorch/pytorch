@@ -109,7 +109,7 @@ def convert_fake_tensor_to_tensor_meta(
     return ep, shape_env
 
 
-def convert_tensor_meta_to_fake_tensor(ep: ExportedProgram, shape_env: ShapeEnv = None) -> ExportedProgram:
+def convert_tensor_meta_to_fake_tensor(ep: ExportedProgram, shape_env: Optional[ShapeEnv] = None) -> ExportedProgram:
     """
     Replace (inplace) the tensor metadata with faketensor
     """

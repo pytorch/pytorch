@@ -399,7 +399,7 @@ def maybe_get_next_module(
     node: Node,
     modules: Dict[str, nn.Module],
     target_module_type: Optional[Type[nn.Module]] = None,
-    target_functional_type: Any = None,
+    target_functional_type: Optional[Any] = None,
 ) -> Optional[Node]:
     """ Gets the next module that matches what is needed in
     is_target_module_type if it exists
@@ -448,7 +448,7 @@ def get_skipped_module_name_and_classes(
 def _is_custom_module_lstm(
         node: Node,
         named_modules: Dict[str, torch.nn.Module],
-        qconfig: QConfigAny = None,
+        qconfig: Optional[QConfigAny] = None,
         # QuantizeHandler, but we cannot include the type here due to circular imports
         qhandler: Optional[Any] = None,
 ) -> bool:
@@ -467,7 +467,7 @@ def _is_custom_module_lstm(
 def _is_custom_module_mha(
         node: Node,
         named_modules: Dict[str, torch.nn.Module],
-        qconfig: QConfigAny = None,
+        qconfig: Optional[QConfigAny] = None,
         # QuantizeHandler, but we cannot include the type here due to circular imports
         qhandler: Optional[Any] = None,
 ) -> bool:
