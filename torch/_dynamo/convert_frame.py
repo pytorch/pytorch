@@ -11,7 +11,10 @@ import torch
 import torch._logging
 from torch._guards import tracing
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    GuardOnDataDependentSymNode,
+)
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -498,13 +501,13 @@ def _compile(
         BackendCompilerFailed,
         AssertionError,
         ConstraintViolationError,
+        GuardOnDataDependentSymNode,
     ) as e:
         exception_handler(e, code, frame)
         raise
     except Exception as e:
         exception_handler(e, code, frame)
-        # TODO: Why???  Why not raise the original exception as is
-        raise InternalTorchDynamoError() from e
+        raise InternalTorchDynamoError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

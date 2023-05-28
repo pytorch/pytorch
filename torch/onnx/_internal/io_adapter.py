@@ -1,9 +1,131 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple
 
+from typing import (
+    Any,
+    Callable,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    Sequence,
+    Tuple,
+    Union,
+)
+
+import torch
+
+from torch.onnx._internal import _beartype
 from torch.utils import _pytree as pytree
+
+# TODO(bowbao): Add diagnostics for IO adapters.
+
+
+@runtime_checkable
+class InputAdaptStep(Protocol):
+    """A protocol that defines a step in the input adapting process.
+
+    The input adapting process is a sequence of steps that are applied to the
+    PyTorch model inputs to transform them into the inputs format expected by the
+    exported ONNX model. Each step takes the PyTorch model inputs as arguments and
+    returns the transformed inputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    input signature by any individual component in the exporter.
+    """
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        ...
+
+
+class InputAdapter:
+    """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
+
+    def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
+        self._steps = steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: InputAdaptStep) -> None:
+        """Appends a step to the input adapt steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._steps.append(step)
+
+    @_beartype.beartype
+    def apply(
+        self, *model_args, **model_kwargs
+    ) -> Sequence[Union[int, float, bool, "torch.Tensor", None]]:
+        """Converts the PyTorch model inputs to exported ONNX model inputs format.
+
+        Args:
+            model_args: The PyTorch model inputs.
+            model_kwargs: The PyTorch model keyword inputs.
+
+        Returns:
+            A sequence of tensors converted from PyTorch model inputs.
+        """
+        args: Sequence[Any] = model_args
+        kwargs: Mapping[str, Any] = model_kwargs
+        for step in self._steps:
+            args, kwargs = step.apply(args, kwargs)
+        assert not kwargs
+        return args
+
+
+@runtime_checkable
+class OutputAdaptStep(Protocol):
+    """A protocol that defines a step in the output adapting process.
+
+    The output adapting process is a sequence of steps that are applied to the
+    PyTorch model outputs to transform them into the outputs format produced by the
+    exported ONNX model. Each step takes the PyTorch model outputs as arguments and
+    returns the transformed outputs.
+
+    This serves as a base formalized construct for the transformation done to model
+    output signature by any individual component in the exporter.
+    """
+
+    def apply(self, model_outputs: Any) -> Any:
+        ...
+
+
+class OutputAdapter:
+    """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
+
+    def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
+        self._steps = steps or []
+
+    @_beartype.beartype
+    def append_step(self, step: OutputAdaptStep) -> None:
+        """Appends a step to the output format steps.
+
+        Args:
+            step: The step to append.
+        """
+        self._steps.append(step)
+
+    @_beartype.beartype
+    def apply(
+        self, model_outputs: Any
+    ) -> Sequence[Union["torch.Tensor", int, float, bool]]:
+        """Converts the PyTorch model outputs to exported ONNX model outputs format.
+
+        Args:
+            model_outputs: The PyTorch model outputs.
+
+        Returns:
+            PyTorch model outputs in exported ONNX model outputs format.
+        """
+        for step in self._steps:
+            model_outputs = step.apply(model_outputs)
+        return model_outputs
+
 
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
@@ -101,6 +223,27 @@ class MergeKwargsIntoArgsStep:
             A tuple of the model args and kwargs. kwargs is always empty.
         """
         return tuple(model_args) + tuple(model_kwargs.values()), {}
+
+
+class LiftParametersAndBuffersIntoArgsStep:
+    """Append parameters and buffers to model's positional argument list."""
+
+    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
+        self.inputs = inputs
+
+    def apply(
+        self, model_args: Sequence[Any], model_kwargs: Mapping[str, Any]
+    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        """Append model's parameters and buffers into its input.
+
+        Args:
+            model_args: The model args.
+            model_kwargs: The model kwargs.
+
+        Returns:
+            A tuple of the model args + appended inputs and kwargs.
+        """
+        return (*model_args, *self.inputs), model_kwargs
 
 
 class RemoveNoneInputStep:

@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -11,38 +11,92 @@ from torch.distributed._tensor.api import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.op_schema import (
+    OpSchema,
+    OpStrategy,
+    OutputSharding,
+    PlacementStrategy,
+    StrategyType,
+)
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
-from torch.distributed._tensor.ops.utils import normalize_dim, prod, register_prop_rule
+from torch.distributed._tensor.ops.utils import (
+    normalize_dim,
+    prod,
+    register_op_strategy,
+    register_prop_rule,
+)
+from torch.fx import Node
 
 
 aten = torch.ops.aten
 
 
-# NOTE: the default propagation rule should apply for
-# any operator that does not return a DTensor, i.e.
-# for operators that only returns int/float/bool, we by
-# default still propagate the spec, this is to ensure
-# that we only return None for the case where the sharding
-# propagation failed, and we should do auto-redistribute
-def default_prop_rule(op_schema: OpSchema) -> OutputSharding:
-    # by default prop the first arg spec
-    return OutputSharding(op_schema.args_spec[0])
-
-
-def prop_create_like(op_schema: OpSchema) -> OutputSharding:
-    # For operators that create tensors with same shape as input but
-    # with specific content that does not depend on the input, we
-    # can propagate Sharding, but we have to make sure we move from
-    # partial to replicated.
-    input_spec = op_schema.args_spec[0]
-    output_spec = DTensorSpec(
-        mesh=input_spec.mesh,
-        placements=tuple(
-            Replicate() if isinstance(p, _Partial) else p for p in input_spec.placements
-        ),
+@register_op_strategy(
+    [
+        aten._to_copy.default,
+        aten.clone.default,
+        aten.contiguous.default,
+        aten.copy_.default,
+        aten.detach.default,
+        aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
+    ]
+)
+def default_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    # Default strategy by default just propagate the first input strategy
+    select_strategy = node_to_strategy[node.all_input_nodes[0]]
+    assert isinstance(select_strategy, OpStrategy)
+    return OpStrategy(
+        [
+            PlacementStrategy(arg_strategy.output_spec)
+            for arg_strategy in select_strategy.strategies
+        ]
     )
-    return OutputSharding(output_spec=output_spec)
+
+
+@register_op_strategy(
+    [
+        aten.empty_like.default,
+        aten.fill_.Scalar,
+        aten.full_like.default,
+        aten.ones_like.default,
+        aten.zero_.default,
+        aten.zeros_like.default,
+    ]
+)
+def create_like_strategy(
+    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
+) -> StrategyType:
+    # create_like_strategy deals with ops that creating tensors with same
+    # shape as input, but with specific content that does not depend on
+    # the input, we can propagate sharding, but we have to make sure we
+    # move from partial to replicated.
+    select_strategy = node_to_strategy[node.all_input_nodes[0]]
+    create_like_strategy = OpStrategy([])
+    assert isinstance(select_strategy, OpStrategy)
+    for arg_strategy in select_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if arg_spec.sums:
+            # if the arg_spec have partial, accept partial
+            # in the input_specs but output replicate for
+            # those corresponding mesh dims
+            output_spec = DTensorSpec(
+                mesh=arg_spec.mesh,
+                placements=tuple(
+                    Replicate() if isinstance(p, _Partial) else p
+                    for p in arg_spec.placements
+                ),
+            )
+            create_like_strategy.strategies.append(
+                PlacementStrategy(output_spec=output_spec, input_specs=(arg_spec,))
+            )
+
+        else:
+            create_like_strategy.strategies.append(PlacementStrategy(arg_spec))
+
+    return create_like_strategy
 
 
 @register_prop_rule(aten._local_scalar_dense.default)
@@ -85,35 +139,11 @@ def non_tensor_prop_rule(op_schema: OpSchema) -> OutputSharding:
     return OutputSharding(output_spec=None)
 
 
-default_prop_ops = [
-    aten._to_copy.default,
-    aten.clone.default,
-    aten.contiguous.default,
-    aten.copy_.default,
-    aten.detach.default,
-    aten.new_empty_strided.default,
-]
-
-create_like_ops = [
-    aten.empty_like.default,
-    aten.fill_.Scalar,
-    aten.full_like.default,
-    aten.ones_like.default,
-    aten.zero_.default,
-    aten.zeros_like.default,
-]
-
 new_factory_ops = [
     aten.new_full.default,
     aten.new_ones.default,
     aten.new_zeros.default,
 ]
-
-for op in default_prop_ops:
-    register_prop_rule(op)(default_prop_rule)
-
-for op in create_like_ops:
-    register_prop_rule(op)(prop_create_like)
 
 for op in new_factory_ops:
     register_prop_rule(op)(new_factory_rule)

@@ -2700,7 +2700,7 @@ class DeviceCachingAllocator {
           // to catch the exception, free some stuff in their script, and
           // attempt the allocation again. In this case, we can also forgive and
           // clear CUDA's internal error state.
-          cudaGetLastError();
+          (void)cudaGetLastError();
         } else {
           // If the error's unrelated to memory allocation, we should throw
           // immediately.
@@ -3026,7 +3026,7 @@ class DeviceCachingAllocator {
         cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
         if (err == cudaErrorNotReady) {
           // ignore and clear the error if not ready
-          cudaGetLastError();
+          (void)cudaGetLastError();
           // Return the ownership of the Event (unique ptr)
           e.first = std::move(event);
           break;
@@ -3419,7 +3419,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
       // ignore and clear the error if access was already enabled
-      cudaGetLastError();
+      (void)cudaGetLastError();
     } else {
       C10_CUDA_CHECK(err);
     }
@@ -3525,7 +3525,7 @@ void setAllocatorSettings(const std::string& env) {
 }
 
 // Size pretty-printer
-inline std::string format_size(uint64_t size) {
+std::string format_size(uint64_t size) {
   std::ostringstream os;
   os.precision(2);
   os << std::fixed;

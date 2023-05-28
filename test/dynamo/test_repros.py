@@ -1088,11 +1088,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        # TODO: There is some bug here where corrects ends up with
-        # a Tensor in element 0.  We graph break on that (reflected here)
-        # but really we shouldn't have gotten a Tensor at all, as
-        # the operation is between an int and an item() result
-        self.assertEqual(cnt.frame_count, ifunspec(6, 5))
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertEqual(cnt.frame_count, 5)
+        else:
+            self.assertEqual(cnt.frame_count, 6)
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1637,6 +1636,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIs(act.act, nn.functional.gelu)
         self.assertTrue(hasattr(act, "_buffers"))  # check that __init__ got called
 
+    def test_dropout_inline(self):
+        @torch._dynamo.optimize("eager")
+        def fn(x):
+            return torch.nn.Dropout(0.1)(x)
+
+        y = torch.randn(10)
+        torch.manual_seed(1337)
+        ref = nn.functional.dropout(y, 0.1)
+        torch.manual_seed(1337)
+        res = fn(y)
+        self.assertTrue(same(ref, res))
+
     def test_torch_tensor_ops(self):
         def fn(x):
             return torch.Tensor.abs_(x)
@@ -1881,17 +1892,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from .test_functions import tensor_for_import_testing
+                from .utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                from test_functions import tensor_for_import_testing
+                from utils import tensor_for_import_testing
 
                 return x * 2 * tensor_for_import_testing
 
@@ -1904,19 +1915,19 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_relative_import_no_modulename(self):
         try:
-            from . import test_functions as _  # noqa: F401
+            from . import utils as _  # noqa: F401
 
             def fn(x):
-                from . import test_functions
+                from . import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         except ImportError:
 
             def fn(x):
-                import test_functions
+                import utils
 
-                return x * 2 * test_functions.tensor_for_import_testing
+                return x * 2 * utils.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -3167,6 +3178,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = check_type(torch.randn(4), [torch.Tensor])
         res = opt_check_type(torch.randn(4), [torch.Tensor])
         self.assertEqual(ref, res)
+
+    def test_kwargs_out_list_variable(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, param):
+                z = torch.frexp(**param)
+                return z
+
+        model = Repro()
+        params = {"input": torch.tensor([[0.0, 1, 2, 4]])}
+        params["out"] = [
+            torch.empty(0, dtype=torch.float32),  # mantissa
+            torch.empty(0, dtype=torch.int32),  # exponent
+        ]
+
+        model = torch.compile(model, backend="eager")
+        mantissa, exponent = model(params)
+        ref_mantissa = torch.tensor([[0.0000, 0.5000, 0.5000, 0.5000]])
+        ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
+        self.assertEqual(ref_mantissa, mantissa)
+        self.assertEqual(ref_exponent, exponent)
 
 
 if __name__ == "__main__":

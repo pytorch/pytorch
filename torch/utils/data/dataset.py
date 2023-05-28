@@ -41,7 +41,10 @@ class Dataset(Generic[T_co]):
     data sample for a given key. Subclasses could also optionally overwrite
     :meth:`__len__`, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
-    of :class:`~torch.utils.data.DataLoader`.
+    of :class:`~torch.utils.data.DataLoader`. Subclasses could also
+    optionally implement :meth:`__getitems__`, for speedup batched samples
+    loading. This method accepts list of indices of samples of batch and returns
+    list of samples.
 
     .. note::
       :class:`~torch.utils.data.DataLoader` by default constructs a index
@@ -50,7 +53,11 @@ class Dataset(Generic[T_co]):
     """
 
     def __getitem__(self, index) -> T_co:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses of Dataset should implement __getitem__.")
+
+    # def __getitems__(self, indices: List) -> List[T_co]:
+    # Not implemented to prevent false-positives in fetcher check in
+    # torch.utils.data._utils.fetch._MapDatasetFetcher
 
     def __add__(self, other: 'Dataset[T_co]') -> 'ConcatDataset[T_co]':
         return ConcatDataset([self, other])
@@ -169,7 +176,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 4, 5, 6]
     """
     def __iter__(self) -> Iterator[T_co]:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses of IterableDataset should implement __iter__.")
 
     def __add__(self, other: Dataset[T_co]):
         return ChainDataset([self, other])
@@ -295,6 +302,14 @@ class Subset(Dataset[T_co]):
         if isinstance(idx, list):
             return self.dataset[[self.indices[i] for i in idx]]
         return self.dataset[self.indices[idx]]
+
+    def __getitems__(self, indices: List[int]) -> List[T_co]:
+        # add batched sampling support when parent dataset supports it.
+        # see torch.utils.data._utils.fetch._MapDatasetFetcher
+        if callable(getattr(self.dataset, "__getitems__", None)):
+            return self.dataset.__getitems__([self.indices[idx] for idx in indices])  # type: ignore[attr-defined]
+        else:
+            return [self.dataset[self.indices[idx]] for idx in indices]
 
     def __len__(self):
         return len(self.indices)

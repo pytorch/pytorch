@@ -19,11 +19,18 @@ import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
+# multipy/deploy is setting this import before importing torch, this is the most
+# reliable way we have to detect if we're running within deploy.
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+def _running_with_deploy():
+    return sys.modules.get("torch._meta_registrations", None) is object
+
 from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if sys.executable == 'torch_deploy':
+if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
@@ -157,7 +164,7 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -191,7 +198,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
+        (_running_with_deploy() or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -1277,7 +1284,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
