@@ -86,6 +86,9 @@ Error::Error(SourceLocation source_location, std::string msg)
               (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
+using APIUsageMetadataLoggerType = std::function<void(
+    const std::string&,
+    const std::map<std::string, std::string>& metadata_map)>;
 using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
@@ -105,6 +108,13 @@ APIUsageLoggerType* GetAPIUsageLogger() {
   return &func;
 };
 
+APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
+  static APIUsageMetadataLoggerType func =
+      [](const std::string&,
+         const std::map<std::string, std::string>& metadata_map) {};
+  return &func;
+};
+
 DDPUsageLoggerType* GetDDPUsageLogger() {
   static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
@@ -116,6 +126,14 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = std::move(logger);
 }
 
+void SetAPIUsageMetadataLogger(
+    std::function<void(
+        const std::string&,
+        const std::map<std::string, std::string>& metadata_map)> logger) {
+  TORCH_CHECK(logger);
+  *GetAPIUsageMetadataLogger() = std::move(logger);
+}
+
 void SetPyTorchDDPUsageLogger(
     std::function<void(const DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
@@ -125,6 +143,15 @@ void SetPyTorchDDPUsageLogger(
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
+}
+
+void LogAPIUsageMetadata(
+    const std::string& context,
+    const std::map<std::string, std::string>& metadata_map) try {
+  if (auto logger = GetAPIUsageMetadataLogger())
+    (*logger)(context, metadata_map);
 } catch (std::bad_function_call&) {
   // static destructor race
 }
