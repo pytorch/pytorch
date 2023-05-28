@@ -941,11 +941,16 @@ class TestForeach(TestCase):
             ))
             if op.name in ("_foreach_clamp_max", "_foreach_clamp_min") and rhs_arg_has_complex_number:
                 return False, "clamp is not supported for complex types"
+            # Wit this the result will be complex128, so skip.
+            if rhs_arg_has_complex_number and dtype == torch.float64:
+                return False, ""
 
             return True, ""
 
+        # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
+        value_range = {"low": 0.5, "high": 1.0} if dtype == torch.float64 else {}
         for sample in op.sample_inputs(
-            device, dtype, requires_grad=True, num_input_tenosrs=[5], same_size=True,
+            device, dtype, requires_grad=True, num_input_tenosrs=[5], same_size=True, **value_range,
         ):
             # Skip `_foreach_pow.ScalarAndTensor(Scalar, Tensor[])`
             if op.name == "_foreach_pow" and isinstance(sample.input, Number):
@@ -957,6 +962,9 @@ class TestForeach(TestCase):
 
             working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
             if not working_sample:
+                if not err_msg_pattern:
+                    # lhs of float64 and rhs of complex.
+                    continue
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
                     gradcheck(
                         func,
@@ -968,8 +976,6 @@ class TestForeach(TestCase):
                         check_batched_grad=False,
                     )
             else:
-                # FIXME(crcrpar):
-                # float64: acos, asin, log10, log1p, log2, log, pow, sqrt
                 gradcheck(
                     func,
                     sample.input,
