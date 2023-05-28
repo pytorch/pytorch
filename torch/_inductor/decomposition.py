@@ -29,6 +29,7 @@ inductor_decompositions = get_decompositions(
         aten.flip,
         aten.lcm,
         aten.linalg_vector_norm,
+        aten.logcumsumexp,
         aten.sin_,
         aten.sqrt_,
         aten.std,

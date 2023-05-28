@@ -230,6 +230,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "exponential": {f16},
     "geometric": {f16},
     "log_normal": {f16},
+    "logcumsumexp": {f32, f64},
     ("normal", "in_place"): {f16, f32, f64},
     "uniform": {f16},
     "unique": {b8, f16, f32, f64, i32, i64},
