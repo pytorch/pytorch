@@ -32,12 +32,16 @@ bool is_pinned_default(const Tensor& self, c10::optional<Device> device) {
 }
 
 Tensor pin_memory(const Tensor& self, c10::optional<Device> device) {
-  std::cout << "00 self.is_nested(): " << self.is_nested() << std::endl;
   // Kind of mad that I have to do two dynamic dispatches here, pretty
   // annoying
   if (self.is_pinned(device)) {
     return self;
   }
+  // I'm even more annoyed at this additional check. We could change
+  // _pin_memory to dispatch on dispatchkey of self since NestedTensorCUDA
+  // is not a device. Or we can just assume that this additional bool field
+  // check is cheap enough in comparison to the cost of pinning memory in the
+  // first place.
   if (self.is_nested()) {
     auto* nt_input = get_nested_tensor_impl(self);
     TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));

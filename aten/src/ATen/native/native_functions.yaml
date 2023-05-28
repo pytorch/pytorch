@@ -4342,7 +4342,7 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    CUDA: is_pinned_cuda
+    NestedTensorCUDA, CUDA: is_pinned_cuda
     MPS: is_pinned_mps
     CompositeExplicitAutograd: is_pinned_default
 
