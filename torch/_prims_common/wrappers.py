@@ -5,12 +5,13 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
     ShapeType,
+    StrideType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, List, Sequence, Tuple, NamedTuple, Optional, Union, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
 import inspect
 from functools import wraps
 import warnings
@@ -160,7 +161,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 def _maybe_resize_out(
     out: TensorLikeType,
     shape: ShapeType,
-    stride: Optional[Union[List[int], int]] = None,
+    stride: Optional[StrideType] = None,
     is_copy: bool = False
 ) -> TensorLikeType:
     if _resize_output_check(out, shape):
