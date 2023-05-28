@@ -27,6 +27,15 @@ def is_symint_node(node):
     return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
 
 
+def has_recomputable_tags(fx_g):
+    found = False
+    for node in fx_g.graph.nodes:
+        if node.op == "call_function":
+            if "recompute" in node.meta.keys():
+                found = True
+                break
+    return found
+
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
@@ -231,6 +240,8 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
+    if has_recomputable_tags(joint_module):
+        return tagged_min_cut_rematerialization_partition(joint_module, _joint_inputs, num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
@@ -550,6 +561,10 @@ def min_cut_rematerialization_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
+
+    if has_recomputable_tags(joint_module):
+        return tagged_min_cut_rematerialization_partition(joint_module, _joint_inputs, num_fwd_outputs)
+
     try:
         import networkx as nx
     except ImportError as e:
