@@ -5,7 +5,6 @@
 #include <c10/core/Storage.h>
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
-#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at::native {
 
