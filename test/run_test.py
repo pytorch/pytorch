@@ -15,6 +15,8 @@ from datetime import datetime
 from distutils.version import LooseVersion
 from typing import Any, cast, Dict, List, Optional
 
+import pkg_resources
+
 import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
@@ -27,6 +29,7 @@ from torch.testing._internal.common_utils import (
     retry_shell,
     set_cwd,
     shell,
+    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
 from torch.utils import cpp_extension
@@ -57,6 +60,7 @@ except ImportError:
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
+DISTRIBUTED_TEST_PREFIX = "distributed"
 
 
 # Note [ROCm parallel CI testing]
@@ -422,7 +426,7 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_fuser_legacy",
 ]
 
-DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
+DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -489,7 +493,17 @@ def run_test(
         test_file = test_module.name
         use_sharded_test = True
 
+    is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
     is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
+    # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
+    # to just return successfully here
+    if is_cpp_test and RERUN_DISABLED_TESTS:
+        print_to_stderr(
+            "Skipping C++ tests when running under RERUN_DISABLED_TESTS mode"
+        )
+        return 0
+
     if use_sharded_test:
         if is_cpp_test:
             stepcurrent_key = test_file
@@ -517,7 +531,12 @@ def run_test(
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args.extend(
-            get_pytest_args(options, stepcurrent_key, is_cpp_test=is_cpp_test)
+            get_pytest_args(
+                options,
+                stepcurrent_key,
+                is_cpp_test=is_cpp_test,
+                is_distributed_test=is_distributed_test,
+            )
         )
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
@@ -901,7 +920,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
     num_lines = sum(1 for _ in open(file_path, "rb"))
     test = str(test)
     n = 100
-    with open(file_path, "r") as f:
+    with open(file_path, "rb") as f:
         print_to_stderr("")
         if failed:
             if n < num_lines:
@@ -912,25 +931,32 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
                     f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})"
                 )
                 for _ in range(num_lines - n):
-                    print_to_stderr(next(f).rstrip())
+                    print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
                 print_to_stderr("##[endgroup]")
             for _ in range(min(n, num_lines)):
-                print_to_stderr(next(f).rstrip())
+                print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
             print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read())
+            print_to_stderr(f.read().decode("utf-8", errors="ignore"))
             print_to_stderr("##[endgroup]")
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         print_to_stderr("")
 
 
-def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
+def get_pytest_args(
+    options, stepcurrent_key, is_cpp_test=False, is_distributed_test=False
+):
     if RERUN_DISABLED_TESTS:
+        # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
+        # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
+        # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210). The same logic applies
+        # to ASAN, which is also slow
+        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
-        rerun_options = ["--flake-finder", "--flake-runs=50"]
+        rerun_options = ["--flake-finder", f"--flake-runs={count}"]
     elif options.continue_through_error:
         # If continue through error, don't stop on first failure
         rerun_options = ["--reruns=2"]
@@ -938,8 +964,6 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
         # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
         # failure
         rerun_options = ["-x", "--reruns=2"]
-        if IS_CI:
-            rerun_options.append(f"--sc={stepcurrent_key}")
 
     pytest_args = [
         "-vv",
@@ -947,11 +971,13 @@ def get_pytest_args(options, stepcurrent_key, is_cpp_test=False):
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        pytest_args.extend(
+            ["-p", "no:xdist", "--use-pytest", f"--sc={stepcurrent_key}"]
+        )
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
-        pytest_args.extend(["-n", "auto"])
+        pytest_args.extend(["-n", str(NUM_PROCS)])
 
         if IS_CI:
             # Add the option to generate XML test report here as C++ tests
@@ -1244,9 +1270,8 @@ def exclude_tests(
 def must_serial(file: str) -> bool:
     return (
         os.getenv("PYTORCH_TEST_RUN_EVERYTHING_IN_SERIAL", "0") == "1"
-        or "distributed" in os.getenv("TEST_CONFIG", "")
-        or "dynamo" in os.getenv("TEST_CONFIG", "")
-        or "distributed" in file
+        or DISTRIBUTED_TEST_PREFIX in os.getenv("TEST_CONFIG", "")
+        or DISTRIBUTED_TEST_PREFIX in file
         or file in CUSTOM_HANDLERS
         or file in RUN_PARALLEL_BLOCKLIST
         or file in CI_SERIAL_LIST
@@ -1487,7 +1512,11 @@ def run_tests(
 
     def parallel_test_completion_callback(err_message):
         test_failed = handle_error_messages(err_message)
-        if test_failed and not options.continue_through_error:
+        if (
+            test_failed
+            and not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+        ):
             pool.terminate()
 
     try:
@@ -1505,7 +1534,11 @@ def run_tests(
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
 
-        if not options.continue_through_error and len(failure_messages) != 0:
+        if (
+            not options.continue_through_error
+            and not RERUN_DISABLED_TESTS
+            and len(failure_messages) != 0
+        ):
             raise RuntimeError(
                 "\n".join(failure_messages)
                 + "\n\nTip: You can keep running tests even on failure by "
@@ -1520,7 +1553,11 @@ def run_tests(
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             test_failed = handle_error_messages(err_message)
-            if test_failed and not options.continue_through_error:
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
                 raise RuntimeError(err_message)
 
     finally:
@@ -1530,7 +1567,25 @@ def run_tests(
     return failure_messages
 
 
+def check_pip_packages() -> None:
+    packages = [
+        "pytest-rerunfailures",
+        "pytest-shard",
+        "pytest-flakefinder",
+        "pytest-xdist",
+    ]
+    installed_packages = [i.key for i in pkg_resources.working_set]
+    for package in packages:
+        if package not in installed_packages:
+            print(
+                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+            )
+            sys.exit(1)
+
+
 def main():
+    check_pip_packages()
+
     options = parse_args()
 
     test_directory = str(REPO_ROOT / "test")
@@ -1589,7 +1644,10 @@ def main():
     if len(failure_messages) != 0:
         for err in failure_messages:
             print_to_stderr(err)
-        sys.exit(1)
+
+        # A disabled test is expected to fail, so there is no need to report a failure here
+        if not RERUN_DISABLED_TESTS:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
