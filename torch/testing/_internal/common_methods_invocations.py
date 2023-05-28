@@ -21584,3 +21584,28 @@ def skipOps(test_case_name, base_test_name, to_skip):
     def wrapped(fn):
         return fn
     return wrapped
+
+# TODO: Share the implementation with functorch/common_utils.py
+def tol2(op_name, variant_name, override_dct, *, device_type=None):
+    return (op_name, variant_name, override_dct, device_type)
+
+def tol1(op_name, override_dct, *, device_type=None):
+    return tol2(op_name, '', override_dct, device_type=device_type)
+
+def opsToleranceOverride(ops, test_case_name, base_test_name, overrides):
+    for override in overrides:
+        op_name, variant_name, override, device_type = override
+        matching_opinfos = [o for o in ops
+                            if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        decorators.append(DecorateInfo(
+            toleranceOverride(override),
+            test_case_name, base_test_name, device_type=device_type))
+        opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped
