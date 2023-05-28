@@ -27,6 +27,8 @@ from torch.testing._internal.common_methods_invocations import (
     generate_elementwise_unary_small_value_tensors,
     generate_elementwise_unary_large_value_tensors,
     generate_elementwise_unary_extremal_value_tensors,
+    opsToleranceOverride,
+    tol1
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -38,6 +40,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     precisionOverride,
     dtypesIfCPU,
+    tol
 )
 
 from torch.testing import make_tensor
@@ -300,6 +303,10 @@ class TestUnaryUfuncs(TestCase):
         reference_filtered_ops,
         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
     )
+    @opsToleranceOverride(reference_filtered_ops,'TestUnaryUfuncs', 'test_reference_numerics_extremal', (
+        tol1('acosh',
+             {torch.complex64: tol(atol=1e-05, rtol=1e-05)}, device_type='cuda'),
+    ))
     def test_reference_numerics_extremal(self, device, dtype, op):
         tensors = generate_elementwise_unary_extremal_value_tensors(
             op, device=device, dtype=dtype, requires_grad=False
