@@ -136,6 +136,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self._test_wrap_simple(f, (x, y), 3)
 
+    def test_capture_tracked_nested(self):
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            return wrap(lambda x: wrap(lambda x: x + y, x), x)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
     def test_inlined_functions(self):
         def g(x, y):
             return x + y

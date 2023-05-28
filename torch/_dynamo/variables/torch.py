@@ -782,6 +782,7 @@ def speculate_subgraph(
     tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+    from .builder import wrap_fx_proxy
 
     try:
         with tx.output.new_subtracer() as tracer:
@@ -789,19 +790,24 @@ def speculate_subgraph(
             # One argument to graph per sub_args
             for a in sub_args:
                 if a is None:
-                    a = ConstantVariable(None)
+                    new_arg = ConstantVariable(None)
                 assert not isinstance(
                     a, torch.Tensor
                 ), "Tensors should already be tracked?"
                 if isinstance(a, ConstantVariable):
                     proxy = tracer.create_graph_input("const")
+                    new_arg = a
                 elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
-                    tracer.create_graph_input(a.as_proxy().node.name)
+                    new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
+                    example_value = a.as_proxy().node.meta["example_value"]
+                    new_arg = wrap_fx_proxy(
+                        tx=tx, proxy=new_proxy, example_value=example_value
+                    )
                 else:
                     raise unimplemented(
                         "HigherOrderOperator with body that accepts non-Tensors as input"
                     )
-                args.append(a)
+                args.append(new_arg)
             output = f.call_function(tx, args, {})
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -834,6 +840,7 @@ def speculate_subgraph(
                     {},
                 )
                 graph = tx.output.graph
+                graph.lint()
                 lifted_freevars = tracer.lifted_freevars
 
                 return (
@@ -1245,6 +1252,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_name = add_subgraph(
                 "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
+
             body_node = make_attr(body_name)
             p_args = (
                 body_node,
