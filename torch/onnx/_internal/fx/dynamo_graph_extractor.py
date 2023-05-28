@@ -19,8 +19,7 @@ from typing import (
 import torch._dynamo
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter
-from torch.onnx._internal.fx import fx_exporter
+from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.utils import _pytree as pytree
 
 
@@ -98,10 +97,10 @@ class _PyTreeExtensionContext:
             )
 
 
-class DynamoFlattenOutputStep(fx_exporter.FlattenOutputStep):
+class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     """Flatten nested collection and custom python types and return a flat list of elements.
 
-    Extended from :class:`fx_exporter.FlattenOutputStep` to support flattening arbitrary
+    Extended from :class:`io_adapter.FlattenOutputStep` to support flattening arbitrary
     types via pytree extension. By default this supports many common user defined python
     types such as :class:`ModelOutput` from HuggingFace transformers.
 
@@ -171,7 +170,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
+    ) -> torch.fx.GraphModule:
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
         args = copy.deepcopy(model_args)
         kwargs = copy.deepcopy(model_kwargs)
@@ -196,10 +195,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
-        #
-        # `args` and `kwargs` are merged and flattened by `dynamo.export`.
-        # Apply and record this input adapt step.
-        merged_args, _ = self.adapt_input(
-            fx_exporter.FlattenInputWithTreeSpecValidationStep, args, kwargs
+        self.input_adapter.append_step(
+            io_adapter.FlattenInputWithTreeSpecValidationStep()
         )
-        return graph_module, merged_args  # type: ignore[return-value]
+        return graph_module  # type: ignore[return-value]

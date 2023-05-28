@@ -199,7 +199,7 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
       }
 
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
       TORCH_CHECK(

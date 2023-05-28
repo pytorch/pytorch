@@ -5233,6 +5233,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"repeats_1": {0: "r"}},
         )
 
+        class DynamicFlattenModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(2)
+
+        x = torch.tensor([1, 2, 3])
+        self.run_test(
+            DynamicFlattenModel(),
+            x,
+            input_names=["input_1"],
+            dynamic_axes={"input_1": {0: "w"}},
+        )
+
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_multiple_dynamic_repeat_interleave(self):
         class DynamicRepeatsModel(torch.nn.Module):
