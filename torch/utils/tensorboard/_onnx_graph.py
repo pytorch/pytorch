@@ -8,7 +8,7 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 def load_onnx_graph(fname):
     import onnx
 
-    m = onnx.load(fname)
+    m = onnx.load(fname)  # type: ignore[attr-defined]
     g = m.graph
     return parse(g)
 
