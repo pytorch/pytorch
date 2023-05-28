@@ -356,6 +356,170 @@ def pointwise_ops():
 
     return ops
 
+def tagged_min_cut_rematerialization_partition(
+    joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs
+) -> Tuple[fx.GraphModule, fx.GraphModule]:
+    """
+    This is a modified copy of min_cut_rematerialization_partition which relies
+    on tags attached at the Fx node to decide what to recompute.
+
+    TODOs
+    1) Refactor required to avoid code duplication.
+    2)
+
+    """
+    try:
+        import networkx as nx
+    except ImportError as e:
+        raise RuntimeError("Need networkx installed to perform smart recomputation "
+                           "heuristics") from e
+
+    joint_module.graph.eliminate_dead_code()
+    joint_module.recompile()
+
+    fx_g = joint_module.graph
+
+    #  add the CSE pass
+    if config.cse:
+        cse_graph = fx_graph_cse(fx_g)
+        joint_module.graph = cse_graph
+    full_bw_graph = joint_module.graph
+
+
+    recomputable_nodes = set()
+    unrecomputable_nodes = set()
+    name_to_node = {}
+    for node in joint_module.graph.nodes:
+        name_to_node[node.name] = node
+        is_recomputable = False
+        if "recompute" in node.meta:
+            is_recomputable = node.meta["recompute"]
+        if is_recomputable:
+            recomputable_nodes.add(node)
+        else:
+            unrecomputable_nodes.add(node)
+
+    def classify_nodes(joint_module):
+        required_bw_nodes = set()
+        for node in joint_module.graph.nodes:
+            if node.op == 'placeholder' and "tangents" in node.target:
+                required_bw_nodes.add(node)
+            if node in required_bw_nodes:
+                for user in node.users:
+                    required_bw_nodes.add(user)
+
+        primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+        required_bw_nodes.update(o for o in bwd_outputs if o is not None)
+        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+        required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
+                             if node.op != 'output'}
+        unclaimed_nodes = {node for node in joint_module.graph.nodes
+                           if node not in required_fw_nodes and node not in required_bw_nodes}
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
+
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+
+    # networkx blows up on graphs with no required backward nodes
+    # Since there's nothing to partition anyway, and the default partitioner can "handle"
+    # this case, send our graph over to the default partitioner.
+    if len(required_bw_nodes) == 0:
+        return default_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+
+    for node in reversed(joint_module.graph.nodes):
+        if node not in required_fw_nodes:
+            node.dist_from_bw = 0
+        else:
+            node.dist_from_bw = int(1e9)
+            for user in node.users:
+                node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
+
+    if AOT_PARTITIONER_DEBUG:
+        joint_module_ops = {
+            str(node.target._overloadpacket)
+            for node in joint_module.graph.nodes
+            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+        }
+        ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
+        print("Ops banned from rematerialization: ", ops_ignored)
+        print()
+
+    def ban_recomputation(node):
+        return node not in recomputable_nodes
+
+    def get_node_weight(node) -> int:
+        mem_sz = _size_of(node)
+
+        # Heuristic to bias towards nodes closer to the backwards pass
+        # Complete guess about current value
+        mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+        # mem_sz = int(mem_sz + node.dist_from_bw)
+        return mem_sz
+
+    nx_graph = nx.DiGraph()
+    for node in full_bw_graph.nodes:
+        if node.op == 'output':
+            continue
+
+        if node in required_bw_nodes:
+            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+            continue
+
+        if _is_primal(node):
+            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+
+        # If a node can't be recomputed (too expensive or involves randomness),
+        # we prevent it from being recomputed by adding an inf edge to the source
+        # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
+        if ban_recomputation(node) and node in required_fw_nodes:
+            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+
+        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
+                              ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
+        if is_symint_node(node):
+            weight = 1
+        elif is_sym_node(node):
+            weight = math.inf
+        elif is_non_tensor_node:
+            weight = math.inf
+        else:
+            weight = get_node_weight(node)
+
+        # Creates the weights on the "node" edge
+        nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
+        for user in node.users:
+            nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+
+    try:
+        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+    except Exception:
+        print('Failed to compute min-cut on following graph:')
+        print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        raise
+
+    reachable, non_reachable = partition
+    cutset = set()
+    for u, nbrs in ((n, nx_graph[n]) for n in reachable):
+        cutset.update((u, v) for v in nbrs if v in non_reachable)
+
+    cut_nodes = set()
+    for node_in, node_out in cutset:
+        assert node_in[:-3] == node_out[:-4]
+        node_name = node_in[:-3]
+        cut_nodes.add(node_name)
+
+    # To make this stuff deterministic
+    node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
+    saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
+    # Symints must be kept separate from tensors so that PythonFunction only calls
+    # save_for_backward on tensors and stashes symints in autograd .ctx
+    saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
+    saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    fw_module, bw_module = _extract_fwd_bwd_modules(
+        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    return fw_module, bw_module
+
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,

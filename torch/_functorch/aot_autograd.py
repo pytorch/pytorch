@@ -32,7 +32,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from . import config
-from .partitioners import default_partition
+from .partitioners import default_partition, tagged_min_cut_rematerialization_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
 
 log = logging.getLogger(__name__)
@@ -2669,6 +2669,16 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
     # Higher order ops might eventually need to do the same.
     return fx_g
 
+
+def get_partition_fn(fx_g, aot_config):
+    partition_fn = aot_config.partition_fn
+    for node in fx_g.graph.nodes:
+        if node.op == "call_function":
+            if "recompute" in node.meta.keys():
+                partition_fn = tagged_min_cut_rematerialization_partition
+    return partition_fn
+
+
 def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     fx_g = aot_dispatch_autograd_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
@@ -2691,7 +2701,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 + fw_metadata.num_intermediate_bases
                 + fw_metadata.num_outputs_rng_offset
             )
-            fw_module, bw_module = aot_config.partition_fn(
+
+            partition_fn = get_partition_fn(fx_g, aot_config)
+
+            fw_module, bw_module = partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
