@@ -2719,8 +2719,6 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
-    skip('linalg.pinv', 'singular'),  # likely needs updated tolerance
-
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
@@ -2760,6 +2758,7 @@ aot_autograd_failures = {
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     # overrides atol=1e-4, rtol=1e-5 would do as well
     decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
+    decorate('linalg.pinv', 'singular', decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
